@@ -6,8 +6,9 @@ import matplotlib.patches as patches
 from matplotlib.path import Path
 from matplotlib.gridspec import GridSpec
 from PIL import Image
+from scipy.spatial.transform import Rotation
 
-base_dir = r'D:\DATASET\KITTI\3DDetection\data_object_image_2'
+base_dir = None
 use_pitch = None
 
 
@@ -257,7 +258,9 @@ def compute_3Dbox(P2, line):
     corners_3D_1 = np.vstack((corners_3D, np.ones((corners_3D.shape[-1]))))
     corners_2D = P2.dot(corners_3D_1)
     if use_pitch:
-        pass
+        rotation_matrix=Rotation.identity().as_matrix()
+        # rotation_matrix=Rotation.from_euler("X",-45,degrees=True).as_matrix()
+        corners_2D=rotation_matrix.dot(corners_2D)
     corners_2D = corners_2D / corners_2D[2]
     corners_2D = corners_2D[:2]
 
@@ -388,11 +391,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Visualize 3D bounding box on images',
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-a', '-dataset', type=str, default='tracklet', help='training dataset or tracklet')
+    parser.add_argument('--dataset_root', type=str)
     parser.add_argument('-s', '--save', type=bool, default=True, help='Save Figure or not')
     parser.add_argument('-p', '--path', type=str, default='../result_mobilenet_0093', help='Output Image folder')
     parser.add_argument('--pitch', type=bool, default=False, help='whether if pitch is involved')
     args = parser.parse_args()
-    use_pitch=args.pitch
+    use_pitch = args.pitch
+    base_dir = args.dataset_root
     if not os.path.exists(args.path):
         os.mkdir(args.path)
 

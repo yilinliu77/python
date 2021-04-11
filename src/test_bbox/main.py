@@ -186,8 +186,8 @@ def compute_birdviewbox(line, shape, scale):
     x_corners = [0, l, l, 0]  # -l/2
     z_corners = [w, w, 0, 0]  # -w/2
 
-    x_corners += -w / 2
-    z_corners += -l / 2
+    x_corners += -l / 2
+    z_corners += -w / 2
 
     # bounding box in object coordinate
     corners_2D = np.array([x_corners, z_corners])
@@ -254,13 +254,12 @@ def compute_3Dbox(P2, line):
     corners_3D = np.array([x_corners, y_corners, z_corners])
     corners_3D = R.dot(corners_3D)
     corners_3D += np.array([obj.tx, obj.ty, obj.tz]).reshape((3, 1))
-
-    corners_3D_1 = np.vstack((corners_3D, np.ones((corners_3D.shape[-1]))))
-    corners_2D = P2.dot(corners_3D_1)
     if use_pitch:
-        rotation_matrix=Rotation.identity().as_matrix()
-        # rotation_matrix=Rotation.from_euler("X",-45,degrees=True).as_matrix()
-        corners_2D=rotation_matrix.dot(corners_2D)
+        # rotation_matrix=Rotation.identity().as_matrix()
+        rotation_matrix=Rotation.from_euler("X",45,degrees=True).as_matrix()
+        corners_3D_1=rotation_matrix.dot(corners_3D)
+    corners_3D_2 = np.vstack((corners_3D_1, np.ones((corners_3D_1.shape[-1]))))
+    corners_2D = P2.dot(corners_3D_2)
     corners_2D = corners_2D / corners_2D[2]
     corners_2D = corners_2D[:2]
 
@@ -303,10 +302,12 @@ def visualization(args, image_path, label_path, calib_path, pred_path,
                 P2 = np.reshape(P2, (3, 4))
 
         fig = plt.figure(figsize=(20.00, 5.12), dpi=100)
+        # fig = plt.figure(figsize=(20.00, 10.24), dpi=100)
 
         # fig.tight_layout()
         gs = GridSpec(1, 4)
         gs.update(wspace=0)  # set the spacing between axes.
+        # gs.update()
 
         ax = fig.add_subplot(gs[0, :3])
         ax2 = fig.add_subplot(gs[0, 3:])
@@ -316,6 +317,8 @@ def visualization(args, image_path, label_path, calib_path, pred_path,
         shape = 900
         birdimage = np.zeros((shape, shape, 3), np.uint8)
 
+        if not os.path.getsize(label_file):
+            continue
         # with open(label_file) as f1, open(prediction_file) as f2:
         with open(label_file) as f1:
             # for line_gt, line_p in zip(f1, f2):

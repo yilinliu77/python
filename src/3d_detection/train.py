@@ -1,8 +1,9 @@
-import sys
+import sys,os
+sys.path.append("./")
+sys.path.append(os.path.join(os.getcwd(),"thirdparty/visualDet3D"))
 
-sys.path.append("/")
 from argparse import ArgumentParser
-
+from model import Yolo3D
 import torch
 
 import pytorch_lightning as pl
@@ -11,7 +12,10 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 from pytorch_lightning import Trainer, seed_everything
 import numpy as np
+import hydra
+from omegaconf import DictConfig, OmegaConf
 
+from visualDet3D.data.kitti import KittiMonoDataset
 
 
 class Benchmark(pl.LightningModule):
@@ -19,9 +23,8 @@ class Benchmark(pl.LightningModule):
         super(Benchmark, self).__init__()
         self.hparams = hparams
 
-        if self.hparams.model == 0:
-            self.model = None
-            self.dataset_builder = None
+        self.model = Yolo3D(self.hparams)
+        self.dataset_builder = KittiMonoDataset
 
         # self.test_loss = pl.metrics.Accuracy()
 
@@ -31,36 +34,40 @@ class Benchmark(pl.LightningModule):
         return point_inside
 
     def train_dataloader(self):
-        dataset_path = self.hparams.train_dataset.split(";")
-        dataset = []
-        for item in dataset_path:
-            dataset.append(self.dataset_builder(item,self.hparams, True))
-        self.train_dataset = torch.utils.data.ConcatDataset(dataset)
+        self.train_dataset = self.dataset_builder(self.cfg_for_visualdet3d)
+
+        # dataset_path = self.hparams.train_dataset.split(";")
+        # dataset = []
+        # for item in dataset_path:
+        #     dataset.append(self.dataset_builder(item,self.hparams, True))
+        # self.train_dataset = torch.utils.data.ConcatDataset(dataset)
         return DataLoader(self.train_dataset,
                           batch_size=self.hparams.batch_size,
                           num_workers=self.hparams.num_worker,
                           shuffle=True,
                           drop_last=True,
                           pin_memory=True,
+                          collate_fn=self.valid_dataset.collate_fn
                           )
 
     def val_dataloader(self):
-        dataset_path = self.hparams.valid_dataset.split(";")
-        dataset = []
-        for item in dataset_path:
-            dataset.append(self.dataset_builder(item,self.hparams, False))
-        self.valid_dataset = torch.utils.data.ConcatDataset(dataset)
+        # dataset_path = self.hparams.valid_dataset.split(";")
+        # dataset = []
+        # for item in dataset_path:
+        #     dataset.append(self.dataset_builder(item,self.hparams, False))
+        # self.valid_dataset = torch.utils.data.ConcatDataset(dataset)
+        self.valid_dataset = self.dataset_builder(self.cfg_for_visualdet3d,"validation")
+
         return DataLoader(self.valid_dataset,
                           batch_size=self.hparams.batch_size,
                           num_workers=self.hparams.num_worker,
                           drop_last=True,
                           pin_memory=True,
+                          collate_fn=self.valid_dataset.collate_fn
                           )
 
     def test_dataloader(self):
         self.test_dataset = self.dataset_builder(self.hparams.test_dataset)
-        # self.cd_calculator = dist_chamfer_3D.chamfer_3DDist()
-        self.model.prepare_test_query_points(v_coordinate_size=self.hparams.coordinate_size)
         return DataLoader(self.test_dataset,
                           batch_size=self.hparams.batch_size,
                           num_workers=self.hparams.num_worker,
@@ -134,67 +141,40 @@ class Benchmark(pl.LightningModule):
         }
 
 
-def get_model_arguments():
-    parser = ArgumentParser()
-
+@hydra.main(config_name=".")
+def main(v_cfg: DictConfig):
+    # parser = ArgumentParser()
     # parametrize the network
-    parser.add_argument('-lr', '--learning_rate', type=float, default=1e-4)
-    parser.add_argument('-gp', '--gpu', type=int, default=1)
-    parser.add_argument('-nw', '--num_worker', type=int, default=0)
-    parser.add_argument('-tr', '--train_dataset', type=str)
-    parser.add_argument('-va', '--valid_dataset', type=str)
-    parser.add_argument('-te', '--test_dataset', type=str)
-    parser.add_argument('-bs', '--batch_size', type=int, default=4)
-    #
-    parser.add_argument('--phase', type=int, default=0)
-    parser.add_argument('--model', type=int, default=0)
-    parser.add_argument('--use_keypoints', action='store_true')
-    parser.add_argument('--svr', action='store_true')
-    #
-    parser.add_argument('--num_attention_layer', type=int, default=3)
-    parser.add_argument('--hidden_dim_attention_layer', type=int, default=512)
-    parser.add_argument('--dropout_attention_attention_layer', type=float, default=0)
-    parser.add_argument('--num_head_attention_layer', type=int, default=1)
-    # Test options
-    parser.add_argument('--evaluate', action='store_true')
-    parser.add_argument('--threshold', type=float, default=0.5)
-    parser.add_argument('--coordinate_size', type=int, default=64)
-    parser.add_argument('--uniform_sample', action='store_true')
-    parser.add_argument('--save_points', action='store_true')
-
-    #
-    parser.add_argument('-p', '--plane_dim', type=int, default=4096)
-    parser.add_argument('-c', '--convex_dim', type=int, default=256)
-
-    return parser
-
-
-if __name__ == '__main__':
+    # parser.add_argument('-c', '--config_path', type=str, default="configs/3d_detection/test.yaml")
+    # parser = pl.Trainer.add_argparse_args(parser)
+    # args = parser.parse_args()
+    print(OmegaConf.to_yaml(v_cfg))
     seed_everything(0)
     # set_start_method('spawn')
-    parser = get_model_arguments()
-    parser = pl.Trainer.add_argparse_args(parser)
-    args = parser.parse_args()
 
     early_stop_callback = EarlyStopping(
         patience=100,
         monitor="val_loss"
     )
 
-    trainer = Trainer(gpus=args.gpu, weights_summary=None,
-                      distributed_backend="ddp" if args.gpu > 1 else None,
+    trainer = Trainer(gpus=v_cfg["trainer"].gpu, weights_summary=None,
+                      distributed_backend="ddp" if v_cfg["trainer"].gpu > 1 else None,
                       # early_stop_callback=early_stop_callback,
-                      auto_lr_find="learning_rate" if args.auto_lr_find else False,
+                      auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,
                       max_epochs=5000,
                       )
 
-    model = Benchmark(args)
-    if args.resume_from_checkpoint is not None:
-        model.load_state_dict(torch.load(args.resume_from_checkpoint)["state_dict"], strict=True)
-    if args.auto_lr_find:
+    model = Benchmark(v_cfg)
+    if v_cfg["trainer"].resume_from_checkpoint is not None:
+        model.load_state_dict(torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"], strict=True)
+    if v_cfg["trainer"].auto_lr_find:
         trainer.tune(model)
         print(model.hparams.learning_rate)
-    if args.evaluate:
+    if v_cfg["trainer"].evaluate:
         trainer.test(model)
     else:
         trainer.fit(model)
+
+
+if __name__ == '__main__':
+    main()

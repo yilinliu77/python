@@ -19,7 +19,7 @@ Note:
         - https://docs.opencv.org/master/d6/d00/tutorial_py_root.html
         - https://matplotlib.org/stable/tutorials/index.html
 """
-def limit_range(value,min,max):
+def limit_range(value,min,max): # Name
     if value<min:
         return min
     if value>max:
@@ -31,7 +31,7 @@ def draw_box(v_box):
     sp = img.shape
     height = sp[0]
     width = sp[1]
-    for box in boxes:
+    for box in boxes: # v_box
         box[0] = limit_range(box[0],0,width)
         box[1] = limit_range(box[1],0,height)
         box[2] = limit_range(box[2],0,width)
@@ -40,9 +40,10 @@ def draw_box(v_box):
     for box in boxes:
         cv.rectangle(img,(box[0],box[1]),(box[2],box[3]),(0,255,0),3)
     cv.imshow("test", img)
+    # Wait key
 
 
-    im = mpimg.imread('test.png')
+    # im = mpimg.imread('test.png')
     plt.title("test")
     for row in im:
         for i in row:
@@ -50,6 +51,7 @@ def draw_box(v_box):
             i[0]=gray;
             i[1]=gray;
             i[2]=gray;
+    # cvtColor
     plt.imshow(im)
     for box in boxes:
         plt.vlines(box[0],box[1],box[3],"g")
@@ -57,7 +59,7 @@ def draw_box(v_box):
         plt.hlines(box[1],box[0],box[2],"g")
         plt.hlines(box[3],box[0],box[2],"g")
     plt.show()
-    
+
     pass
 
 

@@ -19,47 +19,48 @@ Note:
         - https://docs.opencv.org/master/d6/d00/tutorial_py_root.html
         - https://matplotlib.org/stable/tutorials/index.html
 """
-def limit_range(value,min,max): # Name
-    if value<min:
-        return min
-    if value>max:
-        return max
-    return value
+def limit_range(v_value,v_min,v_max):
+    if v_value<v_min:
+        return v_min
+    if v_value>v_max:
+        return v_max
+    return v_value
 
 def draw_box(v_box):
     img = cv.imread(cv.samples.findFile("test.png"))
+    
     sp = img.shape
     height = sp[0]
     width = sp[1]
-    for box in boxes: # v_box
+    for box in v_box:
         box[0] = limit_range(box[0],0,width)
         box[1] = limit_range(box[1],0,height)
         box[2] = limit_range(box[2],0,width)
         box[3] = limit_range(box[3],0,height)
         
-    for box in boxes:
+    for box in v_box:
         cv.rectangle(img,(box[0],box[1]),(box[2],box[3]),(0,255,0),3)
     cv.imshow("test", img)
-    # Wait key
+    cv.waitKey()
 
-
-    # im = mpimg.imread('test.png')
     plt.title("test")
-    for row in im:
-        for i in row:
-            gray = i[2]*0.299 + i[1]*0.587 + i[0]*0.114
-            i[0]=gray;
-            i[1]=gray;
-            i[2]=gray;
-    # cvtColor
-    plt.imshow(im)
+    #for row in img:
+    #    for i in row:
+    #        gray = i[2]*0.299 + i[1]*0.587 + i[0]*0.114
+    #        i[0]=gray
+    #        i[1]=gray
+    #        i[2]=gray
+    gray = cv.cvtColor(img, cv.COLOR_RGBA2GRAY)
+    gray = cv.cvtColor(gray, cv.COLOR_GRAY2BGR)
+    #if just use once cvtColor, it will show a green picture.
+    plt.imshow(gray)
     for box in boxes:
         plt.vlines(box[0],box[1],box[3],"g")
         plt.vlines(box[2],box[1],box[3],"g")
         plt.hlines(box[1],box[0],box[2],"g")
         plt.hlines(box[3],box[0],box[2],"g")
     plt.show()
-
+    
     pass
 
 

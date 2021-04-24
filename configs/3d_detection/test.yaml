@@ -2,8 +2,8 @@ trainer:
   learning_rate: 1e-4
   gpu: 1
   num_worker: 0
-  train_dataset: D:\Projects\SEAR\datasets\training\training
-  valid_dataset: D:\Projects\SEAR\datasets\training\training
+  train_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
+  valid_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
   batch_size: 4
   auto_lr_find: false
   resume_from_checkpoint: None
@@ -12,5 +12,8 @@ det_3d:
   preprocess: true
   preprocess_dir: C:\repo\python\temp\det3d
   visualDet3D_config_path: C:\repo\python\src\3d_detection\Yolo3D_test.py
+
+
+
 model:
-  with_anchor: true
+  compute_anchor: true

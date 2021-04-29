@@ -84,8 +84,8 @@ data = edict(
     train_dataset = "KittiMonoDataset",
     val_dataset   = "KittiMonoDataset",
     test_dataset  = "KittiMonoTestDataset",
-    train_split_file = os.path.join(cfg.path.visualDet3D_path, '../', 'temp', 'train_split.txt'),
-    val_split_file   = os.path.join(cfg.path.visualDet3D_path, '../', 'temp',  'val_split.txt'),
+    train_split_file = os.path.join(cfg.path.visualDet3D_path, '../', 'temp', 'training_split.txt'),
+    val_split_file   = os.path.join(cfg.path.visualDet3D_path, '../', 'temp',  'validation_split.txt'),
 )
 
 data.augmentation = edict(

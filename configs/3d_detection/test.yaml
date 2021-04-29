@@ -6,14 +6,18 @@ trainer:
   valid_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
   batch_size: 4
   auto_lr_find: false
-  resume_from_checkpoint: None
+  resume_from_checkpoint:
   evaluate: false
 det_3d:
-  preprocess: true
-  preprocess_dir: C:\repo\python\temp\det3d
   visualDet3D_config_path: C:\repo\python\src\3d_detection\Yolo3D_test.py
-
-
+  preprocessed_path: temp/det3d/anchors/
+  compute_anchor: false
 
 model:
-  compute_anchor: true
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+#  job_logging: disabled
+#  hydra_logging: disabled

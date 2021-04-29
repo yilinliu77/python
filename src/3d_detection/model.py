@@ -1,16 +1,21 @@
 import math
 import os
+import pickle
 
 import cv2
 import hydra
 import torch
 from easydict import EasyDict
-from torchvision.models import resnet101
+from torchvision.models import resnet101, resnet18
 from torch import nn
 import numpy as np
+from tqdm import tqdm
 
 from visualDet3D.networks.detectors.yolomono3d_core import YoloMono3DCore
 from visualDet3D.networks.heads.detection_3d_head import AnchorBasedDetection3DHead
+from visualDet3D.networks.heads.losses import SigmoidFocalLoss
+from visualDet3D.networks.lib.blocks import AnchorFlatten
+from visualDet3D.networks.lib.ops import ModulatedDeformConvPack
 from visualDet3D.utils.utils import cfg_from_file
 
 from scipy.spatial.transform import Rotation as R
@@ -22,130 +27,238 @@ from visualDet3D.data.kitti.kittidata import KittiData
 from visualDet3D.utils.timer import Timer
 from visualDet3D.utils.utils import cfg_from_file
 
+from torch.nn import functional as F
+
 
 class Yolo3D(nn.Module):
     def __init__(self, v_cfg):
         super(Yolo3D, self).__init__()
-        det_3d_cfg = cfg_from_file(v_cfg["det_3d"]["visualDet3D_config_path"])
 
         anchors_cfg = EasyDict({
-            "pyramid_levels": [4],
-            "strides": [16],
-            "sizes": [24],
-            "ratios": [.5, 1.],
-            "scales": np.array([2 ** (i / 4.0) for i in range(16)]),
+            "pyramid_levels": [5], # Final shape of the images 800(original_width) / 2^5(levels) = 25(feature_map_shape)
+            "strides": [32], # Shift the anchor from the single pixel. 800(original_width) / 25(feature_map_shape) = 32
+            "sizes": [24], # Base size of the anchors (in original image shape)
+            "ratios": [.5, 1., 2.], # Different ratio of the anchors
+            "scales": np.array([2 ** (i / 4.0) for i in range(16)]), # Different area of the anchors, will multiply the base size
             "obj_types": ['Car'],
-            "filter_anchors": True,
+            "filter_anchors": False,
             "filter_y_threshold_min_max": None,
             "filter_x_threshold": None,
-            "anchor_prior_channel": 6,
+            "anchor_prior_channel": 14, #(x, y, z, w, h, l, ry) *2
         })
 
-        head_loss = EasyDict(
+        self.head_loss_cfg = EasyDict(
             filter_anchor=False,
             fg_iou_threshold=0.5,
             bg_iou_threshold=0.4,
-            L1_regression_alpha=5 ** 2,
-            focal_loss_gamma=2.0,
-            match_low_quality=False,
-            balance_weight=[20.0],
-            regression_weight=[1, 1, 1, 1, 1, 1, 3, 1, 1, 0.5, 0.5, 0.5, 1],
-            # [x, y, w, h, cx, cy, z, sin2a, cos2a, w, h, l]
+            # L1_regression_alpha=5 ** 2,
+            # focal_loss_gamma=2.0,
+            # match_low_quality=False,
+            # balance_weight=[20.0],
+            # regression_weight=[1, 1, 1, 1, 1, 1, 3, 1, 1, 0.5, 0.5, 0.5, 1],
         )
 
-        # self.bbox_head = AnchorBasedDetection3DHead(num_features_in=1024,
-        #                                             num_classes=3,
-        #                                             num_regression_loss_terms=12,
-        #                                             preprocessed_path="temp/anchors",
-        #                                             anchors_cfg=anchors_cfg,
-        #                                             layer_cfg=EasyDict(),
-        #                                             loss_cfg=EasyDict(),
-        #                                             test_cfg=EasyDict(),
-        #                                             read_precompute_anchor=True)
+        self.network_cfg = EasyDict(
+            num_features_in=512,
+            reg_feature_size=256,
+            cls_feature_size=256,
 
-        if v_cfg["model"]["compute_anchor"] == True:
-            # Get the training split
-            train_index_names = [item.strip() for item in open(
-                os.path.join(hydra.utils.get_original_cwd(), "temp/anchors/train_split.txt")).readlines()]
+            num_anchors=32,
+            num_cls_output = 1,
+            num_reg_output = 13, # (x1, y1, x2, y2, x3d_center, y3d_center, x, y, z, w, h, l, ry)
+        )
 
-            anchor_manager = Anchors(os.path.join(hydra.utils.get_original_cwd(), "temp/anchors/"),
-                                     readConfigFile=False,
-                                     **anchors_cfg)
-            # Statistics about the anchor
-            total_objects = 0
-            total_usable_objects = 0
-            uniform_sum_each_type = []
-            uniform_square_each_type = []
-            len_scale = len(anchor_manager.scales)
-            len_ratios = len(anchor_manager.ratios)
-            len_level = len(anchor_manager.pyramid_levels)
-            examine = np.zeros([len_level * len_scale, len_ratios])
-            sums = np.zeros([len_level * len_scale, len_ratios, 3])
-            squared = np.zeros([len_level * len_scale, len_ratios, 3], dtype=np.float64)
-            for i, index_name in enumerate(train_index_names):
-                data_frame = KittiData(v_cfg["trainer"]["train_dataset"], index_name, {
-                    "calib": True,
-                    "image": True,
-                    "label": True,
-                    "velodyne": False,
-                })
-                calib, image, label, velo = data_frame.read_data()
-                data_frame.calib = calib
-                data_frame.label = label
-                # Replace the 2d bounding box with re-projection
-                # NOTE: Currently fix the shape
-                data_frame.bbox2d = self.project_box3d_to_img(data_frame)
+        preprocessed_path = os.path.join(hydra.utils.get_original_cwd(), "temp/det3d/anchors/")
+        if v_cfg["det_3d"]["compute_anchor"] == True:
+            with torch.no_grad():
+                for data_split in ["training", "validation"]:
+                    print("Start the precomputing {}".format(data_split))
+                    # Get the training split
+                    train_index_names = [item.strip() for item in open(
+                        os.path.join(hydra.utils.get_original_cwd(), "temp/det3d/{}_split.txt".format(data_split))).readlines()]
 
-                ### Debug
-                from matplotlib import pyplot as plt
-                min_x = torch.min(data_frame.bbox2d[0, :, 0]).item()
-                min_y = torch.min(data_frame.bbox2d[0, :, 1]).item()
-                max_x = torch.max(data_frame.bbox2d[0, :, 0]).item()
-                max_y = torch.max(data_frame.bbox2d[0, :, 1]).item()
-                x_min, y_min, x_max, y_max = map(int, [min_x,min_y,max_x,max_y])
-                image = cv2.rectangle(image, (x_min, y_min), (x_max, y_max), [0, 255, 0],5)
-                plt.imshow(image)
-                plt.show()
-                ###
+                    anchor_manager = Anchors(preprocessed_path,
+                                             readConfigFile=False,
+                                             **anchors_cfg)
+                    # Statistics about the anchor
+                    total_objects = 0
+                    total_usable_objects = 0
+                    uniform_sum_each_type = []
+                    uniform_square_each_type = []
+                    len_scale = len(anchor_manager.scales)
+                    len_ratios = len(anchor_manager.ratios)
+                    len_level = len(anchor_manager.pyramid_levels)
+                    examine = np.zeros([len_level * len_scale, len_ratios])
+                    sums = np.zeros([len_level * len_scale, len_ratios, 7])
+                    squared = np.zeros([len_level * len_scale, len_ratios, 7], dtype=np.float64)
+                    data_frames = []
+                    for i, index_name in tqdm(enumerate(train_index_names)):
+                        data_frame = KittiData(v_cfg["trainer"]["train_dataset"], index_name, {
+                            "calib": True,
+                            "image": True,
+                            "label": True,
+                            "velodyne": False,
+                        })
+                        calib, image, label, velo = data_frame.read_data()
+                        data_frame.calib = calib
+                        data_frame.label = label
+                        # Replace the 2d bounding box with re-projection
+                        # NOTE: Currently fix the shape
+                        data_frame.corners_in_camera_coordinates = self.project_box3d_to_img(data_frame)
+                        data_frame.bbox2d = torch.stack([torch.tensor((
+                                torch.min(item[:8, 0]),
+                                torch.min(item[:8, 1]),
+                                torch.max(item[:8, 0]),
+                                torch.max(item[:8, 1]))
+                            ) for item in data_frame.corners_in_camera_coordinates
+                            ], dim=0
+                        )
+                        data_frame.bbox3d_img_center = torch.stack([torch.tensor(
+                            item[8, :],
+                        ) for item in data_frame.corners_in_camera_coordinates
+                        ], dim=0
+                        )
 
-                total_objects += len(data_frame.label.data)
-                data = np.array(
-                    [
-                        [obj.x, obj.y, obj.z, obj.w, obj.h, obj.l, obj.ry] for obj in data_frame.label.data
-                    ]
-                )
-                if data.any():
-                    uniform_sum_each_type.append(np.sum(data, axis=0))
-                    uniform_square_each_type.append(np.sum(data ** 2, axis=0))
+                        # ### Debug
+                        # from matplotlib import pyplot as plt
+                        # for box in data_frame.bbox2d:
+                        #     x_min, y_min, x_max, y_max = map(int, box.numpy().tolist())
+                        #     image = cv2.rectangle(image, (x_min, y_min), (x_max, y_max), [0, 255, 0],5)
+                        # plt.imshow(image)
+                        # plt.show()
+                        # ###
 
-                # NOTE: Currently fix the shape
-                anchors, _ = anchor_manager(torch.ones((1, 3, 800, 800)), torch.tensor(calib.P2).reshape([-1, 3, 4]))
-                bbox3d = torch.tensor(data).cuda()
-                usable_anchors = anchors[0]
+                        # Find the 3d bbox
+                        # Fix the height of KITTI label. (Y is the bottom of the car)
+                        data_frame.bbox3d = torch.stack([torch.tensor((
+                            item.x, item.y - 0.5 * item.h, item.z,
+                            item.w, item.h, item.l,
+                            item.ry
+                        )) for item in data_frame.label.data
+                        ], dim=0)
 
-                IoUs = calc_iou(usable_anchors, data_frame.bbox2d)  # [N, K]
-                IoU_max, IoU_argmax = torch.max(IoUs, dim=0)
-                IoU_max_anchor, IoU_argmax_anchor = torch.max(IoUs, dim=1)
+                        total_objects += len(data_frame.label.data)
+                        data = np.array(
+                            [
+                                [obj.x, obj.y, obj.z, obj.w, obj.h, obj.l, obj.ry] for obj in data_frame.label.data
+                            ]
+                        )
+                        if data.any():
+                            uniform_sum_each_type.append(np.sum(data, axis=0))
+                            uniform_square_each_type.append(np.sum(data ** 2, axis=0))
 
-                num_usable_object = torch.sum(IoU_max > head_loss.fg_iou_threshold).item()
-                total_usable_objects += num_usable_object
+                        # NOTE: Currently fix the shape
+                        anchors, _ = anchor_manager(torch.ones((1, 3, 800, 800)), torch.tensor(calib.P2).reshape([-1, 3, 4]))
+                        bbox3d = torch.tensor(data).cuda()
+                        usable_anchors = anchors[0]
 
-                positive_anchors_mask = IoU_max_anchor > head_loss.fg_iou_threshold
-                positive_ground_truth_3d = bbox3d[IoU_argmax_anchor[positive_anchors_mask]].cpu().numpy()
+                        IoUs = calc_iou(usable_anchors, data_frame.bbox2d)  # [num_anchors, num_gt]
+                        IoU_max, IoU_argmax = torch.max(IoUs, dim=0)
+                        IoU_max_anchor, IoU_argmax_anchor = torch.max(IoUs, dim=1)
 
-                used_anchors = usable_anchors[positive_anchors_mask].cpu().numpy()  # [x1, y1, x2, y2]
+                        num_usable_object = torch.sum(IoU_max > self.head_loss_cfg.fg_iou_threshold).item()
+                        total_usable_objects += num_usable_object
 
-                sizes_int, ratio_int = anchor_manager.anchors2indexes(used_anchors)
-                for k in range(len(sizes_int)):
-                    examine[sizes_int[k], ratio_int[k]] += 1
-                    sums[sizes_int[k], ratio_int[k]] += positive_ground_truth_3d[k, 2:5]
-                    squared[sizes_int[k], ratio_int[k]] += positive_ground_truth_3d[k, 2:5] ** 2
+                        positive_anchors_mask = IoU_max_anchor > self.head_loss_cfg.fg_iou_threshold
+                        positive_ground_truth_3d = bbox3d[IoU_argmax_anchor[positive_anchors_mask]].cpu().numpy()
 
-        self.core = YoloMono3DCore()
-        self.network_cfg = det_3d_cfg
-        self.obj_types = det_3d_cfg.obj_types
+                        used_anchors = usable_anchors[positive_anchors_mask].cpu().numpy()  # [x1, y1, x2, y2]
 
-    # NOTE: Add fixed 45 degree in pitch (X axis)
+                        sizes_int, ratio_int = anchor_manager.anchors2indexes(used_anchors)
+                        for k in range(len(sizes_int)):
+                            examine[sizes_int[k], ratio_int[k]] += 1
+                            sums[sizes_int[k], ratio_int[k]] += positive_ground_truth_3d[k]
+                            squared[sizes_int[k], ratio_int[k]] += positive_ground_truth_3d[k] ** 2
+                        data_frames.append(data_frame)
+
+                    print("Total objects:{}, total usable objects:{}".format(total_objects,total_usable_objects))
+
+                    uniform_sum_each_type = np.array(uniform_sum_each_type).sum(axis=0)
+                    uniform_square_each_type = np.array(uniform_square_each_type).sum(axis=0)
+                    global_mean = uniform_sum_each_type / total_objects
+                    global_var = np.sqrt(uniform_square_each_type / total_objects - global_mean ** 2)
+
+                    avg = sums / (examine[:, :, np.newaxis] + 1e-8)
+                    EX_2 = squared / (examine[:, :, np.newaxis] + 1e-8)
+                    std = np.sqrt(EX_2 - avg ** 2)
+
+                    avg[examine < 10, :] = -100
+                    std[examine < 10, :] = 1e10
+                    avg[np.isnan(std)] = -100
+                    std[np.isnan(std)] = 1e10
+                    avg[std < 1e-3] = -100
+                    std[std < 1e-3] = 1e10
+
+                    whl_avg = np.ones([avg.shape[0], avg.shape[1], global_mean.shape[0]]) * global_mean
+                    whl_std = np.ones([avg.shape[0], avg.shape[1], global_var.shape[0]]) * global_var
+
+                    avg = np.concatenate([avg, whl_avg], axis=2)
+                    std = np.concatenate([std, whl_std], axis=2)
+
+                    print("Pre calculation done, save it now")
+                    if not os.path.exists(preprocessed_path):
+                        os.makedirs(os.path.join(preprocessed_path, data_split))
+                    npy_file = os.path.join(preprocessed_path, data_split, 'anchor_mean_car.npy')
+                    np.save(npy_file, avg)
+                    std_file = os.path.join(preprocessed_path, data_split, 'anchor_std_car.npy')
+                    np.save(std_file, std)
+                    pkl_file = os.path.join(preprocessed_path, data_split, 'imdb.pkl')
+                    pickle.dump(data_frames, open(pkl_file, 'wb'))
+
+        self.anchors = Anchors(preprocessed_path,
+                               readConfigFile=True,
+                               **anchors_cfg)
+
+        self.init_layers(self.network_cfg["num_features_in"], self.network_cfg["cls_feature_size"],
+                         self.network_cfg["reg_feature_size"], self.network_cfg["num_anchors"],
+                         self.network_cfg["num_cls_output"], self.network_cfg["num_reg_output"])
+
+        self.focal_loss = SigmoidFocalLoss(gamma=2.0, balance_weights=torch.tensor([20]))
+
+    def init_layers(self,
+                    v_num_features_in, v_cls_feature_size, v_reg_feature_size, v_num_anchors,
+                    v_num_cls_output, v_num_reg_output):
+        resnet = resnet18(pretrained=True)
+        self.core = nn.Sequential(
+            resnet.conv1,
+            resnet.relu,
+            resnet.bn1,
+            resnet.maxpool,
+            resnet.layer1,
+            resnet.layer2,
+            resnet.layer3,
+            resnet.layer4,
+        )
+        self.cls_feature_extraction = nn.Sequential(
+            nn.Conv2d(v_num_features_in, v_cls_feature_size, kernel_size=3, padding=1),
+            nn.Dropout2d(0.3),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(v_cls_feature_size, v_cls_feature_size, kernel_size=3, padding=1),
+            nn.Dropout2d(0.3),
+            nn.ReLU(inplace=True),
+
+            nn.Conv2d(v_cls_feature_size, v_num_anchors * v_num_cls_output, kernel_size=3, padding=1),
+            AnchorFlatten(v_num_cls_output)
+        )
+        self.reg_feature_extraction = nn.Sequential(
+            ModulatedDeformConvPack(v_num_features_in, v_reg_feature_size, 3, padding=1),
+            nn.BatchNorm2d(v_reg_feature_size),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(v_reg_feature_size, v_reg_feature_size, kernel_size=3, padding=1),
+            nn.BatchNorm2d(v_reg_feature_size),
+            nn.ReLU(inplace=True),
+
+            nn.Conv2d(v_reg_feature_size, v_num_anchors * v_num_reg_output, kernel_size=3, padding=1),
+            AnchorFlatten(v_num_reg_output)
+        )
+
+    """ 
+    Input:  Dataframe with the standard label
+    Output: (9,4) torch tensor. 8 corners and 1 center. (x1,y1,x2,y2)
+    Note:
+        - Add fixed 45 degree in pitch (X axis)
+        - May have negative coordinate if v_width and v_height is None
+    """
     def project_box3d_to_img(self, v_dataframe, v_width=None, v_height=None):
         camera_corners = []
         for id_batch in range(len(v_dataframe.label.data)):
@@ -175,27 +288,41 @@ class Yolo3D(nn.Module):
                     [v_dataframe.label.data[id_batch].w / 2,
                      -v_dataframe.label.data[id_batch].h,
                      v_dataframe.label.data[id_batch].l / 2],
+                    [0,
+                     -v_dataframe.label.data[id_batch].h / 2,
+                     0],
+
                 ]
             ).float()
-            rotation_matrix = torch.tensor(
-                R.from_euler("XYZ", [-math.pi / 4, -v_dataframe.label.data[id_batch].ry, 0]).as_matrix()).float()
-            rotated_corners = torch.matmul(rotation_matrix, corners.T).T
-            abs_corners = rotated_corners + torch.tensor([
+
+            # Rotate through Y axis
+            # Both upper of lower case is accept. The box is currently at the origin
+            yaw_rotation_matrix = torch.tensor(
+                R.from_euler("xyz", [0, -v_dataframe.label.data[id_batch].ry, 0]).as_matrix()).float()
+            corners = torch.matmul(yaw_rotation_matrix, corners.T).T
+
+            corners = corners + torch.tensor([
                 v_dataframe.label.data[id_batch].x,
                 v_dataframe.label.data[id_batch].y,
                 v_dataframe.label.data[id_batch].z
             ]).float()  # [N, 8, 3]
-            abs_corners=abs_corners
-            camera_corners.append(torch.cat([abs_corners,
-                                             torch.ones_like(abs_corners[:, 0:1])],
+
+            # Rotate through Y axis
+            # Should be global coordinates, upper case in scipy's Rotation
+            rotation_matrix = torch.tensor(
+                R.from_euler("XYZ", [math.pi / 4, 0, 0]).as_matrix()).float()
+            corners = torch.matmul(rotation_matrix, corners.T).T
+
+            camera_corners.append(torch.cat([corners,
+                                             torch.ones_like(corners[:, 0:1])],
                                             dim=-1))  # [N, 8, 4]
             with open("{}.xyz".format(id_batch), "w") as f:
                 for point in camera_corners[-1]:
                     f.write("{} {} {}\n".format(point[0].item(), point[1].item(), point[2].item()))
             pass
         camera_corners = torch.stack(camera_corners, dim=0)
-        # camera_corners = torch.matmul(torch.tensor(v_dataframe.calib.P2).float(),
-        #                             camera_corners.transpose(1, 2)).transpose(1, 2)  # [N, 8, 3]
+        camera_corners = torch.matmul(torch.tensor(v_dataframe.calib.P2).float(),
+                                      camera_corners.transpose(1, 2)).transpose(1, 2)  # [N, 8, 3]
 
         homo_coord = (camera_corners / (camera_corners[:, :, 2:] + 1e-6))[:, :, :2]  # [N, 8, 3]
         if v_width is not None:
@@ -205,53 +332,375 @@ class Yolo3D(nn.Module):
             ], dim=-1)
         return homo_coord
 
-    def training_forward(self, img_batch, annotations, P2):
+    def _assign(self, anchor, annotation,
+                bg_iou_threshold=0.0,
+                fg_iou_threshold=0.5,
+                min_iou_threshold=0.0,
+                match_low_quality=True,
+                gt_max_assign_all=True,
+                **kwargs):
         """
-        Args:
-            img_batch: [B, C, H, W] tensor
-            annotations: check visualDet3D.utils.utils compound_annotation
-            calib: visualDet3D.kitti.data.kitti.KittiCalib or anything with obj.P2
+            :param
+                anchor: [N, 4]
+                annotation: [num_gt, 4]
+            :return
+                num_gt: box num of gt
+                assigned_gt_inds:
+                max_overlaps=max_overlaps
+                labels=assigned_label
+        """
+        N = anchor.shape[0]
+        num_gt = annotation.shape[0]
+        assigned_gt_inds = anchor.new_full(
+            (N,),
+            -1, dtype=torch.long
+        )  # [N, ] torch.long
+        max_overlaps = anchor.new_zeros((N,))
+        assigned_labels = anchor.new_full((N,),
+                                          -1,
+                                          dtype=torch.long)
+
+        if num_gt == 0:
+            assigned_gt_inds = anchor.new_full(
+                (N,),
+                0, dtype=torch.long
+            )  # [N, ] torch.long
+            return_dict = dict(
+                num_gt=num_gt,
+                assigned_gt_inds=assigned_gt_inds,
+                max_overlaps=max_overlaps,
+                labels=assigned_labels
+            )
+            return return_dict
+
+        IoU = calc_iou(anchor, annotation[:, :4])  # num_anchors x num_annotations
+
+        # max for anchor
+        max_overlaps, argmax_overlaps = IoU.max(dim=1)  # num_anchors
+
+        # max for gt
+        gt_max_overlaps, gt_argmax_overlaps = IoU.max(dim=0)  # num_gt
+
+        # assign negative
+        assigned_gt_inds[(max_overlaps >= 0) & (max_overlaps < bg_iou_threshold)] = 0
+
+        # assign positive
+        pos_inds = max_overlaps >= fg_iou_threshold
+        assigned_gt_inds[pos_inds] = argmax_overlaps[pos_inds] + 1
+
+        if match_low_quality:
+            for i in range(num_gt):
+                if gt_max_overlaps[i] >= min_iou_threshold:
+                    if gt_max_assign_all:
+                        max_iou_inds = IoU[:, i] == gt_max_overlaps[i]
+                        assigned_gt_inds[max_iou_inds] = i + 1
+                    else:
+                        assigned_gt_inds[gt_argmax_overlaps[i]] = i + 1
+
+        assigned_labels = assigned_gt_inds.new_full((N,), -1)
+        pos_inds = torch.nonzero(
+            assigned_gt_inds > 0, as_tuple=False
+        ).squeeze()
+        if pos_inds.numel() > 0:
+            assigned_labels[pos_inds] = torch.zeros_like(
+                annotation[assigned_gt_inds[pos_inds] - 1, 0]).long()  # Only 1 class here
+
+        return_dict = dict(
+            num_gt=num_gt,
+            assigned_gt_inds=assigned_gt_inds,
+            max_overlaps=max_overlaps,
+            labels=assigned_labels
+        )
+        return return_dict
+
+    def _encode(self, sampled_anchors, sampled_gt_bboxes, selected_anchors_3d):
+        # Sampled_gt_bboxes: GT Box after sample: x1,y1,x2,y2,x3d_projected,y3d_projected, x3d, y3d, z3d, w3d, h3d, l3d, ry
+        assert sampled_anchors.shape[0] == sampled_gt_bboxes.shape[0]
+
+        sampled_anchors = sampled_anchors.float()
+        sampled_gt_bboxes = sampled_gt_bboxes.float()
+        px = (sampled_anchors[..., 0] + sampled_anchors[..., 2]) * 0.5  # center x of the predicted 2d bbox
+        py = (sampled_anchors[..., 1] + sampled_anchors[..., 3]) * 0.5  # center y of the predicted 2d bbox
+        pw = sampled_anchors[..., 2] - sampled_anchors[..., 0]  # width of the predicted 2d bbox
+        ph = sampled_anchors[..., 3] - sampled_anchors[..., 1]  # height of the predicted 2d bbox
+
+        gx = (sampled_gt_bboxes[..., 0] + sampled_gt_bboxes[..., 2]) * 0.5  # center x of the gt 2d bbox
+        gy = (sampled_gt_bboxes[..., 1] + sampled_gt_bboxes[..., 3]) * 0.5  # center y of the gt 2d bbox
+        gw = sampled_gt_bboxes[..., 2] - sampled_gt_bboxes[..., 0]  # width of the gt 2d bbox
+        gh = sampled_gt_bboxes[..., 3] - sampled_gt_bboxes[..., 1]  # height of the gt 2d bbox
+
+        targets_dx = (gx - px) / pw  # shift of the gt 2d bbox center x
+        targets_dy = (gy - py) / ph  # shift of the gt 2d bbox center y
+        targets_dw = torch.log(gw / pw)  # shift of the gt 2d bbox width
+        targets_dh = torch.log(gh / ph)  # shift of the gt 2d bbox height
+
+        targets_cdx_projected = (sampled_gt_bboxes[:, 4] - px) / pw  # shift of the projected gt 3d bbox center x
+        targets_cdy_projected = (sampled_gt_bboxes[:, 5] - py) / ph  # shift of the projected gt 3d bbox center y
+
+        targets_cdz = (sampled_gt_bboxes[:, 8] - selected_anchors_3d[:, 2, 0]) / selected_anchors_3d[:, 2, 1]
+        targets_cdy = (sampled_gt_bboxes[:, 7] - selected_anchors_3d[:, 1, 0]) / selected_anchors_3d[:, 1, 1]
+        targets_cdx = (sampled_gt_bboxes[:, 6] - selected_anchors_3d[:, 0, 0]) / selected_anchors_3d[:, 0, 1]
+        targets_w3d = (sampled_gt_bboxes[:, 9] - selected_anchors_3d[:, 3, 0]) / selected_anchors_3d[:, 3, 1]
+        targets_h3d = (sampled_gt_bboxes[:, 10] - selected_anchors_3d[:, 4, 0]) / selected_anchors_3d[:, 4, 1]
+        targets_l3d = (sampled_gt_bboxes[:, 11] - selected_anchors_3d[:, 5, 0]) / selected_anchors_3d[:, 5, 1]
+        targets_ry = (sampled_gt_bboxes[:, 12] - selected_anchors_3d[:, 6, 0]) / selected_anchors_3d[:, 6, 1]
+
+        targets = torch.stack((targets_dx, targets_dy, targets_dw, targets_dh,
+                               targets_cdx_projected, targets_cdy_projected,
+                               targets_cdx, targets_cdy, targets_cdz,
+                               targets_w3d, targets_h3d, targets_l3d,
+                               targets_ry
+                               ), dim=1)
+
+        stds = targets.new([0.1, 0.1, 0.2, 0.2, 0.1, 0.1, 1, 1, 1, 1, 1, 1, 1])
+
+        targets = targets.div_(stds)
+        return targets
+
+    def _decode(self, boxes, deltas, anchors_3d_mean_std, label_index, alpha_score):
+        std = torch.tensor([0.1, 0.1, 0.2, 0.2, 0.1, 0.1, 1, 1, 1, 1, 1, 1], dtype=torch.float32, device=boxes.device)
+        widths = boxes[..., 2] - boxes[..., 0]
+        heights = boxes[..., 3] - boxes[..., 1]
+        ctr_x = boxes[..., 0] + 0.5 * widths
+        ctr_y = boxes[..., 1] + 0.5 * heights
+
+        dx = deltas[..., 0] * std[0]
+        dy = deltas[..., 1] * std[1]
+        dw = deltas[..., 2] * std[2]
+        dh = deltas[..., 3] * std[3]
+
+        pred_ctr_x = ctr_x + dx * widths
+        pred_ctr_y = ctr_y + dy * heights
+        pred_w = torch.exp(dw) * widths
+        pred_h = torch.exp(dh) * heights
+
+        pred_boxes_x1 = pred_ctr_x - 0.5 * pred_w
+        pred_boxes_y1 = pred_ctr_y - 0.5 * pred_h
+        pred_boxes_x2 = pred_ctr_x + 0.5 * pred_w
+        pred_boxes_y2 = pred_ctr_y + 0.5 * pred_h
+
+        one_hot_mask = torch.nn.functional.one_hot(label_index, anchors_3d_mean_std.shape[1]).bool()
+        selected_mean_std = anchors_3d_mean_std[one_hot_mask]  # [N]
+        mask = selected_mean_std[:, 0, 0] > 0
+
+        cdx = deltas[..., 4] * std[4]
+        cdy = deltas[..., 5] * std[5]
+        pred_cx1 = ctr_x + cdx * widths
+        pred_cy1 = ctr_y + cdy * heights
+        pred_z = deltas[..., 6] * selected_mean_std[:, 0, 1] + selected_mean_std[:, 0, 0]  # [N, 6]
+        pred_sin = deltas[..., 7] * selected_mean_std[:, 1, 1] + selected_mean_std[:, 1, 0]
+        pred_cos = deltas[..., 8] * selected_mean_std[:, 2, 1] + selected_mean_std[:, 2, 0]
+        pred_alpha = torch.atan2(pred_sin, pred_cos) / 2.0
+
+        pred_w = deltas[..., 9] * selected_mean_std[:, 3, 1] + selected_mean_std[:, 3, 0]
+        pred_h = deltas[..., 10] * selected_mean_std[:, 4, 1] + selected_mean_std[:, 4, 0]
+        pred_l = deltas[..., 11] * selected_mean_std[:, 5, 1] + selected_mean_std[:, 5, 0]
+
+        pred_boxes = torch.stack([pred_boxes_x1, pred_boxes_y1, pred_boxes_x2, pred_boxes_y2,
+                                  pred_cx1, pred_cy1, pred_z,
+                                  pred_w, pred_h, pred_l, pred_alpha], dim=1)
+
+        pred_boxes[alpha_score[:, 0] < 0.5, -1] += np.pi
+
+        return pred_boxes, mask
+
+    def _sample(self, assignment_result, anchors, v_gt_data, v_id_batch):
+        """
+            Pseudo sampling
+        """
+        pos_inds = torch.nonzero(
+            assignment_result['assigned_gt_inds'] > 0, as_tuple=False
+        ).unsqueeze(-1).unique()
+        neg_inds = torch.nonzero(
+            assignment_result['assigned_gt_inds'] == 0, as_tuple=False
+        ).unsqueeze(-1).unique()
+        gt_flags = anchors.new_zeros(anchors.shape[0], dtype=torch.uint8)  #
+
+        pos_assigned_gt_inds = assignment_result['assigned_gt_inds'] - 1
+
+        if v_gt_data["image"].numel() == 0:
+            pos_gt_bboxes = v_gt_data["image"].new_zeros([0, 4])
+        else:
+            pos_gt_bboxes = torch.cat([
+                v_gt_data["bbox2d"][v_id_batch][pos_assigned_gt_inds[pos_inds] - 1],
+                v_gt_data["bbox3d_img_center"][v_id_batch][pos_assigned_gt_inds[pos_inds] - 1],
+                v_gt_data["bbox3d"][v_id_batch][pos_assigned_gt_inds[pos_inds] - 1],
+            ], dim=1)
+        return_dict = dict(
+            pos_inds=pos_inds,
+            neg_inds=neg_inds,
+            pos_bboxes=anchors[pos_inds],
+            neg_bboxes=anchors[neg_inds],
+            pos_gt_bboxes=pos_gt_bboxes,
+            pos_assigned_gt_inds=pos_assigned_gt_inds[pos_inds],
+        )
+        return return_dict
+
+    def _get_anchor_3d(self, anchors, anchor_mean_std_3d, assigned_labels):
+        """
+            anchors: [N_pos, 4] only positive anchors
+            anchor_mean_std_3d: [N_pos, C, K=6, 2]
+            assigned_labels: torch.Longtensor [N_pos, ]
+
+            return:
+                selected_mask = torch.bool [N_pos, ]
+                selected_anchors_3d:  [N_selected, K, 2]
+        """
+        num_classes = 1
+        one_hot_mask = torch.nn.functional.one_hot(assigned_labels, num_classes).bool()
+        selected_anchor_3d = anchor_mean_std_3d[one_hot_mask]
+
+        return torch.ones_like(selected_anchor_3d[:, 0, 0]).long(), selected_anchor_3d
+
+    def loss(self, cls_scores, reg_preds, anchors, v_anchor_mean_std, v_data):
+        batch_size = cls_scores.shape[0]
+
+        cls_loss = []
+        reg_loss = []
+        number_of_positives = []
+        for id_batch in range(batch_size):
+            reg_pred = reg_preds[id_batch]
+            cls_score = cls_scores[id_batch]
+
+            if len(v_data["label"]) == 0:
+                cls_loss.append(torch.tensor(0).cuda().float())
+                reg_loss.append(reg_preds.new_zeros(self.network_cfg["num_reg_output"]))
+                number_of_positives.append(0)
+                continue
+
+            assignement_result_dict = self._assign(anchors[0], v_data["bbox2d"][id_batch],
+                                                   bg_iou_threshold=self.head_loss_cfg["bg_iou_threshold"],
+                                                   fg_iou_threshold=self.head_loss_cfg["fg_iou_threshold"],
+                                                   min_iou_threshold=0.0,
+                                                   match_low_quality=self.head_loss_cfg["match_low_quality"],
+                                                   gt_max_assign_all=True,
+                                                   )
+            # GT Box after sample: x1,y1,x2,y2,x3d_projected,y3d_projected, x3d, y3d, z3d, w3d, h3d, l3d, ry
+            sampling_result_dict = self._sample(assignement_result_dict, anchors[0], v_data, id_batch)
+
+            num_valid_anchors = anchors[0].shape[0]
+            labels = anchors[0].new_full((num_valid_anchors, 1),
+                                         -1,  # -1 not computed, binary for each class
+                                         dtype=torch.float)
+
+            pos_inds = sampling_result_dict['pos_inds']
+            neg_inds = sampling_result_dict['neg_inds']
+
+            if len(pos_inds) > 0:
+                pos_assigned_gt_label = torch.tensor(
+                    v_data["label"][id_batch], device=sampling_result_dict['pos_assigned_gt_inds'].device)[
+                    sampling_result_dict['pos_assigned_gt_inds']].long()
+
+                selected_mask, selected_anchor_3d = self._get_anchor_3d(
+                    sampling_result_dict['pos_bboxes'],
+                    v_anchor_mean_std[pos_inds],
+                    pos_assigned_gt_label,
+                )
+                if len(selected_anchor_3d) > 0:
+                    pos_inds = pos_inds[selected_mask]
+                    pos_bboxes = sampling_result_dict['pos_bboxes'][selected_mask]
+                    pos_gt_bboxes = sampling_result_dict['pos_gt_bboxes'][selected_mask]
+                    pos_assigned_gt = sampling_result_dict['pos_assigned_gt_inds'][selected_mask]
+
+                    pos_bbox_targets = self._encode(
+                        pos_bboxes, pos_gt_bboxes, selected_anchor_3d
+                    )  # [N, 12], [N, 1]
+                    label_index = pos_assigned_gt_label[selected_mask]
+                    labels[pos_inds, :] = 0
+                    labels[pos_inds, label_index] = 1
+
+                    pos_anchor = anchors[0][pos_inds]
+                    pos_alpha_score = alpha_score[pos_inds]
+                    if False:
+                        pos_prediction_decoded = self._decode(pos_anchor, reg_pred[pos_inds], v_anchor_mean_std,
+                                                              label_index, pos_alpha_score)
+                        pos_target_decoded = self._decode(pos_anchor, pos_bbox_targets, anchors_3d_mean_std,
+                                                          label_index, pos_alpha_score)
+
+                        reg_loss.append(
+                            (self.loss_bbox(pos_prediction_decoded, pos_target_decoded) * self.regression_weight).mean(
+                                dim=0))
+                    else:
+                        reg_loss_j = F.l1_loss(pos_bbox_targets, reg_pred[pos_inds], reduction='none')
+                        # alpha_loss_j = self.alpha_loss(pos_alpha_score, targets_alpha_cls)
+                        # loss_j = torch.cat([reg_loss_j, alpha_loss_j], dim=1) * self.regression_weight  # [N, 13]
+                        reg_loss.append(reg_loss_j.mean(dim=0))  # [13]
+                        number_of_positives.append(len(v_data["label"][id_batch]))
+            else:
+                reg_loss.append(reg_preds.new_zeros(self.network_cfg["num_reg_output"]))
+                number_of_positives.append(len(v_data["label"][id_batch]))
+
+            if len(neg_inds) > 0:
+                labels[neg_inds, :] = 0
+
+            cls_loss.append(self.focal_loss(cls_score, labels).sum() / (len(pos_inds) + len(neg_inds)))
+
+        weights = reg_pred.new(number_of_positives).unsqueeze(1)  # [B, 1]
+        cls_loss = torch.stack(cls_loss).mean(dim=0, keepdim=True)
+        reg_loss = torch.stack(reg_loss, dim=0)  # [B, 13]
+
+        weighted_regression_losses = torch.sum(weights * reg_loss / (torch.sum(weights) + 1e-6), dim=0)
+        reg_loss = weighted_regression_losses.mean(dim=0, keepdim=True)
+        return cls_loss, reg_loss
+
+    def training_forward(self, v_data):
+        """
+        Args: v_data
+            calib: (B,3,4) P2 matrix
+            image: (B,3,800,800) images
+            label: [[],[]] list of indexes of the label
+            bbox2d: [(N1, 4), (N2, 4)] list of objects' 2d bounding boxes. N1,N2... is the number of objects contained
+                in one image. (x1,y1,x2,y2)
+            bbox3d: [(N1, 7), (N2, 7)] list of objects' 3d bounding boxes. N1,N2... is the number of objects contained
+                in one image. (x, y, z, w, h, l, ry)
+            bbox3d_img_center: [(N1, 2), (N2, 7)] list of 3d bounding boxes projected center. N1,N2... is the number of
+            objects contained in one image. (x, y)
+
         Returns:
             cls_loss, reg_loss: tensor of losses
-            loss_dict: [key, value] pair for logging
         """
 
-        features = self.core(dict(image=img_batch, P2=P2))
-        cls_preds, reg_preds = self.bbox_head(dict(features=features, P2=P2, image=img_batch))
+        v_data["features"] = self.core(v_data["image"])
+        cls_preds = self.cls_feature_extraction(v_data["features"])
+        reg_preds = self.reg_feature_extraction(v_data["features"])
 
-        anchors = self.bbox_head.get_anchor(img_batch, P2)
+        anchors, useful_mask, anchor_mean_std = self.anchors(v_data["image"], v_data["calib"],
+                                                             is_filtering=False)
 
-        cls_loss, reg_loss, loss_dict = self.bbox_head.loss(cls_preds, reg_preds, anchors, annotations, P2)
+        cls_loss, reg_loss = self.loss(cls_preds, reg_preds, anchors, anchor_mean_std, v_data)
 
-        return cls_loss, reg_loss, loss_dict
+        return cls_loss, reg_loss
 
-    def test_forward(self, img_batch, P2):
+    def get_boxes(self):
+        pass
+
+    def test_forward(self, v_data):
         """
-        Args:
-            img_batch: [B, C, H, W] tensor
-            calib: visualDet3D.kitti.data.kitti.KittiCalib or anything with obj.P2
+        Args: v_data
+            calib: (B,3,4) P2 matrix
+            image: (B,3,800,800) images
+            label: [[],[]] list of indexes of the label
+            bbox2d: [(N1, 4), (N2, 4)] list of objects' 2d bounding boxes. N1,N2... is the number of objects contained
+                in one image. (x1,y1,x2,y2)
+            bbox3d: [(N1, 7), (N2, 7)] list of objects' 3d bounding boxes. N1,N2... is the number of objects contained
+                in one image. (x, y, z, w, h, l, ry)
+            bbox3d_img_center: [(N1, 2), (N2, 7)] list of 3d bounding boxes projected center. N1,N2... is the number of
+            objects contained in one image. (x, y)
+
         Returns:
-            results: a nested list:
-                result[i] = detection_results for obj_types[i]
-                    each detection result is a list [scores, bbox, obj_type]:
-                        bbox = [bbox2d(length=4) , cx, cy, z, w, h, l, alpha]
+            cls_loss, reg_loss: tensor of losses
         """
-        assert img_batch.shape[0] == 1  # we recommmend image batch size = 1 for testing
+        v_data["features"] = self.core(v_data["image"])
+        cls_preds = self.cls_feature_extraction(v_data["features"])
+        reg_preds = self.reg_feature_extraction(v_data["features"])
 
-        features = self.core(dict(image=img_batch, P2=P2))
-        cls_preds, reg_preds = self.bbox_head(dict(features=features, P2=P2))
+        anchors, useful_mask, anchor_mean_std = self.anchors(v_data["image"], v_data["calib"],
+                                                             is_filtering=False)
 
-        anchors = self.bbox_head.get_anchor(img_batch, P2)
-
-        scores, bboxes, cls_indexes = self.bbox_head.get_bboxes(cls_preds, reg_preds, anchors, P2, img_batch)
+        scores, bboxes, cls_indexes = self.get_boxes(cls_preds, reg_preds, anchors, anchor_mean_std, v_data)
 
         return scores, bboxes, cls_indexes
 
-    def forward(self, inputs):
+    def forward(self, v_inputs):
 
-        if isinstance(inputs, list) and len(inputs) == 3:
-            img_batch, annotations, calib = inputs
-            return self.training_forward(img_batch, annotations, calib)
-        else:
-            img_batch, calib = inputs
-            return self.test_forward(img_batch, calib)
+        return self.training_forward(v_inputs)

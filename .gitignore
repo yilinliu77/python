@@ -1,6 +1,9 @@
 .idea/
 temp/
 outputs/
+src/huyue/my_mesh.obj
+src/huyue/my_point_cloud.xyz
+lightning_logs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

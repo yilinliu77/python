@@ -10,6 +10,38 @@ import open3d as o3d
 from scipy.spatial.transform import Rotation as R
 
 """
+2021/4/29 Comment by Yilin:
+- draw_point_cloud
+    - Will done!
+- draw_meshes
+    - Will done!
+    - Aspects that currently right, but might be helpful in the future:
+        - You have already got familiar with the `vertices` and `faces` in obj format. However, learning the 
+        `normal` and `mtl` attribute could also be very helpful in your future project.  
+- rotate_meshes
+    - Will done
+    - How about rotate it by yourself? Hint: you get the transformation matrix, can you directly multiply it to 
+        the vertices?
+
+- detect_planes
+    - Although you do not finish the clustering algorithm to find the sub-planes for different buildings, your idea is 
+    great and you can still think about it in the future. Currently the goal of this exercise is just detect the whole
+    planes.
+    - In the 6th line of your function `detect_planes`. It is not a problem here. But you should be careful that you do
+    not actually copy the variable `pcd` to `pcd1`. Python holds a different copy method from C++. You should be aware 
+    of that
+    - Aspects that currently right, but might be helpful in the future:
+        - You do not have to use exactly 3 points to estimate a plane. A more robust way is to use several points (20+)
+        to construct a equation and solve it using some numerical methods like `Least squares method`. This method is 
+        widely used in different areas.
+        - You might interested in `numba` if you want a faster algorithm in python.
+    - Most important: The planes extracted by ransac is heavily rely on the parameters. Actually I can get a good result 
+    using the builtin algorithm in open3d. Try to compare them and do your own analysis. What is the expected behavior?
+    Any unexpected behaviour? Use figures or numbers to prove your analysis. This is a pretty good exercise in 
+    the next week.
+"""
+
+"""
 Learn to load and transform point clouds, meshes
 """
 
@@ -285,8 +317,35 @@ def detect_planes(v_point_clout_path, v_output_path):
     o3d.io.write_point_cloud(v_output_path,pcd1)
     pass
 
+def detect_planes_open3d(v_mesh_path):
+    mesh = o3d.io.read_triangle_mesh(v_mesh_path)
+    pcd=mesh.sample_points_uniformly(100000)
+
+    pcd=pcd.translate(-pcd.get_center())
+
+    pcds=[]
+    num_points_remain=np.asarray(pcd.points).shape[0]
+    while num_points_remain>500:
+        print(num_points_remain)
+        plane_model, inliers = pcd.segment_plane(distance_threshold=1,
+                                             ransac_n=10,
+                                             num_iterations=10000)
+        inlier_cloud = pcd.select_by_index(inliers)
+        inlier_cloud.paint_uniform_color([random.random(), random.random(), random.random()])
+        pcds.append(inlier_cloud)
+        pcd = pcd.select_by_index(inliers, invert=True)
+        num_points_remain = np.asarray(pcd.points).shape[0]
+
+    o3d.visualization.draw_geometries(pcds,
+                                      zoom=0.8,
+                                      front=[-0.4999, -0.1659, -0.8499],
+                                      lookat=[2.1813, 2.0619, 2.0999],
+                                      up=[0.1204, -0.9852, 0.1215])
+
+
 if __name__ == '__main__':
-    draw_point_cloud("szu_north_0422_points.ply","my_point_cloud.xyz")
-    draw_meshes("szu_north_0422.obj","my_mesh.obj")
-    rotate_meshes("szu_north_0422.obj","my_mesh_rotated.obj")
-    detect_planes("szu_north_0422_points.ply","my_planes.ply")
+    # draw_point_cloud("szu_north_0422_points.ply","my_point_cloud.xyz")
+    # draw_meshes("szu_north_0422.obj","my_mesh.obj")
+    # rotate_meshes("szu_north_0422.obj","my_mesh_rotated.obj")
+    # detect_planes("szu_north_0422_points.ply","my_planes.ply")
+    detect_planes_open3d("szu_north_0422.obj")

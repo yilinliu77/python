@@ -21,7 +21,7 @@ Note:
 """
 
 """
-2021/4/24 Comment:
+2021/4/24 Comment by Yilin:
 Great. You finish all the requirements. And the `limit_range` function guarantee the robustness. Still, here are some 
 minor improvements.
     - Try to visualize the image in both gray and color using matplotlib. Currently you only visualize the gray image.

@@ -58,7 +58,7 @@ class Mono_det_3d(pl.LightningModule):
         self.valid_dataset = self.dataset_builder(self.hparams,"validation")
 
         return DataLoader(self.valid_dataset,
-                          batch_size=self.hparams["trainer"].batch_size,
+                          batch_size=1,
                           num_workers=self.hparams["trainer"].num_worker,
                           drop_last=True,
                           pin_memory=True,
@@ -97,11 +97,14 @@ class Mono_det_3d(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         data = batch
 
-        cls_loss, reg_loss = self.forward(data)
+        results = self.forward(data)
+        results["scores"]
+        results["bboxes"]
+        results["cls_indexes"]
         return {
-            'val_loss': reg_loss + cls_loss,
-            'val_cls_loss': cls_loss,
-            'val_reg_loss': reg_loss,
+            'val_loss': results["cls_loss"] + results["reg_loss"],
+            'val_cls_loss': results["cls_loss"],
+            'val_reg_loss': results["reg_loss"],
         }
 
     def validation_epoch_end(self, outputs):

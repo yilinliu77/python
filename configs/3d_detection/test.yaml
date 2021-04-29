@@ -12,6 +12,7 @@ det_3d:
   visualDet3D_config_path: C:\repo\python\src\3d_detection\Yolo3D_test.py
   preprocessed_path: temp/det3d/anchors/
   compute_anchor: false
+  score_threshold: 0.5
 
 model:
 

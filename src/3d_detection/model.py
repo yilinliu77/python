@@ -33,7 +33,7 @@ from torch.nn import functional as F
 class Yolo3D(nn.Module):
     def __init__(self, v_cfg):
         super(Yolo3D, self).__init__()
-
+        self.hparams=v_cfg
         anchors_cfg = EasyDict({
             "pyramid_levels": [5], # Final shape of the images 800(original_width) / 2^5(levels) = 25(feature_map_shape)
             "strides": [32], # Shift the anchor from the single pixel. 800(original_width) / 25(feature_map_shape) = 32
@@ -53,7 +53,7 @@ class Yolo3D(nn.Module):
             bg_iou_threshold=0.4,
             # L1_regression_alpha=5 ** 2,
             # focal_loss_gamma=2.0,
-            # match_low_quality=False,
+            match_low_quality=False,
             # balance_weight=[20.0],
             # regression_weight=[1, 1, 1, 1, 1, 1, 3, 1, 1, 0.5, 0.5, 0.5, 1],
         )
@@ -63,10 +63,12 @@ class Yolo3D(nn.Module):
             reg_feature_size=256,
             cls_feature_size=256,
 
-            num_anchors=32,
+            num_anchors=anchors_cfg["scales"].shape[0]*len(anchors_cfg["ratios"]),
             num_cls_output = 1,
             num_reg_output = 13, # (x1, y1, x2, y2, x3d_center, y3d_center, x, y, z, w, h, l, ry)
         )
+
+        self.stds=[0.1, 0.1, 0.2, 0.2, 0.1, 0.1, 1, 1, 1, 1, 1, 1, 1]
 
         preprocessed_path = os.path.join(hydra.utils.get_original_cwd(), "temp/det3d/anchors/")
         if v_cfg["det_3d"]["compute_anchor"] == True:
@@ -452,55 +454,65 @@ class Yolo3D(nn.Module):
                                targets_ry
                                ), dim=1)
 
-        stds = targets.new([0.1, 0.1, 0.2, 0.2, 0.1, 0.1, 1, 1, 1, 1, 1, 1, 1])
+        stds = targets.new(self.stds)
 
         targets = targets.div_(stds)
         return targets
 
-    def _decode(self, boxes, deltas, anchors_3d_mean_std, label_index, alpha_score):
-        std = torch.tensor([0.1, 0.1, 0.2, 0.2, 0.1, 0.1, 1, 1, 1, 1, 1, 1], dtype=torch.float32, device=boxes.device)
-        widths = boxes[..., 2] - boxes[..., 0]
-        heights = boxes[..., 3] - boxes[..., 1]
-        ctr_x = boxes[..., 0] + 0.5 * widths
-        ctr_y = boxes[..., 1] + 0.5 * heights
+    """
+    :param
+    v_prediction: (x1,y1,x2,y2,x3d_projected,y3d_projected, x3d, y3d, z3d, w3d, h3d, l3d, ry)
+    anchors_3d_mean_std: (x3d, y3d, z3d, w3d, h3d, l3d, ry)
+    """
+    def _decode(self, v_boxes_2d, v_prediction, anchors_3d_mean_std, label_index):
+        std = torch.tensor(self.stds, dtype=torch.float32, device=v_boxes_2d.device)
 
-        dx = deltas[..., 0] * std[0]
-        dy = deltas[..., 1] * std[1]
-        dw = deltas[..., 2] * std[2]
-        dh = deltas[..., 3] * std[3]
+        # 2D Bounding box
+        widths = v_boxes_2d[..., 2] - v_boxes_2d[..., 0]
+        heights = v_boxes_2d[..., 3] - v_boxes_2d[..., 1]
+        ctr_x = v_boxes_2d[..., 0] + 0.5 * widths
+        ctr_y = v_boxes_2d[..., 1] + 0.5 * heights
 
-        pred_ctr_x = ctr_x + dx * widths
-        pred_ctr_y = ctr_y + dy * heights
+        dx = v_prediction[..., 0] * std[0]
+        dy = v_prediction[..., 1] * std[1]
+        dw = v_prediction[..., 2] * std[2]
+        dh = v_prediction[..., 3] * std[3]
+
+        pred_centre_x = ctr_x + dx * widths
+        pred_centre_y = ctr_y + dy * heights
         pred_w = torch.exp(dw) * widths
         pred_h = torch.exp(dh) * heights
 
-        pred_boxes_x1 = pred_ctr_x - 0.5 * pred_w
-        pred_boxes_y1 = pred_ctr_y - 0.5 * pred_h
-        pred_boxes_x2 = pred_ctr_x + 0.5 * pred_w
-        pred_boxes_y2 = pred_ctr_y + 0.5 * pred_h
+        pred_boxes_x1 = pred_centre_x - 0.5 * pred_w
+        pred_boxes_y1 = pred_centre_y - 0.5 * pred_h
+        pred_boxes_x2 = pred_centre_x + 0.5 * pred_w
+        pred_boxes_y2 = pred_centre_y + 0.5 * pred_h
 
         one_hot_mask = torch.nn.functional.one_hot(label_index, anchors_3d_mean_std.shape[1]).bool()
         selected_mean_std = anchors_3d_mean_std[one_hot_mask]  # [N]
         mask = selected_mean_std[:, 0, 0] > 0
 
-        cdx = deltas[..., 4] * std[4]
-        cdy = deltas[..., 5] * std[5]
-        pred_cx1 = ctr_x + cdx * widths
-        pred_cy1 = ctr_y + cdy * heights
-        pred_z = deltas[..., 6] * selected_mean_std[:, 0, 1] + selected_mean_std[:, 0, 0]  # [N, 6]
-        pred_sin = deltas[..., 7] * selected_mean_std[:, 1, 1] + selected_mean_std[:, 1, 0]
-        pred_cos = deltas[..., 8] * selected_mean_std[:, 2, 1] + selected_mean_std[:, 2, 0]
-        pred_alpha = torch.atan2(pred_sin, pred_cos) / 2.0
+        # 2D Projected centre
+        cdx = v_prediction[..., 4] * std[4]
+        cdy = v_prediction[..., 5] * std[5]
+        pred_center_x1_projected = ctr_x + cdx * widths
+        pred_center_y1_projected = ctr_y + cdy * heights
 
-        pred_w = deltas[..., 9] * selected_mean_std[:, 3, 1] + selected_mean_std[:, 3, 0]
-        pred_h = deltas[..., 10] * selected_mean_std[:, 4, 1] + selected_mean_std[:, 4, 0]
-        pred_l = deltas[..., 11] * selected_mean_std[:, 5, 1] + selected_mean_std[:, 5, 0]
+        # 3D Bounding box
+        pred_x = v_prediction[..., 6] * selected_mean_std[:, 0, 1] + selected_mean_std[:, 0, 0]  # [N, 6]
+        pred_y = v_prediction[..., 7] * selected_mean_std[:, 1, 1] + selected_mean_std[:, 1, 0]  # [N, 6]
+        pred_z = v_prediction[..., 8] * selected_mean_std[:, 2, 1] + selected_mean_std[:, 2, 0]  # [N, 6]
+
+        pred_w = v_prediction[..., 9] * selected_mean_std[:, 3, 1] + selected_mean_std[:, 3, 0]
+        pred_h = v_prediction[..., 10] * selected_mean_std[:, 4, 1] + selected_mean_std[:, 4, 0]
+        pred_l = v_prediction[..., 11] * selected_mean_std[:, 5, 1] + selected_mean_std[:, 5, 0]
+
+        pred_ry = v_prediction[..., 12] * selected_mean_std[:, 6, 1] + selected_mean_std[:, 6, 0]
 
         pred_boxes = torch.stack([pred_boxes_x1, pred_boxes_y1, pred_boxes_x2, pred_boxes_y2,
-                                  pred_cx1, pred_cy1, pred_z,
-                                  pred_w, pred_h, pred_l, pred_alpha], dim=1)
-
-        pred_boxes[alpha_score[:, 0] < 0.5, -1] += np.pi
+                                  pred_center_x1_projected, pred_center_y1_projected,
+                                  pred_x, pred_y, pred_z,
+                                  pred_w, pred_h, pred_l, pred_ry], dim=1)
 
         return pred_boxes, mask
 
@@ -609,8 +621,6 @@ class Yolo3D(nn.Module):
                     labels[pos_inds, :] = 0
                     labels[pos_inds, label_index] = 1
 
-                    pos_anchor = anchors[0][pos_inds]
-                    pos_alpha_score = alpha_score[pos_inds]
                     if False:
                         pos_prediction_decoded = self._decode(pos_anchor, reg_pred[pos_inds], v_anchor_mean_std,
                                                               label_index, pos_alpha_score)
@@ -671,8 +681,26 @@ class Yolo3D(nn.Module):
 
         return cls_loss, reg_loss
 
-    def get_boxes(self):
-        pass
+    def get_boxes(self,v_cls_preds, v_reg_preds, v_anchors, v_anchor_mean_std, v_data):
+        assert v_cls_preds.shape[0]==1
+        cls_score = v_cls_preds.sigmoid()[0]
+
+        anchor = v_anchors[0]  # [N, 4]
+        anchor_mean_std_3d = v_anchor_mean_std  # [N, K, 2]
+
+        score_thr = self.hparams["det_3d"]["score_threshold"]
+        max_score, label = cls_score.max(dim=-1)
+        high_score_mask = (max_score > score_thr)
+        anchor = anchor[high_score_mask, :]
+        anchor_mean_std_3d = anchor_mean_std_3d[high_score_mask, :]
+        cls_score = cls_score[high_score_mask, :]
+        reg_pred = v_reg_preds[0][high_score_mask, :]
+        max_score = max_score[high_score_mask]
+        label = label[high_score_mask]
+
+        bboxes, mask = self._decode(anchor, reg_pred, anchor_mean_std_3d, label)
+
+        return max_score, bboxes, label
 
     def test_forward(self, v_data):
         """
@@ -696,11 +724,20 @@ class Yolo3D(nn.Module):
 
         anchors, useful_mask, anchor_mean_std = self.anchors(v_data["image"], v_data["calib"],
                                                              is_filtering=False)
-
+        cls_loss, reg_loss = self.loss(cls_preds, reg_preds, anchors, anchor_mean_std, v_data)
         scores, bboxes, cls_indexes = self.get_boxes(cls_preds, reg_preds, anchors, anchor_mean_std, v_data)
 
-        return scores, bboxes, cls_indexes
+        return {
+            "scores":scores,
+            "bboxes":bboxes,
+            "cls_indexes":cls_indexes,
+            "cls_loss":cls_loss,
+            "reg_loss":reg_loss,
+        }
 
     def forward(self, v_inputs):
+        if self.training:
+            return self.training_forward(v_inputs)
+        else:
+            return self.test_forward(v_inputs)
 
-        return self.training_forward(v_inputs)

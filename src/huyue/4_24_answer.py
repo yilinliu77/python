@@ -24,6 +24,8 @@ from scipy.spatial.transform import Rotation as R
         the vertices?
 
 - detect_planes
+    - The current results is pretty good!
+    
     - Although you do not finish the clustering algorithm to find the sub-planes for different buildings, your idea is 
     great and you can still think about it in the future. Currently the goal of this exercise is just detect the whole
     planes.
@@ -36,9 +38,9 @@ from scipy.spatial.transform import Rotation as R
         widely used in different areas.
         - You might interested in `numba` if you want a faster algorithm in python.
     - Most important: The planes extracted by ransac is heavily rely on the parameters. Actually I can get a good result 
-    using the builtin algorithm in open3d. Try to compare them and do your own analysis. What is the expected behavior?
-    Any unexpected behaviour? Use figures or numbers to prove your analysis. This is a pretty good exercise in 
-    the next week.
+    using the builtin algorithm in open3d. Try to use the whole point clouds that contains the floor (sampled from the 
+    mesh) and do your own analysis. What is the expected behavior? Any unexpected behaviour? Use figures or numbers to 
+    prove your analysis. This could be a pretty good exercise in the next week.
 """
 
 """
@@ -327,7 +329,7 @@ def detect_planes_open3d(v_mesh_path):
     num_points_remain=np.asarray(pcd.points).shape[0]
     while num_points_remain>500:
         print(num_points_remain)
-        plane_model, inliers = pcd.segment_plane(distance_threshold=1,
+        plane_model, inliers = pcd.segment_plane(distance_threshold=2,
                                              ransac_n=10,
                                              num_iterations=10000)
         inlier_cloud = pcd.select_by_index(inliers)

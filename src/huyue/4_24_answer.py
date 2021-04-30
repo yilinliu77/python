@@ -10,37 +10,36 @@ import open3d as o3d
 from scipy.spatial.transform import Rotation as R
 
 """
-2021/4/29 Comment by Yilin:
 - draw_point_cloud
-    - Will done!
+      - Well done!
 - draw_meshes
-    - Will done!
-    - Aspects that currently right, but might be helpful in the future:
-        - You have already got familiar with the `vertices` and `faces` in obj format. However, learning the 
-        `normal` and `mtl` attribute could also be very helpful in your future project.  
+      - Well done!
+      - Aspects that are currently right, but might be helpful in the future:
+            - You have already got familiar with the `vertices` and `faces` in obj format. However, learning the 
+            `normal` and `mtl` attribute could also be very helpful in your future project.   
 - rotate_meshes
-    - Will done
-    - How about rotate it by yourself? Hint: you get the transformation matrix, can you directly multiply it to 
-        the vertices?
+      - Well done
+      - How about rotate it by yourself? Hint: you get the transformation matrix, can you directly multiply it to 
+            the vertices?
 
 - detect_planes
-    - The current results is pretty good!
-    
-    - Although you do not finish the clustering algorithm to find the sub-planes for different buildings, your idea is 
-    great and you can still think about it in the future. Currently the goal of this exercise is just detect the whole
-    planes.
-    - In the 6th line of your function `detect_planes`. It is not a problem here. But you should be careful that you do
-    not actually copy the variable `pcd` to `pcd1`. Python holds a different copy method from C++. You should be aware 
-    of that
-    - Aspects that currently right, but might be helpful in the future:
-        - You do not have to use exactly 3 points to estimate a plane. A more robust way is to use several points (20+)
-        to construct a equation and solve it using some numerical methods like `Least squares method`. This method is 
-        widely used in different areas.
-        - You might interested in `numba` if you want a faster algorithm in python.
-    - Most important: The planes extracted by ransac is heavily rely on the parameters. Actually I can get a good result 
-    using the builtin algorithm in open3d. Try to use the whole point clouds that contains the floor (sampled from the 
-    mesh) and do your own analysis. What is the expected behavior? Any unexpected behaviour? Use figures or numbers to 
-    prove your analysis. This could be a pretty good exercise in the next week.
+      - The current results are pretty good!
+      
+      - Although you do not finish the clustering algorithm to find the sub-planes for different buildings, your idea is 
+      great and you can still think about it in the future. Currently the goal of this exercise is just detecting the whole
+      plane.
+      - In the 6th line of your function `detect_planes`. It is not a problem here. But you should be careful that you do
+      not actually copy the variable `pcd` to `pcd1`. Python holds a different copy method from C++. You should be aware 
+      of that
+      - Aspects that are currently right, but might be helpful in the future:
+            - You do not have to use exactly 3 points to estimate a plane. A more robust way is to use several points (20+)
+            to construct an equation and solve it using some numerical methods like `Least squares method`. This method is 
+            widely used in different areas.
+            - You might be interested in `numba` if you want a faster algorithm in python.
+      - Most important: The planes extracted by ransac heavily rely on the parameters. Actually I can get a good result 
+      using the builtin algorithm in open3d. Try to use the whole point clouds that contains the floor (sampled from the 
+      mesh) and do your own analysis. What is the expected behavior? Any unexpected behaviour? Use figures or numbers to 
+      prove your analysis. This could be a pretty good extra exercise in the next week.
 """
 
 """

@@ -1,9 +1,11 @@
 trainer:
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 0
-  train_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
-  valid_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\testing
+  num_worker: 4
+  train_dataset: /mnt/d/siga_21/withAlpha/training
+  valid_dataset: /mnt/d/siga_21/withAlpha/training
+  valid_split: temp/sndd_det3d/sndd_total_split_val.txt
+  train_split: temp/sndd_det3d/sndd_total_split_train.txt
 #  train_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
 #  valid_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
   batch_size: 4
@@ -11,14 +13,14 @@ trainer:
   resume_from_checkpoint:
   evaluate: false
 det_3d:
-  visualDet3D_config_path: C:\repo\python\src\3d_detection\Yolo3D_test.py
-  preprocessed_path: temp/det3d/anchors/
-  compute_anchor: true
+  preprocessed_path: temp/sndd_det3d/
+  compute_anchor: false
   score_threshold: 0.5
-  rotate_pitch_when_project: false
+  test_score_threshold: 0.75
+  rotate_pitch_when_project: true
 model:
-  img_shape_x: 1280
-  img_shape_y: 288
+  img_shape_x: 800
+  img_shape_y: 800
 hydra:
   run:
     dir: .

@@ -1,3 +1,6 @@
 [submodule "thirdparty/visualDet3D"]
 	path = thirdparty/visualDet3D
 	url = https://github.com/whatseven/visualDet3D
+[submodule "thirdparty/kitti-object-eval-python"]
+	path = thirdparty/kitti-object-eval-python
+	url = https://github.com/traveller59/kitti-object-eval-python

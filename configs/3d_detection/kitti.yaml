@@ -3,22 +3,38 @@ trainer:
   gpu: 1
   num_worker: 0
   train_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
-  valid_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\testing
+  valid_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
+#  valid_split: temp/det3d/total_split_val.txt
+#  train_split: temp/det3d/total_split_train.txt
+  train_split: temp/det3d/chen_split_train.txt
+  valid_split: temp/det3d/chen_split_val.txt
+#  valid_split: temp/det3d/debug_split_val.txt
+#  train_split: temp/det3d/debug_split_train.txt
+
 #  train_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
 #  valid_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
+
   batch_size: 4
   auto_lr_find: false
   resume_from_checkpoint:
   evaluate: false
 det_3d:
-  visualDet3D_config_path: C:\repo\python\src\3d_detection\Yolo3D_test.py
-  preprocessed_path: temp/det3d/anchors/
-  compute_anchor: true
+  preprocessed_path: temp/kitti_test
+  compute_anchor: false
   score_threshold: 0.5
+  test_score_threshold: 0.75
   rotate_pitch_when_project: false
+
+anchor:
+  stride: 16
+  sizes: [24]
+  ratios: [.5, .7, 1., 1.5 ,2.]
+
 model:
   img_shape_x: 1280
-  img_shape_y: 288
+  img_shape_y: 360
+
+
 hydra:
   run:
     dir: .

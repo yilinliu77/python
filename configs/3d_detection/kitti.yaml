@@ -6,8 +6,8 @@ trainer:
   valid_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
 #  valid_split: temp/det3d/total_split_val.txt
 #  train_split: temp/det3d/total_split_train.txt
-  train_split: temp/det3d/chen_split_train.txt
-  valid_split: temp/det3d/chen_split_val.txt
+  train_split: temp/kitti_split/chen_split_train.txt
+  valid_split: temp/kitti_split/chen_split_val.txt
 #  valid_split: temp/det3d/debug_split_val.txt
 #  train_split: temp/det3d/debug_split_train.txt
 

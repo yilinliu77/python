@@ -75,7 +75,7 @@ class Yolo3D(nn.Module):
         )
 
         self.network_cfg = EasyDict(
-            num_features_in=2048,
+            num_features_in=1024,
             reg_feature_size=512,
             cls_feature_size=256,
 
@@ -146,7 +146,8 @@ class Yolo3D(nn.Module):
 
                         preprocess = self.train_preprocess if data_split == "training" else self.test_preprocess
                         image, P2, label_tr = preprocess(image, labels=deepcopy(label.data), p2=deepcopy(calib.P2))
-                        data_frame.image = image
+                        # data_frame.image = image
+                        data_frame.image_file = data_frame.image2_path
                         calib.P2 = P2
                         data_frame.calib = calib
                         label.data = label_tr
@@ -266,7 +267,8 @@ class Yolo3D(nn.Module):
                         # cv2.waitKey()
 
                     print("Total objects:{}, total usable objects:{}".format(total_objects, total_usable_objects))
-
+                    if not os.path.exists(os.path.join(preprocessed_path, data_split)):
+                        os.makedirs(os.path.join(preprocessed_path, data_split))
                     if data_split == "training":
 
                         uniform_sum_each_type = np.array(uniform_sum_each_type).sum(axis=0)
@@ -296,8 +298,7 @@ class Yolo3D(nn.Module):
 
                         print("Pre calculation done, save it now")
 
-                        if not os.path.exists(os.path.join(preprocessed_path, data_split)):
-                            os.makedirs(os.path.join(preprocessed_path, data_split))
+
                         npy_file = os.path.join(preprocessed_path, data_split, 'anchor_mean_Car.npy')
                         np.save(npy_file, avg)
                         std_file = os.path.join(preprocessed_path, data_split, 'anchor_std_Car.npy')
@@ -371,13 +372,13 @@ class Yolo3D(nn.Module):
         resnet = resnet50(pretrained=True)
         self.core = nn.Sequential(
             resnet.conv1,
-            resnet.relu,
             resnet.bn1,
-            # resnet.maxpool,
+            resnet.relu,
+            resnet.maxpool,
             resnet.layer1,
             resnet.layer2,
             resnet.layer3,
-            resnet.layer4,
+            # resnet.layer4,
         )
         self.cls_feature_extraction = nn.Sequential(
             nn.Conv2d(v_num_features_in, v_cls_feature_size, kernel_size=3, padding=1),

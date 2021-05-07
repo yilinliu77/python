@@ -1,0 +1,43 @@
+trainer:
+  learning_rate: 1e-4
+  gpu: 1
+  num_worker: 4
+  train_dataset: /mnt/d/siga_21/SZU/training
+  valid_dataset: /mnt/d/siga_21/SZU/training
+  #  valid_split: temp/det3d/total_split_val.txt
+  #  train_split: temp/det3d/total_split_train.txt
+  train_split: temp/szu_total_split_train.txt
+  valid_split: temp/szu_total_split_val.txt
+  #  valid_split: temp/det3d/debug_split_val.txt
+  #  train_split: temp/det3d/debug_split_train.txt
+
+  #  train_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
+  #  valid_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
+
+  batch_size: 4
+  auto_lr_find: false
+  resume_from_checkpoint:
+  evaluate: false
+det_3d:
+  preprocessed_path: temp/szu
+  compute_anchor: true
+  score_threshold: 0.5
+  test_score_threshold: 0.75
+  rotate_pitch_when_project: false
+
+anchor:
+  stride: 16
+  sizes: [ 24 ]
+  ratios: [.125, .25,.5, .7, 1., 1.5 ,2.,4.,8. ]
+
+model:
+  img_shape_x: 800
+  img_shape_y: 800
+
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+#  job_logging: disabled
+#  hydra_logging: disabled

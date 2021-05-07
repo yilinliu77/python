@@ -52,7 +52,7 @@ class Mono_det_3d(pl.LightningModule):
         return data
 
     def train_dataloader(self):
-        self.train_dataset = self.dataset_builder(self.hparams)
+        self.train_dataset = self.dataset_builder(self.hparams,"training",self.model.train_preprocess)
 
         # dataset_path = self.hparams.train_dataset.split(";")
         # dataset = []
@@ -74,7 +74,7 @@ class Mono_det_3d(pl.LightningModule):
         # for item in dataset_path:
         #     dataset.append(self.dataset_builder(item,self.hparams, False))
         # self.valid_dataset = torch.utils.data.ConcatDataset(dataset)
-        self.valid_dataset = self.dataset_builder(self.hparams, "validation")
+        self.valid_dataset = self.dataset_builder(self.hparams, "validation",self.model.test_preprocess)
 
         return DataLoader(self.valid_dataset,
                           batch_size=1,
@@ -86,7 +86,7 @@ class Mono_det_3d(pl.LightningModule):
                           )
 
     def test_dataloader(self):
-        self.test_dataset = self.dataset_builder(self.hparams, "validation")
+        self.test_dataset = self.dataset_builder(self.hparams, "validation",self.model.test_preprocess)
         return DataLoader(self.test_dataset,
                           batch_size=1,
                           num_workers=self.hparams["trainer"].num_worker,

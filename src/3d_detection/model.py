@@ -10,6 +10,7 @@ from easydict import EasyDict
 from torchvision.models import resnet101, resnet18, resnet50
 from torch import nn
 import numpy as np
+from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.ops import nms
 from tqdm import tqdm
 
@@ -369,17 +370,24 @@ class Yolo3D(nn.Module):
     def init_layers(self,
                     v_num_features_in, v_cls_feature_size, v_reg_feature_size, v_num_anchors,
                     v_num_cls_output, v_num_reg_output):
-        resnet = resnet50(pretrained=True)
-        self.core = nn.Sequential(
-            resnet.conv1,
-            resnet.bn1,
-            resnet.relu,
-            resnet.maxpool,
-            resnet.layer1,
-            resnet.layer2,
-            resnet.layer3,
-            # resnet.layer4,
+        # resnet = resnet50(pretrained=True)
+        # self.core = nn.Sequential(
+        #     resnet.conv1,
+        #     resnet.bn1,
+        #     resnet.relu,
+        #     resnet.maxpool,
+        #     resnet.layer1,
+        #     resnet.layer2,
+        #     resnet.layer3,
+        #     # resnet.layer4,
+        # )
+
+        self.core=resnet_fpn_backbone(
+            "resnet18",
+            pretrained=True,
+            trainable_layers=3
         )
+
         self.cls_feature_extraction = nn.Sequential(
             nn.Conv2d(v_num_features_in, v_cls_feature_size, kernel_size=3, padding=1),
             nn.Dropout2d(0.3),
@@ -918,10 +926,10 @@ class Yolo3D(nn.Module):
         """
         Debug
         """
-        cls_preds=cls_preds.new_zeros((1,cls_preds.shape[1],1))
-        reg_preds=cls_preds.new_zeros((1,cls_preds.shape[1],13))
-        reg_preds[0][v_data["gt_index_per_anchor"][0]>0] = v_data['training_target_data'][0]
-        cls_preds[0][v_data["gt_index_per_anchor"][0]>0] = 5
+        # cls_preds=cls_preds.new_zeros((1,cls_preds.shape[1],1))
+        # reg_preds=cls_preds.new_zeros((1,cls_preds.shape[1],13))
+        # reg_preds[0][v_data["gt_index_per_anchor"][0]>0] = v_data['training_target_data'][0]
+        # cls_preds[0][v_data["gt_index_per_anchor"][0]>0] = 5
 
         scores, bboxes, cls_indexes = self.get_boxes(cls_preds, reg_preds,
                                                      self.anchors.to(cls_preds.device),

@@ -52,7 +52,7 @@ class Mono_det_3d(pl.LightningModule):
         return data
 
     def train_dataloader(self):
-        self.train_dataset = self.dataset_builder(self.hparams,"training",self.model.train_preprocess)
+        self.train_dataset = self.dataset_builder(self.hparams, "training", self.model.train_preprocess)
 
         # dataset_path = self.hparams.train_dataset.split(";")
         # dataset = []
@@ -74,7 +74,7 @@ class Mono_det_3d(pl.LightningModule):
         # for item in dataset_path:
         #     dataset.append(self.dataset_builder(item,self.hparams, False))
         # self.valid_dataset = torch.utils.data.ConcatDataset(dataset)
-        self.valid_dataset = self.dataset_builder(self.hparams, "validation",self.model.test_preprocess)
+        self.valid_dataset = self.dataset_builder(self.hparams, "validation", self.model.test_preprocess)
 
         return DataLoader(self.valid_dataset,
                           batch_size=1,
@@ -86,7 +86,7 @@ class Mono_det_3d(pl.LightningModule):
                           )
 
     def test_dataloader(self):
-        self.test_dataset = self.dataset_builder(self.hparams, "validation",self.model.test_preprocess)
+        self.test_dataset = self.dataset_builder(self.hparams, "validation", self.model.test_preprocess)
         return DataLoader(self.test_dataset,
                           batch_size=1,
                           num_workers=self.hparams["trainer"].num_worker,
@@ -117,7 +117,7 @@ class Mono_det_3d(pl.LightningModule):
         }
 
     def evaluate(self, v_data, v_results, v_id):
-        bbox_2d=self.model.rectify_2d_box(v_results["bboxes"][:, :4],v_data['original_calib'][0],v_data['calib'][0])
+        bbox_2d = self.model.rectify_2d_box(v_results["bboxes"][:, :4], v_data['original_calib'][0], v_data['calib'][0])
 
         bbox_3d_state_3d = torch.cat([v_results["bboxes"][:, 6:12], v_results["bboxes"][:, 13:14]], dim=1)
 
@@ -139,7 +139,7 @@ class Mono_det_3d(pl.LightningModule):
             "gt_bbox": data["bbox2d"][0].cpu().numpy(),
             "image": data["image"][0].cpu().permute(1, 2, 0).numpy()
         }
-        if self.current_epoch % 10 == 9:
+        if self.current_epoch % 5 == 4:
             self.evaluate(data, results, batch_idx)
         return {
             'val_loss': results["cls_loss"] + results["reg_loss"],
@@ -183,7 +183,7 @@ class Mono_det_3d(pl.LightningModule):
                                         3
                                         )
         self.logger.experiment.add_image("Validation_example", viz_img, dataformats='HWC', global_step=self.global_step)
-        if self.current_epoch % 10 == 9 and not self.trainer.running_sanity_check:
+        if self.current_epoch % 5 == 4 and not self.trainer.running_sanity_check:
             from visualDet3D.evaluator.kitti.evaluate import evaluate
             result_texts = evaluate(
                 label_path=os.path.join(self.hparams["trainer"]["valid_dataset"], 'label_2'),

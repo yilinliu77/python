@@ -126,11 +126,11 @@ def shift(v_shape, v_pyramid, v_stride, v_anchors):
 
 if __name__ == '__main__':
     anchor_generator = Anchors(
-        pyramid_levels=[2, 3, 4, 5],
-        sizes=[32, 16, 8, 4],
-        v_strides=[16, 8, 4, 2],
+        pyramid_levels=[4, 5],
+        sizes=[8, 4],
+        v_strides=[1, 1],
         ratios=[.25, .5, 1, 2., 4.],
-        scales=np.array([2 ** (i / 4.0) for i in range(16)]).tolist()
+        scales=np.array([2 ** (i / 2.0) for i in range(8)]).tolist()
     )
 
     anchor1 = anchor_generator(np.zeros((800, 800)).shape)

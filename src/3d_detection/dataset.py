@@ -19,7 +19,7 @@ class KittiMonoDataset(torch.utils.data.Dataset):
             '{}/imdb.pkl'.format(v_mode))
         self.imdb = pickle.load(open(imdb_file_path, 'rb'))  # list of kittiData
         self.mode = v_mode
-        self.transform=v_transform
+        self.transform = v_transform
 
     def __getitem__(self, index):
         kitti_data = self.imdb[index % len(self.imdb)]
@@ -36,8 +36,7 @@ class KittiMonoDataset(torch.utils.data.Dataset):
             'bbox2d': kitti_data.bbox2d,  # [N, 4] [x1, y1, x2, y2]
             'bbox3d': kitti_data.bbox3d,  # [N, 7] [x, y, z, w, h, l, ry]
             'bbox3d_img_center': kitti_data.bbox3d_img_center,
-            'training_label': kitti_data.training_label,
-            'training_target_data': kitti_data.training_target_data,
+            'training_data': kitti_data.data,
             'gt_index_per_anchor': kitti_data.gt_index_per_anchor,
         }
         return output_dict
@@ -54,8 +53,7 @@ class KittiMonoDataset(torch.utils.data.Dataset):
         bbox2ds = [item['bbox2d'] for item in batch]
         bbox3ds = [item['bbox3d'] for item in batch]
         bbox3d_img_center = [item['bbox3d_img_center'] for item in batch]
-        training_label = torch.stack([item['training_label'] for item in batch], dim=0)
-        training_target_data = [item['training_target_data'] for item in batch]
+        training_data = [item['training_data'] for item in batch]
         gt_index_per_anchor = [item['gt_index_per_anchor'] for item in batch]
 
         return {
@@ -66,7 +64,6 @@ class KittiMonoDataset(torch.utils.data.Dataset):
             'bbox2d': bbox2ds,  # [N, 4] [x1, y1, x2, y2]
             'bbox3d': bbox3ds,  # [N, 7] [x, y, z, w, h, l, ry]
             'bbox3d_img_center': bbox3d_img_center,
-            'training_label': training_label,
-            'training_target_data': training_target_data,
+            'training_data': training_data,
             'gt_index_per_anchor': gt_index_per_anchor,
         }

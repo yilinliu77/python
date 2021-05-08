@@ -6,10 +6,10 @@ trainer:
   valid_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
 #  valid_split: temp/det3d/total_split_val.txt
 #  train_split: temp/det3d/total_split_train.txt
-#  train_split: temp/kitti_split/chen_split_train.txt
-#  valid_split: temp/kitti_split/chen_split_val.txt
-  valid_split: temp/kitti_split/debug_split_val.txt
-  train_split: temp/kitti_split/debug_split_train.txt
+  train_split: temp/kitti_split/chen_split_train.txt
+  valid_split: temp/kitti_split/chen_split_val.txt
+#  valid_split: temp/kitti_split/debug_split_val.txt
+#  train_split: temp/kitti_split/debug_split_train.txt
 
 #  train_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
 #  valid_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
@@ -26,10 +26,11 @@ det_3d:
   rotate_pitch_when_project: false
 
 anchor:
-  pyramid_levels: [2, 3, 4, 5]
-  sizes: [32, 16, 8, 4]
-  v_strides: [16, 8, 4, 2]
-  ratios: [.25, .5, 1, 2., 4.]
+  pyramid_levels: [5]
+  sizes: [24]
+  v_strides: [1]
+  ratios: [.125, .25, .5, 1, 2., 4., 8.]
+  scales: [0.5, 1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15.]
 
 model:
   img_shape_x: 1280

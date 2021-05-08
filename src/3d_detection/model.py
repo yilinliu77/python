@@ -53,12 +53,12 @@ class Yolo3D(nn.Module):
         # })
 
         anchors_cfg = EasyDict({
-            "pyramid_levels": v_cfg["anchor"]["pyramid_levels"],
-            "v_strides": v_cfg["anchor"]["v_strides"],
+            "pyramid_levels": list(v_cfg["anchor"]["pyramid_levels"]),
+            "v_strides": list(v_cfg["anchor"]["v_strides"]),
             # Shift the anchor from the single pixel. 800(original_width) / 25(feature_map_shape) = 32
-            "sizes": v_cfg["anchor"]["sizes"],  # Base size of the anchors (in original image shape)
-            "ratios": v_cfg["anchor"]["ratios"],  # Different ratio of the anchors
-            "scales": np.array([2 ** (i / 4.0) for i in range(16)]),
+            "sizes": list(v_cfg["anchor"]["sizes"]),  # Base size of the anchors (in original image shape)
+            "ratios": list(v_cfg["anchor"]["ratios"]),  # Different ratio of the anchors
+            "scales": list(v_cfg["anchor"]["scales"]),
             # Different area of the anchors, will multiply the base size
         })
 
@@ -78,7 +78,6 @@ class Yolo3D(nn.Module):
             reg_feature_size=1024,
             cls_feature_size=512,
 
-            num_anchors=anchors_cfg["scales"].shape[0] * len(anchors_cfg["ratios"]),
             num_cls_output=1,
             num_reg_output=13,  # (x1, y1, x2, y2, x3d_center, y3d_center, x, y, z, w, h, l, ry)
         )
@@ -87,12 +86,12 @@ class Yolo3D(nn.Module):
 
         train_transform = [
             EasyDict(type_name='ConvertToFloat'),
-            EasyDict(type_name='PhotometricDistort',
-                     keywords=EasyDict(distort_prob=1.0, contrast_lower=0.5, contrast_upper=1.5, saturation_lower=0.5,
-                                       saturation_upper=1.5, hue_delta=18.0, brightness_delta=32)),
+            # EasyDict(type_name='PhotometricDistort',
+            #          keywords=EasyDict(distort_prob=1.0, contrast_lower=0.5, contrast_upper=1.5, saturation_lower=0.5,
+            #                            saturation_upper=1.5, hue_delta=18.0, brightness_delta=32)),
             EasyDict(type_name='Resize',
                      keywords=EasyDict(size=(v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"]))),
-            EasyDict(type_name='RandomMirror', keywords=EasyDict(mirror_prob=0.5)),
+            # EasyDict(type_name='RandomMirror', keywords=EasyDict(mirror_prob=0.5)),
             EasyDict(type_name='Normalize',
                      keywords=EasyDict(mean=np.array([0.485, 0.456, 0.406]), stds=np.array([0.229, 0.224, 0.225])))
         ]
@@ -267,7 +266,8 @@ class Yolo3D(nn.Module):
                     anchor_manager_with_distribution = Anchors(
                         preprocessed_path=os.path.join(preprocessed_path, "training", 'anchor_mean_std_Car.npy'),
                         **anchors_cfg)
-                    anchors = anchor_manager_with_distribution((v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"]))
+                    anchors = anchor_manager_with_distribution(
+                        (v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"]))
                     anchors = anchors
                     for _, data_frame in tqdm(enumerate(data_frames)):
                         gt_index_per_anchor = self._assign(anchors, data_frame.bbox2d,
@@ -278,35 +278,7 @@ class Yolo3D(nn.Module):
                                                                "match_low_quality"],
                                                            gt_max_assign_all=True,
                                                            )
-                        # GT Box after sample: x1,y1,x2,y2,x3d_projected,y3d_projected, x3d, y3d, z3d, w3d, h3d, l3d, ry
-                        sampling_result_dict = self._sample(gt_index_per_anchor, anchors, data_frame.data)
 
-                        labels = anchors.new_full((anchors.shape[0], 1),
-                                                  -1,  # -1 not computed, binary for each class
-                                                  dtype=torch.float)
-
-                        pos_inds = sampling_result_dict['pos_inds']
-                        neg_inds = sampling_result_dict['neg_inds']
-
-                        if len(pos_inds) > 0:
-                            selected_anchor_3d = anchor_manager_with_distribution.anchors_mean_std
-
-                            pos_bboxes = sampling_result_dict['pos_bboxes']
-                            pos_gt_bboxes = sampling_result_dict['pos_gt_bboxes']
-
-                            pos_bbox_targets = self._encode(
-                                pos_bboxes, pos_gt_bboxes, selected_anchor_3d
-                            )  # [N, 13], [N, 1]
-                            labels[pos_inds, :] = 1
-
-                        else:
-                            pos_bbox_targets = anchors.new_zeros((0, 13))
-
-                        if len(neg_inds) > 0:
-                            labels[neg_inds, :] = 0
-
-                        data_frame.training_label = labels
-                        data_frame.training_target_data = pos_bbox_targets
                         data_frame.gt_index_per_anchor = gt_index_per_anchor
 
                     pkl_file = os.path.join(preprocessed_path, data_split, 'imdb.pkl')
@@ -319,7 +291,7 @@ class Yolo3D(nn.Module):
         self.anchors_distribution = anchor_manager_with_distribution.anchors_mean_std
 
         self.init_layers(self.network_cfg["num_features_in"], self.network_cfg["cls_feature_size"],
-                         self.network_cfg["reg_feature_size"], self.network_cfg["num_anchors"],
+                         self.network_cfg["reg_feature_size"], anchor_manager_with_distribution.num_anchor_per_scale,
                          self.network_cfg["num_cls_output"], self.network_cfg["num_reg_output"])
 
         self.focal_loss = SigmoidFocalLoss(gamma=2.0, balance_weights=torch.tensor([20]))
@@ -340,7 +312,7 @@ class Yolo3D(nn.Module):
         # )
         # self.core.requires_grad_(False)
         self.core = resnet_fpn_backbone(
-            "resnet18",
+            "resnet50",
             pretrained=True,
             trainable_layers=0,
             output_channel=1024
@@ -599,10 +571,6 @@ class Yolo3D(nn.Module):
         pred_boxes_x2 = pred_centre_x + 0.5 * pred_w
         pred_boxes_y2 = pred_centre_y + 0.5 * pred_h
 
-        one_hot_mask = torch.nn.functional.one_hot(label_index, anchors_3d_mean_std.shape[1]).bool()
-        selected_mean_std = anchors_3d_mean_std[one_hot_mask]  # [N]
-        mask = selected_mean_std[:, 0, 0] > 0
-
         # 2D Projected centre
         cdx = v_prediction[..., 4] * std[4]
         cdy = v_prediction[..., 5] * std[5]
@@ -610,22 +578,22 @@ class Yolo3D(nn.Module):
         pred_center_y1_projected = ctr_y + cdy * heights
 
         # 3D Bounding box
-        pred_x = (v_prediction[..., 6] * selected_mean_std[1, 0] + selected_mean_std[0, 0]) * std[6]  # [N, 6]
-        pred_y = (v_prediction[..., 7] * selected_mean_std[1, 1] + selected_mean_std[0, 1]) * std[7]  # [N, 6]
-        pred_z = (v_prediction[..., 8] * selected_mean_std[1, 2] + selected_mean_std[0, 2]) * std[8]  # [N, 6]
+        pred_x = (v_prediction[..., 6] * anchors_3d_mean_std[1, 0] + anchors_3d_mean_std[0, 0]) * std[6]  # [N, 6]
+        pred_y = (v_prediction[..., 7] * anchors_3d_mean_std[1, 1] + anchors_3d_mean_std[0, 1]) * std[7]  # [N, 6]
+        pred_z = (v_prediction[..., 8] * anchors_3d_mean_std[1, 2] + anchors_3d_mean_std[0, 2]) * std[8]  # [N, 6]
 
-        pred_w = (v_prediction[..., 9] * selected_mean_std[1, 3] + selected_mean_std[0, 3]) * std[9]
-        pred_h = (v_prediction[..., 10] * selected_mean_std[1, 4] + selected_mean_std[0, 4]) * std[10]
-        pred_l = (v_prediction[..., 11] * selected_mean_std[1, 5] + selected_mean_std[0, 5]) * std[11]
+        pred_w = (v_prediction[..., 9] * anchors_3d_mean_std[1, 3] + anchors_3d_mean_std[0, 3]) * std[9]
+        pred_h = (v_prediction[..., 10] * anchors_3d_mean_std[1, 4] + anchors_3d_mean_std[0, 4]) * std[10]
+        pred_l = (v_prediction[..., 11] * anchors_3d_mean_std[1, 5] + anchors_3d_mean_std[0, 5]) * std[11]
 
-        pred_ry = (v_prediction[..., 12] * selected_mean_std[1, 6] + selected_mean_std[0, 6]) * std[12]
+        pred_ry = (v_prediction[..., 12] * anchors_3d_mean_std[1, 6] + anchors_3d_mean_std[0, 6]) * std[12]
 
         pred_boxes = torch.stack([pred_boxes_x1, pred_boxes_y1, pred_boxes_x2, pred_boxes_y2,
                                   pred_center_x1_projected, pred_center_y1_projected,
                                   pred_x, pred_y, pred_z,
                                   pred_w, pred_h, pred_l, pred_ry], dim=1)
 
-        return pred_boxes, mask
+        return pred_boxes
 
     def _sample(self, v_gt_index_per_anchor, anchors, v_gt_data):
         """
@@ -769,6 +737,34 @@ class Yolo3D(nn.Module):
         reg_loss = weighted_regression_losses.mean(dim=0)
         return cls_loss, reg_loss
 
+    def get_training_data(self, v_gt_index_per_anchor, v_anchors, v_data, v_anchor_mean_std):
+        # GT Box after sample: x1,y1,x2,y2,x3d_projected,y3d_projected, x3d, y3d, z3d, w3d, h3d, l3d, ry
+        sampling_result_dict = self._sample(v_gt_index_per_anchor, v_anchors, v_data)
+
+        labels = v_anchors.new_full((self.anchors.shape[0], 1),
+                                    -1,  # -1 not computed, binary for each class
+                                    dtype=torch.float)
+
+        pos_inds = sampling_result_dict['pos_inds']
+        neg_inds = sampling_result_dict['neg_inds']
+
+        if len(pos_inds) > 0:
+            pos_bboxes = sampling_result_dict['pos_bboxes']
+            pos_gt_bboxes = sampling_result_dict['pos_gt_bboxes']
+
+            pos_bbox_targets = self._encode(
+                pos_bboxes, pos_gt_bboxes, v_anchor_mean_std
+            )  # [N, 13], [N, 1]
+            labels[pos_inds, :] = 1
+
+        else:
+            pos_bbox_targets = v_anchors.new_zeros((0, 13))
+
+        if len(neg_inds) > 0:
+            labels[neg_inds, :] = 0
+
+        return pos_bbox_targets, labels
+
     def training_forward(self, v_data):
         """
         Args: v_data
@@ -785,23 +781,39 @@ class Yolo3D(nn.Module):
         Returns:
             cls_loss, reg_loss: tensor of losses
         """
-
         v_data["features"] = self.core(v_data["image"])
-        cls_preds = self.cls_feature_extraction(v_data["features"])
-        reg_preds = self.reg_feature_extraction(v_data["features"])
 
-        cls_loss = self.focal_loss(cls_preds, v_data['training_label']).mean()
-        reg_loss = cls_loss.new_tensor(0.)
+        cls_preds = []
+        reg_preds = []
+        for feature_name, feature_map in v_data["features"].items():
+            if feature_name in ["3"]:
+                cls_pred = self.cls_feature_extraction(feature_map)
+                reg_pred = self.reg_feature_extraction(feature_map)
+                cls_preds.append(cls_pred)
+                reg_preds.append(reg_pred)
+        cls_preds = torch.cat(cls_preds, dim=1)
+        reg_preds = torch.cat(reg_preds, dim=1)
+
+        reg_loss = cls_preds.new_tensor(0.,requires_grad=True)
+        cls_loss = cls_preds.new_tensor(0.,requires_grad=True)
 
         for id_batch in range(len(v_data["label"])):
             if len(v_data["label"][id_batch]) > 0:
                 gt_index_per_anchor = v_data["gt_index_per_anchor"][id_batch]
                 if (gt_index_per_anchor > 0).sum() == 0:
                     continue
-                reg_loss += F.l1_loss(reg_preds[id_batch][gt_index_per_anchor > 0][:, :],
-                                      v_data['training_target_data'][id_batch][:, :]
+                pos_bbox_targets, labels = self.get_training_data(
+                    gt_index_per_anchor,
+                    self.anchors.to(cls_preds.device),
+                    v_data["training_data"][id_batch],
+                    self.anchors_distribution.to(cls_preds.device),
+                )
+                cls_loss = cls_loss + self.focal_loss(cls_preds[id_batch], labels).mean()
+                reg_loss = reg_loss + F.l1_loss(reg_preds[id_batch][gt_index_per_anchor > 0][:, :],
+                                      pos_bbox_targets[:, :]
                                       )
         reg_loss = reg_loss / len(v_data["label"])
+        cls_loss = cls_loss / len(v_data["label"])
 
         return cls_loss, reg_loss
 
@@ -809,20 +821,19 @@ class Yolo3D(nn.Module):
         assert v_cls_preds.shape[0] == 1
         cls_score = v_cls_preds.sigmoid()[0]
 
-        anchor = v_anchors[0]  # [N, 4]
+        anchor = v_anchors  # [N, 4]
         anchor_mean_std_3d = v_anchor_mean_std  # [N, K, 2]
 
         score_thr = self.hparams["det_3d"]["score_threshold"]
         max_score, label = cls_score.max(dim=-1)
         high_score_mask = (max_score > score_thr)
         anchor = anchor[high_score_mask, :]
-        anchor_mean_std_3d = anchor_mean_std_3d[high_score_mask, :]
         cls_score = cls_score[high_score_mask, :]
         reg_pred = v_reg_preds[0][high_score_mask, :]
         max_score = max_score[high_score_mask]
         label = label[high_score_mask]
 
-        bboxes, mask = self._decode(anchor, reg_pred, anchor_mean_std_3d, label)
+        bboxes = self._decode(anchor, reg_pred, anchor_mean_std_3d, label)
 
         keep_inds = nms(bboxes[:, :4], max_score, 0.5)
 
@@ -867,36 +878,47 @@ class Yolo3D(nn.Module):
         """
         v_data["features"] = self.core(v_data["image"])
 
-        cls_preds=[]
-        reg_preds=[]
-        for feature_name,feature_map in v_data["features"].items():
-            if feature_name in ["1","2","3"]:
+        cls_preds = []
+        reg_preds = []
+        for feature_name, feature_map in v_data["features"].items():
+            if feature_name in ["3"]:
                 cls_pred = self.cls_feature_extraction(feature_map)
                 reg_pred = self.reg_feature_extraction(feature_map)
                 cls_preds.append(cls_pred)
                 reg_preds.append(reg_pred)
-        cls_preds=torch.cat(cls_preds,dim=1)
-        reg_preds=torch.cat(reg_preds,dim=1)
+        cls_preds = torch.cat(cls_preds, dim=1)
+        reg_preds = torch.cat(reg_preds, dim=1)
 
-        cls_loss = self.focal_loss(cls_preds, v_data['training_label']).mean()
-        reg_loss = cls_loss.new_tensor(0.)
+        reg_loss = cls_preds.new_tensor(0.)
+        cls_loss = cls_preds.new_tensor(0.)
 
+        gt_prediction = None
         for id_batch in range(len(v_data["label"])):
             if len(v_data["label"][id_batch]) > 0:
                 gt_index_per_anchor = v_data["gt_index_per_anchor"][id_batch]
                 if (gt_index_per_anchor > 0).sum() == 0:
                     continue
+                pos_bbox_targets, labels = self.get_training_data(
+                    gt_index_per_anchor,
+                    self.anchors.to(cls_preds.device),
+                    v_data["training_data"][id_batch],
+                    self.anchors_distribution.to(cls_preds.device),
+                )
+                gt_prediction = pos_bbox_targets
+                cls_loss += self.focal_loss(cls_preds[id_batch], labels).mean()
                 reg_loss += F.l1_loss(reg_preds[id_batch][gt_index_per_anchor > 0][:, :],
-                                      v_data['training_target_data'][id_batch][:, :]
+                                      pos_bbox_targets[:, :]
                                       )
         reg_loss = reg_loss / len(v_data["label"])
+        cls_loss = cls_loss / len(v_data["label"])
         """
         Debug
         """
-        # cls_preds=cls_preds.new_zeros((1,cls_preds.shape[1],1))
-        # reg_preds=cls_preds.new_zeros((1,cls_preds.shape[1],13))
-        # reg_preds[0][v_data["gt_index_per_anchor"][0]>0] = v_data['training_target_data'][0]
-        # cls_preds[0][v_data["gt_index_per_anchor"][0]>0] = 5
+        # cls_preds = cls_preds.new_zeros((1, cls_preds.shape[1], 1))
+        # reg_preds = cls_preds.new_zeros((1, cls_preds.shape[1], 13))
+        # if gt_prediction is not None:
+        #     reg_preds[0][v_data["gt_index_per_anchor"][0] > 0] = gt_prediction
+        # cls_preds[0][v_data["gt_index_per_anchor"][0] > 0] = 5
 
         scores, bboxes, cls_indexes = self.get_boxes(cls_preds, reg_preds,
                                                      self.anchors.to(cls_preds.device),

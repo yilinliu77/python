@@ -31,7 +31,7 @@ class Anchors(nn.Module):
 
         self.scale_step = 1 / (np.log2(self.scales[1]) - np.log2(self.scales[0]))
         if self.preprocessed_path != "":
-            self.anchors_mean_std = np.load(self.preprocessed_path)
+            self.anchors_mean_std = torch.from_numpy(np.load(self.preprocessed_path))
 
         self.anchors = None
 
@@ -47,7 +47,7 @@ class Anchors(nn.Module):
                 anchors = generate_anchors(base_size=self.sizes[idx], ratios=self.ratios, scales=self.scales)
                 shifted_anchors = shift(image_shapes[idx], p, self.strides[idx], anchors)
                 all_anchors = np.append(all_anchors, shifted_anchors, axis=0)
-            self.anchors = all_anchors
+            self.anchors = torch.from_numpy(all_anchors)
 
             # self.anchors_image_x_center = self.anchors[:, 0:4:2].mean(dim=1)  # [N]
             # self.anchors_image_y_center = self.anchors[:, 1:4:2].mean(dim=1)  # [N]

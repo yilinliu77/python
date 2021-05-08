@@ -10,7 +10,6 @@ from easydict import EasyDict
 from torchvision.models import resnet101, resnet18, resnet50
 from torch import nn
 import numpy as np
-from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.ops import nms
 from tqdm import tqdm
 
@@ -23,7 +22,8 @@ from visualDet3D.utils.utils import cfg_from_file
 
 from scipy.spatial.transform import Rotation as R
 
-from visualDet3D.networks.heads.anchors import Anchors
+# from visualDet3D.networks.heads.anchors import Anchors
+from anchors import Anchors
 from visualDet3D.networks.utils.utils import calc_iou, BBox3dProjector
 from visualDet3D.data.pipeline import build_augmentator
 from visualDet3D.data.kitti.kittidata import KittiData
@@ -31,6 +31,8 @@ from visualDet3D.utils.timer import Timer
 from visualDet3D.utils.utils import cfg_from_file
 
 from torch.nn import functional as F
+
+from include.resnet_fpn import resnet_fpn_backbone
 
 
 class Yolo3D(nn.Module):
@@ -51,17 +53,13 @@ class Yolo3D(nn.Module):
         # })
 
         anchors_cfg = EasyDict({
-            "pyramid_levels": [4],
-            "strides": [v_cfg["anchor"]["stride"]],  # Shift the anchor from the single pixel. 800(original_width) / 25(feature_map_shape) = 32
+            "pyramid_levels": v_cfg["anchor"]["pyramid_levels"],
+            "v_strides": v_cfg["anchor"]["v_strides"],
+            # Shift the anchor from the single pixel. 800(original_width) / 25(feature_map_shape) = 32
             "sizes": v_cfg["anchor"]["sizes"],  # Base size of the anchors (in original image shape)
             "ratios": v_cfg["anchor"]["ratios"],  # Different ratio of the anchors
             "scales": np.array([2 ** (i / 4.0) for i in range(16)]),
             # Different area of the anchors, will multiply the base size
-            "obj_types": ['Car'],
-            "filter_anchors": False,
-            "filter_y_threshold_min_max": None,
-            "filter_x_threshold": None,
-            "anchor_prior_channel": 7,  # x, y, z, w, h, l, ry
         })
 
         self.head_loss_cfg = EasyDict(
@@ -77,8 +75,8 @@ class Yolo3D(nn.Module):
 
         self.network_cfg = EasyDict(
             num_features_in=1024,
-            reg_feature_size=512,
-            cls_feature_size=256,
+            reg_feature_size=1024,
+            cls_feature_size=512,
 
             num_anchors=anchors_cfg["scales"].shape[0] * len(anchors_cfg["ratios"]),
             num_cls_output=1,
@@ -119,20 +117,13 @@ class Yolo3D(nn.Module):
                                      v_cfg["trainer"]["train_split"] if data_split == "training" else v_cfg[
                                          "trainer"]["valid_split"])).readlines()]
 
-                    anchor_manager = Anchors(preprocessed_path,
-                                             readConfigFile=False,
+                    anchor_manager = Anchors(preprocessed_path="",
                                              **anchors_cfg)
                     # Statistics about the anchor
                     total_objects = 0
                     total_usable_objects = 0
                     uniform_sum_each_type = []
                     uniform_square_each_type = []
-                    len_scale = len(anchor_manager.scales)
-                    len_ratios = len(anchor_manager.ratios)
-                    len_level = len(anchor_manager.pyramid_levels)
-                    examine = np.zeros([len_level * len_scale, len_ratios])
-                    sums = np.zeros([len_level * len_scale, len_ratios, 7])
-                    squared = np.zeros([len_level * len_scale, len_ratios, 7], dtype=np.float64)
                     data_frames = []
                     for i, index_name in tqdm(enumerate(train_index_names)):
                         data_frame = KittiData(v_cfg["trainer"]["train_dataset"], index_name, {
@@ -226,11 +217,9 @@ class Yolo3D(nn.Module):
 
                         # NOTE: Currently fix the shape
                         # anchors, _ = anchor_manager(torch.ones((1, 3, 800, 800)), torch.tensor(calib.P2).reshape([-1, 3, 4]))
-                        anchors, _ = anchor_manager(
-                            torch.ones((1, 3, v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"])),
-                            torch.tensor(calib.P2).reshape([-1, 3, 4]))
+                        anchors = anchor_manager((v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"]))
                         bbox3d = torch.tensor(data).cuda()
-                        usable_anchors = anchors[0]
+                        usable_anchors = anchors
 
                         IoUs = calc_iou(usable_anchors, data_frame.bbox2d)  # [num_anchors, num_gt]
                         IoU_max, IoU_argmax = torch.max(IoUs, dim=0)
@@ -242,13 +231,6 @@ class Yolo3D(nn.Module):
                         positive_anchors_mask = IoU_max_anchor > self.head_loss_cfg.fg_iou_threshold
                         positive_ground_truth_3d = bbox3d[IoU_argmax_anchor[positive_anchors_mask]].cpu().numpy()
 
-                        used_anchors = usable_anchors[positive_anchors_mask].cpu().numpy()  # [x1, y1, x2, y2]
-
-                        sizes_int, ratio_int = anchor_manager.anchors2indexes(used_anchors)
-                        for k in range(len(sizes_int)):
-                            examine[sizes_int[k], ratio_int[k]] += 1
-                            sums[sizes_int[k], ratio_int[k]] += positive_ground_truth_3d[k]
-                            squared[sizes_int[k], ratio_int[k]] += positive_ground_truth_3d[k] ** 2
                         data_frame.data = torch.cat([
                             data_frame.bbox2d,
                             data_frame.bbox3d_img_center,
@@ -271,46 +253,22 @@ class Yolo3D(nn.Module):
                     if not os.path.exists(os.path.join(preprocessed_path, data_split)):
                         os.makedirs(os.path.join(preprocessed_path, data_split))
                     if data_split == "training":
-
                         uniform_sum_each_type = np.array(uniform_sum_each_type).sum(axis=0)
                         uniform_square_each_type = np.array(uniform_square_each_type).sum(axis=0)
                         global_mean = uniform_sum_each_type / total_objects
                         global_var = np.sqrt(uniform_square_each_type / total_objects - global_mean ** 2)
 
-                        avg = sums / (examine[:, :, np.newaxis] + 1e-8)
-                        EX_2 = squared / (examine[:, :, np.newaxis] + 1e-8)
-                        std = np.sqrt(EX_2 - avg ** 2)
-
-                        avg[examine < 10, :] = -100
-                        std[examine < 10, :] = 1e10
-                        avg[np.isnan(std)] = -100
-                        std[np.isnan(std)] = 1e10
-                        avg[std < 1e-3] = -100
-                        std[std < 1e-3] = 1e10
-
-                        whole_avg = np.ones([avg.shape[0], avg.shape[1], global_mean.shape[0]]) * global_mean
-                        whole_std = np.ones([avg.shape[0], avg.shape[1], global_var.shape[0]]) * global_var
-
-                        # avg = np.concatenate([avg, whl_avg], axis=2)
-                        # std = np.concatenate([std, whl_std], axis=2)
-
-                        avg = whole_avg
-                        std = whole_std
-
                         print("Pre calculation done, save it now")
 
+                        npy_file = os.path.join(preprocessed_path, data_split, 'anchor_mean_std_Car.npy')
+                        mean_std = np.stack([global_mean, global_var, ])
+                        np.save(npy_file, mean_std)
 
-                        npy_file = os.path.join(preprocessed_path, data_split, 'anchor_mean_Car.npy')
-                        np.save(npy_file, avg)
-                        std_file = os.path.join(preprocessed_path, data_split, 'anchor_std_Car.npy')
-                        np.save(std_file, std)
-
-                    anchor_manager_with_distribution = Anchors(preprocessed_path,
-                                                               readConfigFile=True,
-                                                               **anchors_cfg)
-                    anchors = anchor_manager_with_distribution(torch.ones(
-                        (1, 3, v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"])))
-                    anchors = anchors[0]
+                    anchor_manager_with_distribution = Anchors(
+                        preprocessed_path=os.path.join(preprocessed_path, "training", 'anchor_mean_std_Car.npy'),
+                        **anchors_cfg)
+                    anchors = anchor_manager_with_distribution((v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"]))
+                    anchors = anchors
                     for _, data_frame in tqdm(enumerate(data_frames)):
                         gt_index_per_anchor = self._assign(anchors, data_frame.bbox2d,
                                                            bg_iou_threshold=self.head_loss_cfg["bg_iou_threshold"],
@@ -331,7 +289,7 @@ class Yolo3D(nn.Module):
                         neg_inds = sampling_result_dict['neg_inds']
 
                         if len(pos_inds) > 0:
-                            selected_anchor_3d = anchor_manager_with_distribution.anchor_mean_std[pos_inds][:, 0]
+                            selected_anchor_3d = anchor_manager_with_distribution.anchors_mean_std
 
                             pos_bboxes = sampling_result_dict['pos_bboxes']
                             pos_gt_bboxes = sampling_result_dict['pos_gt_bboxes']
@@ -354,12 +312,11 @@ class Yolo3D(nn.Module):
                     pkl_file = os.path.join(preprocessed_path, data_split, 'imdb.pkl')
                     pickle.dump(data_frames, open(pkl_file, 'wb'))
 
-        anchor_manager_with_distribution = Anchors(preprocessed_path,
-                                                   readConfigFile=True,
-                                                   **anchors_cfg)
-        self.anchors = anchor_manager_with_distribution(torch.ones(
-            (1, 3, v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"])))
-        self.anchors_distribution = anchor_manager_with_distribution.anchor_mean_std
+        anchor_manager_with_distribution = Anchors(
+            preprocessed_path=os.path.join(preprocessed_path, "training", 'anchor_mean_std_Car.npy'),
+            **anchors_cfg)
+        self.anchors = anchor_manager_with_distribution((v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"]))
+        self.anchors_distribution = anchor_manager_with_distribution.anchors_mean_std
 
         self.init_layers(self.network_cfg["num_features_in"], self.network_cfg["cls_feature_size"],
                          self.network_cfg["reg_feature_size"], self.network_cfg["num_anchors"],
@@ -381,11 +338,12 @@ class Yolo3D(nn.Module):
         #     resnet.layer3,
         #     # resnet.layer4,
         # )
-
-        self.core=resnet_fpn_backbone(
+        # self.core.requires_grad_(False)
+        self.core = resnet_fpn_backbone(
             "resnet18",
             pretrained=True,
-            trainable_layers=3
+            trainable_layers=0,
+            output_channel=1024
         )
 
         self.cls_feature_extraction = nn.Sequential(
@@ -591,13 +549,13 @@ class Yolo3D(nn.Module):
         targets_cdx_projected = (sampled_gt_bboxes[:, 4] - px) / pw  # shift of the projected gt 3d bbox center x
         targets_cdy_projected = (sampled_gt_bboxes[:, 5] - py) / ph  # shift of the projected gt 3d bbox center y
 
-        targets_cdz = (sampled_gt_bboxes[:, 8] - selected_anchors_3d[:, 2, 0]) / selected_anchors_3d[:, 2, 1]
-        targets_cdy = (sampled_gt_bboxes[:, 7] - selected_anchors_3d[:, 1, 0]) / selected_anchors_3d[:, 1, 1]
-        targets_cdx = (sampled_gt_bboxes[:, 6] - selected_anchors_3d[:, 0, 0]) / selected_anchors_3d[:, 0, 1]
-        targets_w3d = (sampled_gt_bboxes[:, 9] - selected_anchors_3d[:, 3, 0]) / selected_anchors_3d[:, 3, 1]
-        targets_h3d = (sampled_gt_bboxes[:, 10] - selected_anchors_3d[:, 4, 0]) / selected_anchors_3d[:, 4, 1]
-        targets_l3d = (sampled_gt_bboxes[:, 11] - selected_anchors_3d[:, 5, 0]) / selected_anchors_3d[:, 5, 1]
-        targets_ry = (sampled_gt_bboxes[:, 12] - selected_anchors_3d[:, 6, 0]) / selected_anchors_3d[:, 6, 1]
+        targets_cdz = (sampled_gt_bboxes[:, 8] - selected_anchors_3d[0, 2]) / selected_anchors_3d[1, 2]
+        targets_cdy = (sampled_gt_bboxes[:, 7] - selected_anchors_3d[0, 1]) / selected_anchors_3d[1, 1]
+        targets_cdx = (sampled_gt_bboxes[:, 6] - selected_anchors_3d[0, 0]) / selected_anchors_3d[1, 0]
+        targets_w3d = (sampled_gt_bboxes[:, 9] - selected_anchors_3d[0, 3]) / selected_anchors_3d[1, 3]
+        targets_h3d = (sampled_gt_bboxes[:, 10] - selected_anchors_3d[0, 4]) / selected_anchors_3d[1, 4]
+        targets_l3d = (sampled_gt_bboxes[:, 11] - selected_anchors_3d[0, 5]) / selected_anchors_3d[1, 5]
+        targets_ry = (sampled_gt_bboxes[:, 12] - selected_anchors_3d[0, 6]) / selected_anchors_3d[1, 6]
 
         targets = torch.stack((targets_dx, targets_dy, targets_dw, targets_dh,
                                targets_cdx_projected, targets_cdy_projected,
@@ -652,15 +610,15 @@ class Yolo3D(nn.Module):
         pred_center_y1_projected = ctr_y + cdy * heights
 
         # 3D Bounding box
-        pred_x = (v_prediction[..., 6] * selected_mean_std[:, 0, 1] + selected_mean_std[:, 0, 0]) * std[6]  # [N, 6]
-        pred_y = (v_prediction[..., 7] * selected_mean_std[:, 1, 1] + selected_mean_std[:, 1, 0]) * std[7]  # [N, 6]
-        pred_z = (v_prediction[..., 8] * selected_mean_std[:, 2, 1] + selected_mean_std[:, 2, 0]) * std[8]  # [N, 6]
+        pred_x = (v_prediction[..., 6] * selected_mean_std[1, 0] + selected_mean_std[0, 0]) * std[6]  # [N, 6]
+        pred_y = (v_prediction[..., 7] * selected_mean_std[1, 1] + selected_mean_std[0, 1]) * std[7]  # [N, 6]
+        pred_z = (v_prediction[..., 8] * selected_mean_std[1, 2] + selected_mean_std[0, 2]) * std[8]  # [N, 6]
 
-        pred_w = (v_prediction[..., 9] * selected_mean_std[:, 3, 1] + selected_mean_std[:, 3, 0]) * std[9]
-        pred_h = (v_prediction[..., 10] * selected_mean_std[:, 4, 1] + selected_mean_std[:, 4, 0]) * std[10]
-        pred_l = (v_prediction[..., 11] * selected_mean_std[:, 5, 1] + selected_mean_std[:, 5, 0]) * std[11]
+        pred_w = (v_prediction[..., 9] * selected_mean_std[1, 3] + selected_mean_std[0, 3]) * std[9]
+        pred_h = (v_prediction[..., 10] * selected_mean_std[1, 4] + selected_mean_std[0, 4]) * std[10]
+        pred_l = (v_prediction[..., 11] * selected_mean_std[1, 5] + selected_mean_std[0, 5]) * std[11]
 
-        pred_ry = (v_prediction[..., 12] * selected_mean_std[:, 6, 1] + selected_mean_std[:, 6, 0]) * std[12]
+        pred_ry = (v_prediction[..., 12] * selected_mean_std[1, 6] + selected_mean_std[0, 6]) * std[12]
 
         pred_boxes = torch.stack([pred_boxes_x1, pred_boxes_y1, pred_boxes_x2, pred_boxes_y2,
                                   pred_center_x1_projected, pred_center_y1_projected,
@@ -874,7 +832,7 @@ class Yolo3D(nn.Module):
 
         return max_score, bboxes, label
 
-    def rectify_2d_box(self,v_box2d,v_original_calib,v_calib):
+    def rectify_2d_box(self, v_box2d, v_original_calib, v_calib):
         original_P = v_original_calib
         P2 = v_calib
         scale_x = original_P[0, 0] / P2[0, 0]
@@ -908,8 +866,17 @@ class Yolo3D(nn.Module):
             cls_loss, reg_loss: tensor of losses
         """
         v_data["features"] = self.core(v_data["image"])
-        cls_preds = self.cls_feature_extraction(v_data["features"])
-        reg_preds = self.reg_feature_extraction(v_data["features"])
+
+        cls_preds=[]
+        reg_preds=[]
+        for feature_name,feature_map in v_data["features"].items():
+            if feature_name in ["1","2","3"]:
+                cls_pred = self.cls_feature_extraction(feature_map)
+                reg_pred = self.reg_feature_extraction(feature_map)
+                cls_preds.append(cls_pred)
+                reg_preds.append(reg_pred)
+        cls_preds=torch.cat(cls_preds,dim=1)
+        reg_preds=torch.cat(reg_preds,dim=1)
 
         cls_loss = self.focal_loss(cls_preds, v_data['training_label']).mean()
         reg_loss = cls_loss.new_tensor(0.)
@@ -942,11 +909,11 @@ class Yolo3D(nn.Module):
         from visualDet3D.utils.utils import theta2alpha_3d
         alpha = theta2alpha_3d(bboxes[:, 12], bboxes[:, 6], bboxes[:, 8],
                                v_data["calib"][0]).unsqueeze(1)
-        alpha[:,:]=-10
+        alpha[:, :] = -10
         bboxes = torch.cat([bboxes, alpha], dim=1)
-        bboxes[:,12]+=0.01
-        bboxes[:,:4]+=1
-        bboxes[:,7:12]+=0.1
+        bboxes[:, 12] += 0.01
+        bboxes[:, :4] += 1
+        bboxes[:, 7:12] += 0.1
 
         valid_mask = scores > self.hparams["det_3d"]["test_score_threshold"]
 

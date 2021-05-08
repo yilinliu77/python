@@ -1,0 +1,44 @@
+trainer:
+  learning_rate: 1e-4
+  gpu: 1
+  num_worker: 0
+  train_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
+  valid_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
+#  valid_split: temp/det3d/total_split_val.txt
+#  train_split: temp/det3d/total_split_train.txt
+#  train_split: temp/kitti_split/chen_split_train.txt
+#  valid_split: temp/kitti_split/chen_split_val.txt
+  valid_split: temp/kitti_split/debug_split_val.txt
+  train_split: temp/kitti_split/debug_split_train.txt
+
+#  train_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
+#  valid_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
+
+  batch_size: 4
+  auto_lr_find: false
+  resume_from_checkpoint:
+  evaluate: false
+det_3d:
+  preprocessed_path: temp/kitti_fpn_test
+  compute_anchor: true
+  score_threshold: 0.5
+  test_score_threshold: 0.75
+  rotate_pitch_when_project: false
+
+anchor:
+  pyramid_levels: [2, 3, 4, 5]
+  sizes: [32, 16, 8, 4]
+  v_strides: [16, 8, 4, 2]
+  ratios: [.25, .5, 1, 2., 4.]
+
+model:
+  img_shape_x: 1280
+  img_shape_y: 360
+
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+#  job_logging: disabled
+#  hydra_logging: disabled

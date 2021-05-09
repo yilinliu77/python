@@ -1,6 +1,7 @@
 import os
 import pickle
 
+import cv2
 import hydra
 import torch
 import torchvision
@@ -26,6 +27,7 @@ class KittiMonoDataset(torch.utils.data.Dataset):
         # image = torch.from_numpy(kitti_data.image).permute(2, 0, 1)
         image = np.asarray(Image.open(kitti_data.image2_path)).copy()
         image = self.transform(image)[0]
+
         image = torch.from_numpy(image).permute(2, 0, 1)
 
         output_dict = {

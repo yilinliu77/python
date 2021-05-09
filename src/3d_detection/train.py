@@ -100,7 +100,7 @@ class Mono_det_3d(pl.LightningModule):
         optimizer = Adam(self.parameters(), lr=self.hparams["trainer"].learning_rate, )
         return {
             'optimizer': optimizer,
-            'lr_scheduler': CosineAnnealingLR(optimizer, T_max=30, eta_min=3e-5),
+            # 'lr_scheduler': CosineAnnealingLR(optimizer, T_max=30, eta_min=3e-5),
             'monitor': 'val_loss'
         }
 
@@ -122,8 +122,8 @@ class Mono_det_3d(pl.LightningModule):
         bbox_3d_state_3d = torch.cat([v_results["bboxes"][:, 6:12], v_results["bboxes"][:, 13:14]], dim=1)
 
         write_result_to_file(self.evaluate_root,
-                             # int(self.evaluate_index[v_id]),
-                             v_id,
+                             int(self.evaluate_index[v_id]),
+                             # v_id,
                              v_results["scores"],
                              bbox_2d,
                              bbox_3d_state_3d,
@@ -139,8 +139,7 @@ class Mono_det_3d(pl.LightningModule):
             "gt_bbox": data["bbox2d"][0].cpu().numpy(),
             "image": data["image"][0].cpu().permute(1, 2, 0).numpy()
         }
-        if self.current_epoch % 5 == 4:
-            self.evaluate(data, results, batch_idx)
+        self.evaluate(data, results, batch_idx)
         return {
             'val_loss': results["cls_loss"] + results["reg_loss"],
             'val_cls_loss': results["cls_loss"],
@@ -183,7 +182,7 @@ class Mono_det_3d(pl.LightningModule):
                                         3
                                         )
         self.logger.experiment.add_image("Validation_example", viz_img, dataformats='HWC', global_step=self.global_step)
-        if self.current_epoch % 5 == 4 and not self.trainer.running_sanity_check:
+        if not self.trainer.running_sanity_check:
             from visualDet3D.evaluator.kitti.evaluate import evaluate
             result_texts = evaluate(
                 label_path=os.path.join(self.hparams["trainer"]["valid_dataset"], 'label_2'),
@@ -241,7 +240,8 @@ def main(v_cfg: DictConfig):
                       # early_stop_callback=early_stop_callback,
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,
                       max_epochs=5000,
-                      # check_val_every_n_epoch=10
+                      gradient_clip_val=0.1,
+                      check_val_every_n_epoch=5
                       )
 
     model = Mono_det_3d(v_cfg)

@@ -29,7 +29,6 @@ class Anchors(nn.Module):
         self.scales = scales
         self.preprocessed_path = preprocessed_path
 
-        self.scale_step = 1 / (np.log2(self.scales[1]) - np.log2(self.scales[0]))
         if self.preprocessed_path != "":
             self.anchors_mean_std = torch.from_numpy(np.load(self.preprocessed_path))
 

@@ -15,14 +15,12 @@ from pytorch_lightning import seed_everything
 
 from train import Mono_det_3d
 
-dataset_root=r"D:\DATASET\KITTI\3DDetection\data_object_image_2\training\image_2"
+dataset_root=r"D:\\Projects\\SEAR\\datasets\\SZU\\SZU\\training\\image_2"
 
 test_index=[
-    "000073","000074","000075","000079","000080",
-    "000076","000077","000078","000081","000089",
+    "000766","001043","026818","026952","027368"
             ]
-checkpoint_path = r"lightning_logs/version_50/checkpoints/epoch=13-step=12991.ckpt"
-img_file = r"D:\DATASET\KITTI\3DDetection\data_object_image_2\training\image_2\000002.png"
+checkpoint_path = r"C:\repo\python\temp\szu_3d_detection_epoch_v2_35.ckpt"
 # img_file = r"D:\Projects\SEAR\datasets\withAlpha\training\image_2\002375.png"
 
 
@@ -47,7 +45,8 @@ def main(v_cfg: DictConfig):
             Img transform
             """
             img = np.asarray(Image.open(os.path.join(dataset_root,index+".png")))
-            P2 = np.asarray([item for item in open(os.path.join(dataset_root,"../calib/",index+".txt")).readlines()][2].split(":")[1].split(" ")[1:]).astype(np.float32).reshape(3,4)
+            # P2 = np.asarray([item for item in open(os.path.join(dataset_root,"../calib/",index+".txt")).readlines()][2].split(":")[1].split(" ")[1:]).astype(np.float32).reshape(3,4)
+            P2 = np.asarray([item for item in open(os.path.join(dataset_root,"../calib/",index+".txt")).readlines()][0].split(":")[1].split(" ")[1:]).astype(np.float32).reshape(3,4)
             img_tr,P2_tr = model.model.test_preprocess(img,p2=deepcopy(P2))
 
             img_tr = torch.from_numpy(img_tr).permute(2, 0, 1).unsqueeze(0).cuda()

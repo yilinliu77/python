@@ -51,10 +51,11 @@ class Yolo3D(nn.Module):
 
         anchors_cfg = EasyDict({
             "pyramid_levels": [4],
-            "strides": [v_cfg["anchor"]["stride"]],  # Shift the anchor from the single pixel. 800(original_width) / 25(feature_map_shape) = 32
+            "strides": [v_cfg["anchor"]["stride"]],
+            # Shift the anchor from the single pixel. 800(original_width) / 25(feature_map_shape) = 32
             "sizes": v_cfg["anchor"]["sizes"],  # Base size of the anchors (in original image shape)
             "ratios": v_cfg["anchor"]["ratios"],  # Different ratio of the anchors
-            "scales": np.array([2 ** (i / 4.0) for i in range(16)]),
+            "scales": np.array([2 ** (i / 4.0) for i in range(0, 32, 2)]),
             # Different area of the anchors, will multiply the base size
             "obj_types": ['Car'],
             "filter_anchors": False,
@@ -270,7 +271,6 @@ class Yolo3D(nn.Module):
                     if not os.path.exists(os.path.join(preprocessed_path, data_split)):
                         os.makedirs(os.path.join(preprocessed_path, data_split))
                     if data_split == "training":
-
                         uniform_sum_each_type = np.array(uniform_sum_each_type).sum(axis=0)
                         uniform_square_each_type = np.array(uniform_square_each_type).sum(axis=0)
                         global_mean = uniform_sum_each_type / total_objects
@@ -297,7 +297,6 @@ class Yolo3D(nn.Module):
                         std = whole_std
 
                         print("Pre calculation done, save it now")
-
 
                         npy_file = os.path.join(preprocessed_path, data_split, 'anchor_mean_Car.npy')
                         np.save(npy_file, avg)
@@ -839,7 +838,7 @@ class Yolo3D(nn.Module):
 
         return cls_loss, reg_loss
 
-    def get_boxes(self, v_cls_preds, v_reg_preds, v_anchors, v_anchor_mean_std, v_data):
+    def get_boxes(self, v_cls_preds, v_reg_preds, v_anchors, v_anchor_mean_std, v_data,v_nms_threshold=0.5):
         assert v_cls_preds.shape[0] == 1
         cls_score = v_cls_preds.sigmoid()[0]
 
@@ -858,7 +857,8 @@ class Yolo3D(nn.Module):
 
         bboxes, mask = self._decode(anchor, reg_pred, anchor_mean_std_3d, label)
 
-        keep_inds = nms(bboxes[:, :4], max_score, 0.5)
+        # BUG HERE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 0.75->0.5
+        keep_inds = nms(bboxes[:, :4], max_score, v_nms_threshold)
 
         bboxes = bboxes[keep_inds]
         max_score = max_score[keep_inds]
@@ -866,7 +866,7 @@ class Yolo3D(nn.Module):
 
         return max_score, bboxes, label
 
-    def rectify_2d_box(self,v_box2d,v_original_calib,v_calib):
+    def rectify_2d_box(self, v_box2d, v_original_calib, v_calib):
         original_P = v_original_calib
         P2 = v_calib
         scale_x = original_P[0, 0] / P2[0, 0]
@@ -918,10 +918,10 @@ class Yolo3D(nn.Module):
         """
         Debug
         """
-        cls_preds=cls_preds.new_zeros((1,cls_preds.shape[1],1))
-        reg_preds=cls_preds.new_zeros((1,cls_preds.shape[1],13))
-        reg_preds[0][v_data["gt_index_per_anchor"][0]>0] = v_data['training_target_data'][0]
-        cls_preds[0][v_data["gt_index_per_anchor"][0]>0] = 5
+        cls_preds = cls_preds.new_zeros((1, cls_preds.shape[1], 1))
+        reg_preds = cls_preds.new_zeros((1, cls_preds.shape[1], 13))
+        reg_preds[0][v_data["gt_index_per_anchor"][0] > 0] = v_data['training_target_data'][0]
+        cls_preds[0][v_data["gt_index_per_anchor"][0] > 0] = 5
 
         scores, bboxes, cls_indexes = self.get_boxes(cls_preds, reg_preds,
                                                      self.anchors.to(cls_preds.device),
@@ -934,11 +934,11 @@ class Yolo3D(nn.Module):
         from visualDet3D.utils.utils import theta2alpha_3d
         alpha = theta2alpha_3d(bboxes[:, 12], bboxes[:, 6], bboxes[:, 8],
                                v_data["calib"][0]).unsqueeze(1)
-        alpha[:,:]=-10
+        alpha[:, :] = -10
         bboxes = torch.cat([bboxes, alpha], dim=1)
-        bboxes[:,12]+=0.01
-        bboxes[:,:4]+=1
-        bboxes[:,7:12]+=0.1
+        # bboxes[:, 12] += 0.01
+        # bboxes[:, :4] += 1
+        # bboxes[:, 7:12] += 0.1
 
         valid_mask = scores > self.hparams["det_3d"]["test_score_threshold"]
 

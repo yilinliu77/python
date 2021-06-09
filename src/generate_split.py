@@ -3,11 +3,11 @@ import numpy as np
 
 if __name__ == '__main__':
     names=[]
-    for item in os.listdir(r"/mnt/d/siga_21/SZU/training/image_2"):
+    for item in os.listdir(r"D:\Projects\SEAR\datasets\YRS\training\image_2"):
         name=item.split(".")[0]
         names.append(name)
 
-    split_mode="szu_total"
+    split_mode="yrs_total"
     split_list=np.arange(len(names))
     np.random.shuffle(split_list)
     train_index=int(len(names)*0.8)

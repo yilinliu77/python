@@ -2,8 +2,8 @@ trainer:
   learning_rate: 1e-4
   gpu: 1
   num_worker: 4
-  train_dataset: /mnt/d/siga_21/SZU/training
-  valid_dataset: /mnt/d/siga_21/SZU/training
+  train_dataset: D:\\Projects\\SEAR\\datasets\\SZU\\SZU\\training
+  valid_dataset: D:\\Projects\\SEAR\\datasets\\SZU\\SZU\\training
   #  valid_split: temp/det3d/total_split_val.txt
   #  train_split: temp/det3d/total_split_train.txt
   train_split: temp/szu_total_split_train.txt

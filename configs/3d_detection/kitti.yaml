@@ -6,10 +6,10 @@ trainer:
   valid_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
 #  valid_split: temp/det3d/total_split_val.txt
 #  train_split: temp/det3d/total_split_train.txt
-  train_split: temp/kitti_split/chen_split_train.txt
-  valid_split: temp/kitti_split/chen_split_val.txt
-#  valid_split: temp/det3d/debug_split_val.txt
-#  train_split: temp/det3d/debug_split_train.txt
+#  train_split: temp/kitti_split/chen_split_train.txt
+#  valid_split: temp/kitti_split/chen_split_val.txt
+  valid_split: temp/det3d/debug_split_val.txt
+  train_split: temp/det3d/debug_split_train.txt
 
 #  train_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
 #  valid_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
@@ -20,7 +20,7 @@ trainer:
   evaluate: false
 det_3d:
   preprocessed_path: temp/kitti_test
-  compute_anchor: false
+  compute_anchor: true
   score_threshold: 0.5
   test_score_threshold: 0.75
   rotate_pitch_when_project: false

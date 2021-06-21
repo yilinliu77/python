@@ -8,13 +8,13 @@ trainer:
 #  train_split: temp/det3d/total_split_train.txt
   train_split: temp/kitti_split/chen_split_train.txt
   valid_split: temp/kitti_split/chen_split_val.txt
-#  train_split: temp/kitti_split/debug_split_val.txt
+#  valid_split: temp/kitti_split/debug_split_val.txt
 #  train_split: temp/kitti_split/debug_split_train.txt
 
 #  train_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
 #  valid_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
 
-  batch_size: 8
+  batch_size: 1
   auto_lr_find: false
   resume_from_checkpoint:
   evaluate: false

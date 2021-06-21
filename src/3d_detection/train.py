@@ -29,9 +29,10 @@ from visualDet3D.data.kitti.utils import write_result_to_file
 class Mono_det_3d(pl.LightningModule):
     def __init__(self, hparams):
         super(Mono_det_3d, self).__init__()
-        self.hparams = hparams
+        self.hydra_conf = hparams
+        self.learning_rate=self.hydra_conf["trainer"].learning_rate
 
-        self.model = Yolo3D(self.hparams)
+        self.model = Yolo3D(self.hydra_conf)
         self.dataset_builder = KittiMonoDataset
 
         # self.test_loss = pl.metrics.Accuracy()
@@ -43,7 +44,7 @@ class Mono_det_3d(pl.LightningModule):
             shutil.rmtree(self.evaluate_root)
         os.makedirs(self.evaluate_root)
         self.evaluate_index = [item.strip() for item in open(os.path.join(hydra.utils.get_original_cwd(),
-                                                                          self.hparams["trainer"]["valid_split"]
+                                                                          self.hydra_conf["trainer"]["valid_split"]
                                                                           )).readlines()]
 
     def forward(self, v_data):
@@ -52,7 +53,7 @@ class Mono_det_3d(pl.LightningModule):
         return data
 
     def train_dataloader(self):
-        self.train_dataset = self.dataset_builder(self.hparams, "training", self.model.train_preprocess)
+        self.train_dataset = self.dataset_builder(self.hydra_conf, "training", self.model.train_preprocess)
 
         # dataset_path = self.hparams.train_dataset.split(";")
         # dataset = []
@@ -60,8 +61,8 @@ class Mono_det_3d(pl.LightningModule):
         #     dataset.append(self.dataset_builder(item,self.hparams, True))
         # self.train_dataset = torch.utils.data.ConcatDataset(dataset)
         return DataLoader(self.train_dataset,
-                          batch_size=self.hparams["trainer"].batch_size,
-                          num_workers=self.hparams["trainer"].num_worker,
+                          batch_size=self.hydra_conf["trainer"].batch_size,
+                          num_workers=self.hydra_conf["trainer"].num_worker,
                           shuffle=True,
                           drop_last=True,
                           pin_memory=True,
@@ -74,11 +75,11 @@ class Mono_det_3d(pl.LightningModule):
         # for item in dataset_path:
         #     dataset.append(self.dataset_builder(item,self.hparams, False))
         # self.valid_dataset = torch.utils.data.ConcatDataset(dataset)
-        self.valid_dataset = self.dataset_builder(self.hparams, "validation", self.model.test_preprocess)
+        self.valid_dataset = self.dataset_builder(self.hydra_conf, "validation", self.model.test_preprocess)
 
         return DataLoader(self.valid_dataset,
                           batch_size=1,
-                          num_workers=self.hparams["trainer"].num_worker,
+                          num_workers=self.hydra_conf["trainer"].num_worker,
                           drop_last=False,
                           shuffle=False,
                           pin_memory=True,
@@ -86,10 +87,10 @@ class Mono_det_3d(pl.LightningModule):
                           )
 
     def test_dataloader(self):
-        self.test_dataset = self.dataset_builder(self.hparams, "validation", self.model.test_preprocess)
+        self.test_dataset = self.dataset_builder(self.hydra_conf, "validation", self.model.test_preprocess)
         return DataLoader(self.test_dataset,
                           batch_size=1,
-                          num_workers=self.hparams["trainer"].num_worker,
+                          num_workers=self.hydra_conf["trainer"].num_worker,
                           drop_last=False,
                           shuffle=False,
                           pin_memory=True,
@@ -97,7 +98,7 @@ class Mono_det_3d(pl.LightningModule):
                           )
 
     def configure_optimizers(self):
-        optimizer = Adam(self.parameters(), lr=self.hparams["trainer"].learning_rate, )
+        optimizer = Adam(self.parameters(), lr=self.learning_rate, )
         return {
             'optimizer': optimizer,
             # 'lr_scheduler': CosineAnnealingLR(optimizer, T_max=30, eta_min=3e-5),
@@ -185,10 +186,10 @@ class Mono_det_3d(pl.LightningModule):
         if not self.trainer.running_sanity_check:
             from visualDet3D.evaluator.kitti.evaluate import evaluate
             result_texts = evaluate(
-                label_path=os.path.join(self.hparams["trainer"]["valid_dataset"], 'label_2'),
+                label_path=os.path.join(self.hydra_conf["trainer"]["valid_dataset"], 'label_2'),
                 result_path=self.evaluate_root,
                 label_split_file=os.path.join(hydra.utils.get_original_cwd(),
-                                              self.hparams["trainer"]["valid_split"]
+                                              self.hydra_conf["trainer"]["valid_split"]
                                               ),
                 current_classes=[0],
             )
@@ -214,10 +215,10 @@ class Mono_det_3d(pl.LightningModule):
         # from visualDet3D.evaluator.kitti.evaluate import evaluate
         from evaluate import evaluate
         result_texts = evaluate(
-            label_path=os.path.join(self.hparams["trainer"]["valid_dataset"], 'label_2'),
+            label_path=os.path.join(self.hydra_conf["trainer"]["valid_dataset"], 'label_2'),
             result_path=self.evaluate_root,
             label_split_file=os.path.join(hydra.utils.get_original_cwd(),
-                                          self.hparams["trainer"]["valid_split"]),
+                                          self.hydra_conf["trainer"]["valid_split"]),
             current_class=0,
             coco=False
         )
@@ -249,7 +250,7 @@ def main(v_cfg: DictConfig):
         model.load_state_dict(torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"], strict=True)
     if v_cfg["trainer"].auto_lr_find:
         trainer.tune(model)
-        print(model.hparams.learning_rate)
+        print(model.learning_rate)
     if v_cfg["trainer"].evaluate:
         trainer.test(model)
     else:

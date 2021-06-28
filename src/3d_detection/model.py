@@ -3,6 +3,9 @@ import os
 import pickle
 import shutil
 from copy import deepcopy
+import sys
+
+sys.path.append('C:/Users/zihan/Desktop/visualDet3D/visualDet3D')
 
 import cv2
 import hydra
@@ -33,7 +36,7 @@ from visualDet3D.utils.utils import cfg_from_file
 
 from torch.nn import functional as F
 
-from include.resnet_fpn import resnet_fpn_backbone
+#from include.resnet_fpn import resnet_fpn_backbone
 
 
 class Yolo3D(nn.Module):
@@ -71,13 +74,15 @@ class Yolo3D(nn.Module):
             # focal_loss_gamma=2.0,
             match_low_quality=False,
             # balance_weight=[20.0],
-            # regression_weight=[1, 1, 1, 1, 1, 1, 3, 1, 1, 0.5, 0.5, 0.5, 1],
+            # regression_weight=[1, 1, 1, 1, 1, 1, 1, 1, 3, 0.5, 0.5, 0.5, 1],
         )
 
         self.network_cfg = EasyDict(
-            num_features_in=256,
-            reg_feature_size=512,
-            cls_feature_size=256,
+            num_features_in=1024,
+            #reg_feature_size=512,
+            #cls_feature_size=256,
+            reg_feature_size=1024,
+            cls_feature_size=512,
 
             num_cls_output=1,
             num_reg_output=13,  # (x1, y1, x2, y2, x3d_center, y3d_center, x, y, z, w, h, l, ry)
@@ -88,17 +93,25 @@ class Yolo3D(nn.Module):
 
         train_transform = [
             EasyDict(type_name='ConvertToFloat'),
-            # EasyDict(type_name='PhotometricDistort',
-            #          keywords=EasyDict(distort_prob=1.0, contrast_lower=0.5, contrast_upper=1.5, saturation_lower=0.5,
-            #                            saturation_upper=1.5, hue_delta=18.0, brightness_delta=32)),
+            ###
+            #EasyDict(type_name='PhotometricDistort',
+            #         keywords=EasyDict(distort_prob=1.0, contrast_lower=0.5, contrast_upper=1.5, saturation_lower=0.5,
+            #                           saturation_upper=1.5, hue_delta=18.0, brightness_delta=32)),
+            #EasyDict(type_name='CropTop', keywords=EasyDict(crop_top_index=100)),
+            ###
             EasyDict(type_name='Resize',
                      keywords=EasyDict(size=(v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"]))),
-            # EasyDict(type_name='RandomMirror', keywords=EasyDict(mirror_prob=0.5)),
+            ###
+            #EasyDict(type_name='RandomMirror', keywords=EasyDict(mirror_prob=0.5)),
+            ###
             EasyDict(type_name='Normalize',
                      keywords=EasyDict(mean=np.array([0.485, 0.456, 0.406]), stds=np.array([0.229, 0.224, 0.225])))
         ]
         test_transform = [
             EasyDict(type_name='ConvertToFloat'),
+            ###
+            #EasyDict(type_name='CropTop', keywords=EasyDict(crop_top_index=100)),
+            ###
             EasyDict(type_name='Resize',
                      keywords=EasyDict(size=(v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"]))),
             EasyDict(type_name='Normalize',
@@ -120,6 +133,11 @@ class Yolo3D(nn.Module):
 
                     anchor_manager = Anchors(preprocessed_path="",
                                              **anchors_cfg)
+
+                    len_scale = len(anchor_manager.scales)
+                    len_ratios = len(anchor_manager.ratios)
+                    len_level = len(anchor_manager.pyramid_levels)
+
                     # Statistics about the anchor
                     total_objects = 0
                     total_usable_objects = 0
@@ -138,7 +156,7 @@ class Yolo3D(nn.Module):
 
                         preprocess = self.train_preprocess if data_split == "training" else self.test_preprocess
                         image, P2, label_tr = preprocess(image, labels=deepcopy(label.data), p2=deepcopy(calib.P2))
-                        # data_frame.image = image
+                        #data_frame.image = image
                         data_frame.image_file = data_frame.image2_path
                         calib.P2 = P2
                         data_frame.calib = calib
@@ -148,6 +166,11 @@ class Yolo3D(nn.Module):
                         # Do the filtering
                         data_frame.label.data = [
                             item for item in data_frame.label.data if item.type == "Car" and item.z < 200]
+
+                        data = []
+
+                        #data_frame.label.data = [
+                        #    item for item in data_frame.label.data if item.type == "Car" and item.occluded < 2 and item.z > 3]
 
                         if len(data_frame.label.data) == 0:
                             data_frame.corners_in_camera_coordinates = torch.zeros((0, 9, 4)).float()
@@ -215,8 +238,10 @@ class Yolo3D(nn.Module):
                             ]
                         )
                         if data.any():
+
                             # uniform_sum_each_type.append(np.sum(data, axis=0))
                             # uniform_square_each_type.append(np.sum(data ** 2, axis=0))
+
                             data_statics.append(data)
 
                         # NOTE: Currently fix the shape
@@ -318,7 +343,7 @@ class Yolo3D(nn.Module):
     def init_layers(self,
                     v_num_features_in, v_cls_feature_size, v_reg_feature_size, v_num_anchors,
                     v_num_cls_output, v_num_reg_output):
-        resnet = resnet18(pretrained=True)
+        resnet = resnet101(pretrained=True)
         self.core = nn.Sequential(
             resnet.conv1,
             resnet.bn1,
@@ -837,7 +862,13 @@ class Yolo3D(nn.Module):
         cls_loss = cls_preds.new_tensor(0., requires_grad=True)
         reg_loss = cls_preds.new_tensor(0., requires_grad=True)
 
-        num_positives = 0
+        regression_weight = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 3, 0.5, 0.5, 0.5, 1], device='cuda:0')
+        #regression_weight = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], device='cuda:0')
+
+        #reg_loss_mat = cls_preds.new_tensor(0., requires_grad=True)
+        reg_loss_mat = torch.zeros(13, device='cuda:0', requires_grad=True)
+
+        num_positives = 1
         for id_batch in range(len(v_data["label"])):
             if len(v_data["label"][id_batch]) > 0:
                 gt_index_per_anchor = v_data["gt_index_per_anchor"][id_batch]
@@ -850,15 +881,38 @@ class Yolo3D(nn.Module):
                     self.anchors_distribution.to(cls_preds.device),
                 )
                 cls_loss = cls_loss + self.focal_loss(cls_preds[id_batch], labels).mean()
+                """
+                reg_loss_batch = F.l1_loss(reg_preds[id_batch][gt_index_per_anchor > 0][:, :],
+                                                pos_bbox_targets[:, :],
+                                                reduction='none'
+                                                )[0]
+
+                reg_loss = reg_loss + reg_loss_batch.mean(dim=0) * (gt_index_per_anchor > 0).sum()
+
+                reg_loss_mat = reg_loss_mat + reg_loss_batch * (gt_index_per_anchor > 0).sum()
+
+                """
                 reg_loss = reg_loss + F.l1_loss(reg_preds[id_batch][gt_index_per_anchor > 0][:, :],
                                                 pos_bbox_targets[:, :]
                                                 ) * (gt_index_per_anchor > 0).sum()
+
+                reg_loss_mat = reg_loss_mat + F.l1_loss(reg_preds[id_batch][gt_index_per_anchor > 0][:, :],
+                                                pos_bbox_targets[:, :],
+                                                reduction='none'
+                                                )[0] * (gt_index_per_anchor > 0).sum()
+
                 num_positives += (gt_index_per_anchor > 0).sum()
 
         reg_loss = reg_loss / num_positives
         cls_loss = cls_loss / len(v_data["label"]) * 100 # divide with batch size
 
-        return cls_loss, reg_loss
+        loss_2d = torch.mean(reg_loss_mat[:4]) / num_positives
+        loss_3d_xyz = torch.mean(reg_loss_mat[6:9]) / num_positives
+        loss_3d_whl = torch.mean(reg_loss_mat[9:12]) / num_positives
+        loss_3d_ry = torch.mean(reg_loss_mat[12]) / num_positives
+        loss_sep = [loss_2d, loss_3d_xyz, loss_3d_whl, loss_3d_ry]
+
+        return cls_loss, reg_loss, loss_sep
 
     def get_boxes(self, v_cls_preds, v_reg_preds, v_anchors, v_anchor_mean_std, v_data):
         assert v_cls_preds.shape[0] == 1
@@ -935,11 +989,15 @@ class Yolo3D(nn.Module):
         # cls_preds = torch.cat(cls_preds, dim=1)
         # reg_preds = torch.cat(reg_preds, dim=1)
 
+        regression_weight = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 3, 0.5, 0.5, 0.5, 1], device='cuda:0')
+        #regression_weight = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], device='cuda:0')
+
         reg_loss = cls_preds.new_tensor(0.)
         cls_loss = cls_preds.new_tensor(0.)
+        reg_loss_mat = torch.zeros(13, device='cuda:0')
 
         gt_prediction = None
-        num_positives=0
+        num_positives=1
         for id_batch in range(len(v_data["label"])):
             if len(v_data["label"][id_batch]) > 0:
                 gt_index_per_anchor = v_data["gt_index_per_anchor"][id_batch]
@@ -963,15 +1021,39 @@ class Yolo3D(nn.Module):
                 #     cv2.rectangle(img,(pts[0],pts[1]),(pts[2],pts[3]),(255,0,0),3)
                 # cv2.imshow("", img)
                 # cv2.waitKey()
-
+                """
                 cls_loss = cls_loss + self.focal_loss(cls_preds[id_batch], labels).mean()
+
+                reg_loss_batch = F.l1_loss(reg_preds[id_batch][gt_index_per_anchor > 0][:, :],
+                                           pos_bbox_targets[:, :],
+                                           reduction='none'
+                                           )[0]
+
+                reg_loss = reg_loss + reg_loss_batch.mean(dim=0) * (gt_index_per_anchor > 0).sum()
+
+                reg_loss_mat = reg_loss_mat + reg_loss_batch * (gt_index_per_anchor > 0).sum()
+
+                """
                 reg_loss = reg_loss + F.l1_loss(reg_preds[id_batch][gt_index_per_anchor > 0][:, :],
                                                 pos_bbox_targets[:, :]
                                                 ) * (gt_index_per_anchor > 0).sum()
+
+                reg_loss_mat = reg_loss_mat + F.l1_loss(reg_preds[id_batch][gt_index_per_anchor > 0][:, :],
+                                            pos_bbox_targets[:, :],
+                                            reduction='none'
+                                            )[0] * (gt_index_per_anchor > 0).sum()
+
                 num_positives += (gt_index_per_anchor > 0).sum()
 
         reg_loss = reg_loss / num_positives
         cls_loss = cls_loss / len(v_data["label"]) * 100 # divide with batch size
+
+        loss_2d = torch.mean(reg_loss_mat[:4]) / num_positives
+        loss_3d_xyz = torch.mean(reg_loss_mat[6:9]) / num_positives
+        loss_3d_whl = torch.mean(reg_loss_mat[9:12]) / num_positives
+        loss_3d_ry = torch.mean(reg_loss_mat[12]) / num_positives
+        loss_sep = [loss_2d, loss_3d_xyz, loss_3d_whl, loss_3d_ry]
+
         """
         Debug
         """
@@ -1006,6 +1088,7 @@ class Yolo3D(nn.Module):
             "cls_indexes": cls_indexes[valid_mask],
             "cls_loss": cls_loss,
             "reg_loss": reg_loss,
+            "loss_sep": loss_sep
         }
 
     def forward(self, v_inputs):

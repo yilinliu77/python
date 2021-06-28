@@ -108,11 +108,15 @@ class Mono_det_3d(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         data = batch
 
-        cls_loss, reg_loss = self.forward(data)
+        cls_loss, reg_loss, loss_sep = self.forward(data)
 
         self.log("training_cls", cls_loss, prog_bar=True, on_epoch=True)
         self.log("training_reg", reg_loss, prog_bar=True, on_epoch=True)
 
+        self.log("loss_2d", loss_sep[0], prog_bar=True, on_epoch=True)
+        self.log("loss_3d_xyz", loss_sep[1], prog_bar=True, on_epoch=True)
+        self.log("loss_3d_whl", loss_sep[2], prog_bar=True, on_epoch=True)
+        self.log("loss_3d_ry", loss_sep[3], prog_bar=True, on_epoch=True)
         return {
             'loss': reg_loss + cls_loss,
         }
@@ -145,15 +149,30 @@ class Mono_det_3d(pl.LightningModule):
             'val_loss': results["cls_loss"] + results["reg_loss"],
             'val_cls_loss': results["cls_loss"],
             'val_reg_loss': results["reg_loss"],
+            'val_loss_2d': results["loss_sep"][0],
+            'val_loss_3d_xyz': results["loss_sep"][1],
+            'val_loss_3d_whl': results["loss_sep"][2],
+            'val_loss_3d_ry': results["loss_sep"][3]
         }
 
     def validation_epoch_end(self, outputs):
         avg_loss_total = torch.stack([x['val_loss'] for x in outputs]).mean()
         avg_loss_cls = torch.stack([x['val_cls_loss'] for x in outputs]).mean()
         avg_loss_reg = torch.stack([x['val_reg_loss'] for x in outputs]).mean()
+
+        avg_loss_2d = torch.stack([x['val_loss_2d'] for x in outputs]).mean()
+        avg_loss_3d_xyz = torch.stack([x['val_loss_3d_xyz'] for x in outputs]).mean()
+        avg_loss_3d_whl = torch.stack([x['val_loss_3d_whl'] for x in outputs]).mean()
+        avg_loss_3d_ry = torch.stack([x['val_loss_3d_ry'] for x in outputs]).mean()
+
         self.log("val_loss", avg_loss_total.item(), prog_bar=True, on_epoch=True)
         self.log("val_cls_loss", avg_loss_cls.item(), prog_bar=True, on_epoch=True)
         self.log("val_reg_loss", avg_loss_reg.item(), prog_bar=True, on_epoch=True)
+
+        self.log("val_loss_2d", avg_loss_2d.item(), prog_bar=True, on_epoch=True)
+        self.log("val_loss_3d_xyz", avg_loss_3d_xyz.item(), prog_bar=True, on_epoch=True)
+        self.log("val_loss_3d_whl", avg_loss_3d_whl.item(), prog_bar=True, on_epoch=True)
+        self.log("val_loss_3d_ry", avg_loss_3d_ry.item(), prog_bar=True, on_epoch=True)
 
         # Visualize the example
         img = self.validation_example["image"]
@@ -225,7 +244,7 @@ class Mono_det_3d(pl.LightningModule):
         # print(result_texts[0])
 
 
-@hydra.main(config_name=".")
+@hydra.main(config_name="kitti_fpn.yaml")
 def main(v_cfg: DictConfig):
     print(OmegaConf.to_yaml(v_cfg))
     seed_everything(0)

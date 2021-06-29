@@ -4,8 +4,8 @@ trainer:
   num_worker: 0
   train_dataset: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti_obj\training
   valid_dataset: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti_obj\training
-  train_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\debug_split\train.txt
-  valid_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\debug_split\val.txt
+  train_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\chen_split\train.txt
+  valid_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\chen_split\val.txt
 #  train_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
 #  valid_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
 #  valid_split: temp/det3d/total_split_val.txt
@@ -24,7 +24,7 @@ trainer:
   evaluate: false
 det_3d:
   preprocessed_path: temp/kitti_test2
-  compute_anchor: true
+  compute_anchor: false
   score_threshold: 0.5
   test_score_threshold: 0.75
   rotate_pitch_when_project: false

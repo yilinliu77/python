@@ -30,9 +30,29 @@ class Anchors(nn.Module):
         self.preprocessed_path = preprocessed_path
 
         if self.preprocessed_path != "":
-            self.anchors_mean_std = torch.from_numpy(np.load(self.preprocessed_path))
-
+            self.anchors_mean_std = torch.from_numpy(np.load(self.preprocessed_path)) # [2, 16, 2, 6]
+            ### modified
+            #self.anchors_mean_origin = self.anchors_mean_std[0,:,:,:]  # [16, 2, 6]
+            #self.anchors_std_origin = self.anchors_mean_std[1,:,:,:]  # [16, 2, 6]
+            ###
         self.anchors = None
+
+    ### modified
+    def anchors2indexes(self, anchors:np.ndarray)->Tuple[np.ndarray, np.ndarray]:
+        """
+            computations in numpy: anchors[N, 4]
+            return: sizes_int [N,]  ratio_ints [N, ]
+        """
+        sizes = np.sqrt((anchors[:, 2] - anchors[:, 0]) * (anchors[:, 3] - anchors[:, 1]))
+        sizes_diff = sizes - (np.array(self.sizes) * np.array(self.scales))[:, np.newaxis]
+        sizes_int = np.argmin(np.abs(sizes_diff), axis=0)
+
+        ratio =  (anchors[:, 3] - anchors[:, 1]) / (anchors[:, 2] - anchors[:, 0])
+        ratio_diff = ratio - np.array(self.ratios)[:, np.newaxis]
+        ratio_int = np.argmin(np.abs(ratio_diff), axis=0)
+        return sizes_int, ratio_int
+
+    ###
 
     def forward(self, v_shape: np.ndarray):
         shape = np.asarray(v_shape)
@@ -46,8 +66,16 @@ class Anchors(nn.Module):
                 anchors = generate_anchors(base_size=self.sizes[idx], ratios=self.ratios, scales=self.scales)
                 shifted_anchors = shift(image_shapes[idx], p, self.strides[idx], anchors)
                 all_anchors = np.append(all_anchors, shifted_anchors, axis=0)
-            self.anchors = torch.from_numpy(all_anchors)
 
+            ### modified
+            if self.preprocessed_path != "":
+                sizes_int, ratio_int = self.anchors2indexes(all_anchors)
+                #self.anchor_means = torch.tensor(self.anchors_mean_std[0, sizes_int, ratio_int])  # [types, N, 6]
+                #self.anchor_stds = torch.tensor(self.anchors_mean_std[1, sizes_int, ratio_int])  # [types, N, 6]
+                self.anchors_mean_std = self.anchors_mean_std[:, sizes_int, ratio_int].permute(1, 2, 0)
+            ###
+            self.anchors = torch.from_numpy(all_anchors)
+            ###
             # self.anchors_image_x_center = self.anchors[:, 0:4:2].mean(dim=1)  # [N]
             # self.anchors_image_y_center = self.anchors[:, 1:4:2].mean(dim=1)  # [N]
 

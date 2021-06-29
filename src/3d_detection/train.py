@@ -24,6 +24,7 @@ from omegaconf import DictConfig, OmegaConf
 from dataset import KittiMonoDataset
 
 from visualDet3D.data.kitti.utils import write_result_to_file
+from visualDet3D.networks.utils import BBox3dProjector, BackProjection
 
 
 class Mono_det_3d(pl.LightningModule):
@@ -46,6 +47,10 @@ class Mono_det_3d(pl.LightningModule):
         self.evaluate_index = [item.strip() for item in open(os.path.join(hydra.utils.get_original_cwd(),
                                                                           self.hydra_conf["trainer"]["valid_split"]
                                                                           )).readlines()]
+        ### modified
+        self.backprojector = BackProjection().cuda()
+        self.projector = BBox3dProjector().cuda()
+        ###
 
     def forward(self, v_data):
         data = self.model(v_data)
@@ -122,10 +127,30 @@ class Mono_det_3d(pl.LightningModule):
         }
 
     def evaluate(self, v_data, v_results, v_id):
+
         bbox_2d = self.model.rectify_2d_box(v_results["bboxes"][:, :4], v_data['original_calib'][0], v_data['calib'][0])
+        #bbox_3d_state_3d = torch.cat([v_results["bboxes"][:, 6:12], v_results["bboxes"][:, 13:14]], dim=1)
 
-        bbox_3d_state_3d = torch.cat([v_results["bboxes"][:, 6:12], v_results["bboxes"][:, 13:14]], dim=1)
+        ### modified
 
+        # (x1, y1, x2, y2, x3d_projected, y3d_projected, z3d, w3d, h3d, l3d, ry)
+
+        P2 = v_data['calib'][0]
+
+        bbox_3d_state = v_results["bboxes"][:, 4:]
+        bbox_3d_state_3d = self.backprojector(bbox_3d_state, P2)
+        #_, _, thetas = self.projector(bbox_3d_state_3d, bbox_3d_state_3d.new(P2))
+
+        write_result_to_file(self.evaluate_root,
+                             int(self.evaluate_index[v_id]),
+                             # v_id,
+                             v_results["scores"],
+                             bbox_2d,
+                             bbox_3d_state_3d,
+                             v_results["bboxes"][:, 10],
+                             ["Car" for _ in v_results["scores"]])
+        ###
+        """
         write_result_to_file(self.evaluate_root,
                              int(self.evaluate_index[v_id]),
                              # v_id,
@@ -134,7 +159,7 @@ class Mono_det_3d(pl.LightningModule):
                              bbox_3d_state_3d,
                              v_results["bboxes"][:, 12],
                              ["Car" for _ in v_results["scores"]])
-
+        """
     def validation_step(self, batch, batch_idx):
         data = batch
 

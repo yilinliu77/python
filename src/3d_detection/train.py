@@ -31,12 +31,11 @@ class Mono_det_3d(pl.LightningModule):
     def __init__(self, hparams):
         super(Mono_det_3d, self).__init__()
         self.hydra_conf = hparams
-        self.learning_rate=self.hydra_conf["trainer"].learning_rate
+        self.learning_rate = self.hydra_conf["trainer"].learning_rate
 
         self.model = Yolo3D(self.hydra_conf)
         self.dataset_builder = KittiMonoDataset
 
-        # self.test_loss = pl.metrics.Accuracy()
         self.evaluate_root = os.path.join(
             hydra.utils.get_original_cwd(),
             hparams["det_3d"]["preprocessed_path"],
@@ -115,54 +114,36 @@ class Mono_det_3d(pl.LightningModule):
 
         cls_loss, reg_loss, loss_sep = self.forward(data)
 
-        self.log("training_cls", cls_loss, prog_bar=True, on_epoch=True)
-        self.log("training_reg", reg_loss, prog_bar=True, on_epoch=True)
+        self.log_dict({"Training Classification": cls_loss,
+                       "Training Regression": reg_loss,
+                       "Training 2d": loss_sep[0],
+                       "Training 3d_xyz": loss_sep[1],
+                       "Training 3d_whl": loss_sep[2],
+                       }, on_epoch=True, on_step=False)
 
-        self.log("loss_2d", loss_sep[0], prog_bar=True, on_epoch=True)
-        self.log("loss_3d_xyz", loss_sep[1], prog_bar=True, on_epoch=True)
-        self.log("loss_3d_whl", loss_sep[2], prog_bar=True, on_epoch=True)
-        self.log("loss_3d_ry", loss_sep[3], prog_bar=True, on_epoch=True)
         return {
             'loss': reg_loss + cls_loss,
         }
 
     def evaluate(self, v_data, v_results, v_id):
-
         bbox_2d = self.model.rectify_2d_box(v_results["bboxes"][:, :4], v_data['original_calib'][0], v_data['calib'][0])
-        #bbox_3d_state_3d = torch.cat([v_results["bboxes"][:, 6:12], v_results["bboxes"][:, 13:14]], dim=1)
-
-        ### modified
-
-        # (x1, y1, x2, y2, x3d_projected, y3d_projected, z3d, w3d, h3d, l3d, ry)
 
         P2 = v_data['calib'][0]
-
         bbox_3d_state = v_results["bboxes"][:, 4:]
-        bbox_3d_state_3d = self.backprojector(bbox_3d_state, P2)
-        #_, _, thetas = self.projector(bbox_3d_state_3d, bbox_3d_state_3d.new(P2))
+        bbox_3d_state_3d = self.backprojector(bbox_3d_state,
+                                              P2)  # Convert cx, cy, z, sin2a, cos2a, w, h, l to x, y, z, w, h, l, alpha
+        _, _, thetas = self.projector(bbox_3d_state_3d, bbox_3d_state_3d.new(P2))  # Calculate theta
 
         write_result_to_file(self.evaluate_root,
                              int(self.evaluate_index[v_id]),
-                             # v_id,
                              v_results["scores"],
                              bbox_2d,
                              bbox_3d_state_3d,
-                             v_results["bboxes"][:, 10],
+                             thetas,
                              ["Car" for _ in v_results["scores"]])
-        ###
-        """
-        write_result_to_file(self.evaluate_root,
-                             int(self.evaluate_index[v_id]),
-                             # v_id,
-                             v_results["scores"],
-                             bbox_2d,
-                             bbox_3d_state_3d,
-                             v_results["bboxes"][:, 12],
-                             ["Car" for _ in v_results["scores"]])
-        """
+
     def validation_step(self, batch, batch_idx):
         data = batch
-
         results = self.forward(data)
         self.validation_example = {
             "bbox": results["bboxes"].cpu().numpy(),
@@ -171,35 +152,25 @@ class Mono_det_3d(pl.LightningModule):
         }
         self.evaluate(data, results, batch_idx)
         return {
-            'val_loss': results["cls_loss"] + results["reg_loss"],
-            'val_cls_loss': results["cls_loss"],
-            'val_reg_loss': results["reg_loss"],
-            'val_loss_2d': results["loss_sep"][0],
-            'val_loss_3d_xyz': results["loss_sep"][1],
-            'val_loss_3d_whl': results["loss_sep"][2],
-            'val_loss_3d_ry': results["loss_sep"][3]
+            'Validation Loss': results["cls_loss"] + results["reg_loss"],
+            "Validation Classification": results["cls_loss"],
+            "Validation Regression": results["reg_loss"],
+            "Validation 2d": results["loss_sep"][0],
+            "Validation 3d_xyz": results["loss_sep"][1],
+            "Validation 3d_whl": results["loss_sep"][2],
         }
 
     def validation_epoch_end(self, outputs):
-        avg_loss_total = torch.stack([x['val_loss'] for x in outputs]).mean()
-        avg_loss_cls = torch.stack([x['val_cls_loss'] for x in outputs]).mean()
-        avg_loss_reg = torch.stack([x['val_reg_loss'] for x in outputs]).mean()
-
-        avg_loss_2d = torch.stack([x['val_loss_2d'] for x in outputs]).mean()
-        avg_loss_3d_xyz = torch.stack([x['val_loss_3d_xyz'] for x in outputs]).mean()
-        avg_loss_3d_whl = torch.stack([x['val_loss_3d_whl'] for x in outputs]).mean()
-        avg_loss_3d_ry = torch.stack([x['val_loss_3d_ry'] for x in outputs]).mean()
-
-        self.log("val_loss", avg_loss_total.item(), prog_bar=True, on_epoch=True)
-        self.log("val_cls_loss", avg_loss_cls.item(), prog_bar=True, on_epoch=True)
-        self.log("val_reg_loss", avg_loss_reg.item(), prog_bar=True, on_epoch=True)
-
-        self.log("val_loss_2d", avg_loss_2d.item(), prog_bar=True, on_epoch=True)
-        self.log("val_loss_3d_xyz", avg_loss_3d_xyz.item(), prog_bar=True, on_epoch=True)
-        self.log("val_loss_3d_whl", avg_loss_3d_whl.item(), prog_bar=True, on_epoch=True)
-        self.log("val_loss_3d_ry", avg_loss_3d_ry.item(), prog_bar=True, on_epoch=True)
-
         # Visualize the example
+        log_dict = {item: 0 for item in outputs[0]}
+        for item in outputs:
+            for key in log_dict:
+                log_dict[key] += item[key]
+        for key in log_dict:
+            log_dict[key] /= len(outputs)
+        self.log_dict(log_dict)
+
+        # Visualize imgs
         img = self.validation_example["image"]
         img = np.clip((img * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])) * 255, 0, 255).astype(
             np.uint8)
@@ -285,8 +256,8 @@ def main(v_cfg: DictConfig):
                       # early_stop_callback=early_stop_callback,
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,
                       max_epochs=5000,
-                      gradient_clip_val=0.1,
-                      check_val_every_n_epoch=5
+                      # gradient_clip_val=0.1,
+                      check_val_every_n_epoch=3
                       )
 
     model = Mono_det_3d(v_cfg)

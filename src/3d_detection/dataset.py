@@ -36,10 +36,11 @@ class KittiMonoDataset(torch.utils.data.Dataset):
             'image': image,
             'label': [0 for _ in kitti_data.label.data],
             'bbox2d': kitti_data.bbox2d,  # [N, 4] [x1, y1, x2, y2]
-            'bbox3d': kitti_data.bbox3d,  # [N, 7] [x, y, z, w, h, l, ry]
+            'bbox3d': kitti_data.bbox3d,  # [N, 7] [z, sin2a, cos2a, w, h, l]
             'bbox3d_img_center': kitti_data.bbox3d_img_center,
-            'training_data': kitti_data.data,
-            'gt_index_per_anchor': kitti_data.gt_index_per_anchor,
+            'training_data': torch.cat([
+                kitti_data.bbox2d, kitti_data.bbox3d_img_center, kitti_data.bbox3d
+            ],dim=1),
         }
         return output_dict
 
@@ -56,7 +57,6 @@ class KittiMonoDataset(torch.utils.data.Dataset):
         bbox3ds = [item['bbox3d'] for item in batch]
         bbox3d_img_center = [item['bbox3d_img_center'] for item in batch]
         training_data = [item['training_data'] for item in batch]
-        gt_index_per_anchor = [item['gt_index_per_anchor'] for item in batch]
 
         return {
             'original_calib': torch.tensor(original_calib).float(),
@@ -64,8 +64,7 @@ class KittiMonoDataset(torch.utils.data.Dataset):
             'image': torch.stack(image, dim=0),
             'label': label,
             'bbox2d': bbox2ds,  # [N, 4] [x1, y1, x2, y2]
-            'bbox3d': bbox3ds,  # [N, 7] [x, y, z, w, h, l, ry]
+            'bbox3d': bbox3ds,  # [N, 7] [z, sin2a, cos2a, w, h, l]
             'bbox3d_img_center': bbox3d_img_center,
             'training_data': training_data,
-            'gt_index_per_anchor': gt_index_per_anchor,
         }

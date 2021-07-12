@@ -1,26 +1,26 @@
 trainer:
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 0
+  num_worker: 8
   train_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
   valid_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
 #  valid_split: temp/det3d/total_split_val.txt
 #  train_split: temp/det3d/total_split_train.txt
-#  train_split: temp/kitti_split/chen_split_train.txt
-#  valid_split: temp/kitti_split/chen_split_val.txt
-  valid_split: temp/kitti_split/debug_split_val.txt
-  train_split: temp/kitti_split/debug_split_train.txt
+  train_split: temp/kitti_split/chen_split_train.txt
+  valid_split: temp/kitti_split/chen_split_val.txt
+#  valid_split: temp/kitti_split/debug_split_val.txt
+#  train_split: temp/kitti_split/debug_split_train.txt
 
 #  train_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
 #  valid_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
 
-  batch_size: 1
+  batch_size: 8
   auto_lr_find: false
   resume_from_checkpoint:
   evaluate: false
 det_3d:
   preprocessed_path: temp/kitti_test2
-  compute_anchor: false
+  compute_anchor: true
   score_threshold: 0.5
   test_score_threshold: 0.75
   rotate_pitch_when_project: false

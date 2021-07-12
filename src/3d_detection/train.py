@@ -4,6 +4,8 @@ import sys, os
 import cv2
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
+from src.utils import convert_standard_normalization_back
+
 sys.path.append("./")
 sys.path.append(os.path.join(os.getcwd(), "thirdparty/visualDet3D"))
 sys.path.append(os.path.join(os.getcwd(), "thirdparty/kitti-object-eval-python"))
@@ -105,8 +107,8 @@ class Mono_det_3d(pl.LightningModule):
         optimizer = Adam(self.parameters(), lr=self.learning_rate, )
         return {
             'optimizer': optimizer,
-            # 'lr_scheduler': CosineAnnealingLR(optimizer, T_max=30, eta_min=3e-5),
-            'monitor': 'val_loss'
+            'lr_scheduler': CosineAnnealingLR(optimizer, T_max=30, eta_min=3e-5),
+            'monitor': 'Validation Loss'
         }
 
     def training_step(self, batch, batch_idx):
@@ -122,6 +124,7 @@ class Mono_det_3d(pl.LightningModule):
                        }, on_epoch=True, on_step=False)
 
         return {
+            # 'loss': loss_sep[0],
             'loss': reg_loss + cls_loss,
         }
 
@@ -145,13 +148,15 @@ class Mono_det_3d(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         data = batch
         results = self.forward(data)
+
         self.validation_example = {
             "bbox": results["bboxes"].cpu().numpy(),
-            "gt_bbox": data["bbox2d"][0].cpu().numpy(),
+            "gt_bbox": data["training_data"][0][:,:4].cpu().numpy(),
             "image": data["image"][0].cpu().permute(1, 2, 0).numpy()
         }
         self.evaluate(data, results, batch_idx)
         return {
+            # 'Validation Loss': results["loss_sep"][0],
             'Validation Loss': results["cls_loss"] + results["reg_loss"],
             "Validation Classification": results["cls_loss"],
             "Validation Regression": results["reg_loss"],
@@ -172,8 +177,7 @@ class Mono_det_3d(pl.LightningModule):
 
         # Visualize imgs
         img = self.validation_example["image"]
-        img = np.clip((img * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])) * 255, 0, 255).astype(
-            np.uint8)
+        img = convert_standard_normalization_back(img)
         viz_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         viz_img = cv2.cvtColor(viz_img, cv2.COLOR_BGR2RGB)
         # GT
@@ -255,7 +259,7 @@ def main(v_cfg: DictConfig):
                       distributed_backend="ddp" if v_cfg["trainer"].gpu > 1 else None,
                       # early_stop_callback=early_stop_callback,
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,
-                      max_epochs=5000,
+                      max_epochs=60,
                       # gradient_clip_val=0.1,
                       check_val_every_n_epoch=3
                       )

@@ -15,6 +15,7 @@ from torch import nn
 import numpy as np
 from torchvision.ops import nms
 from tqdm import tqdm
+from src.utils import *
 
 from visualDet3D.networks.heads.losses import SigmoidFocalLoss
 from visualDet3D.networks.lib.blocks import AnchorFlatten
@@ -51,32 +52,31 @@ class Yolo3D(nn.Module):
             fg_iou_threshold=0.5,
             bg_iou_threshold=0.4,
             match_low_quality=False,
+            regression_weight=[1, 1, 1, 1, 1, 1, 3, 1, 1, 0.5, 0.5, 0.5, 1],
+            # [x, y, w, h, cx, cy, z, sin2a, cos2a, w, h, l]
+
         )
 
         self.network_cfg = EasyDict(
-            num_features_in=256,
-            reg_feature_size=512,
-            cls_feature_size=256,
+            num_features_in=1024,
+            reg_feature_size=1024,
+            cls_feature_size=512,
 
             num_cls_output=1 + 1,  # A flag for alpha angle
             num_reg_output=12,  # (x1, y1, x2, y2, x3d_center, y3d_center, z, sin2a, cos2a, w, h, l)
         )
 
-        self.stds = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],requires_grad=False).float()
+        self.stds = torch.tensor([.1, .1, .1, .1, .1, .1, 1, 1, 1, 1, 1, 1], requires_grad=False).float()
 
         train_transform = [
             EasyDict(type_name='ConvertToFloat'),
-            ###
-            # EasyDict(type_name='PhotometricDistort',
-            #         keywords=EasyDict(distort_prob=1.0, contrast_lower=0.5, contrast_upper=1.5, saturation_lower=0.5,
-            #                           saturation_upper=1.5, hue_delta=18.0, brightness_delta=32)),
+            EasyDict(type_name='PhotometricDistort',
+                     keywords=EasyDict(distort_prob=1.0, contrast_lower=0.5, contrast_upper=1.5, saturation_lower=0.5,
+                                       saturation_upper=1.5, hue_delta=18.0, brightness_delta=32)),
             # EasyDict(type_name='CropTop', keywords=EasyDict(crop_top_index=100)),
-            ###
             EasyDict(type_name='Resize',
                      keywords=EasyDict(size=(v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"]))),
-            ###
-            # EasyDict(type_name='RandomMirror', keywords=EasyDict(mirror_prob=0.5)),
-            ###
+            EasyDict(type_name='RandomMirror', keywords=EasyDict(mirror_prob=0.5)),
             EasyDict(type_name='Normalize',
                      keywords=EasyDict(mean=np.array([0.485, 0.456, 0.406]), stds=np.array([0.229, 0.224, 0.225])))
         ]
@@ -134,11 +134,13 @@ class Yolo3D(nn.Module):
                             "velodyne": False,
                         })
                         calib, image, label, velo = data_frame.read_data()
+                        data_frame.index_name = index_name
                         data_frame.original_calib = deepcopy(calib)
                         data_frame.original_shape = image.shape
-
+                        data_frame.image = None
                         preprocess = self.train_preprocess if data_split == "training" else self.test_preprocess
                         image, P2, label_tr = preprocess(image, labels=deepcopy(label.data), p2=deepcopy(calib.P2))
+                        # data_frame.image = image
                         # data_frame.image = image
                         data_frame.image_file = data_frame.image2_path
                         calib.P2 = P2
@@ -154,71 +156,95 @@ class Yolo3D(nn.Module):
                         #    item for item in data_frame.label.data if item.type == "Car" and item.occluded < 2 and item.z > 3]
 
                         if len(data_frame.label.data) == 0:
-                            data_frame.corners_in_camera_coordinates = torch.zeros((0, 9, 4)).float()
-                            data_frame.bbox2d = torch.zeros((0, 4)).float()
-                            data_frame.bbox3d_img_center = torch.zeros((0, 2)).float()
-                            ### modified
+                            # data_frame.corners_in_camera_coordinates = torch.zeros((0, 9, 4)).float()
+                            # data_frame.bbox2d = torch.zeros((0, 4)).float()
+                            # data_frame.bbox3d_img_center = torch.zeros((0, 2)).float()
                             # data_frame.bbox3d = torch.zeros((0, 7)).float()
-                            data_frame.bbox3d = torch.zeros((0, 6)).float()
-                            ###
-                            data_frame.data = torch.zeros((0, 13)).float()
+                            # data_frame.data = torch.zeros((0, 13)).float()
                             data_frames.append(data_frame)
                             continue
 
-                        # Replace the 2d bounding box with re-projection
-                        # NOTE: Currently fix the shape
-                        data_frame.corners_in_camera_coordinates = self.project_box3d_to_img(data_frame,
-                                                                                             v_cfg["det_3d"][
-                                                                                                 "rotate_pitch_when_project"])
-                        if False:
-                            data_frame.bbox2d = torch.stack([torch.tensor((
-                                torch.min(item[:8, 0]),
-                                torch.min(item[:8, 1]),
-                                torch.max(item[:8, 0]),
-                                torch.max(item[:8, 1]))
-                            ) for item in data_frame.corners_in_camera_coordinates
-                            ], dim=0
-                            )
-                        else:
-                            data_frame.bbox2d = torch.stack([torch.tensor((
-                                item.bbox_l,
-                                item.bbox_t,
-                                item.bbox_r,
-                                item.bbox_b,)
-                            ) for item in data_frame.label.data
-                            ], dim=0
-                            )
-
-                        data_frame.bbox3d_img_center = torch.stack(
-                            [item[8, :] for item in data_frame.corners_in_camera_coordinates],
-                            dim=0
-                        )
-
+                        # # Replace the 2d bounding box with re-projection
+                        # # NOTE: Currently fix the shape
+                        # data_frame.corners_in_camera_coordinates = self.project_box3d_to_img(data_frame,
+                        #                                                                      v_cfg["det_3d"][
+                        #                                                                          "rotate_pitch_when_project"])
+                        # if False:
+                        #     data_frame.bbox2d = torch.stack([torch.tensor((
+                        #         torch.min(item[:8, 0]),
+                        #         torch.min(item[:8, 1]),
+                        #         torch.max(item[:8, 0]),
+                        #         torch.max(item[:8, 1]))
+                        #     ) for item in data_frame.corners_in_camera_coordinates
+                        #     ], dim=0
+                        #     )
+                        # else:
+                        #     data_frame.bbox2d = torch.stack([torch.tensor((
+                        #         item.bbox_l,
+                        #         item.bbox_t,
+                        #         item.bbox_r,
+                        #         item.bbox_b,)
+                        #     ) for item in data_frame.label.data
+                        #     ], dim=0
+                        #     )
+                        #
+                        # data_frame.bbox3d_img_center = torch.stack(
+                        #     [item[8, :] for item in data_frame.corners_in_camera_coordinates],
+                        #     dim=0
+                        # )
+                        #
                         # ### Debug
-                        # from matplotlib import pyplot as plt
-                        # for box in data_frame.bbox2d:
-                        #     x_min, y_min, x_max, y_max = map(int, box.numpy().tolist())
-                        #     image = cv2.rectangle(image, (x_min, y_min), (x_max, y_max), [0, 255, 0],5)
-                        # plt.imshow(image)
-                        # plt.show()
+                        # # from matplotlib import pyplot as plt
+                        # # viz_img = convert_standard_normalization_back(image)
+                        # # for box in data_frame.bbox2d:
+                        # #     x_min, y_min, x_max, y_max = map(int, box.numpy().tolist())
+                        # #     viz_img = cv2.rectangle(viz_img, (x_min, y_min), (x_max, y_max), [0, 255, 0], 5)
+                        # # for corners in data_frame.corners_in_camera_coordinates:
+                        # #     corners = corners.numpy().tolist()
+                        # #     cv2.line(viz_img, tuple(map(int,corners[0])), tuple(map(int,corners[1])), (255, 0, 0), 1)
+                        # #     cv2.line(viz_img, tuple(map(int,corners[0])), tuple(map(int,corners[2])), (255, 0, 0), 1)
+                        # #     cv2.line(viz_img, tuple(map(int,corners[2])), tuple(map(int,corners[3])), (255, 0, 0), 1)
+                        # #     cv2.line(viz_img, tuple(map(int,corners[1])), tuple(map(int,corners[3])), (255, 0, 0), 1)
+                        # #     cv2.line(viz_img, tuple(map(int,corners[4])), tuple(map(int,corners[5])), (255, 0, 0), 1)
+                        # #     cv2.line(viz_img, tuple(map(int,corners[5])), tuple(map(int,corners[7])), (255, 0, 0), 1)
+                        # #     cv2.line(viz_img, tuple(map(int,corners[7])), tuple(map(int,corners[6])), (255, 0, 0), 1)
+                        # #     cv2.line(viz_img, tuple(map(int,corners[6])), tuple(map(int,corners[4])), (255, 0, 0), 1)
+                        # #     cv2.line(viz_img, tuple(map(int,corners[0])), tuple(map(int,corners[4])), (255, 0, 0), 1)
+                        # #     cv2.line(viz_img, tuple(map(int,corners[2])), tuple(map(int,corners[6])), (255, 0, 0), 1)
+                        # #     cv2.line(viz_img, tuple(map(int,corners[3])), tuple(map(int,corners[7])), (255, 0, 0), 1)
+                        # #     cv2.line(viz_img, tuple(map(int,corners[1])), tuple(map(int,corners[5])), (255, 0, 0), 1)
+                        # #     center_point=(int(corners[8][0]),int(corners[8][1]))
+                        # #     cv2.rectangle(viz_img,
+                        # #                   (center_point[0]-2,center_point[1]-2),(center_point[0]+2,center_point[1]+2),
+                        # #                   (0,0,255),2)
+                        # # plt.imshow(viz_img)
+                        # # plt.show()
                         # ###
-
-                        # Fix the height of KITTI label. (Y is the bottom of the car)
-                        for item in data_frame.label.data:
-                            item.y = item.y - item.h * 0.5
-                        # Find the 3d bbox
+                        #
+                        # # Fix the height of KITTI label. (Y is the bottom of the car)
+                        # for item in data_frame.label.data:
+                        #     item.y = item.y - item.h * 0.5
+                        # # Find the 3d bbox
                         ### modified
                         data_frame.bbox3d = torch.stack([torch.tensor((
                             item.z, np.sin(2 * item.alpha), np.cos(2 * item.alpha),
-                            item.w, item.h, item.l
+                            item.w, item.h, item.l, item.alpha
                         )) for item in data_frame.label.data
                         ], dim=0)
+                        data_frame.bbox2d = torch.stack([torch.tensor((
+                            item.bbox_l,
+                            item.bbox_t,
+                            item.bbox_r,
+                            item.bbox_b,)
+                        ) for item in data_frame.label.data
+                        ], dim=0
+                        )
 
                         total_objects += len(data_frame.label.data)
 
                         if data_frame.bbox3d.numpy().any():
-                            uniform_sum_each_type[0, :] += np.sum(data_frame.bbox3d.numpy()[:, 3:], axis=0)
-                            uniform_square_each_type[0, :] += np.sum(data_frame.bbox3d.numpy()[:, 3:] ** 2, axis=0)
+                            uniform_sum_each_type[0, :] += np.sum(data_frame.bbox3d.numpy()[:, 3:6], axis=0)
+                            uniform_square_each_type[0, :] += np.sum(data_frame.bbox3d.numpy()[:, 3:6] ** 2, axis=0)
 
                         anchors = anchor_manager((v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"]))
                         bbox3d = torch.tensor(
@@ -246,11 +272,11 @@ class Yolo3D(nn.Module):
                             sums[0, sizes_int[k], ratio_int[k]] += positive_ground_truth_3d[k, :]
                             squared[0, sizes_int[k], ratio_int[k]] += positive_ground_truth_3d[k, :] ** 2
 
-                        data_frame.data = torch.cat([
-                            data_frame.bbox2d,
-                            data_frame.bbox3d_img_center,
-                            data_frame.bbox3d,
-                        ], dim=1)  # [x, y, w, h, cx, cy, z, sin2a, cos2a, w, h, l]
+                        # data_frame.data = torch.cat([
+                        #     data_frame.bbox2d,
+                        #     data_frame.bbox3d_img_center,
+                        #     data_frame.bbox3d,
+                        # ], dim=1)  # [x, y, w, h, cx, cy, z, sin2a, cos2a, w, h, l, alpha]
                         data_frames.append(data_frame)
 
                         # for box in data_frame.bbox2d:
@@ -301,7 +327,8 @@ class Yolo3D(nn.Module):
         anchor_manager_with_distribution = Anchors(
             preprocessed_path=os.path.join(preprocessed_path, "training", 'anchor_mean_std_Car.npy'),
             **anchors_cfg)
-        self.anchors = anchor_manager_with_distribution((v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"])).float()
+        self.anchors = anchor_manager_with_distribution(
+            (v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"])).float()
         self.anchors_distribution = anchor_manager_with_distribution.anchors_mean_std.float()
 
         self.init_layers(self.network_cfg["num_features_in"], self.network_cfg["cls_feature_size"],
@@ -312,6 +339,7 @@ class Yolo3D(nn.Module):
         self.alpha_loss = nn.BCEWithLogitsLoss(reduction='sum')
         self.classification_loss = nn.CrossEntropyLoss(reduction="mean")
         self.regression_loss = nn.L1Loss(reduction="none")
+        # self.regression_loss = nn.SmoothL1Loss(reduction="none")
 
     def init_layers(self,
                     v_num_features_in, v_cls_feature_size, v_reg_feature_size, v_num_anchors,
@@ -329,8 +357,8 @@ class Yolo3D(nn.Module):
         #     # resnet.layer4,
         # )
 
-        from visualDet3D.networks.backbones import resnet18, resnet
-        self.core = resnet(depth=18,
+        from visualDet3D.networks.backbones import resnet
+        self.core = resnet(depth=101,
                            pretrained=True,
                            frozen_stages=-1,
                            num_stages=3,
@@ -376,79 +404,6 @@ class Yolo3D(nn.Module):
         - Add fixed 45 degree in pitch (X axis)
         - May have negative coordinate if v_width and v_height is None
     """
-    def project_box3d_to_img(self, v_dataframe, v_pitch_45, v_width=None, v_height=None):
-        camera_corners = []
-        for id_batch in range(len(v_dataframe.label.data)):
-            corners = torch.tensor(
-                [
-                    [-v_dataframe.label.data[id_batch].l / 2,
-                     0,
-                     -v_dataframe.label.data[id_batch].w / 2],
-                    [-v_dataframe.label.data[id_batch].l / 2,
-                     0,
-                     v_dataframe.label.data[id_batch].w / 2],
-                    [v_dataframe.label.data[id_batch].l / 2,
-                     0,
-                     -v_dataframe.label.data[id_batch].w / 2],
-                    [v_dataframe.label.data[id_batch].l / 2,
-                     0,
-                     v_dataframe.label.data[id_batch].w / 2],
-                    [-v_dataframe.label.data[id_batch].l / 2,
-                     -v_dataframe.label.data[id_batch].h,
-                     -v_dataframe.label.data[id_batch].w / 2],
-                    [-v_dataframe.label.data[id_batch].l / 2,
-                     -v_dataframe.label.data[id_batch].h,
-                     v_dataframe.label.data[id_batch].w / 2],
-                    [v_dataframe.label.data[id_batch].l / 2,
-                     -v_dataframe.label.data[id_batch].h,
-                     -v_dataframe.label.data[id_batch].w / 2],
-                    [v_dataframe.label.data[id_batch].l / 2,
-                     -v_dataframe.label.data[id_batch].h,
-                     v_dataframe.label.data[id_batch].w / 2],
-                    [0,
-                     -v_dataframe.label.data[id_batch].h / 2,
-                     0],
-
-                ]
-            ).float()
-
-            # Rotate through Y axis
-            # Both upper of lower case is accept. The box is currently at the origin
-            yaw_rotation_matrix = torch.tensor(
-                R.from_euler("xyz", [0, -v_dataframe.label.data[id_batch].ry, 0]).as_matrix()).float()
-            corners = torch.matmul(yaw_rotation_matrix, corners.T).T
-
-            corners = corners + torch.tensor([
-                v_dataframe.label.data[id_batch].x,
-                v_dataframe.label.data[id_batch].y,
-                v_dataframe.label.data[id_batch].z
-            ]).float()  # [N, 8, 3]
-
-            # Rotate through Y axis
-            # Should be global coordinates, upper case in scipy's Rotation
-            if v_pitch_45:
-                rotation_matrix = torch.tensor(
-                    R.from_euler("XYZ", [math.pi / 4, 0, 0]).as_matrix()).float()
-                corners = torch.matmul(rotation_matrix, corners.T).T
-
-            camera_corners.append(torch.cat([corners,
-                                             torch.ones_like(corners[:, 0:1])],
-                                            dim=-1))  # [N, 8, 4]
-            # with open("{}.xyz".format(id_batch), "w") as f:
-            #     for point in camera_corners[-1]:
-            #         f.write("{} {} {}\n".format(point[0].item(), point[1].item(), point[2].item()))
-            pass
-        camera_corners = torch.stack(camera_corners, dim=0)
-        camera_corners = torch.matmul(torch.tensor(v_dataframe.calib.P2).float(),
-                                      camera_corners.transpose(1, 2)).transpose(1, 2)  # [N, 8, 3]
-
-        homo_coord = (camera_corners / (camera_corners[:, :, 2:] + 1e-6))[:, :, :2]  # [N, 8, 3]
-        if v_width is not None:
-            homo_coord = torch.stack([
-                torch.clamp(homo_coord[:, :, 0], 0, v_width),
-                torch.clamp(homo_coord[:, :, 1], 0, v_height),
-            ], dim=-1)
-        return homo_coord
 
     def _assign(self, anchor, annotation,
                 bg_iou_threshold=0.0,
@@ -529,6 +484,7 @@ class Yolo3D(nn.Module):
     anchors_3d_mean_std: (z, sin2a, cos2a, w, h, l)
     outputs: (x, y, w, h, cx, cy, z, sin2a, cos2a, w, h, l)
     """
+
     def _encode(self, sampled_anchors, sampled_gt_bboxes, selected_anchors_3d):
         # Sampled_gt_bboxes: GT Box after sample: x1, y1, x2, y2, x3d_projected, y3d_projected, x3d, y3d, z3d, w3d, h3d, l3d, ry
         # modify: new GT box after sample: (x1, y1, x2, y2, x3d_projected, y3d_projected, z3d, w3d, h3d, l3d, ry)
@@ -556,13 +512,13 @@ class Yolo3D(nn.Module):
         targets_cdx_projected = (sampled_gt_bboxes[:, 4] - px) / pw
         targets_cdy_projected = (sampled_gt_bboxes[:, 5] - py) / ph
 
+        gt_alpha = sampled_gt_bboxes[:, 10]
         targets_cdz = (sampled_gt_bboxes[:, 6] - selected_anchors_3d[:, 0, 0]) / selected_anchors_3d[:, 0, 1]
-        targets_cd_sin = (sampled_gt_bboxes[:, 7] - selected_anchors_3d[:, 1, 0]) / selected_anchors_3d[:, 1, 1]
-        targets_cd_cos = (sampled_gt_bboxes[:, 8] - selected_anchors_3d[:, 2, 0]) / selected_anchors_3d[:, 2, 1]
-        targets_w3d = (sampled_gt_bboxes[:, 9] - selected_anchors_3d[:, 3, 0]) / selected_anchors_3d[:, 3, 1]
-        targets_h3d = (sampled_gt_bboxes[:, 10] - selected_anchors_3d[:, 4, 0]) / selected_anchors_3d[:, 4, 1]
-        targets_l3d = (sampled_gt_bboxes[:, 11] - selected_anchors_3d[:, 5, 0]) / selected_anchors_3d[:, 5, 1]
-        pred_alpha = torch.atan2(sampled_gt_bboxes[:, 7], sampled_gt_bboxes[:, 8]) / 2.0
+        targets_cd_sin = (torch.sin(2*gt_alpha) - selected_anchors_3d[:, 1, 0]) / selected_anchors_3d[:, 1, 1]
+        targets_cd_cos = (torch.cos(2*gt_alpha) - selected_anchors_3d[:, 2, 0]) / selected_anchors_3d[:, 2, 1]
+        targets_w3d = (sampled_gt_bboxes[:, 7] - selected_anchors_3d[:, 3, 0]) / selected_anchors_3d[:, 3, 1]
+        targets_h3d = (sampled_gt_bboxes[:, 8] - selected_anchors_3d[:, 4, 0]) / selected_anchors_3d[:, 4, 1]
+        targets_l3d = (sampled_gt_bboxes[:, 9] - selected_anchors_3d[:, 5, 0]) / selected_anchors_3d[:, 5, 1]
 
         targets = torch.stack((targets_dx, targets_dy, targets_dw, targets_dh,
                                targets_cdx_projected, targets_cdy_projected, targets_cdz,
@@ -571,7 +527,7 @@ class Yolo3D(nn.Module):
 
         targets = targets.div_(self.stds.to(targets.device))
 
-        targets_alpha_cls = (torch.cos(pred_alpha) > 0).float()
+        targets_alpha_cls = (torch.cos(gt_alpha) > 0).float()
         return targets, targets_alpha_cls
 
     def _decode(self, v_boxes_2d, v_prediction, anchors_3d_mean_std, v_alpha):
@@ -635,10 +591,7 @@ class Yolo3D(nn.Module):
         pos_assigned_gt_inds = v_gt_index_per_anchor - 1
 
         if v_gt_data.numel() == 0:
-            ### modified
-            pos_gt_bboxes = v_gt_data.new_zeros([0, 12])
-            ###
-            # pos_gt_bboxes = v_gt_data.new_zeros([0, 13])
+            pos_gt_bboxes = v_gt_data.new_zeros([0, 13])
         else:
             pos_gt_bboxes = v_gt_data[pos_assigned_gt_inds[pos_inds]]
 
@@ -677,7 +630,7 @@ class Yolo3D(nn.Module):
             v_anchor_mean_std = v_anchor_mean_std[pos_inds, :]
 
             # Double check if anchor has negative z mean
-            valid_flag = v_anchor_mean_std[:,0,0]>0
+            valid_flag = v_anchor_mean_std[:, 0, 0] > 0
             pos_bboxes = pos_bboxes[valid_flag]
             pos_gt_bboxes = pos_gt_bboxes[valid_flag]
             v_anchor_mean_std = v_anchor_mean_std[valid_flag]
@@ -688,15 +641,15 @@ class Yolo3D(nn.Module):
                 pos_bboxes, pos_gt_bboxes, v_anchor_mean_std
             )  # [N, 12], [N, 1]
             labels[pos_inds, 0] = 1
-            alpha_loss = self.alpha_loss(v_cls_prediction[pos_inds][:, 1],alpha_score).reshape(1)
+            alpha_loss = self.alpha_loss(v_cls_prediction[pos_inds][:, 1], alpha_score).reshape(1)
             reg_loss = self.regression_loss(v_reg_prediction[pos_inds][:, :],
                                             pos_bbox_targets[:, :],
                                             ).sum(dim=0)
-            reg_loss=torch.cat([reg_loss,alpha_loss])
+            reg_loss = torch.cat([reg_loss, alpha_loss])
             num_positives = pos_inds.shape[0]
 
         else:
-            reg_loss = v_anchors.new_zeros((13),requires_grad=True)
+            reg_loss = v_anchors.new_zeros((13), requires_grad=True)
             num_positives = 0
         if len(neg_inds) > 0:
             labels[neg_inds, 0] = 0
@@ -711,8 +664,8 @@ class Yolo3D(nn.Module):
         cls_preds = self.cls_feature_extraction(v_data["features"])  # [1, 58880, 1]
         reg_preds = self.reg_feature_extraction(v_data["features"])  # [1, 58880, 12]
 
-        reg_loss = cls_preds.new_full((13,),0,dtype=torch.float32)
-        cls_loss = cls_preds.new_tensor(0.,requires_grad=True)
+        reg_loss = cls_preds.new_full((13,), 0, dtype=torch.float32)
+        cls_loss = cls_preds.new_tensor(0., requires_grad=True)
 
         gt_prediction = None
         num_positives = 1e-6
@@ -741,7 +694,8 @@ class Yolo3D(nn.Module):
                 # cv2.waitKey()
 
         reg_loss = reg_loss / num_positives
-        cls_loss = cls_loss / (len(v_data["label"])+1e-6)
+        reg_loss = reg_loss * reg_loss.new(self.head_loss_cfg["regression_weight"])
+        cls_loss = cls_loss / (len(v_data["label"]) + 1e-6)
 
         # [x, y, w, h, cx, cy, z, sin2a, cos2a, w, h, l]
         ### modified
@@ -756,7 +710,7 @@ class Yolo3D(nn.Module):
         assert v_cls_preds.shape[0] == 1
         cls_score = v_cls_preds.sigmoid()[0]
         alpha_score = cls_score[..., 1:1 + 1]
-        cls_score = cls_score[:,0:1]
+        cls_score = cls_score[:, 0:1]
 
         anchor = v_anchors  # [N, 4]
         anchor_mean_std_3d = v_anchor_mean_std  # [N, K, 2] -- [2, 16, 2, 6]
@@ -837,6 +791,7 @@ class Yolo3D(nn.Module):
                 # cv2.waitKey()
 
         reg_loss = reg_loss / num_positives
+        reg_loss = reg_loss * reg_loss.new(self.head_loss_cfg["regression_weight"])
         cls_loss = cls_loss / (len(v_data["label"]) + 1e-6)
 
         # [x, y, w, h, cx, cy, z, sin2a, cos2a, w, h, l]

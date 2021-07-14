@@ -54,14 +54,63 @@ def draw_box(v_box):
     gray = cv.cvtColor(gray, cv.COLOR_GRAY2BGR)
     #if just use once cvtColor, it will show a green picture.
     plt.imshow(gray)
+
+import os
+from visualDet3D.data.kitti.kittidata import KittiLabel
+
+def draw_box_result(name):
+
+    image_path = "C:\\Users\\zihan\\Desktop\\visualDet3D\\visualDet3D\\visualDet3D\\data\\kitti_obj\\testing\\image_2"
+    output_path = "C:\\Users\\zihan\\Desktop\\python\\src\\3d_detection\\temp\\kitti_test2\\output"
+    #image_path = "C:\\Users\\zihan\\Desktop\\visualDet3D\\visualDet3D\\visualDet3D\\data\\kitti_obj\\training\\image_2"
+
+    cv.samples.addSamplesDataSearchPath(image_path)
+    img = cv.imread(cv.samples.findFile(name))
+    print(name)
+    print(img.shape)
+    label_path = os.path.join(output_path, name[:6] + ".txt")
+    kitti_label = KittiLabel(label_path=label_path)
+    kitti_label.read_label_file()
+    print(kitti_label.data)
+    v_box = [[24.975143,171.052780,226.496078,294.367249]]
+
+    sp = img.shape
+    height = sp[0]
+    width = sp[1]
+
+    for box in v_box:
+        box[0] = limit_range(box[0], 0, width)
+        box[1] = limit_range(box[1], 0, height)
+        box[2] = limit_range(box[2], 0, width)
+        box[3] = limit_range(box[3], 0, height)
+
+    for box in v_box:
+        print(box)
+        cv.rectangle(img, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (0, 255, 0), 3)
+    cv.imshow("test", img)
+    cv.waitKey()
+
+    plt.title("test")
+    # for row in img:
+    #    for i in row:
+    #        gray = i[2]*0.299 + i[1]*0.587 + i[0]*0.114
+    #        i[0]=gray
+    #        i[1]=gray
+    #        i[2]=gray
+    gray = cv.cvtColor(img, cv.COLOR_RGBA2GRAY)
+    gray = cv.cvtColor(gray, cv.COLOR_GRAY2BGR)
+    # if just use once cvtColor, it will show a green picture.
+    plt.imshow(gray)
     for box in boxes:
-        plt.vlines(box[0],box[1],box[3],"g")
-        plt.vlines(box[2],box[1],box[3],"g")
-        plt.hlines(box[1],box[0],box[2],"g")
-        plt.hlines(box[3],box[0],box[2],"g")
+        plt.vlines(box[0], box[1], box[3], "g")
+        plt.vlines(box[2], box[1], box[3], "g")
+        plt.hlines(box[1], box[0], box[2], "g")
+        plt.hlines(box[3], box[0], box[2], "g")
     plt.show()
-    
+
     pass
+
+draw_box_result("000001.png")
 
 
 if __name__ == '__main__':

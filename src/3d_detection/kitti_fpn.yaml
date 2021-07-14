@@ -4,8 +4,10 @@ trainer:
   num_worker: 0
   train_dataset: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti_obj\training
   valid_dataset: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti_obj\training
-  train_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\chen_split\train.txt
-  valid_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\chen_split\val.txt
+  test_dataset: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti_obj\testing
+  train_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\train_split\train.txt
+  valid_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\train_split\val.txt
+  test_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\test_split\test.txt
 #  train_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
 #  valid_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
 #  valid_split: temp/det3d/total_split_val.txt
@@ -20,8 +22,9 @@ trainer:
 
   batch_size: 8
   auto_lr_find: false
-  resume_from_checkpoint:
+  resume_from_checkpoint: C:\Users\zihan\Desktop\python\src\3d_detection\lightning_logs\version_127\checkpoints\epoch=86-step=75863.ckpt
   evaluate: false
+  running_sanity_check: false
 det_3d:
   preprocessed_path: temp/kitti_test2
   compute_anchor: false
@@ -36,11 +39,12 @@ anchor:
 
 #  ratios: [.125, .25, .5, 1, 2., 4., 8.]
   ratios: [.5, 1]
-  scales: [0.5, 1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15.]
+  #scales: [0.5, 1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15.]
+  #scales: [1., 1.18920712, 1.41421356, 1.68179283, 2., 2.37841423, 2.82842712, 3.36358566, 4., 4.75682846, 5.65685425, 6.72717132, 8., 9.51365692, 11.3137085, 13.45434264]
 
 model:
   img_shape_x: 1280
-  img_shape_y: 360
+  img_shape_y: 288
 
 
 hydra:

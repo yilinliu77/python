@@ -5,8 +5,8 @@ trainer:
   train_dataset: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti_obj\training
   valid_dataset: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti_obj\training
   test_dataset: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti_obj\testing
-  train_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\train_split\train.txt
-  valid_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\train_split\val.txt
+  train_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\chen_split\train.txt
+  valid_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\chen_split\val.txt
   test_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\test_split\test.txt
 #  train_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
 #  valid_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
@@ -22,12 +22,12 @@ trainer:
 
   batch_size: 8
   auto_lr_find: false
-  resume_from_checkpoint: C:\Users\zihan\Desktop\python\src\3d_detection\lightning_logs\version_127\checkpoints\epoch=86-step=75863.ckpt
+  resume_from_checkpoint: #C:\Users\zihan\Desktop\checkpoints\epoch=53-step=47087.ckpt
   evaluate: false
   running_sanity_check: false
 det_3d:
   preprocessed_path: temp/kitti_test2
-  compute_anchor: false
+  compute_anchor: true
   score_threshold: 0.5
   test_score_threshold: 0.75
   rotate_pitch_when_project: false

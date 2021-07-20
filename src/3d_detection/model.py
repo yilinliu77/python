@@ -4,6 +4,7 @@ import pickle
 import shutil
 from copy import deepcopy
 import sys
+from lib.DCNv2_latest.dcn_v2 import DCNv2, DCN
 
 import win32file
 
@@ -392,7 +393,8 @@ class Yolo3D(nn.Module):
         self.cls_feature_extraction[-2].bias.data.fill_(0)
 
         self.reg_feature_extraction = nn.Sequential(
-            ModulatedDeformConvPack(v_num_features_in, v_reg_feature_size, 3, padding=1),
+            #ModulatedDeformConvPack(v_num_features_in, v_reg_feature_size, 3, padding=1),
+            DCN(v_num_features_in, v_reg_feature_size, 3, stride=1, padding=1),
             nn.BatchNorm2d(v_reg_feature_size),
             nn.ReLU(inplace=True),
             nn.Conv2d(v_reg_feature_size, v_reg_feature_size, kernel_size=3, padding=1),

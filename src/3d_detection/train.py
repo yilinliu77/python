@@ -261,11 +261,12 @@ def main(v_cfg: DictConfig):
 
     early_stop_callback = EarlyStopping(
         patience=100,
-        monitor="val_loss"
+        monitor="Validation Loss"
     )
 
     model_check_point =  ModelCheckpoint(
-        monitor='val_loss',
+        #dirpath="C:\\Users\\zihan\\Desktop\\checkpoints\\",
+        monitor='Validation Loss',
         save_top_k=3,
         save_last=True
     )
@@ -273,9 +274,9 @@ def main(v_cfg: DictConfig):
     trainer = Trainer(gpus=v_cfg["trainer"].gpu, weights_summary=None,
                       distributed_backend="ddp" if v_cfg["trainer"].gpu > 1 else None,
                       #early_stop_callback=early_stop_callback,
-                      checkpoint_callback=model_check_point,
+                      callbacks=[model_check_point],
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,
-                      max_epochs=100,
+                      max_epochs=60,
                       gradient_clip_val=0.1,
                       check_val_every_n_epoch=3
                       )

@@ -132,6 +132,7 @@ class Mono_det_3d(pl.LightningModule):
                        "Training 3d_xyz": loss_sep[1],
                        "Training 3d_sin_cos": loss_sep[2],
                        "Training 3d_whl": loss_sep[3],
+                       "Validation 3d_alpha": loss_sep[4],
                        }, on_epoch=True, on_step=False)
 
         return {
@@ -175,6 +176,7 @@ class Mono_det_3d(pl.LightningModule):
             "Validation 3d_xyz": results["loss_sep"][1],
             "Validation 3d_sin_cos": results["loss_sep"][2],
             "Validation 3d_whl": results["loss_sep"][3],
+            "Validation 3d_alpha": results["loss_sep"][4],
         }
 
     def validation_epoch_end(self, outputs):

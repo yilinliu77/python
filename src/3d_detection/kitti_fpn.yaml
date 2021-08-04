@@ -22,7 +22,8 @@ trainer:
 
   batch_size: 8
   auto_lr_find: false
-  resume_from_checkpoint: #C:\Users\zihan\Desktop\checkpoints\epoch=53-step=47087.ckpt
+  #resume_from_checkpoint: #C:\Users\zihan\Desktop\checkpoints\epoch=53-step=47087.ckpt
+  resume_from_checkpoint: #C:\Users\zihan\Desktop\python\src\3d_detection\lightning_logs\version_173\checkpoints\epoch=47-step=41855.ckpt
   evaluate: false
   running_sanity_check: false
 det_3d:
@@ -33,12 +34,18 @@ det_3d:
   rotate_pitch_when_project: false
 
 anchor:
-  pyramid_levels: [4]
-  sizes: [24]
-  v_strides: [1]
+  #pyramid_levels: [4]
+  #sizes: [24]
+  #v_strides: [1]
+  pyramid_levels: [3, 4, 5, 6, 7]
+  sizes: [16, 32, 64, 128, 256]
+  v_strides: [1, 1, 1, 1, 1]
+  #v_strides: [8, 16, 32, 64, 128]
+
 
 #  ratios: [.125, .25, .5, 1, 2., 4., 8.]
-  ratios: [.5, 1]
+  ratios: [.5, 1, 2]
+  #ratios: [.5, 1, 2]
   #scales: [0.5, 1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15.]
   #scales: [1., 1.18920712, 1.41421356, 1.68179283, 2., 2.37841423, 2.82842712, 3.36358566, 4., 4.75682846, 5.65685425, 6.72717132, 8., 9.51365692, 11.3137085, 13.45434264]
 

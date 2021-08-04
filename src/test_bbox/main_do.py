@@ -72,7 +72,7 @@ def draw_box_result(name):
     kitti_label = KittiLabel(label_path=label_path)
     kitti_label.read_label_file()
     print(kitti_label.data)
-    v_box = [[24.975143,171.052780,226.496078,294.367249]]
+    v_box = [[670.457031, 171.616043, 728.592590, 198.775589]]
 
     sp = img.shape
     height = sp[0]
@@ -110,7 +110,7 @@ def draw_box_result(name):
 
     pass
 
-draw_box_result("000001.png")
+draw_box_result("000000.png")
 
 
 if __name__ == '__main__':

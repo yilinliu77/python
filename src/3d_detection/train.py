@@ -132,6 +132,7 @@ class Mono_det_3d(pl.LightningModule):
                        "Training 3d_xyz": loss_sep[1],
                        "Training 3d_sin_cos": loss_sep[2],
                        "Training 3d_whl": loss_sep[3],
+                       "Validation 3d_alpha": loss_sep[4],
                        }, on_epoch=True, on_step=False)
 
         return {
@@ -175,6 +176,7 @@ class Mono_det_3d(pl.LightningModule):
             "Validation 3d_xyz": results["loss_sep"][1],
             "Validation 3d_sin_cos": results["loss_sep"][2],
             "Validation 3d_whl": results["loss_sep"][3],
+            "Validation 3d_alpha": results["loss_sep"][4],
         }
 
     def validation_epoch_end(self, outputs):
@@ -261,7 +263,7 @@ def main(v_cfg: DictConfig):
 
     early_stop_callback = EarlyStopping(
         patience=100,
-        monitor="val_loss"
+        monitor="Validation Loss"
     )
 
     model_check_point =  ModelCheckpoint(
@@ -273,9 +275,9 @@ def main(v_cfg: DictConfig):
     trainer = Trainer(gpus=v_cfg["trainer"].gpu, weights_summary=None,
                       distributed_backend="ddp" if v_cfg["trainer"].gpu > 1 else None,
                       #early_stop_callback=early_stop_callback,
-                      checkpoint_callback=model_check_point,
+                      callbacks=[model_check_point],
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,
-                      max_epochs=100,
+                      max_epochs=60,
                       gradient_clip_val=0.1,
                       check_val_every_n_epoch=3
                       )

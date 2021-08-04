@@ -44,7 +44,7 @@ class Anchors(nn.Module):
             return: sizes_int [N,]  ratio_ints [N, ]
         """
         sizes = np.sqrt((anchors[:, 2] - anchors[:, 0]) * (anchors[:, 3] - anchors[:, 1]))
-        sizes_diff = sizes - (np.array(self.sizes) * np.array(self.scales))[:, np.newaxis]
+        sizes_diff = sizes - np.outer(np.array(self.sizes), np.array(self.scales)).reshape(-1)[:, np.newaxis]
         sizes_int = np.argmin(np.abs(sizes_diff), axis=0)
 
         ratio =  (anchors[:, 3] - anchors[:, 1]) / (anchors[:, 2] - anchors[:, 0])
@@ -128,9 +128,15 @@ def generate_anchors(base_size=None, ratios=None, scales=None):
 
 
 def shift(v_shape, v_pyramid, v_stride, v_anchors):
+
     shape_scale = 2 ** v_pyramid
     shift_x = (np.arange(0, v_shape[1], v_stride) + 0.5) * shape_scale
     shift_y = (np.arange(0, v_shape[0], v_stride) + 0.5) * shape_scale
+
+    """
+    shift_x = (np.arange(0, v_shape[1]) + 0.5) * v_stride
+    shift_y = (np.arange(0, v_shape[0]) + 0.5) * v_stride
+    """
 
     shift_x, shift_y = np.meshgrid(shift_x, shift_y)
 
@@ -150,7 +156,7 @@ def shift(v_shape, v_pyramid, v_stride, v_anchors):
 
     return all_anchors
 
-
+"""
 if __name__ == '__main__':
     anchor_generator = Anchors(
         pyramid_levels=[4, 5],
@@ -181,3 +187,4 @@ if __name__ == '__main__':
 
     cv2.destroyAllWindows()
     pass
+"""

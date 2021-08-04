@@ -21,6 +21,7 @@ from tqdm import tqdm
 from visualDet3D.networks.heads.losses import SigmoidFocalLoss
 from visualDet3D.networks.lib.blocks import AnchorFlatten
 from visualDet3D.networks.lib.ops import ModulatedDeformConvPack
+from thirdparty.DCNv2_latest.dcn_v2 import DCN
 from visualDet3D.networks.utils.utils import ClipBoxes
 
 from scipy.spatial.transform import Rotation as R
@@ -392,7 +393,8 @@ class Yolo3D(nn.Module):
         self.cls_feature_extraction[-2].bias.data.fill_(0)
 
         self.reg_feature_extraction = nn.Sequential(
-            ModulatedDeformConvPack(v_num_features_in, v_reg_feature_size, 3, padding=1),
+            # ModulatedDeformConvPack(v_num_features_in, v_reg_feature_size, 3, padding=1),
+            DCN(v_num_features_in, v_reg_feature_size, 3, padding=1, stride=1),
             nn.BatchNorm2d(v_reg_feature_size),
             nn.ReLU(inplace=True),
             nn.Conv2d(v_reg_feature_size, v_reg_feature_size, kernel_size=3, padding=1),

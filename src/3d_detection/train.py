@@ -265,7 +265,7 @@ def main(v_cfg: DictConfig):
     )
 
     model_check_point =  ModelCheckpoint(
-        monitor='val_loss',
+        monitor='Validation Loss',
         save_top_k=3,
         save_last=True
     )

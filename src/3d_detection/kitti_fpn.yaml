@@ -28,18 +28,18 @@ trainer:
   running_sanity_check: false
 det_3d:
   preprocessed_path: temp/kitti_test2
-  compute_anchor: true
+  compute_anchor: false
   score_threshold: 0.5
   test_score_threshold: 0.75
   rotate_pitch_when_project: false
 
 anchor:
-  #pyramid_levels: [4]
-  #sizes: [24]
-  #v_strides: [1]
-  pyramid_levels: [3, 4, 5, 6, 7]
-  sizes: [16, 32, 64, 128, 256]
-  v_strides: [1, 1, 1, 1, 1]
+  pyramid_levels: [4]
+  sizes: [24]
+  v_strides: [1]
+  #pyramid_levels: [3, 4, 5, 6, 7]
+  #sizes: [16, 32, 64, 128, 256]
+  #v_strides: [1, 1, 1, 1, 1]
   #v_strides: [8, 16, 32, 64, 128]
 
 

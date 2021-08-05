@@ -49,8 +49,8 @@ class Yolo3D(nn.Module):
             "sizes": list(v_cfg["anchor"]["sizes"]),  # Base size of the anchors (in original image shape)
             "ratios": list(v_cfg["anchor"]["ratios"]),  # Different ratio of the anchors
             #"scales": list(v_cfg["anchor"]["scales"]),
-            #"scales": np.array([2 ** (i / 4.0) for i in range(4)]),
-            "scales": np.array([2 ** (i / 3.0) for i in range(3)]),
+            "scales": np.array([2 ** (i / 4.0) for i in range(16)]),
+            #"scales": np.array([2 ** (i / 3.0) for i in range(3)]),
             #"scales": np.array([1, 2, 3, 4]),
             # Different area of the anchors, will multiply the base size
         })
@@ -64,9 +64,9 @@ class Yolo3D(nn.Module):
         )
 
         self.network_cfg = EasyDict(
-            num_features_in=256,
+            num_features_in=1024,
             reg_feature_size=1024,
-            cls_feature_size=1024,
+            cls_feature_size=512,
 
             num_cls_output=1 + 1,  # A flag for alpha angle
             num_reg_output=12,  # (x1, y1, x2, y2, x3d_center, y3d_center, z, sin2a, cos2a, w, h, l)

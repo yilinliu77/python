@@ -126,20 +126,20 @@ class FPN_Resnet(nn.Module):
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
         # Top layer
-        self.toplayer = nn.Conv2d(2048, 256, kernel_size=1, stride=1, padding=0)  # Reduce channels
+        self.toplayer = nn.Conv2d(2048, 1024, kernel_size=1, stride=1, padding=0)  # Reduce channels
         # Smooth layers
         #self.smooth0 = nn.Conv2d(256, 1024, kernel_size=3, stride=1, padding=1)
-        self.smooth1 = nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
+        self.smooth1 = nn.Conv2d(1024, 1024, kernel_size=3, stride=1, padding=1)
         self.smooth2 = nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
         self.smooth3 = nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
         # Lateral layers
-        self.latlayer1 = nn.Conv2d(1024, 256, kernel_size=1, stride=1, padding=0)
+        self.latlayer1 = nn.Conv2d(1024, 1024, kernel_size=1, stride=1, padding=0)
         self.latlayer2 = nn.Conv2d(512, 256, kernel_size=1, stride=1, padding=0)
         self.latlayer3 = nn.Conv2d(256, 256, kernel_size=1, stride=1, padding=0)
 
         # P6 & P7
-        self.conv6 = nn.Conv2d(2048, 256, kernel_size=3, stride=2, padding=1)
-        self.conv7 = nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1)
+        #self.conv6 = nn.Conv2d(2048, 256, kernel_size=3, stride=2, padding=1)
+        #self.conv7 = nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1)
 
 
 
@@ -232,25 +232,25 @@ class FPN_Resnet(nn.Module):
         #print(f'c5:{c5.shape}')
 
         # P6 & P7
-        p6 = self.conv6(c5)
-        p7 = self.conv7(self.relu(p6))
+        #p6 = self.conv6(c5)
+        #p7 = self.conv7(self.relu(p6))
 
         # Top-down
         p5 = self.toplayer(c5)
         #print(f'p5:{p5.shape}')
         p4 = self._upsample_add(p5, self.latlayer1(c4))
         #print(f'latlayer1(c4):{self.latlayer1(c4).shape}, p4:{p4.shape}')
-        p3 = self._upsample_add(p4, self.latlayer2(c3))
+        #p3 = self._upsample_add(p4, self.latlayer2(c3))
         #print(f'latlayer1(c3):{self.latlayer2(c3).shape}, p3:{p3.shape}')
-        p2 = self._upsample_add(p3, self.latlayer3(c2))
+        #p2 = self._upsample_add(p3, self.latlayer3(c2))
         #print(f'latlayer1(c2):{self.latlayer3(c2).shape}, p2:{p2.shape}')
         # Smooth
         #p5 = self.smooth0(p5)
         p4 = self.smooth1(p4)
-        p3 = self.smooth2(p3)
-        p2 = self.smooth3(p2)
+        #p3 = self.smooth2(p3)
+        #p2 = self.smooth3(p2)
 
-        out = [p3, p4, p5, p6, p7]
+        out = [p4]
 
         return out
 

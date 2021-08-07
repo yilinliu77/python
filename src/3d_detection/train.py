@@ -117,7 +117,7 @@ class Mono_det_3d(pl.LightningModule):
         optimizer = Adam(self.parameters(), lr=self.learning_rate, )
         return {
             'optimizer': optimizer,
-            'lr_scheduler': CosineAnnealingLR(optimizer, T_max=50., eta_min=3e-5),
+            'lr_scheduler': CosineAnnealingLR(optimizer, T_max=500., eta_min=3e-5),
             'monitor': 'Validation Loss'
         }
 
@@ -277,7 +277,7 @@ def main(v_cfg: DictConfig):
                       #early_stop_callback=early_stop_callback,
                       callbacks=[model_check_point],
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,
-                      max_epochs=60,
+                      max_epochs=500,
                       gradient_clip_val=0.1,
                       check_val_every_n_epoch=3
                       )

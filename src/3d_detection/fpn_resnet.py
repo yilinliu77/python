@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import math
 import torch.utils.model_zoo as model_zoo
+import torchvision
 from visualDet3D.networks.utils.registry import BACKBONE_DICT
 
 
@@ -250,7 +251,8 @@ class FPN_Resnet(nn.Module):
         p3 = self.smooth2(p3)
         p2 = self.smooth3(p2)
 
-        out = [p3, p4, p5, p6, p7]
+        # out = [p3, p4, p5, p6, p7]
+        out = [p4]
 
         return out
 
@@ -270,6 +272,8 @@ def fpn_resnet(depth, **kwargs):
         model = fpn_resnet101(**kwargs)
 
     return model
+
+torchvision.models.detection.retinanet_resnet50_fpn()
 
 """
 with torch.no_grad():

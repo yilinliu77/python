@@ -4,11 +4,11 @@ import pickle
 import shutil
 from copy import deepcopy
 import sys
-from lib.DCNv2_latest.dcn_v2 import DCNv2, DCN
+# from lib.DCNv2_latest.dcn_v2 import DCNv2, DCN
 
-import win32file
+# import win32file
 
-sys.path.append('C:/Users/zihan/Desktop/visualDet3D/visualDet3D')
+# sys.path.append('C:/Users/zihan/Desktop/visualDet3D/visualDet3D')
 
 import cv2
 import hydra
@@ -51,7 +51,9 @@ class Yolo3D(nn.Module):
             "ratios": list(v_cfg["anchor"]["ratios"]),  # Different ratio of the anchors
             #"scales": list(v_cfg["anchor"]["scales"]),
             #"scales": np.array([2 ** (i / 4.0) for i in range(4)]),
-            "scales": np.array([2 ** (i / 3.0) for i in range(3)]),
+            # "scales": np.array([2 ** (i / 3.0) for i in range(3)]),
+            "scales": np.array([2 ** (i / 4.0) for i in range(16)]),
+            # "scales": np.array([2 ** (i / 6.0) for i in range(32)]),
             #"scales": np.array([1, 2, 3, 4]),
             # Different area of the anchors, will multiply the base size
         })
@@ -65,7 +67,8 @@ class Yolo3D(nn.Module):
         )
 
         self.network_cfg = EasyDict(
-            num_features_in=256,
+            # num_features_in=1024,
+            num_features_in=512,
             reg_feature_size=1024,
             cls_feature_size=1024,
 
@@ -363,7 +366,7 @@ class Yolo3D(nn.Module):
         #     # resnet.layer4,
         # )
 
-        """
+
         from visualDet3D.networks.backbones import resnet101, resnet
         self.core = resnet(depth=101,
                            pretrained=True,
@@ -372,15 +375,19 @@ class Yolo3D(nn.Module):
                            out_indices=(2,),
                            norm_eval=False,
                            dilations=(1, 1, 1), )
-        """
-        from fpn_resnet import fpn_resnet
-        self.core = fpn_resnet(depth=101,
-                               pretrained=True,
-                               frozen_stages=-1,
-                               num_stages=4,
-                               out_indices=(2,),
-                               norm_eval=False,
-                               dilations=(1, 1, 1, 1), )
+
+        from TransformerDet import Swin_Transformer,Swin_Transformer_FPN
+        self.core = Swin_Transformer_FPN()
+        # self.core = Swin_Transformer()
+
+        # from fpn_resnet import fpn_resnet
+        # self.core = fpn_resnet(depth=101,
+        #                        pretrained=True,
+        #                        frozen_stages=-1,
+        #                        num_stages=4,
+        #                        out_indices=(2,),
+        #                        norm_eval=False,
+        #                        dilations=(1, 1, 1, 1), )
 
 
         # self.core.requires_grad_(False)
@@ -390,7 +397,6 @@ class Yolo3D(nn.Module):
         #     trainable_layers=5,
         #     output_channel=1024
         # )
-        """
         self.cls_feature_extraction = nn.Sequential(
             nn.Conv2d(v_num_features_in, v_cls_feature_size, kernel_size=3, padding=1),
             nn.Dropout2d(0.3),
@@ -402,25 +408,23 @@ class Yolo3D(nn.Module):
             nn.Conv2d(v_cls_feature_size, v_num_anchors * v_num_cls_output, kernel_size=3, padding=1),
             AnchorFlatten(v_num_cls_output)
         )
-        """
 
-        self.cls_feature_extraction = nn.Sequential(
-            nn.Conv2d(v_num_features_in, v_cls_feature_size, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(v_cls_feature_size, v_cls_feature_size, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(v_cls_feature_size, v_cls_feature_size, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(v_cls_feature_size, v_cls_feature_size, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(v_cls_feature_size, v_num_anchors * v_num_cls_output, kernel_size=3, padding=1),
-            AnchorFlatten(v_num_cls_output)
-        )
+        # self.cls_feature_extraction = nn.Sequential(
+        #     nn.Conv2d(v_num_features_in, v_cls_feature_size, kernel_size=3, padding=1),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv2d(v_cls_feature_size, v_cls_feature_size, kernel_size=3, padding=1),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv2d(v_cls_feature_size, v_cls_feature_size, kernel_size=3, padding=1),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv2d(v_cls_feature_size, v_cls_feature_size, kernel_size=3, padding=1),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv2d(v_cls_feature_size, v_num_anchors * v_num_cls_output, kernel_size=3, padding=1),
+        #     AnchorFlatten(v_num_cls_output)
+        # )
 
         self.cls_feature_extraction[-2].weight.data.fill_(0)
         self.cls_feature_extraction[-2].bias.data.fill_(0)
 
-        """
         self.reg_feature_extraction = nn.Sequential(
             #ModulatedDeformConvPack(v_num_features_in, v_reg_feature_size, 3, padding=1),
             DCN(v_num_features_in, v_reg_feature_size, 3, stride=1, padding=1),
@@ -433,22 +437,22 @@ class Yolo3D(nn.Module):
             nn.Conv2d(v_reg_feature_size, v_num_anchors * v_num_reg_output, kernel_size=3, padding=1),
             AnchorFlatten(v_num_reg_output)
         )
-        """
 
-        self.reg_feature_extraction = nn.Sequential(
-            #DCN(v_num_features_in, v_reg_feature_size, 3, stride=1, padding=1),
-            #nn.BatchNorm2d(v_reg_feature_size),
-            nn.Conv2d(v_num_features_in, v_reg_feature_size, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(v_reg_feature_size, v_reg_feature_size, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(v_reg_feature_size, v_reg_feature_size, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(v_reg_feature_size, v_reg_feature_size, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(v_reg_feature_size, v_num_anchors * v_num_reg_output, kernel_size=3, padding=1),
-            AnchorFlatten(v_num_reg_output)
-        )
+        #
+        # self.reg_feature_extraction = nn.Sequential(
+        #     #DCN(v_num_features_in, v_reg_feature_size, 3, stride=1, padding=1),
+        #     #nn.BatchNorm2d(v_reg_feature_size),
+        #     nn.Conv2d(v_num_features_in, v_reg_feature_size, kernel_size=3, padding=1),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv2d(v_reg_feature_size, v_reg_feature_size, kernel_size=3, padding=1),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv2d(v_reg_feature_size, v_reg_feature_size, kernel_size=3, padding=1),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv2d(v_reg_feature_size, v_reg_feature_size, kernel_size=3, padding=1),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv2d(v_reg_feature_size, v_num_anchors * v_num_reg_output, kernel_size=3, padding=1),
+        #     AnchorFlatten(v_num_reg_output)
+        # )
 
 
         self.reg_feature_extraction[-2].weight.data.fill_(0)
@@ -817,7 +821,7 @@ class Yolo3D(nn.Module):
         reg_preds = self.reg_feature_extraction(v_data["features"])  # [1, 58880, 12]
         """
 
-        v_data["features"] = self.core(v_data["image"])
+        v_data["features"] = self.core(v_data["image"])[2:3]
 
         """
         cls_preds = []
@@ -938,7 +942,9 @@ class Yolo3D(nn.Module):
         reg_preds = self.reg_feature_extraction(v_data["features"])  # [1, 58880, 12]
 
         """
-        v_data["features"] = self.core(v_data["image"])
+        # v_data["features"] = self.core(v_data["image"])
+        v_data["features"] = self.core(v_data["image"])[2:3]
+
         """
         cls_preds = []
         reg_preds = []

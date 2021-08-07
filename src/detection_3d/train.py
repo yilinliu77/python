@@ -12,7 +12,7 @@ sys.path.append(os.path.join(os.getcwd(), "thirdparty/kitti-object-eval-python")
 from argparse import ArgumentParser
 from src.detection_3d.model import Yolo3D
 import torch
-
+import torch.distributed as dist
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from torch.optim import Adam
@@ -195,8 +195,10 @@ class Mono_det_3d(pl.LightningModule):
             log_dict[key] /= len(outputs)
         self.log_dict(log_dict)
 
+        dist.barrier()
         if outputs[0]["Validation Loss"].device.index!=0:
             return
+
         # Visualize imgs
         img = self.validation_example["image"]
         img = np.clip((img * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])) * 255, 0, 255).astype(

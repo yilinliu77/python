@@ -157,7 +157,7 @@ class Mono_det_3d(pl.LightningModule):
         _, _, thetas = self.projector(bbox_3d_state_3d, bbox_3d_state_3d.new(P2))  # Calculate theta
 
         write_result_to_file(self.evaluate_root,
-                             int(self.evaluate_index[v_id]),
+                             int(v_id),
                              v_results["scores"],
                              bbox_2d,
                              bbox_3d_state_3d,
@@ -185,6 +185,7 @@ class Mono_det_3d(pl.LightningModule):
         }
 
     def validation_epoch_end(self, outputs):
+
         # Visualize the example
         log_dict = {item: 0 for item in outputs[0]}
         for item in outputs:
@@ -194,6 +195,8 @@ class Mono_det_3d(pl.LightningModule):
             log_dict[key] /= len(outputs)
         self.log_dict(log_dict)
 
+        if outputs[0]["Validation Loss"].device.index!=0:
+            return
         # Visualize imgs
         img = self.validation_example["image"]
         img = np.clip((img * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])) * 255, 0, 255).astype(

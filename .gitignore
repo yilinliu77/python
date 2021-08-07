@@ -2,6 +2,7 @@
 temp/
 outputs/
 lightning_logs/
+*.pth
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

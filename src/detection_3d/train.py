@@ -98,9 +98,9 @@ class Mono_det_3d(pl.LightningModule):
         self.valid_dataset = self.dataset_builder(self.hydra_conf, "validation", self.model.test_preprocess)
 
         return DataLoader(self.valid_dataset,
-                          batch_size=1,
-                          num_workers=0,
-                          drop_last=True,
+                          batch_size=self.hydra_conf["trainer"].batch_size,
+                          num_workers=self.hydra_conf["trainer"].num_worker,
+                          drop_last=False,
                           shuffle=False,
                           pin_memory=True,
                           collate_fn=self.valid_dataset.collate_fn,
@@ -147,32 +147,33 @@ class Mono_det_3d(pl.LightningModule):
     v_results: [x1, y1, x2, y2, cx, cy, z, w, h, l, alpha]
     """
 
-    def evaluate(self, v_data, v_results, v_id):
-        bbox_2d = self.model.rectify_2d_box(v_results["bboxes"][:, :4], v_data['original_calib'][0], v_data['calib'][0])
+    def evaluate(self, v_data, v_results,v_i_batch, v_id):
+        bbox_2d = self.model.rectify_2d_box(v_results["bboxes"][v_i_batch][:, :4], v_data['original_calib'][v_i_batch], v_data['calib'][v_i_batch])
 
-        P2 = v_data['calib'][0]
-        bbox_3d_state = v_results["bboxes"][:, 4:]
+        P2 = v_data['calib'][v_i_batch]
+        bbox_3d_state = v_results["bboxes"][v_i_batch][:, 4:]
         bbox_3d_state_3d = self.backprojector(bbox_3d_state,
                                               P2)  # [x3d, y3d, z, w, h, l, alpha]
         _, _, thetas = self.projector(bbox_3d_state_3d, bbox_3d_state_3d.new(P2))  # Calculate theta
 
         write_result_to_file(self.evaluate_root,
                              int(v_id),
-                             v_results["scores"],
+                             v_results["scores"][v_i_batch],
                              bbox_2d,
                              bbox_3d_state_3d,
                              thetas,
-                             ["Car" for _ in v_results["scores"]])
+                             ["Car" for _ in v_results["scores"][v_i_batch]])
 
     def validation_step(self, batch, batch_idx):
         data = batch
         results = self.forward(data)
         self.validation_example = {
-            "bbox": results["bboxes"].cpu().numpy(),
+            "bbox": results["bboxes"][0].cpu().numpy(),
             "gt_bbox": data["bbox2d"][0].cpu().numpy(),
             "image": data["image"][0].cpu().permute(1, 2, 0).numpy()
         }
-        self.evaluate(data, results, data["index"][0])
+        for i_batch in range(len(data["index"])):
+            self.evaluate(data, results,i_batch, data["index"][i_batch])
         return {
             'Validation Loss': results["cls_loss"] + results["reg_loss"],
             "Validation Classification": results["cls_loss"],
@@ -194,8 +195,8 @@ class Mono_det_3d(pl.LightningModule):
         for key in log_dict:
             log_dict[key] /= len(outputs)
         self.log_dict(log_dict)
-
-        dist.barrier()
+        if self.trainer.gpus>1:
+            dist.barrier()
         if outputs[0]["Validation Loss"].device.index!=0:
             return
 

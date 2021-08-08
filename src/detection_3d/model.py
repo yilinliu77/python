@@ -976,18 +976,23 @@ class Yolo3D(nn.Module):
         #     reg_preds[0][v_data["gt_index_per_anchor"][0] > 0] = gt_prediction
         # cls_preds[0][v_data["gt_index_per_anchor"][0] > 0] = 5
 
-        scores, bboxes, cls_indexes = self.get_boxes(cls_preds, reg_preds,  # [1, 58880, 1], [1, 58880, 13]
+        scores, bboxes, cls_indexes = [],[],[]
+        for id_batch in range(len(v_data["label"])):
+            score, bbox, cls_index = self.get_boxes(cls_preds[id_batch:id_batch+1], reg_preds[id_batch:id_batch+1],  # [1, 58880, 1], [1, 58880, 13]
                                                      self.anchors.to(cls_preds.device),  # [58880, 4]
                                                      self.anchors_distribution.to(cls_preds.device),
                                                      # [2, 16, 2, 6] --> [z, sin2a, cos2a, w,h,l]
                                                      v_data)
+            valid_mask = score > self.hparams["det_3d"]["test_score_threshold"]
 
-        valid_mask = scores > self.hparams["det_3d"]["test_score_threshold"]
+            scores.append(score[valid_mask])
+            bboxes.append(bbox[valid_mask])
+            cls_indexes.append(cls_index[valid_mask])
 
         return {
-            "scores": scores[valid_mask],
-            "bboxes": bboxes[valid_mask],
-            "cls_indexes": cls_indexes[valid_mask],
+            "scores": scores,
+            "bboxes": bboxes,
+            "cls_indexes": cls_indexes,
             "cls_loss": cls_loss,
             "reg_loss": reg_loss.mean(),
             "loss_sep": loss_sep

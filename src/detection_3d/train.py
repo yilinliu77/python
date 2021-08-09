@@ -186,7 +186,6 @@ class Mono_det_3d(pl.LightningModule):
         }
 
     def validation_epoch_end(self, outputs):
-
         # Visualize the example
         log_dict = {item: 0 for item in outputs[0]}
         for item in outputs:

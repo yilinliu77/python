@@ -49,8 +49,11 @@ poly=Polygon(boundary_point_cgcs2000)
 
 # root_file=r"D:\Projects\SEAR\Real\Huiyuan\0427_dronescan\model\obj-jingzhun0427\obj-jingzhun0427\Data"
 # origin_point = (492796,2493689,0)
-root_file=r"D:\Projects\SEAR\Real\Huiyuan\0512\cgcs_2000_0.8\0.8-obj\Data"
-origin_point = (492795.0207,2493679.919,67.45)
+root_file=r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\dronescan_plus\obj\obj.7z\release"
+origin_point = (492842.9501,2493719.05,50.76153199)
+
+# root_file=r"D:\Projects\SEAR\Real\Huiyuan\0512\cgcs_2000_0.8\0.8-obj\Data"
+# origin_point = (492795.0207,2493679.919,67.45)
 
 def test3():
     total_points = o3d.io.read_point_cloud(r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\huiwen_0_05_lidar.ply")
@@ -116,7 +119,8 @@ if __name__ == '__main__':
     # test2()
     # test()
     merge_mesh_and_filter_the_points_outside_boundary(root_file,
-                                                      r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\Ours"
+                                                      # r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\Ours"
                                                       # r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\dronescan"
+                                                      r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\dronescan_plus"
                                                       # r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\oblique"
                                                       )

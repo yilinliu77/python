@@ -28,30 +28,30 @@ trainer:
   running_sanity_check: false
 det_3d:
   preprocessed_path: temp/kitti_test2
-  compute_anchor: false
+  compute_anchor: true
   score_threshold: 0.5
   test_score_threshold: 0.75
   rotate_pitch_when_project: false
 
 anchor:
   # Single scale
-  pyramid_levels: [4]
-  sizes: [24]
-  v_strides: [1]
-  ratios: [ .5, 1 ]
-  scales: [1.,1.18920712,1.41421356,1.68179283,2.,2.37841423,2.82842712,3.36358566,4.,4.75682846,5.65685425,6.72717132,8.,9.51365692,11.3137085,13.45434264] # [2 ** (i / 4.0) for i in range(16)]
+#  pyramid_levels: [4]
+#  sizes: [24]
+#  v_strides: [1]
+#  ratios: [ .5, 1 ]
+#  scales: [1.,1.18920712,1.41421356,1.68179283,2.,2.37841423,2.82842712,3.36358566,4.,4.75682846,5.65685425,6.72717132,8.,9.51365692,11.3137085,13.45434264] # [2 ** (i / 4.0) for i in range(16)]
 
 #  Multiple scale
-#  pyramid_levels: [ 4 ]
-#  sizes: [ 24 ]
-#  v_strides: [ 1 ]
-#  ratios: [ .5, 1 ]
-#  scales: [ 1.,1.18920712,1.41421356,1.68179283,2.,2.37841423,2.82842712,3.36358566,4.,4.75682846,5.65685425,6.72717132,8.,9.51365692,11.3137085,13.45434264 ]
+  pyramid_levels: [ 3,4,5 ]
+  sizes: [ 6,24,96 ]
+  v_strides: [ 1,1,1 ]
+  ratios: [ .5, 1 ]
+  scales: [ 1.,1.41421356,2.,2.82842712,3.36358566]
 
 model:
   img_shape_x: 1280
   img_shape_y: 288
-  backbone: "resnet101" # resnet101, resnet101_fpn, tiny_swin_transformer, tiny_swin_transformer_fpn
+  backbone: "resnet101_fpn" # resnet101, resnet101_fpn, tiny_swin_transformer, tiny_swin_transformer_fpn
 
 
 hydra:

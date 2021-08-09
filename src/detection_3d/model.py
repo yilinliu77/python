@@ -340,16 +340,78 @@ class Yolo3D(nn.Module):
                                norm_eval=False,
                                dilations=(1, 1, 1), )
             v_num_features_in = 1024
+            self.cls_feature_extraction = nn.Sequential(
+                nn.Conv2d(v_num_features_in, v_cls_feature_size, kernel_size=3, padding=1),
+                nn.Dropout2d(0.3),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(v_cls_feature_size, v_cls_feature_size, kernel_size=3, padding=1),
+                nn.Dropout2d(0.3),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(v_cls_feature_size, v_num_anchors * v_num_cls_output, kernel_size=3, padding=1),
+                AnchorFlatten(v_num_cls_output)
+            )
+
+            self.cls_feature_extraction[-2].weight.data.fill_(0)
+            self.cls_feature_extraction[-2].bias.data.fill_(0)
+
+            self.reg_feature_extraction = nn.Sequential(
+                DCN(v_num_features_in, v_reg_feature_size, 3, stride=1, padding=1),
+                nn.BatchNorm2d(v_reg_feature_size),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(v_reg_feature_size, v_reg_feature_size, kernel_size=3, padding=1),
+                nn.BatchNorm2d(v_reg_feature_size),
+                nn.ReLU(inplace=True),
+
+                nn.Conv2d(v_reg_feature_size, v_num_anchors * v_num_reg_output, kernel_size=3, padding=1),
+                AnchorFlatten(v_num_reg_output)
+            )
+
+            self.reg_feature_extraction[-2].weight.data.fill_(0)
+            self.reg_feature_extraction[-2].bias.data.fill_(0)
         elif self.hparams["model"]["backbone"] == "resnet101_fpn":
-            from fpn_resnet import fpn_resnet
-            self.core = fpn_resnet(depth=101,
-                                   pretrained=True,
-                                   frozen_stages=-1,
-                                   num_stages=4,
-                                   out_indices=(2,),
-                                   norm_eval=False,
-                                   dilations=(1, 1, 1, 1), )
+            # from fpn_resnet import fpn_resnet
+            # self.core = fpn_resnet(depth=101,
+            #                        pretrained=True,
+            #                        frozen_stages=-1,
+            #                        num_stages=4,
+            #                        out_indices=(2,),
+            #                        norm_eval=False,
+            #                        dilations=(1, 1, 1, 1), )
+            from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
+            self.core = resnet_fpn_backbone('resnet101', pretrained=True, trainable_layers=3,)
             v_num_features_in = 256
+            self.cls_feature_extraction=nn.ModuleList()
+            self.reg_feature_extraction=nn.ModuleList()
+            for i in range(3):
+                self.cls_feature_extraction.append(nn.Sequential(
+                    nn.Conv2d(v_num_features_in, v_cls_feature_size, kernel_size=3, padding=1),
+                    nn.Dropout2d(0.3),
+                    nn.ReLU(inplace=True),
+                    nn.Conv2d(v_cls_feature_size, v_cls_feature_size, kernel_size=3, padding=1),
+                    nn.Dropout2d(0.3),
+                    nn.ReLU(inplace=True),
+                    nn.Conv2d(v_cls_feature_size, v_num_anchors * v_num_cls_output, kernel_size=3, padding=1),
+                    AnchorFlatten(v_num_cls_output)
+                ))
+
+                self.cls_feature_extraction[-1][-2].weight.data.fill_(0)
+                self.cls_feature_extraction[-1][-2].bias.data.fill_(0)
+
+                self.reg_feature_extraction.append(nn.Sequential(
+                    DCN(v_num_features_in, v_reg_feature_size, 3, stride=1, padding=1),
+                    nn.BatchNorm2d(v_reg_feature_size),
+                    nn.ReLU(inplace=True),
+                    nn.Conv2d(v_reg_feature_size, v_reg_feature_size, kernel_size=3, padding=1),
+                    nn.BatchNorm2d(v_reg_feature_size),
+                    nn.ReLU(inplace=True),
+
+                    nn.Conv2d(v_reg_feature_size, v_num_anchors * v_num_reg_output, kernel_size=3, padding=1),
+                    AnchorFlatten(v_num_reg_output)
+                ))
+
+                self.reg_feature_extraction[-1][-2].weight.data.fill_(0)
+                self.reg_feature_extraction[-1][-2].bias.data.fill_(0)
+
         elif self.hparams["model"]["backbone"] == "tiny_swin_transformer":
             from TransformerDet import Swin_Transformer, Swin_Transformer_FPN
             self.core = Swin_Transformer(v_is_tiny=True)
@@ -367,63 +429,7 @@ class Yolo3D(nn.Module):
         #     output_channel=1024
         # )
 
-        self.cls_feature_extraction = nn.Sequential(
-            nn.Conv2d(v_num_features_in, v_cls_feature_size, kernel_size=3, padding=1),
-            nn.Dropout2d(0.3),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(v_cls_feature_size, v_cls_feature_size, kernel_size=3, padding=1),
-            nn.Dropout2d(0.3),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(v_cls_feature_size, v_num_anchors * v_num_cls_output, kernel_size=3, padding=1),
-            AnchorFlatten(v_num_cls_output)
-        )
 
-        # self.cls_feature_extraction = nn.Sequential(
-        #     nn.Conv2d(v_num_features_in, v_cls_feature_size, kernel_size=3, padding=1),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv2d(v_cls_feature_size, v_cls_feature_size, kernel_size=3, padding=1),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv2d(v_cls_feature_size, v_cls_feature_size, kernel_size=3, padding=1),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv2d(v_cls_feature_size, v_cls_feature_size, kernel_size=3, padding=1),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv2d(v_cls_feature_size, v_num_anchors * v_num_cls_output, kernel_size=3, padding=1),
-        #     AnchorFlatten(v_num_cls_output)
-        # )
-
-        self.cls_feature_extraction[-2].weight.data.fill_(0)
-        self.cls_feature_extraction[-2].bias.data.fill_(0)
-
-        self.reg_feature_extraction = nn.Sequential(
-            DCN(v_num_features_in, v_reg_feature_size, 3, stride=1, padding=1),
-            nn.BatchNorm2d(v_reg_feature_size),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(v_reg_feature_size, v_reg_feature_size, kernel_size=3, padding=1),
-            nn.BatchNorm2d(v_reg_feature_size),
-            nn.ReLU(inplace=True),
-
-            nn.Conv2d(v_reg_feature_size, v_num_anchors * v_num_reg_output, kernel_size=3, padding=1),
-            AnchorFlatten(v_num_reg_output)
-        )
-
-        #
-        # self.reg_feature_extraction = nn.Sequential(
-        #     #DCN(v_num_features_in, v_reg_feature_size, 3, stride=1, padding=1),
-        #     #nn.BatchNorm2d(v_reg_feature_size),
-        #     nn.Conv2d(v_num_features_in, v_reg_feature_size, kernel_size=3, padding=1),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv2d(v_reg_feature_size, v_reg_feature_size, kernel_size=3, padding=1),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv2d(v_reg_feature_size, v_reg_feature_size, kernel_size=3, padding=1),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv2d(v_reg_feature_size, v_reg_feature_size, kernel_size=3, padding=1),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv2d(v_reg_feature_size, v_num_anchors * v_num_reg_output, kernel_size=3, padding=1),
-        #     AnchorFlatten(v_num_reg_output)
-        # )
-
-        self.reg_feature_extraction[-2].weight.data.fill_(0)
-        self.reg_feature_extraction[-2].bias.data.fill_(0)
 
     """ 
     Input:  Dataframe with the standard label
@@ -789,23 +795,22 @@ class Yolo3D(nn.Module):
     def training_forward(self, v_data):
         v_data["features"] = self.core(v_data["image"])
 
-        """
-        cls_preds = []
-        reg_preds = []
-
-        for i in self.hparams["anchor"]["pyramid_levels"]:
-            i = i-3
-            cls_pred = self.cls_feature_extraction(v_data["features"][i])  # [1, 58880, 1]
-            reg_pred = self.reg_feature_extraction(v_data["features"][i])  # [1, 58880, 12]
-
-            cls_preds.append(cls_pred)
-            reg_preds.append(reg_pred)
-
-        cls_preds = torch.cat(cls_preds, dim=1)
-        reg_preds = torch.cat(reg_preds, dim=1)
-        """
-        cls_preds = torch.cat([self.cls_feature_extraction(feature) for feature in v_data["features"]], dim=1)
-        reg_preds = torch.cat([self.reg_feature_extraction(feature) for feature in v_data["features"]], dim=1)
+        if self.hparams["model"]["backbone"] == "resnet101":
+            cls_preds = torch.cat([self.cls_feature_extraction(feature) for feature in (v_data["features"])], dim=1)
+            reg_preds = torch.cat([self.reg_feature_extraction(feature) for feature in v_data["features"]], dim=1)
+        elif self.hparams["model"]["backbone"] == "resnet101_fpn":
+            cls_preds = [
+                self.cls_feature_extraction[0](v_data["features"]['1']),
+                self.cls_feature_extraction[1](v_data["features"]['2']),
+                self.cls_feature_extraction[2](v_data["features"]['3']),
+            ]
+            reg_preds = [
+                self.reg_feature_extraction[0](v_data["features"]['1']),
+                self.reg_feature_extraction[1](v_data["features"]['2']),
+                self.reg_feature_extraction[2](v_data["features"]['3']),
+            ]
+            cls_preds = torch.cat(cls_preds, dim=1)
+            reg_preds = torch.cat(reg_preds, dim=1)
 
         reg_loss = cls_preds.new_full((13,), 0, dtype=torch.float32)
         cls_loss = cls_preds.new_tensor(0., requires_grad=True)
@@ -905,23 +910,22 @@ class Yolo3D(nn.Module):
     def test_forward(self, v_data):
         v_data["features"] = self.core(v_data["image"])
 
-        """
-        cls_preds = []
-        reg_preds = []
-
-        for i in self.hparams["anchor"]["pyramid_levels"]:
-            i = i-3
-            cls_pred = self.cls_feature_extraction(v_data["features"][i])  # [1, 58880, 1]
-            reg_pred = self.reg_feature_extraction(v_data["features"][i])  # [1, 58880, 12]
-
-            cls_preds.append(cls_pred)
-            reg_preds.append(reg_pred)
-
-        cls_preds = torch.cat(cls_preds, dim=1)
-        reg_preds = torch.cat(reg_preds, dim=1)
-        """
-        cls_preds = torch.cat([self.cls_feature_extraction(feature) for feature in v_data["features"]], dim=1)
-        reg_preds = torch.cat([self.reg_feature_extraction(feature) for feature in v_data["features"]], dim=1)
+        if self.hparams["model"]["backbone"] == "resnet101":
+            cls_preds = torch.cat([self.cls_feature_extraction(feature) for feature in (v_data["features"])], dim=1)
+            reg_preds = torch.cat([self.reg_feature_extraction(feature) for feature in v_data["features"]], dim=1)
+        elif self.hparams["model"]["backbone"] == "resnet101_fpn":
+            cls_preds=[
+                self.cls_feature_extraction[0](v_data["features"]['1']),
+                self.cls_feature_extraction[1](v_data["features"]['2']),
+                self.cls_feature_extraction[2](v_data["features"]['3']),
+            ]
+            reg_preds=[
+                self.reg_feature_extraction[0](v_data["features"]['1']),
+                self.reg_feature_extraction[1](v_data["features"]['2']),
+                self.reg_feature_extraction[2](v_data["features"]['3']),
+            ]
+            cls_preds = torch.cat(cls_preds, dim=1)
+            reg_preds = torch.cat(reg_preds, dim=1)
 
         reg_loss = cls_preds.new_full((13,), 0, dtype=torch.float32)
         cls_loss = cls_preds.new_tensor(0., requires_grad=True)

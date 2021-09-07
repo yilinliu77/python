@@ -2,20 +2,12 @@ trainer:
   learning_rate: 1e-4
   gpu: 1
   num_worker: 0
-  train_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
-  valid_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
-  test_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\testing
-#  train_split: temp/kitti_split/chen_split_train.txt
-#  valid_split: temp/kitti_split/chen_split_val.txt
-  test_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\test_split\test.txt
-#  train_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
-#  valid_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
-#  valid_split: temp/det3d/total_split_val.txt
-#  train_split: temp/det3d/total_split_train.txt
-#  train_split: temp/kitti_split/chen_split_train.txt
-#  valid_split: temp/kitti_split/chen_split_val.txt
-  train_split: temp/kitti_split/debug_split_train.txt
-  valid_split: temp/kitti_split/debug_split_val.txt
+  train_dataset: D:\Unreal_model_split\Shenzhen_dataset\SZU\training
+  valid_dataset: D:\Unreal_model_split\Shenzhen_dataset\SZU\training
+  test_dataset: D:\Unreal_model_split\Shenzhen_dataset\SZU\training
+  train_split: C:\Users\zihan\Desktop\python\data\debug_split\train.txt
+  valid_split: C:\Users\zihan\Desktop\python\data\debug_split\val.txt
+#  test_split: C:\Users\zihan\Desktop\visualDet3D\visualDet3D\visualDet3D\data\kitti\test_split\test.txt
 
 
 #  train_dataset: C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\training\training
@@ -28,30 +20,30 @@ trainer:
   running_sanity_check: false
 det_3d:
   preprocessed_path: temp/kitti_test2
-  compute_anchor: true
+  compute_anchor: false
   score_threshold: 0.5
   test_score_threshold: 0.75
   rotate_pitch_when_project: false
 
 anchor:
   # Single scale
-#  pyramid_levels: [4]
-#  sizes: [24]
-#  v_strides: [1]
-#  ratios: [ .5, 1 ]
-#  scales: [1.,1.18920712,1.41421356,1.68179283,2.,2.37841423,2.82842712,3.36358566,4.,4.75682846,5.65685425,6.72717132,8.,9.51365692,11.3137085,13.45434264] # [2 ** (i / 4.0) for i in range(16)]
+  pyramid_levels: [4]
+  sizes: [24]
+  v_strides: [1]
+  ratios: [ .5, 1 ]
+  scales: [1.,1.18920712,1.41421356,1.68179283,2.,2.37841423,2.82842712,3.36358566,4.,4.75682846,5.65685425,6.72717132,8.,9.51365692,11.3137085,13.45434264] # [2 ** (i / 4.0) for i in range(16)]
 
 #  Multiple scale
-  pyramid_levels: [ 3,4,5 ]
-  sizes: [ 6,24,96 ]
-  v_strides: [ 1,1,1 ]
-  ratios: [ .5, 1 ]
-  scales: [ 1.,1.41421356,2.,2.82842712,3.36358566]
+#  pyramid_levels: [ 3,4,5 ]
+#  sizes: [ 6,24,96 ]
+#  v_strides: [ 1,1,1 ]
+#  ratios: [ .5, 1 ]
+#  scales: [ 1.,1.41421356,2.,2.82842712,3.36358566]
 
 model:
-  img_shape_x: 1280
-  img_shape_y: 288
-  backbone: "resnet101_fpn" # resnet101, resnet101_fpn, tiny_swin_transformer, tiny_swin_transformer_fpn
+  img_shape_x: 800
+  img_shape_y: 800
+  backbone: "resnet101" # resnet101, resnet101_fpn, tiny_swin_transformer, tiny_swin_transformer_fpn
 
 
 hydra:

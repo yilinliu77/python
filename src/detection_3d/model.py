@@ -79,18 +79,18 @@ class Yolo3D(nn.Module):
             EasyDict(type_name='PhotometricDistort',
                      keywords=EasyDict(distort_prob=1.0, contrast_lower=0.5, contrast_upper=1.5, saturation_lower=0.5,
                                        saturation_upper=1.5, hue_delta=18.0, brightness_delta=32)),
-            EasyDict(type_name='CropTop', keywords=EasyDict(crop_top_index=100)),
-            EasyDict(type_name='Resize',
-                     keywords=EasyDict(size=(v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"]))),
+            #EasyDict(type_name='CropTop', keywords=EasyDict(crop_top_index=100)),
+            #EasyDict(type_name='Resize',
+            #         keywords=EasyDict(size=(v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"]))),
             EasyDict(type_name='RandomMirror', keywords=EasyDict(mirror_prob=0.5)),
             EasyDict(type_name='Normalize',
                      keywords=EasyDict(mean=np.array([0.485, 0.456, 0.406]), stds=np.array([0.229, 0.224, 0.225])))
         ]
         test_transform = [
             EasyDict(type_name='ConvertToFloat'),
-            EasyDict(type_name='CropTop', keywords=EasyDict(crop_top_index=100)),
-            EasyDict(type_name='Resize',
-                     keywords=EasyDict(size=(v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"]))),
+            #EasyDict(type_name='CropTop', keywords=EasyDict(crop_top_index=100)),
+            #EasyDict(type_name='Resize',
+            #         keywords=EasyDict(size=(v_cfg["model"]["img_shape_y"], v_cfg["model"]["img_shape_x"]))),
             EasyDict(type_name='Normalize',
                      keywords=EasyDict(mean=np.array([0.485, 0.456, 0.406]), stds=np.array([0.229, 0.224, 0.225])))
         ]
@@ -498,33 +498,84 @@ class Yolo3D(nn.Module):
             ], dim=-1)
         return homo_coord
 
+    # def _reproject(self, P2: np.ndarray, transformed_label: List[KittiObj]) -> Tuple[List[KittiObj], np.ndarray]:
+    #     bbox3d_state = np.zeros([len(transformed_label), 7])  # [camera_x, camera_y, z, w, h, l, alpha]
+    #     for obj in transformed_label:
+    #         obj.alpha = theta2alpha_3d(obj.ry, obj.x, obj.z, P2)
+    #     bbox3d_origin = torch.tensor(
+    #         [[obj.x, obj.y - 0.5 * obj.h, obj.z, obj.w, obj.h, obj.l, obj.alpha] for obj in transformed_label],
+    #         dtype=torch.float32)
+    #     abs_corner, homo_corner, _ = self.projector(bbox3d_origin, bbox3d_origin.new(P2))
+    #     for i, obj in enumerate(transformed_label):
+    #         extended_center = np.array([obj.x, obj.y - 0.5 * obj.h, obj.z, 1])[:, np.newaxis]  # [4, 1]
+    #         extended_bottom = np.array([obj.x, obj.y, obj.z, 1])[:, np.newaxis]  # [4, 1]
+    #         image_center = (P2 @ extended_center)[:, 0]  # [3]
+    #         image_center[0:2] /= image_center[2]
+    #
+    #         image_bottom = (P2 @ extended_bottom)[:, 0]  # [3]
+    #         image_bottom[0:2] /= image_bottom[2]
+    #
+    #         bbox3d_state[i] = np.concatenate([image_center,
+    #                                           [obj.w, obj.h, obj.l, obj.alpha]])  # [7]
+    #
+    #     max_xy, _ = homo_corner[:, :, 0:2].max(dim=1)  # [N,2]
+    #     min_xy, _ = homo_corner[:, :, 0:2].min(dim=1)  # [N,2]
+    #
+    #     result = torch.cat([min_xy, max_xy], dim=-1)  # [:, 4]
+    #
+    #     bbox2d = result.cpu().numpy()
+    #
+    #     if self.is_reproject:
+    #         for i in range(len(transformed_label)):
+    #             transformed_label[i].bbox_l = bbox2d[i, 0]
+    #             transformed_label[i].bbox_t = bbox2d[i, 1]
+    #             transformed_label[i].bbox_r = bbox2d[i, 2]
+    #             transformed_label[i].bbox_b = bbox2d[i, 3]
+    #
+    #     return transformed_label, bbox3d_state
+
     def _reproject(self, P2: np.ndarray, transformed_label: List[KittiObj]) -> Tuple[List[KittiObj], np.ndarray]:
         bbox3d_state = np.zeros([len(transformed_label), 7])  # [camera_x, camera_y, z, w, h, l, alpha]
         for obj in transformed_label:
             obj.alpha = theta2alpha_3d(obj.ry, obj.x, obj.z, P2)
+        # bbox3d_origin = torch.tensor(
+        #     [[obj.x, obj.y - 0.5 * obj.h, obj.z, obj.w, obj.h, obj.l, obj.alpha] for obj in transformed_label],
+        #     dtype=torch.float32)
         bbox3d_origin = torch.tensor(
             [[obj.x, obj.y - 0.5 * obj.h, obj.z, obj.w, obj.h, obj.l, obj.alpha] for obj in transformed_label],
             dtype=torch.float32)
         abs_corner, homo_corner, _ = self.projector(bbox3d_origin, bbox3d_origin.new(P2))
+        r = R.from_rotvec([63 / 180 * np.pi, 0, 0])
         for i, obj in enumerate(transformed_label):
-            extended_center = np.array([obj.x, obj.y - 0.5 * obj.h, obj.z, 1])[:, np.newaxis]  # [4, 1]
-            extended_bottom = np.array([obj.x, obj.y, obj.z, 1])[:, np.newaxis]  # [4, 1]
+            # extended_center = np.array([obj.x, obj.y - 0.5 * obj.h, obj.z, 1])[:, np.newaxis]  # [4, 1]
+            # extended_bottom = np.array([obj.x, obj.y, obj.z, 1])[:, np.newaxis]  # [4, 1]
+        
+            extended_center = np.array([obj.x, obj.y - 0.5 * obj.h, obj.z])
+            extended_bottom = np.array([obj.x, obj.y, obj.z])
+        
+            # rotate to image plane
+            extended_center = r.apply(extended_center)
+            extended_bottom = r.apply(extended_bottom)
+        
+            extended_center = np.array([extended_center[0], extended_center[1], extended_center[2], 1])[:, np.newaxis]
+            extended_bottom = np.array([extended_bottom[0], extended_bottom[1], extended_bottom[2], 1])[:, np.newaxis]
+        
             image_center = (P2 @ extended_center)[:, 0]  # [3]
             image_center[0:2] /= image_center[2]
-
+        
             image_bottom = (P2 @ extended_bottom)[:, 0]  # [3]
             image_bottom[0:2] /= image_bottom[2]
-
+        
             bbox3d_state[i] = np.concatenate([image_center,
                                               [obj.w, obj.h, obj.l, obj.alpha]])  # [7]
-
+    
         max_xy, _ = homo_corner[:, :, 0:2].max(dim=1)  # [N,2]
         min_xy, _ = homo_corner[:, :, 0:2].min(dim=1)  # [N,2]
-
+    
         result = torch.cat([min_xy, max_xy], dim=-1)  # [:, 4]
-
+    
         bbox2d = result.cpu().numpy()
-
+    
         if self.is_reproject:
             for i in range(len(transformed_label)):
                 transformed_label[i].bbox_l = bbox2d[i, 0]
@@ -532,6 +583,8 @@ class Yolo3D(nn.Module):
                 transformed_label[i].bbox_r = bbox2d[i, 2]
                 transformed_label[i].bbox_b = bbox2d[i, 3]
 
+        # test_ = self.backproject(bbox3d_state, P2)
+    
         return transformed_label, bbox3d_state
 
     def _assign(self, anchor, annotation,
@@ -909,7 +962,26 @@ class Yolo3D(nn.Module):
 
     def test_forward(self, v_data):
         v_data["features"] = self.core(v_data["image"])
-
+        
+        # print(v_data["index"][0])
+        #
+        # bbox2d_ = v_data["bbox2d"][0].cpu().numpy()
+        #
+        # img = v_data["image"][0].cpu().permute(1, 2, 0).numpy()
+        #
+        # img = np.clip((img * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])) * 255, 0, 255).astype(
+        #     np.uint8)
+        # viz_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        # viz_img = cv2.cvtColor(viz_img, cv2.COLOR_BGR2RGB)
+        # viz_img = cv2.rectangle(viz_img,
+        #                         (bbox2d_[0], bbox2d_[1]),
+        #                         (bbox2d_[2], bbox2d_[3]),
+        #                         (0, 255, 0),
+        #                         3
+        #                         )
+        # import matplotlib.pyplot as plt
+        # plt.imshow(viz_img)
+        
         if self.hparams["model"]["backbone"] == "resnet101":
             cls_preds = torch.cat([self.cls_feature_extraction(feature) for feature in (v_data["features"])], dim=1)
             reg_preds = torch.cat([self.reg_feature_extraction(feature) for feature in v_data["features"]], dim=1)

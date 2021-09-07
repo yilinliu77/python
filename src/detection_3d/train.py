@@ -154,7 +154,7 @@ class Mono_det_3d(pl.LightningModule):
         bbox_3d_state = v_results["bboxes"][v_i_batch][:, 4:]
         bbox_3d_state_3d = self.backprojector(bbox_3d_state,
                                               P2)  # [x3d, y3d, z, w, h, l, alpha]
-        _, _, thetas = self.projector(bbox_3d_state_3d, bbox_3d_state_3d.new(P2))  # Calculate theta
+        _, _, thetas = self.projector(bbox_3d_state_3d.cpu().numpy(), P2.cpu().numpy())  # Calculate theta
 
         write_result_to_file(self.evaluate_root,
                              int(v_id),
@@ -170,10 +170,14 @@ class Mono_det_3d(pl.LightningModule):
         self.validation_example = {
             "bbox": results["bboxes"][0].cpu().numpy(),
             "gt_bbox": data["bbox2d"][0].cpu().numpy(),
-            "image": data["image"][0].cpu().permute(1, 2, 0).numpy()
+            "image": data["image"][0].cpu().permute(1, 2, 0).numpy(),
+            "gt_bbox3d": data["bbox3d"][0].cpu().numpy(),
+            "p2": data["calib"][0].cpu().numpy()
         }
+        
+        
         for i_batch in range(len(data["index"])):
-            self.evaluate(data, results,i_batch, data["index"][i_batch])
+            self.evaluate(data, results, i_batch, data["index"][i_batch])
         return {
             'Validation Loss': results["cls_loss"] + results["reg_loss"],
             "Validation Classification": results["cls_loss"],
@@ -198,13 +202,14 @@ class Mono_det_3d(pl.LightningModule):
             dist.barrier()
         if outputs[0]["Validation Loss"].device.index!=0:
             return
-
-        # Visualize imgs
+        
+        # visualize imgs
         img = self.validation_example["image"]
         img = np.clip((img * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])) * 255, 0, 255).astype(
             np.uint8)
         viz_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         viz_img = cv2.cvtColor(viz_img, cv2.COLOR_BGR2RGB)
+
         # GT
         if self.validation_example["gt_bbox"].shape[0] > 0:
             for box in self.validation_example["gt_bbox"]:
@@ -215,6 +220,14 @@ class Mono_det_3d(pl.LightningModule):
                                         (255, 0, 0),
                                         5
                                         )
+        # from src.test_bbox.main_do import visual_3d
+        # viz_img = visual_3d(viz_img,
+        #                     self.validation_example["gt_bbox3d"],
+        #                     self.validation_example["bbox"][:, 4:],
+        #                     self.validation_example["p2"])
+        #
+        # from matplotlib.pyplot import plot as plt
+        # plt.imshow(viz_img)
 
         # Prediction
         if self.validation_example["bbox"].shape[0] > 0:
@@ -226,6 +239,7 @@ class Mono_det_3d(pl.LightningModule):
                                         (0, 255, 0),
                                         3
                                         )
+        
         self.logger.experiment.add_image("Validation_example", viz_img, dataformats='HWC', global_step=self.global_step)
         if not self.trainer.running_sanity_check:
             from visualDet3D.evaluator.kitti.evaluate import evaluate
@@ -266,7 +280,7 @@ class Mono_det_3d(pl.LightningModule):
 """
 
 
-@hydra.main(config_name="kitti_fpn.yaml")
+@hydra.main(config_path=r"C:\Users\zihan\Desktop\python\configs\3d_detection\kitti_fpn.yaml")
 def main(v_cfg: DictConfig):
     print(OmegaConf.to_yaml(v_cfg))
     seed_everything(0)
@@ -307,28 +321,3 @@ def main(v_cfg: DictConfig):
 
 if __name__ == '__main__':
     main()
-
-"""
-# crate test split
-
-import random
-import numpy as np
-import os
-
-total_list = list(range(0, 7481))
-val_list = random.sample(total_list, 500)
-val_list = sorted(val_list)
-train_list = [ele for ele in total_list if ele not in val_list]
-
-path = os.path.join("C:\\Users\\zihan\\Desktop\\visualDet3D\\visualDet3D\\visualDet3D\data\kitti", "train_split")
-
-with open(os.path.join(path, "train.txt"), 'w') as f:
-    for i in train_list:
-        f.write("0"*(6-len(str(i))) + str(i))
-        f.write('\n')
-
-with open(os.path.join(path, "val.txt"), 'w') as f:
-    for i in val_list:
-        f.write("0"*(6-len(str(i))) + str(i))
-        f.write('\n')
-"""

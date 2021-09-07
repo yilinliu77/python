@@ -10,9 +10,10 @@ from PIL import Image
 from typing import List, Tuple
 from visualDet3D.utils.utils import alpha2theta_3d, theta2alpha_3d
 from visualDet3D.data.kitti.kittidata import KittiData, KittiObj, KittiCalib
-from visualDet3D.networks.utils import BBox3dProjector
+from visualDet3D.networks.utils import BBox3dProjector, BackProjection
 from visualDet3D.data.kitti.kittidata import KittiData
 from copy import deepcopy
+from scipy.spatial.transform import Rotation as R
 
 
 class KittiMonoDataset(torch.utils.data.Dataset):
@@ -29,19 +30,35 @@ class KittiMonoDataset(torch.utils.data.Dataset):
         self.transform = v_transform
         self.params = v_params
         self.projector = BBox3dProjector()
-        self.is_reproject = True
+        self.is_reproject = False
+        self.backproject = BackProjection()
 
     def _reproject(self, P2: np.ndarray, transformed_label: List[KittiObj]) -> Tuple[List[KittiObj], np.ndarray]:
         bbox3d_state = np.zeros([len(transformed_label), 7])  # [camera_x, camera_y, z, w, h, l, alpha]
         for obj in transformed_label:
             obj.alpha = theta2alpha_3d(obj.ry, obj.x, obj.z, P2)
+        # bbox3d_origin = torch.tensor(
+        #     [[obj.x, obj.y - 0.5 * obj.h, obj.z, obj.w, obj.h, obj.l, obj.alpha] for obj in transformed_label],
+        #     dtype=torch.float32)
         bbox3d_origin = torch.tensor(
             [[obj.x, obj.y - 0.5 * obj.h, obj.z, obj.w, obj.h, obj.l, obj.alpha] for obj in transformed_label],
             dtype=torch.float32)
         abs_corner, homo_corner, _ = self.projector(bbox3d_origin, bbox3d_origin.new(P2))
+        r = R.from_rotvec([63 / 180 * np.pi, 0, 0])
         for i, obj in enumerate(transformed_label):
-            extended_center = np.array([obj.x, obj.y - 0.5 * obj.h, obj.z, 1])[:, np.newaxis]  # [4, 1]
-            extended_bottom = np.array([obj.x, obj.y, obj.z, 1])[:, np.newaxis]  # [4, 1]
+            # extended_center = np.array([obj.x, obj.y - 0.5 * obj.h, obj.z, 1])[:, np.newaxis]  # [4, 1]
+            # extended_bottom = np.array([obj.x, obj.y, obj.z, 1])[:, np.newaxis]  # [4, 1]
+            
+            extended_center = np.array([obj.x, obj.y - 0.5 * obj.h, obj.z])
+            extended_bottom = np.array([obj.x, obj.y, obj.z])
+            
+            # rotate to image plane
+            extended_center = r.apply(extended_center)
+            extended_bottom = r.apply(extended_bottom)
+            
+            extended_center = np.array([extended_center[0], extended_center[1], extended_center[2], 1])[:, np.newaxis]
+            extended_bottom = np.array([extended_bottom[0], extended_bottom[1], extended_bottom[2], 1])[:, np.newaxis]
+            
             image_center = (P2 @ extended_center)[:, 0]  # [3]
             image_center[0:2] /= image_center[2]
 
@@ -64,6 +81,8 @@ class KittiMonoDataset(torch.utils.data.Dataset):
                 transformed_label[i].bbox_t = bbox2d[i, 1]
                 transformed_label[i].bbox_r = bbox2d[i, 2]
                 transformed_label[i].bbox_b = bbox2d[i, 3]
+                
+        #test_ = self.backproject(bbox3d_state, P2)
 
         return transformed_label, bbox3d_state
 

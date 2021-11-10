@@ -4,3 +4,6 @@
 [submodule "thirdparty/kitti-object-eval-python"]
 	path = thirdparty/kitti-object-eval-python
 	url = https://github.com/traveller59/kitti-object-eval-python
+[submodule "thirdparty/fast_soft_sort"]
+	path = thirdparty/fast_soft_sort
+	url = https://github.com/google-research/fast-soft-sort/

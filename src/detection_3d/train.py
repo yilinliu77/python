@@ -284,7 +284,7 @@ def main(v_cfg: DictConfig):
     )
 
     trainer = Trainer(gpus=v_cfg["trainer"].gpu, weights_summary=None,
-                      distributed_backend="ddp" if v_cfg["trainer"].gpu > 1 else None,
+                      accelerator="ddp" if v_cfg["trainer"].gpu > 1 else None,
                       # early_stop_callback=early_stop_callback,
                       callbacks=[model_check_point],
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,

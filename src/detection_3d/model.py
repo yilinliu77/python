@@ -377,9 +377,33 @@ class Yolo3D(nn.Module):
             #                        out_indices=(2,),
             #                        norm_eval=False,
             #                        dilations=(1, 1, 1, 1), )
-            from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
-            self.core = resnet_fpn_backbone('resnet101', pretrained=True, trainable_layers=3,)
-            v_num_features_in = 256
+            from torchvision.models.detection.backbone_utils import resnet_fpn_backbone,BackboneWithFPN
+            # 1
+            from torchvision.ops.feature_pyramid_network import FeaturePyramidNetwork, LastLevelMaxPool
+            from torchvision.models import resnet
+            from torchvision.ops import misc as misc_nn_ops
+            backbone = resnet.__dict__["resnet101"](
+                pretrained=True,
+                norm_layer=misc_nn_ops.FrozenBatchNorm2d)
+
+            # select layers that wont be frozen
+            assert 0 <= 3 <= 5
+            layers_to_train = ['layer4', 'layer3', 'layer2', 'layer1', 'conv1'][:3]
+            for name, parameter in backbone.named_parameters():
+                if all([not name.startswith(layer) for layer in layers_to_train]):
+                    parameter.requires_grad_(False)
+            extra_blocks = LastLevelMaxPool()
+            returned_layers = [1, 2, 3, 4]
+            assert min(returned_layers) > 0 and max(returned_layers) < 5
+            return_layers = {f'layer{k}': str(v) for v, k in enumerate(returned_layers)}
+            in_channels_stage2 = backbone.inplanes // 8
+            in_channels_list = [in_channels_stage2 * 2 ** (i - 1) for i in returned_layers]
+            out_channels = 1024
+            self.core = BackboneWithFPN(backbone, return_layers, in_channels_list, out_channels, extra_blocks=extra_blocks)
+
+            # 2
+            # self.core = resnet_fpn_backbone('resnet101', pretrained=True, trainable_layers=3,)
+            v_num_features_in = 1024
             self.cls_feature_extraction=nn.ModuleList()
             self.reg_feature_extraction=nn.ModuleList()
             for i in range(3):

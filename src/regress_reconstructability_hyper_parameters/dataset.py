@@ -113,25 +113,25 @@ class Regress_hyper_parameters_dataset(torch.utils.data.Dataset):
                                            False)
         else:
             # batch_index = np.arange(self.views.shape[0])
-            batch_index = self.test_index
+            batch_index = self.test_index[[index]]
         output_dict = {
-            "views": self.views[batch_index],
-            "view_pairs": self.view_pairs[batch_index],
-            "point_attribute": self.point_attribute[batch_index],
+            "views": torch.tensor(self.views[batch_index],dtype=torch.float32),
+            "view_pairs": torch.tensor(self.view_pairs[batch_index],dtype=torch.float32),
+            "point_attribute": torch.tensor(self.point_attribute[batch_index],dtype=torch.float32),
         }
         return output_dict
 
     def __len__(self):
-        return self.num_item if self.is_training else 1
+        return self.num_item if self.is_training else self.test_index.shape[0]
 
     @staticmethod
     def collate_fn(batch):
-        views = batch[0]["views"]
-        view_pairs = batch[0]["view_pairs"]
-        point_attribute = batch[0]["point_attribute"]
+        views = [item["views"] for item in batch]
+        view_pairs = [item["view_pairs"] for item in batch]
+        point_attribute = [item["point_attribute"] for item in batch]
 
         return {
-            'views': torch.tensor(views).float(),
-            'view_pairs': torch.tensor(view_pairs).float(),
-            'point_attribute': torch.tensor(point_attribute).float(),
+            'views': torch.cat(views),
+            'view_pairs': torch.cat(view_pairs),
+            'point_attribute': torch.cat(point_attribute),
         }

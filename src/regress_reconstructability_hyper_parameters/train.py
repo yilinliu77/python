@@ -57,7 +57,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.valid_dataset = Regress_hyper_parameters_dataset(self.hydra_conf, "validation",)
 
         return DataLoader(self.valid_dataset,
-                          batch_size=1,
+                          batch_size=self.hydra_conf["trainer"]["batch_size"],
                           num_workers=self.hydra_conf["trainer"].num_worker,
                           drop_last=False,
                           shuffle=False,
@@ -109,7 +109,14 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.log("Validation Loss", loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
         self.log("Validation Predict spearman", loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
         self.log("Validation num valid point", num_valid_point, prog_bar=False, logger=True, on_step=False, on_epoch=True)
-        self.log("Validation spearman baseline", gt_spearman, prog_bar=True, logger=True, on_step=False, on_epoch=True)
+
+        return torch.cat([results,data["point_attribute"][:,1:2]],dim=1)
+
+    def validation_epoch_end(self, outputs) -> None:
+        result = torch.cat(outputs,dim=0).cpu().detach().numpy()
+        spearmanr_factor = stats.spearmanr(result[:,0],result[:,1])[0]
+        self.log("Validation spearman baseline",spearmanr_factor,prog_bar=True, logger=True, on_step=False, on_epoch=True)
+        pass
 
     def on_after_backward(self) -> None:
         valid_gradients = True

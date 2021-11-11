@@ -33,7 +33,9 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"].learning_rate
 
-        model_module = __import__("model")
+        model_module = __import__("src")
+        model_module = getattr(model_module,"regress_reconstructability_hyper_parameters")
+        model_module = getattr(model_module,"model")
         f = getattr(model_module,self.hydra_conf["model"]["model_name"])
 
         self.model = f(hparams)

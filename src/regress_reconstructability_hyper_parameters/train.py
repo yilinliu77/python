@@ -33,8 +33,8 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"].learning_rate
 
-        self.model = Correlation_nn(hparams)
-        # self.model = Brute_force_nn(hparams)
+        # self.model = Correlation_nn(hparams)
+        self.model = Brute_force_nn(hparams)
 
     def forward(self, v_data):
         data = self.model(v_data)

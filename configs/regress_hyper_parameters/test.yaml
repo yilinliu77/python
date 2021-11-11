@@ -10,9 +10,10 @@ trainer:
   resume_from_checkpoint:
   evaluate: false
   running_sanity_check: false
+
 model:
   is_preprocess: false
-  preprocess_path: C:\repo\python\temp\regress_test_45k
+  preprocess_path: /mnt/d/reconstructability/regress_test_45k
   target_data_dir: D:\Projects\Reconstructability\Scene\bridge_45K\default_noredundancy_nominmax\log
   error_point_cloud_dir: D:\Projects\Reconstructability\Scene\bridge_45K\completeness_smith.ply
 
@@ -21,5 +22,3 @@ hydra:
   run:
     dir: .
   output_subdir: null
-#  job_logging: disabled
-#  hydra_logging: disabled

@@ -12,6 +12,7 @@ trainer:
   running_sanity_check: false
 
 model:
+  model_name: Correlation_nn
   is_preprocess: false
   preprocess_path: /mnt/d/reconstructability/regress_test_45k
   target_data_dir: D:\Projects\Reconstructability\Scene\bridge_45K\default_noredundancy_nominmax\log

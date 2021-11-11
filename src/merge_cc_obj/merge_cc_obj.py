@@ -11,8 +11,8 @@ from shared.trajectory import *
 
 centralized_point=(-12683215., -2575657., 0) # Translate to origin point to prevent overflow
 
-root_file = r"C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\1109-L7_box4-连续路径单镜头\1109-L7_box4-连续路径单镜头\obj"z
-origin_point = (802186.5,2495018,175.5) # Origin point in "metadata.xml"
+root_file = r"C:\Users\yilin\Documents\Tencent Files\1787609016\FileRecv\L7S_10W_youshi_2000\L7S_10W_youshi_2000"
+origin_point = (38493481.32,2492744.246,144.5) # Origin point in "metadata.xml"
 filter_z=-99999 # Set to -99999 if no requirement
 
 # root_file = r"D:\Projects\Building_data\2110-CON-SZ-VCC-huiwenlou+Fine1-51-0.03-8853-1319-PTBGAJKL\重建模型\obj"

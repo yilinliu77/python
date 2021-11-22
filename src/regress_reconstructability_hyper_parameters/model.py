@@ -316,7 +316,7 @@ class Uncertainty_Modeling(nn.Module):
         self.hydra_conf = hparams
         self.is_involve_img = self.hydra_conf["model"]["involve_img"]
 
-        sys.path.insert(0,r"C:\repo\python\thirdparty\Pointnet_Pointnet2_pytorch")
+        sys.path.insert(0,r"thirdparty/Pointnet_Pointnet2_pytorch")
         from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet2_sem_seg import get_model
         self.point_feature_extractor = PointNet(13)
         sys.path.pop()

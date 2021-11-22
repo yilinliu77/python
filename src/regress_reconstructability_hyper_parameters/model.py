@@ -376,7 +376,7 @@ class Uncertainty_Modeling(nn.Module):
 
         geometrical_feature = self.geometrical_feature_extractor(v_data)
         correlation_time += time.time() - t
-        print("{}, {}, {}".format(attention_time,pointnet_time,correlation_time))
+        # print("{}, {}, {}".format(attention_time,pointnet_time,correlation_time))
         return geometrical_feature * uncertainty
 
     def loss(self, v_point_attribute, v_prediction):

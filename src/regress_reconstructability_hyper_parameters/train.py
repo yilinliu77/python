@@ -15,9 +15,11 @@ from pytorch_lightning import Trainer, seed_everything
 import numpy as np
 import hydra
 from omegaconf import DictConfig, OmegaConf
+from tqdm import tqdm
 
 from shared.fast_dataloader import FastDataLoader
-from src.regress_reconstructability_hyper_parameters.dataset import preprocess_data, Regress_hyper_parameters_dataset
+from src.regress_reconstructability_hyper_parameters.dataset import Regress_hyper_parameters_dataset, \
+    Regress_hyper_parameters_dataset_with_imgs
 from src.regress_reconstructability_hyper_parameters.model import Regress_hyper_parameters_Model, Brute_force_nn, \
     Correlation_nn
 
@@ -25,6 +27,8 @@ import torchsort
 # from torchsort import soft_rank
 
 from scipy import stats
+
+from src.regress_reconstructability_hyper_parameters.preprocess_data import preprocess_data
 
 
 class Regress_hyper_parameters(pl.LightningModule):
@@ -45,7 +49,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         return data
 
     def train_dataloader(self):
-        self.train_dataset = Regress_hyper_parameters_dataset(self.hydra_conf, "training",)
+        self.train_dataset = Regress_hyper_parameters_dataset_with_imgs(self.hydra_conf, "training",)
 
         DataLoader_chosed = DataLoader if self.hydra_conf["trainer"]["gpu"] > 0 else FastDataLoader
         return DataLoader_chosed(self.train_dataset,
@@ -58,7 +62,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                                  )
 
     def val_dataloader(self):
-        self.valid_dataset = Regress_hyper_parameters_dataset(self.hydra_conf, "validation",)
+        self.valid_dataset = Regress_hyper_parameters_dataset_with_imgs(self.hydra_conf, "validation",)
 
         return DataLoader(self.valid_dataset,
                           batch_size=self.hydra_conf["trainer"]["batch_size"],
@@ -70,9 +74,10 @@ class Regress_hyper_parameters(pl.LightningModule):
                           )
 
     def test_dataloader(self):
-        self.test_dataset = self.dataset_builder(self.hydra_conf, "testing", self.model.test_preprocess)
+        self.test_dataset = Regress_hyper_parameters_dataset_with_imgs(self.hydra_conf, "test",)
+
         return DataLoader(self.test_dataset,
-                          batch_size=1,
+                          batch_size=self.hydra_conf["trainer"]["batch_size"],
                           num_workers=self.hydra_conf["trainer"].num_worker,
                           drop_last=False,
                           shuffle=False,
@@ -114,12 +119,41 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.log("Validation Predict spearman", loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
         self.log("Validation num valid point", num_valid_point, prog_bar=False, logger=True, on_step=False, on_epoch=True)
 
-        return torch.cat([results,data["point_attribute"][:,1:2]],dim=1)
+        return torch.cat([results,data["point_attribute"][:,:,2:3]],dim=2)
 
     def validation_epoch_end(self, outputs) -> None:
         result = torch.cat(outputs,dim=0).cpu().detach().numpy()
-        spearmanr_factor = stats.spearmanr(result[:,0],result[:,1])[0]
-        self.log("Validation spearman baseline",spearmanr_factor,prog_bar=True, logger=True, on_step=False, on_epoch=True)
+        spearmanr_factors = []
+        for id_item in range(result.shape[0]):
+            spearmanr_factor = stats.spearmanr(result[id_item][:,0],result[id_item][:,1])[0]
+            spearmanr_factors.append(spearmanr_factor)
+        self.log("Validation spearman baseline",np.mean(spearmanr_factors),prog_bar=True, logger=True, on_step=False, on_epoch=True)
+        pass
+
+    def test_step(self, batch, batch_idx)->None:
+        data = batch
+        results = self.forward(data)
+
+        loss, gt_spearman, num_valid_point = self.model.loss(data["point_attribute"], results)
+
+        self.log("Test Loss", loss, prog_bar=True, logger=False, on_step=False, on_epoch=True)
+
+        return torch.cat([results, data["point_attribute"][:, :, 2:3], data["points"][:,:,3:4]], dim=2)
+
+    def test_epoch_end(self, outputs) -> None:
+        result = torch.cat(outputs, dim=0).cpu().detach().numpy()
+        result = result.reshape(-1,result.shape[-1])
+        result = result[np.argsort(result[:,2])]
+        sorted_group = np.split(result[:, :3], np.unique(result[:, 2], return_index=True)[1][1:])
+        whole_points_prediction_error = np.zeros((self.test_dataset.point_attribute.shape[0],2),dtype=np.float32)
+        print("Merge the duplication and calculate the spearman")
+        for id_item in tqdm(range(len(sorted_group))):
+            whole_points_prediction_error[int(sorted_group[id_item][0][2]),0] = np.mean(sorted_group[id_item][:,0])
+            whole_points_prediction_error[int(sorted_group[id_item][0][2]),1] = sorted_group[id_item][0,1]
+        print("{} points are not covered by the sampling".format(np.all(whole_points_prediction_error==0,axis=1).sum()))
+        spearmanr_factor = stats.spearmanr(whole_points_prediction_error[:, 0], whole_points_prediction_error[:, 1])[0]
+        self.log("Test spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
+                 on_epoch=True)
         pass
 
     def on_after_backward(self) -> None:
@@ -142,13 +176,15 @@ def main(v_cfg: DictConfig):
     if v_cfg["model"].is_preprocess:
         if not os.path.exists(v_cfg["model"].preprocess_path):
             os.mkdir(v_cfg["model"].preprocess_path)
-        target_data, mask, error_list = preprocess_data(
+        view, view_pair, point_attribute, view_paths = preprocess_data(
             v_cfg["model"].target_data_dir,
-            v_cfg["model"].error_point_cloud_dir
+            v_cfg["model"].error_point_cloud_dir,
+            v_cfg["model"].img_dir
         )
-        np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "views.npy"), target_data)
-        np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "view_pairs.npy"), mask)
-        np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "point_attribute.npy"), error_list)
+        np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "views"), view)
+        np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "view_pairs"), view_pair)
+        np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "point_attribute"), point_attribute)
+        np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "view_paths"), view_paths)
 
         print("Pre-compute data done")
 

@@ -19,3 +19,6 @@
 [submodule "thirdparty/AA_RMVSNet"]
 	path = thirdparty/AA_RMVSNet
 	url = https://github.com/qt-zhu/aa-rmvsnet
+[submodule "thirdparty/pointnet_pytorch"]
+	path = thirdparty/pointnet_pytorch
+	url = https://github.com/fxia22/pointnet.pytorch

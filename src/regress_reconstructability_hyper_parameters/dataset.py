@@ -88,16 +88,14 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         print("KNN Sample")
         # seed points, radius, max local points,
         new_xyz, new_points, grouped_xyz, fps_idx = sample_and_group(
-            4096, 5, int(v_params["model"]["num_points_per_batch"]), torch.tensor(self.points, dtype=torch.float32).unsqueeze(0),
+            4096, 0.1, int(v_params["model"]["num_points_per_batch"]), torch.tensor(self.points, dtype=torch.float32).unsqueeze(0),
             torch.arange(self.points.shape[0]).unsqueeze(0).unsqueeze(-1), True)
         self.points = new_points[0]
-        print("Pre compute features")
-        pre_compute_img_features(self.view_paths, v_params, self.views)
         # mask = self.target_data[:, 0, -1] < 10
         # mask = self.target_data[:, 0, -1] < 10
         mask = self.point_attribute[:, 0] < 9999999
 
-        stats.spearmanr(self.point_attribute[:, 0][mask], self.point_attribute[:, 1][mask])
+        stats.spearmanr(self.point_attribute[:, 0][mask], self.point_attribute[:, 2][mask])
 
         self.num_item = self.points.shape[0]
 

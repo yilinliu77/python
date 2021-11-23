@@ -28,7 +28,7 @@ import torchsort
 
 from scipy import stats
 
-from src.regress_reconstructability_hyper_parameters.preprocess_data import preprocess_data
+from src.regress_reconstructability_hyper_parameters.preprocess_data import preprocess_data, pre_compute_img_features
 
 
 class Regress_hyper_parameters(pl.LightningModule):
@@ -36,6 +36,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         super(Regress_hyper_parameters, self).__init__()
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"].learning_rate
+        self.batch_size = self.hydra_conf["trainer"]["batch_size"]
 
         model_module = __import__("src")
         model_module = getattr(model_module,"regress_reconstructability_hyper_parameters")
@@ -53,7 +54,7 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         DataLoader_chosed = DataLoader if self.hydra_conf["trainer"]["gpu"] > 0 else FastDataLoader
         return DataLoader_chosed(self.train_dataset,
-                                 batch_size=1,
+                                 batch_size=self.batch_size,
                                  num_workers=self.hydra_conf["trainer"].num_worker,
                                  shuffle=True,
                                  drop_last=True,
@@ -65,7 +66,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.valid_dataset = Regress_hyper_parameters_dataset_with_imgs(self.hydra_conf, "validation",)
 
         return DataLoader(self.valid_dataset,
-                          batch_size=self.hydra_conf["trainer"]["batch_size"],
+                          batch_size=self.batch_size,
                           num_workers=self.hydra_conf["trainer"].num_worker,
                           drop_last=False,
                           shuffle=False,
@@ -136,7 +137,7 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         loss, gt_spearman, num_valid_point = self.model.loss(data["point_attribute"], results)
 
-        self.log("Test Loss", loss, prog_bar=True, logger=False, on_step=False, on_epoch=True)
+        self.log("Test Loss", loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
 
         return torch.cat([results, data["point_attribute"][:, :, 2:3], data["points"][:,:,3:4]], dim=2)
 
@@ -185,8 +186,11 @@ def main(v_cfg: DictConfig):
         np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "view_pairs"), view_pair)
         np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "point_attribute"), point_attribute)
         np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "view_paths"), view_paths)
-
         print("Pre-compute data done")
+
+        print("Pre compute features")
+        pre_compute_img_features(view_paths, v_cfg, view)
+
 
     early_stop_callback = EarlyStopping(
         patience=100,
@@ -204,14 +208,18 @@ def main(v_cfg: DictConfig):
                       # early_stop_callback=early_stop_callback,
                       callbacks=[model_check_point],
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,
-                      max_epochs=500,
+                      max_epochs=3000,
                       gradient_clip_val=0.1,
                       check_val_every_n_epoch=5
                       )
 
     model = Regress_hyper_parameters(v_cfg)
     if v_cfg["trainer"].resume_from_checkpoint is not None:
-        model.load_state_dict(torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"], strict=True)
+        state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
+        for item in list(state_dict.keys()):
+            if "point_feature_extractor" in item:
+                state_dict.pop(item)
+        model.load_state_dict(state_dict, strict=False)
     if v_cfg["trainer"].auto_lr_find:
         trainer.tune(model)
         print(model.learning_rate)

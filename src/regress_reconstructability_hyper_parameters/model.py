@@ -14,6 +14,7 @@ import sys
 
 from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet2_utils import PointNetSetAbstraction, \
     PointNetFeaturePropagation
+from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet_utils import PointNetEncoder
 
 
 def spearmanr(pred, target, **kw):
@@ -24,7 +25,6 @@ def spearmanr(pred, target, **kw):
     target = target - target.mean()
     target = target / target.norm()
     return (pred * target).sum()
-
 
 
 def normal_distribution(v_x, v_sigma, v_exponential):
@@ -114,8 +114,8 @@ class Regress_hyper_parameters_Model(nn.Module):
 
     def loss(self, v_point_attribute, v_prediction):
         # v_error = torch.clamp_max(v_error,1.)
-        gt_reconstructability = v_point_attribute[:,0]
-        gt_error = v_point_attribute[:,1]
+        gt_reconstructability = v_point_attribute[:, 0]
+        gt_error = v_point_attribute[:, 1]
         valid_point = gt_error < 9999999
         num_valid_point = valid_point.sum()
 
@@ -129,7 +129,6 @@ class Regress_hyper_parameters_Model(nn.Module):
                                       valid_error_exp.detach().cpu().numpy())[0]
 
         return soft_spearman, gt_spearman, num_valid_point
-
 
 
 class Brute_force_nn(nn.Module):
@@ -156,7 +155,7 @@ class Brute_force_nn(nn.Module):
         )
 
         for m in self.modules():
-            if isinstance(m,(nn.Linear)):
+            if isinstance(m, (nn.Linear)):
                 nn.init.kaiming_normal_(m.weight)
 
     def forward(self, v_data):
@@ -166,24 +165,28 @@ class Brute_force_nn(nn.Module):
             view_attribute = v_data["views"].view(-1, v_data["views"].shape[2], v_data["views"].shape[3])
         else:
             view_attribute = v_data["views"]
-        view_attribute[:,:,1:4] = view_attribute[:,:,1:4] / (torch.norm(view_attribute[:,:,1:4],dim=2).unsqueeze(-1)+1e-6)
+        view_attribute[:, :, 1:4] = view_attribute[:, :, 1:4] / (
+                    torch.norm(view_attribute[:, :, 1:4], dim=2).unsqueeze(-1) + 1e-6)
         predict_reconstructability_per_view = self.reconstructability_predictor(
-            view_attribute[:,:,1:7]) # Compute the reconstructabilty of every single view
-        valid_mask = torch.zeros_like(predict_reconstructability_per_view) # Filter out the unusable view
-        valid_mask[view_attribute[:,:,0].bool()] = 1
-        predict_reconstructability_per_view = predict_reconstructability_per_view*valid_mask
-        predict_reconstructability = torch.sum(predict_reconstructability_per_view,dim=1) # Sum up all the view contribution of one point
-        predict_reconstructability = predict_reconstructability / torch.sum(view_attribute[:,:,0].bool(),dim=1).unsqueeze(-1) # Normalize the features
-        predict_error = self.reconstructability_to_error(predict_reconstructability) # Map it to point error
-        if predict_error.shape[0]!=batch_size:
-            predict_error=predict_error.reshape(batch_size,-1,predict_error.shape[1])
+            view_attribute[:, :, 1:7])  # Compute the reconstructabilty of every single view
+        valid_mask = torch.zeros_like(predict_reconstructability_per_view)  # Filter out the unusable view
+        valid_mask[view_attribute[:, :, 0].bool()] = 1
+        predict_reconstructability_per_view = predict_reconstructability_per_view * valid_mask
+        predict_reconstructability = torch.sum(predict_reconstructability_per_view,
+                                               dim=1)  # Sum up all the view contribution of one point
+        predict_reconstructability = predict_reconstructability / torch.sum(view_attribute[:, :, 0].bool(),
+                                                                            dim=1).unsqueeze(
+            -1)  # Normalize the features
+        predict_error = self.reconstructability_to_error(predict_reconstructability)  # Map it to point error
+        if predict_error.shape[0] != batch_size:
+            predict_error = predict_error.reshape(batch_size, -1, predict_error.shape[1])
         return predict_error
 
     def loss(self, v_point_attribute, v_prediction):
-        gt_reconstructability = v_point_attribute[:,0]
-        gt_error = v_point_attribute[:,1:2]
+        gt_reconstructability = v_point_attribute[:, 0]
+        gt_error = v_point_attribute[:, 1:2]
 
-        loss = torch.nn.functional.mse_loss(v_prediction,gt_error)
+        loss = torch.nn.functional.mse_loss(v_prediction, gt_error)
         gt_spearman = stats.spearmanr(v_prediction.detach().cpu().numpy(),
                                       gt_error.detach().cpu().numpy())[0]
 
@@ -194,22 +197,22 @@ class Correlation_nn(nn.Module):
     def __init__(self, hparams):
         super(Correlation_nn, self).__init__()
         self.hydra_conf = hparams
-        self.view_feature_extractor=nn.Sequential(
-                    nn.Linear(6, 256),
-                    nn.LeakyReLU(),
-                    # nn.Dropout(0.5),
-                    nn.Linear(256, 256),
-                    nn.LeakyReLU(),
-                    # nn.Dropout(0.5),
-                    nn.Linear(256, 256),
-                    nn.LeakyReLU(),
-                )
-        self.view_feature_fusioner1=nn.MultiheadAttention(embed_dim=256,num_heads=1)
-        self.view_feature_fusioner_linear1=nn.Linear(256, 256)
-        self.view_feature_fusioner_relu1=nn.LeakyReLU()
-        self.view_feature_fusioner2=nn.MultiheadAttention(embed_dim=256,num_heads=1)
-        self.view_feature_fusioner_linear2=nn.Linear(256, 256)
-        self.view_feature_fusioner_relu2=nn.LeakyReLU()
+        self.view_feature_extractor = nn.Sequential(
+            nn.Linear(6, 256),
+            nn.LeakyReLU(),
+            # nn.Dropout(0.5),
+            nn.Linear(256, 256),
+            nn.LeakyReLU(),
+            # nn.Dropout(0.5),
+            nn.Linear(256, 256),
+            nn.LeakyReLU(),
+        )
+        self.view_feature_fusioner1 = nn.MultiheadAttention(embed_dim=256, num_heads=1)
+        self.view_feature_fusioner_linear1 = nn.Linear(256, 256)
+        self.view_feature_fusioner_relu1 = nn.LeakyReLU()
+        self.view_feature_fusioner2 = nn.MultiheadAttention(embed_dim=256, num_heads=1)
+        self.view_feature_fusioner_linear2 = nn.Linear(256, 256)
+        self.view_feature_fusioner_relu2 = nn.LeakyReLU()
 
         self.reconstructability_to_error = nn.Sequential(
             nn.Linear(256, 256),
@@ -219,41 +222,42 @@ class Correlation_nn(nn.Module):
         )
 
         for m in self.parameters():
-            if isinstance(m,(nn.Linear)):
+            if isinstance(m, (nn.Linear)):
                 nn.init.kaiming_normal_(m.weight)
 
     def forward(self, v_data):
         # valid_flag, dx, dy, dz, distance_ratio, normal_angle, central_angle
         batch_size = v_data["views"].shape[0]
         if len(v_data["views"].shape) == 4:
-            view_attribute = v_data["views"].view(-1,v_data["views"].shape[2],v_data["views"].shape[3])
+            view_attribute = v_data["views"].view(-1, v_data["views"].shape[2], v_data["views"].shape[3])
         else:
             view_attribute = v_data["views"]
         view_attribute[:, :, 1:4] = view_attribute[:, :, 1:4] / (
-                    torch.norm(view_attribute[:, :, 1:4], dim=2).unsqueeze(-1) + 1e-6)
+                torch.norm(view_attribute[:, :, 1:4], dim=2).unsqueeze(-1) + 1e-6)
         predict_reconstructability_per_view = self.view_feature_extractor(
             view_attribute[:, :, 1:7])  # Compute the reconstructabilty of every single view
         valid_mask = torch.zeros_like(predict_reconstructability_per_view)  # Filter out the unusable view
         valid_mask[view_attribute[:, :, 0].bool()] = 1
         predict_reconstructability_per_view = predict_reconstructability_per_view * valid_mask
 
-        predict_reconstructability=[]
-        for i in range(predict_reconstructability_per_view.shape[0]//1024+1):
-            if i*1024 == predict_reconstructability_per_view.shape[0]:
+        predict_reconstructability = []
+        for i in range(predict_reconstructability_per_view.shape[0] // 1024 + 1):
+            if i * 1024 == predict_reconstructability_per_view.shape[0]:
                 break
-            feature_item = predict_reconstructability_per_view[i*1024:min(i*1024+1024,predict_reconstructability_per_view.shape[0])]
-            feature_item=torch.transpose(feature_item,0,1)
+            feature_item = predict_reconstructability_per_view[
+                           i * 1024:min(i * 1024 + 1024, predict_reconstructability_per_view.shape[0])]
+            feature_item = torch.transpose(feature_item, 0, 1)
             #
-            attention_result = self.view_feature_fusioner1(feature_item,feature_item,feature_item)
-            attention_result = self.view_feature_fusioner_linear1(torch.transpose(attention_result[0],0,1))
+            attention_result = self.view_feature_fusioner1(feature_item, feature_item, feature_item)
+            attention_result = self.view_feature_fusioner_linear1(torch.transpose(attention_result[0], 0, 1))
             attention_result = self.view_feature_fusioner_relu1(attention_result)
-            feature_item=torch.transpose(attention_result,0,1)
-            attention_result = self.view_feature_fusioner2(feature_item,feature_item,feature_item)
-            attention_result = self.view_feature_fusioner_linear2(torch.transpose(attention_result[0],0,1))
+            feature_item = torch.transpose(attention_result, 0, 1)
+            attention_result = self.view_feature_fusioner2(feature_item, feature_item, feature_item)
+            attention_result = self.view_feature_fusioner_linear2(torch.transpose(attention_result[0], 0, 1))
             attention_result = self.view_feature_fusioner_relu2(attention_result)
 
             predict_reconstructability.append(attention_result)
-        predict_reconstructability=torch.cat(predict_reconstructability,dim=0)
+        predict_reconstructability = torch.cat(predict_reconstructability, dim=0)
         predict_reconstructability = torch.sum(predict_reconstructability,
                                                dim=1)  # Sum up all the view contribution of one point
         predict_reconstructability = predict_reconstructability / torch.sum(view_attribute[:, :, 0].bool(),
@@ -261,27 +265,26 @@ class Correlation_nn(nn.Module):
             -1)  # Normalize the features
 
         predict_error = self.reconstructability_to_error(predict_reconstructability)  # Map it to point error
-        if predict_error.shape[0]!=batch_size:
-            predict_error=predict_error.reshape(batch_size,-1,predict_error.shape[1])
+        if predict_error.shape[0] != batch_size:
+            predict_error = predict_error.reshape(batch_size, -1, predict_error.shape[1])
         return predict_error
 
     def loss(self, v_point_attribute, v_prediction):
-        gt_reconstructability = v_point_attribute[:,0]
-        gt_error = v_point_attribute[:,1:2]
+        gt_reconstructability = v_point_attribute[:, 0]
+        gt_error = v_point_attribute[:, 1:2]
 
-        loss = torch.nn.functional.mse_loss(v_prediction,gt_error)
+        loss = torch.nn.functional.mse_loss(v_prediction, gt_error)
         gt_spearman = stats.spearmanr(v_prediction.detach().cpu().numpy(),
                                       gt_error.detach().cpu().numpy())[0]
 
         return loss, gt_spearman, 0
 
 
-
-class PointNet(nn.Module):
+class PointNet2(nn.Module):
     def __init__(self, num_classes):
         super(PointNet, self).__init__()
-        self.sa1 = PointNetSetAbstraction(128, 0.2, 32, 35 + 3, [32, 32, 64], False)
-        self.sa4 = PointNetSetAbstraction(64, 0.8, 32, 64 + 3, [64, 64, 128], False)
+        self.sa1 = PointNetSetAbstraction(128, 0.3, 32, 35 + 3, [32, 32, 64], False)
+        self.sa2 = PointNetSetAbstraction(64, 0.6, 32, 64 + 3, [64, 64, 128], False)
         self.fp2 = PointNetFeaturePropagation(128 + 64, [256, 128])
         self.fp1 = PointNetFeaturePropagation(128, [128, 128, 128])
         self.conv1 = nn.Conv1d(128, 128, 1)
@@ -291,10 +294,10 @@ class PointNet(nn.Module):
 
     def forward(self, xyz):
         l0_points = xyz
-        l0_xyz = xyz[:,:3,:]
+        l0_xyz = xyz[:, :3, :]
 
         l1_xyz, l1_points = self.sa1(l0_xyz, l0_points)
-        l4_xyz, l4_points = self.sa4(l1_xyz, l1_points)
+        l4_xyz, l4_points = self.sa2(l1_xyz, l1_points)
 
         l1_points = self.fp2(l1_xyz, l4_xyz, l1_points, l4_points)
         l0_points = self.fp1(l0_xyz, l1_xyz, None, l1_points)
@@ -305,21 +308,45 @@ class PointNet(nn.Module):
         return x, l4_points
 
 
+class PointNet1(nn.Module):
+    def __init__(self):
+        super(PointNet1, self).__init__()
+        self.feat = PointNetEncoder(global_feat=False, feature_transform=True, channel=35)
+        self.conv1 = torch.nn.Conv1d(1088, 512, 1)
+        self.conv2 = torch.nn.Conv1d(512, 256, 1)
+        self.conv3 = torch.nn.Conv1d(256, 128, 1)
+        self.conv4 = torch.nn.Conv1d(128, 1, 1)
+        self.bn1 = nn.BatchNorm1d(512)
+        self.bn2 = nn.BatchNorm1d(256)
+        self.bn3 = nn.BatchNorm1d(128)
+
+    def forward(self, x):
+        batchsize = x.size()[0]
+        n_pts = x.size()[2]
+        x, trans, trans_feat = self.feat(x)
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = self.conv4(x)
+        x = x.transpose(2, 1).contiguous()
+        x = x.view(batchsize, n_pts, 1)
+        return x, trans_feat
+
+
 class Uncertainty_Modeling(nn.Module):
     def __init__(self, hparams):
         super(Uncertainty_Modeling, self).__init__()
         self.hydra_conf = hparams
         self.is_involve_img = self.hydra_conf["model"]["involve_img"]
 
-        sys.path.insert(0,r"thirdparty/Pointnet_Pointnet2_pytorch")
-        from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet2_sem_seg import get_model
-        self.point_feature_extractor = PointNet(13)
-        sys.path.pop()
+        self.point_feature_extractor = PointNet1()
 
         # self.img_feature_extractor = torchvision.models.segmentation.fcn_resnet50(pretrained=True)
 
         # self.geometrical_feature_extractor = Correlation_nn(hparams)
         self.geometrical_feature_extractor = Brute_force_nn(hparams)
+        if not self.hydra_conf["model"]["open_weights"]:
+            self.geometrical_feature_extractor.requires_grad_(False)
 
         self.view_feature_fusioner1 = nn.MultiheadAttention(embed_dim=32, num_heads=1)
         self.view_feature_fusioner_linear1 = nn.Linear(32, 32)
@@ -339,41 +366,45 @@ class Uncertainty_Modeling(nn.Module):
         correlation_time = 0
         points = v_data["points"]
         if self.is_involve_img:
-            img_features=[]
+            img_features = []
             t = time.time()
-            for id_batch,item_batch in enumerate(v_data["point_features"]):
+            for id_batch, item_batch in enumerate(v_data["point_features"]):
                 pixel_position_features = item_batch
 
                 # Fuse the image features
-                pixel_position_features=pixel_position_features.transpose(0, 1)
+                pixel_position_features = pixel_position_features.transpose(0, 1)
                 pixel_position_features = self.view_feature_fusioner1(pixel_position_features,
                                                                       pixel_position_features,
                                                                       pixel_position_features,
                                                                       # attn_mask = v_data["point_features_mask"][id_batch])[0]
-                                                                      key_padding_mask = v_data["point_features_mask"][id_batch])[0]
-                pixel_position_features=self.view_feature_fusioner_linear1(pixel_position_features.transpose(0,1))
-                pixel_position_features=self.view_feature_fusioner_relu1(pixel_position_features)
-                pixel_position_features=pixel_position_features.transpose(0, 1)
+                                                                      key_padding_mask=v_data["point_features_mask"][
+                                                                          id_batch])[0]
+                pixel_position_features = self.view_feature_fusioner_linear1(pixel_position_features.transpose(0, 1))
+                pixel_position_features = self.view_feature_fusioner_relu1(pixel_position_features)
+                pixel_position_features = pixel_position_features.transpose(0, 1)
                 pixel_position_features = self.view_feature_fusioner2(pixel_position_features,
                                                                       pixel_position_features,
                                                                       pixel_position_features,
                                                                       # attn_mask = v_data["point_features_mask"][id_batch])[0]
-                                                                      key_padding_mask = v_data["point_features_mask"][id_batch])[0]
-                pixel_position_features=self.view_feature_fusioner_linear2(pixel_position_features.transpose(0, 1))
-                pixel_position_features=self.view_feature_fusioner_relu2(pixel_position_features)
+                                                                      key_padding_mask=v_data["point_features_mask"][
+                                                                          id_batch])[0]
+                pixel_position_features = self.view_feature_fusioner_linear2(pixel_position_features.transpose(0, 1))
+                pixel_position_features = self.view_feature_fusioner_relu2(pixel_position_features)
 
-                img_features.append(torch.mean(pixel_position_features,dim=1))
+                img_features.append(torch.mean(pixel_position_features, dim=1))
 
-            img_features = torch.stack(img_features,dim=0)
-            point_features = torch.cat([points[:,:,:3],img_features],dim=2)
-            attention_time+=time.time()-t
-            t=time.time()
-            uncertainty = self.point_feature_extractor(point_features.transpose(1,2))[0].transpose(1,2)
-            pointnet_time+=time.time()-t
-            t=time.time()
+            img_features = torch.stack(img_features, dim=0)
+            point_features = torch.cat([points[:, :, :3], img_features], dim=2)
+            attention_time += time.time() - t
+            t = time.time()
+            # uncertainty = self.point_feature_extractor(point_features.transpose(1,2))[0].transpose(1,2) # PointNet++
+            uncertainty = self.point_feature_extractor(point_features.transpose(1, 2))[0]
+            pointnet_time += time.time() - t
+            t = time.time()
         else:
             uncertainty = 1
 
+        t = time.time()
         geometrical_feature = self.geometrical_feature_extractor(v_data)
         correlation_time += time.time() - t
         # print("{}, {}, {}".format(attention_time,pointnet_time,correlation_time))
@@ -381,8 +412,8 @@ class Uncertainty_Modeling(nn.Module):
 
     def loss(self, v_point_attribute, v_prediction):
         gt_reconstructability = v_point_attribute[:, 0]
-        gt_max_error = v_point_attribute[:,:, 1:2]
-        gt_avg_error = v_point_attribute[:,:, 2:3]
+        gt_max_error = v_point_attribute[:, :, 1:2]
+        gt_avg_error = v_point_attribute[:, :, 2:3]
 
         loss = torch.nn.functional.mse_loss(v_prediction, gt_avg_error)
         # gt_spearmans=[]

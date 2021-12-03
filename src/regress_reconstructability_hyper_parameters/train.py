@@ -50,7 +50,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         return data
 
     def train_dataloader(self):
-        dataset_paths = self.hydra_conf["trainer"]["train_dataset"].split(";")
+        dataset_paths = self.hydra_conf["trainer"]["train_dataset"].split("*")
         datasets=[]
         for dataset_path in dataset_paths:
             datasets.append(Regress_hyper_parameters_dataset_with_imgs(dataset_path, self.hydra_conf,
@@ -70,7 +70,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                                  )
 
     def val_dataloader(self):
-        dataset_paths = self.hydra_conf["trainer"]["valid_dataset"].split(";")
+        dataset_paths = self.hydra_conf["trainer"]["valid_dataset"].split("*")
         datasets=[]
         for dataset_path in dataset_paths:
             datasets.append(Regress_hyper_parameters_dataset_with_imgs(dataset_path, self.hydra_conf,

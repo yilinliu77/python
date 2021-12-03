@@ -50,7 +50,14 @@ class Regress_hyper_parameters(pl.LightningModule):
         return data
 
     def train_dataloader(self):
-        self.train_dataset = Regress_hyper_parameters_dataset_with_imgs(self.hydra_conf, "training",)
+        dataset_paths = self.hydra_conf["trainer"]["train_dataset"].split(";")
+        datasets=[]
+        for dataset_path in dataset_paths:
+            datasets.append(Regress_hyper_parameters_dataset_with_imgs(dataset_path, self.hydra_conf,
+                                                                       "training" if len(
+                                                                           dataset_paths) == 1 else "testing", ))
+
+        self.train_dataset = torch.utils.data.ConcatDataset(datasets)
 
         DataLoader_chosed = DataLoader if self.hydra_conf["trainer"]["gpu"] > 0 else FastDataLoader
         return DataLoader_chosed(self.train_dataset,
@@ -59,19 +66,23 @@ class Regress_hyper_parameters(pl.LightningModule):
                                  shuffle=True,
                                  drop_last=True,
                                  pin_memory=True,
-                                 collate_fn=self.train_dataset.collate_fn,
+                                 collate_fn=Regress_hyper_parameters_dataset_with_imgs.collate_fn,
                                  )
 
     def val_dataloader(self):
-        self.valid_dataset = Regress_hyper_parameters_dataset_with_imgs(self.hydra_conf, "validation",)
-
+        dataset_paths = self.hydra_conf["trainer"]["valid_dataset"].split(";")
+        datasets=[]
+        for dataset_path in dataset_paths:
+            datasets.append(Regress_hyper_parameters_dataset_with_imgs(dataset_path, self.hydra_conf,
+                                                                       "validation" if len(dataset_paths)==1 else "testing",))
+        self.valid_dataset = torch.utils.data.ConcatDataset(datasets)
         return DataLoader(self.valid_dataset,
                           batch_size=self.batch_size,
                           num_workers=self.hydra_conf["trainer"].num_worker,
                           drop_last=False,
                           shuffle=False,
                           pin_memory=True,
-                          collate_fn=self.valid_dataset.collate_fn,
+                          collate_fn=Regress_hyper_parameters_dataset_with_imgs.collate_fn,
                           )
 
     def test_dataloader(self):
@@ -109,6 +120,10 @@ class Regress_hyper_parameters(pl.LightningModule):
             pass
 
         return loss
+
+    def on_train_start(self) -> None:
+        for dataset in self.train_dataset.datasets:
+            dataset.sample_points_to_different_patches()
 
     def validation_step(self, batch, batch_idx):
         data = batch
@@ -173,24 +188,6 @@ class Regress_hyper_parameters(pl.LightningModule):
 def main(v_cfg: DictConfig):
     print(OmegaConf.to_yaml(v_cfg))
     seed_everything(0)
-
-    if v_cfg["model"].is_preprocess:
-        if not os.path.exists(v_cfg["model"].preprocess_path):
-            os.mkdir(v_cfg["model"].preprocess_path)
-        view, view_pair, point_attribute, view_paths = preprocess_data(
-            v_cfg["model"].target_data_dir,
-            v_cfg["model"].error_point_cloud_dir,
-            v_cfg["model"].img_dir
-        )
-        np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "views"), view)
-        np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "view_pairs"), view_pair)
-        np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "point_attribute"), point_attribute)
-        np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "view_paths"), view_paths)
-        print("Pre-compute data done")
-
-        print("Pre compute features")
-        pre_compute_img_features(view_paths, v_cfg, view)
-
 
     early_stop_callback = EarlyStopping(
         patience=100,

@@ -1,9 +1,9 @@
 trainer:
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 16
-  train_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
-  valid_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
+  num_worker: 0
+  train_dataset: D:\Projects\Reconstructability\pre_computed\dronescan_inter_bridge;D:\Projects\Reconstructability\pre_computed\smith_inter_bridge
+  valid_dataset: D:\Projects\Reconstructability\pre_computed\smith_inter_bridge
 
   batch_size: 16
   auto_lr_find: false
@@ -12,17 +12,17 @@ trainer:
   running_sanity_check: false
 model:
   model_name: Uncertainty_Modeling
-  is_preprocess: false
-  img_size: (600,400)
+#  is_preprocess: false
+#  img_size: (600,400)
+#
+#  target_data_dir: D:\Projects\Reconstructability\training_data\bridge\inter_smith_reconstructability # Reconstructability log file path
+#  error_point_cloud_dir: D:\Projects\Reconstructability\training_data\bridge\inter_smith_accuracy_projected.ply
+#  img_dir: D:\Projects\Building_data\Bridge\asia18\images
+#
+#  preprocess_path: D:\Projects\Reconstructability\pre_computed\bridge_inter # Output path
+#  #  preprocess_path: C:\repo\python\temp\regress_test_10k
 
-  target_data_dir: D:\Projects\Reconstructability\Scene\bridge_10K\proxy\log # Reconstructability log file path
-  error_point_cloud_dir: D:\Projects\Reconstructability\Scene\bridge_10K\proxy_points_with_error_projected.ply
-  img_dir: D:\Projects\Building_data\Bridge\asia18\images
-
-  preprocess_path: D:\Projects\Reconstructability\pre_computed\bridge_10K_full # Output path
-  #  preprocess_path: C:\repo\python\temp\regress_test_10k
-
-  involve_img: true
+  involve_img: false
   open_weights: true
   num_points_per_batch: 256
 

@@ -80,8 +80,11 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.trainer_mode = v_mode
         self.params = v_params
         self.data_root = v_path
-        self.views = np.load(os.path.join(v_path, "views.npz"))["arr_0"]
-        self.view_pairs = np.load(os.path.join(v_path, "view_pairs.npz"))["arr_0"]
+        # self.views = np.load(os.path.join(v_path, "views.npz"))["arr_0"]
+        # self.view_pairs = np.load(os.path.join(v_path, "view_pairs.npz"))["arr_0"]
+        self.views_path=os.path.join(v_path, "views.npz")
+        self.view_pairs_path=os.path.join(v_path, "view_pairs.npz")
+
         self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npz"))["arr_0"]
         self.view_paths = np.load(os.path.join(v_path, "view_paths.npz"), allow_pickle=True)[
             "arr_0"]
@@ -106,7 +109,6 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         np.random.shuffle(self.whole_index)
         self.train_index = self.whole_index[:self.whole_index.shape[0] // 4 * 3]
         self.validation_index = self.whole_index[self.whole_index.shape[0] // 4 * 3:]
-
 
     def __getitem__(self, index):
         num_point_per_patch = self.points.shape[1]
@@ -139,8 +141,8 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
             point_features_mask[id_item,:item.shape[0]]=False
 
         output_dict = {
-            "views": torch.tensor(self.views[point_indexes], dtype=torch.float32),
-            "view_pairs": torch.tensor(self.view_pairs[point_indexes], dtype=torch.float32),
+            "views": torch.tensor(np.load(self.views_path)["arr_0"][point_indexes], dtype=torch.float32),
+            "view_pairs": torch.tensor(np.load(self.view_pairs_path)["arr_0"][point_indexes], dtype=torch.float32),
             "point_attribute": torch.tensor(self.point_attribute[point_indexes], dtype=torch.float32),
             "points": self.points[used_index[index]],
             "point_features": point_features,

@@ -6,7 +6,7 @@ trainer:
   valid_dataset: D:\Projects\Reconstructability\pre_computed\smith_inter_trajectory_inter_proxy_bridge\training_data
   test_dataset: D:\Projects\Reconstructability\pre_computed\ds_inter_trajectory_inter_proxy_bridge\training_data
 
-  batch_size: 16
+  batch_size: 2
   auto_lr_find: false
   resume_from_checkpoint:
   evaluate: false

@@ -99,8 +99,13 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         print("KNN Sample")
         # seed points, radius, max local points,
         new_xyz, new_points, grouped_xyz, fps_idx = sample_and_group(
-            4096, 0.1, int(self.params["model"]["num_points_per_batch"]), torch.tensor(self.original_points, dtype=torch.float32).unsqueeze(0),
-            torch.arange(self.original_points.shape[0]).unsqueeze(0).unsqueeze(-1), True)
+            4096, 0.05, int(self.params["model"]["num_points_per_batch"]),
+            torch.tensor(self.original_points, dtype=torch.float32).unsqueeze(0),
+            torch.arange(self.original_points.shape[0]).unsqueeze(0).unsqueeze(-1),
+            True)
+        if np.unique(new_points[0][:,:,3].reshape(-1).numpy()).shape[0]!=self.point_attribute.shape[0]:
+            print("Uneven samplen only sample {}/{}".format(np.unique(new_points[0][:,:,3].reshape(-1).numpy()).shape[0],self.point_attribute.shape[0]))
+
         self.points = new_points[0]
         mask = self.point_attribute[:, 0] < 9999999
 

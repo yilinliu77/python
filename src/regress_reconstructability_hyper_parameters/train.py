@@ -143,7 +143,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         result = result.reshape(-1, result.shape[-1])
         result = result[np.argsort(result[:, 2])]
         sorted_group = np.split(result[:, :3], np.unique(result[:, 2], return_index=True)[1][1:])
-        whole_points_prediction_error = np.zeros((self.test_dataset.point_attribute.shape[0], 2), dtype=np.float32)
+        whole_points_prediction_error = np.zeros((self.valid_dataset.datasets[0].point_attribute.shape[0], 2), dtype=np.float32)
         print("Merge the duplication and calculate the spearman")
         for id_item in tqdm(range(len(sorted_group))):
             whole_points_prediction_error[int(sorted_group[id_item][0][2]), 0] = np.mean(sorted_group[id_item][:, 0])

@@ -50,7 +50,14 @@ class Regress_hyper_parameters(pl.LightningModule):
         return data
 
     def train_dataloader(self):
-        self.train_dataset = Regress_hyper_parameters_dataset_with_imgs(self.hydra_conf, "training",)
+        dataset_paths = self.hydra_conf["trainer"]["train_dataset"].split("*")
+        datasets=[]
+        for dataset_path in dataset_paths:
+            datasets.append(Regress_hyper_parameters_dataset_with_imgs(dataset_path, self.hydra_conf,
+                                                                       "training" if len(
+                                                                           dataset_paths) == 1 else "testing", ))
+
+        self.train_dataset = torch.utils.data.ConcatDataset(datasets)
 
         DataLoader_chosed = DataLoader if self.hydra_conf["trainer"]["gpu"] > 0 else FastDataLoader
         return DataLoader_chosed(self.train_dataset,
@@ -59,23 +66,28 @@ class Regress_hyper_parameters(pl.LightningModule):
                                  shuffle=True,
                                  drop_last=True,
                                  pin_memory=True,
-                                 collate_fn=self.train_dataset.collate_fn,
+                                 collate_fn=Regress_hyper_parameters_dataset_with_imgs.collate_fn,
                                  )
 
     def val_dataloader(self):
-        self.valid_dataset = Regress_hyper_parameters_dataset_with_imgs(self.hydra_conf, "validation",)
-
+        dataset_paths = self.hydra_conf["trainer"]["valid_dataset"].split("*")
+        datasets=[]
+        for dataset_path in dataset_paths:
+            datasets.append(Regress_hyper_parameters_dataset_with_imgs(dataset_path, self.hydra_conf,
+                                                                       "validation" if len(dataset_paths)==1 else "testing",))
+        self.valid_dataset = torch.utils.data.ConcatDataset(datasets)
         return DataLoader(self.valid_dataset,
                           batch_size=self.batch_size,
                           num_workers=self.hydra_conf["trainer"].num_worker,
                           drop_last=False,
                           shuffle=False,
                           pin_memory=True,
-                          collate_fn=self.valid_dataset.collate_fn,
+                          collate_fn=Regress_hyper_parameters_dataset_with_imgs.collate_fn,
                           )
 
     def test_dataloader(self):
-        self.test_dataset = Regress_hyper_parameters_dataset_with_imgs(self.hydra_conf, "test",)
+        self.test_dataset = Regress_hyper_parameters_dataset_with_imgs(self.hydra_conf["trainer"]["test_dataset"],
+                                                                       self.hydra_conf, "testing",)
 
         return DataLoader(self.test_dataset,
                           batch_size=self.hydra_conf["trainer"]["batch_size"],
@@ -110,6 +122,10 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         return loss
 
+    def on_train_start(self) -> None:
+        for dataset in self.train_dataset.datasets:
+            dataset.sample_points_to_different_patches()
+
     def validation_step(self, batch, batch_idx):
         data = batch
         results = self.forward(data)
@@ -123,12 +139,19 @@ class Regress_hyper_parameters(pl.LightningModule):
         return torch.cat([results,data["point_attribute"][:,:,2:3]],dim=2)
 
     def validation_epoch_end(self, outputs) -> None:
-        result = torch.cat(outputs,dim=0).cpu().detach().numpy()
-        spearmanr_factors = []
-        for id_item in range(result.shape[0]):
-            spearmanr_factor = stats.spearmanr(result[id_item][:,0],result[id_item][:,1])[0]
-            spearmanr_factors.append(spearmanr_factor)
-        self.log("Validation spearman baseline",np.mean(spearmanr_factors),prog_bar=True, logger=True, on_step=False, on_epoch=True)
+        result = torch.cat(outputs, dim=0).cpu().detach().numpy()
+        result = result.reshape(-1, result.shape[-1])
+        result = result[np.argsort(result[:, 2])]
+        sorted_group = np.split(result[:, :3], np.unique(result[:, 2], return_index=True)[1][1:])
+        whole_points_prediction_error = np.zeros((self.test_dataset.point_attribute.shape[0], 2), dtype=np.float32)
+        print("Merge the duplication and calculate the spearman")
+        for id_item in tqdm(range(len(sorted_group))):
+            whole_points_prediction_error[int(sorted_group[id_item][0][2]), 0] = np.mean(sorted_group[id_item][:, 0])
+            whole_points_prediction_error[int(sorted_group[id_item][0][2]), 1] = sorted_group[id_item][0, 1]
+        print("{} points are not covered by the sampling".format(np.all(whole_points_prediction_error == 0, axis=1).sum()))
+        spearmanr_factor = stats.spearmanr(whole_points_prediction_error[:, 0], whole_points_prediction_error[:, 1])[0]
+        self.log("Validation spearman baseline", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
+                 on_epoch=True)
         pass
 
     def test_step(self, batch, batch_idx)->None:
@@ -173,24 +196,6 @@ class Regress_hyper_parameters(pl.LightningModule):
 def main(v_cfg: DictConfig):
     print(OmegaConf.to_yaml(v_cfg))
     seed_everything(0)
-
-    if v_cfg["model"].is_preprocess:
-        if not os.path.exists(v_cfg["model"].preprocess_path):
-            os.mkdir(v_cfg["model"].preprocess_path)
-        view, view_pair, point_attribute, view_paths = preprocess_data(
-            v_cfg["model"].target_data_dir,
-            v_cfg["model"].error_point_cloud_dir,
-            v_cfg["model"].img_dir
-        )
-        np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "views"), view)
-        np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "view_pairs"), view_pair)
-        np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "point_attribute"), point_attribute)
-        np.savez_compressed(os.path.join(v_cfg["model"].preprocess_path, "view_paths"), view_paths)
-        print("Pre-compute data done")
-
-        print("Pre compute features")
-        pre_compute_img_features(view_paths, v_cfg, view)
-
 
     early_stop_callback = EarlyStopping(
         patience=100,

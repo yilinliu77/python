@@ -1,9 +1,10 @@
 trainer:
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 16
-  train_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
-  valid_dataset: D:\DATASET\KITTI\3DDetection\data_object_image_2\training
+  num_worker: 0
+  train_dataset: D:\Projects\Reconstructability\pre_computed\ds_fine_trajectory_fine_proxy_school\training_data*D:\Projects\Reconstructability\pre_computed\ds_inter_trajectory_inter_proxy_bridge\training_data
+  valid_dataset: D:\Projects\Reconstructability\pre_computed\smith_inter_trajectory_inter_proxy_bridge\training_data
+  test_dataset: D:\Projects\Reconstructability\pre_computed\smith_inter_trajectory_inter_proxy_bridge\training_data
 
   batch_size: 16
   auto_lr_find: false
@@ -13,15 +14,7 @@ trainer:
 
 model:
   model_name: Uncertainty_Modeling
-  is_preprocess: false
-  preprocess_path: /mnt/d/reconstructability/regress_test_proxy_10k/
-  target_data_dir: D:\Projects\Reconstructability\Scene\bridge_45K\default_noredundancy_nominmax\log
-  error_point_cloud_dir: D:\Projects\Reconstructability\Scene\bridge_45K\completeness_smith.ply
-  img_size: (600,400)
-
-  img_dir: D:\Projects\Building_data\Bridge\asia18\images
-
-  involve_img: true
+  involve_img: false
   open_weights: true
   num_points_per_batch: 256
 

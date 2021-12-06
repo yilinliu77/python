@@ -15,7 +15,8 @@ from tqdm import tqdm
 from copy import deepcopy
 import open3d as o3d
 from scipy import stats
-
+import multiprocessing as mp
+import ctypes
 from src.regress_reconstructability_hyper_parameters.preprocess_data import pre_compute_img_features
 from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet2_utils import farthest_point_sample, sample_and_group
 
@@ -80,10 +81,12 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.trainer_mode = v_mode
         self.params = v_params
         self.data_root = v_path
-        # self.views = np.load(os.path.join(v_path, "views.npz"))["arr_0"]
+        self.views = np.load(os.path.join(v_path, "views.npz"))["arr_0"]
         # self.view_pairs = np.load(os.path.join(v_path, "view_pairs.npz"))["arr_0"]
-        self.views_path=os.path.join(v_path, "views.npz")
-        self.view_pairs_path=os.path.join(v_path, "view_pairs.npz")
+        # shared_array_base = mp.Array(ctypes.c_float, self.views.shape)
+        # shared_array = np.ctypeslib.as_array(shared_array_base.get_obj())
+        # self.views_path=os.path.join(v_path, "views.npz")
+        # self.view_pairs_path=os.path.join(v_path, "view_pairs.npz")
 
         self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npz"))["arr_0"]
         self.view_paths = np.load(os.path.join(v_path, "view_paths.npz"), allow_pickle=True)[
@@ -141,8 +144,11 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
             point_features_mask[id_item,:item.shape[0]]=False
 
         output_dict = {
-            "views": torch.tensor(np.load(self.views_path)["arr_0"][point_indexes], dtype=torch.float32),
-            "view_pairs": torch.tensor(np.load(self.view_pairs_path)["arr_0"][point_indexes], dtype=torch.float32),
+            # "views": torch.tensor(np.load(self.views_path,mmap_mode="r")["arr_0"][point_indexes], dtype=torch.float32),
+            # "view_pairs": torch.tensor(np.load(self.view_pairs_path,mmap_mode="r")["arr_0"][point_indexes], dtype=torch.float32),
+            "views": torch.tensor(self.views[point_indexes], dtype=torch.float32),
+            # "view_pairs": torch.tensor(self.view_pairs[point_indexes], dtype=torch.float32),
+
             "point_attribute": torch.tensor(self.point_attribute[point_indexes], dtype=torch.float32),
             "points": self.points[used_index[index]],
             "point_features": point_features,
@@ -163,8 +169,8 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         views = [torch.transpose(item["views"],0,1) for item in batch]
         from torch.nn.utils.rnn import pad_sequence
         views_pad = torch.transpose(torch.transpose(pad_sequence(views),0,1),1,2)
-        view_pairs = [torch.transpose(item["view_pairs"],0,1) for item in batch]
-        view_pairs_pad = torch.transpose(torch.transpose(pad_sequence(view_pairs),0,1),1,2)
+        # view_pairs = [torch.transpose(item["view_pairs"],0,1) for item in batch]
+        # view_pairs_pad = torch.transpose(torch.transpose(pad_sequence(view_pairs),0,1),1,2)
         point_attribute = [item["point_attribute"] for item in batch]
         point_features = [item["point_features"] for item in batch]
         points = [item["points"] for item in batch]
@@ -172,7 +178,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
 
         return {
             'views': views_pad,
-            'view_pairs': view_pairs_pad,
+            # 'view_pairs': view_pairs_pad,
             'point_attribute': torch.stack(point_attribute,dim=0),
             'point_features': point_features,
             'points': torch.stack(points,dim=0),

@@ -86,7 +86,8 @@ class Regress_hyper_parameters(pl.LightningModule):
                           )
 
     def test_dataloader(self):
-        self.test_dataset = Regress_hyper_parameters_dataset_with_imgs(self.hydra_conf, "test",)
+        self.test_dataset = Regress_hyper_parameters_dataset_with_imgs(self.hydra_conf["trainer"]["test_dataset"],
+                                                                       self.hydra_conf, "testing",)
 
         return DataLoader(self.test_dataset,
                           batch_size=self.hydra_conf["trainer"]["batch_size"],
@@ -138,12 +139,19 @@ class Regress_hyper_parameters(pl.LightningModule):
         return torch.cat([results,data["point_attribute"][:,:,2:3]],dim=2)
 
     def validation_epoch_end(self, outputs) -> None:
-        result = torch.cat(outputs,dim=0).cpu().detach().numpy()
-        spearmanr_factors = []
-        for id_item in range(result.shape[0]):
-            spearmanr_factor = stats.spearmanr(result[id_item][:,0],result[id_item][:,1])[0]
-            spearmanr_factors.append(spearmanr_factor)
-        self.log("Validation spearman baseline",np.mean(spearmanr_factors),prog_bar=True, logger=True, on_step=False, on_epoch=True)
+        result = torch.cat(outputs, dim=0).cpu().detach().numpy()
+        result = result.reshape(-1, result.shape[-1])
+        result = result[np.argsort(result[:, 2])]
+        sorted_group = np.split(result[:, :3], np.unique(result[:, 2], return_index=True)[1][1:])
+        whole_points_prediction_error = np.zeros((self.test_dataset.point_attribute.shape[0], 2), dtype=np.float32)
+        print("Merge the duplication and calculate the spearman")
+        for id_item in tqdm(range(len(sorted_group))):
+            whole_points_prediction_error[int(sorted_group[id_item][0][2]), 0] = np.mean(sorted_group[id_item][:, 0])
+            whole_points_prediction_error[int(sorted_group[id_item][0][2]), 1] = sorted_group[id_item][0, 1]
+        print("{} points are not covered by the sampling".format(np.all(whole_points_prediction_error == 0, axis=1).sum()))
+        spearmanr_factor = stats.spearmanr(whole_points_prediction_error[:, 0], whole_points_prediction_error[:, 1])[0]
+        self.log("Validation spearman baseline", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
+                 on_epoch=True)
         pass
 
     def test_step(self, batch, batch_idx)->None:

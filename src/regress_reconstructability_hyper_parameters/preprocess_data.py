@@ -29,7 +29,14 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str=None) 
             sum_error_list = plydata['vertex']['sum_error'].copy()
             num_list = plydata['vertex']['num'].copy()
             avg_error = sum_error_list/(num_list+1e-6)
-            error_list = np.stack([max_error_list,avg_error,x,y,z],axis=1).astype(np.float16)
+            x_dim = (np.max(x)-np.min(x))/2
+            y_dim = (np.max(y)-np.min(y))/2
+            z_dim = (np.max(z)-np.min(z))/2
+            max_dim = max(x_dim,y_dim,z_dim)
+            x = (x-np.mean(x))/max_dim
+            y = (y-np.mean(y))/max_dim
+            z = (z-np.mean(z))/max_dim
+            error_list = np.stack([max_error_list,avg_error,x,y,z],axis=1)
         else:
             error_list = plydata['vertex']['error'].copy()
 
@@ -178,26 +185,27 @@ def pre_compute_img_features(v_view_paths: List[str], v_img_size, v_root_path, v
 
 
 if __name__ == '__main__':
-    output_root = r"D:\Projects\Reconstructability\pre_computed\ds_fine_school"
-    reconstructability_file_dir = r"D:\Projects\Reconstructability\training_data\school\fine_ds_reconstructability"
-    error_point_cloud_dir = r"D:\Projects\Reconstructability\training_data\school\fine_ds_accuracy_projected.ply"
-    img_dir = r"D:\Projects\Reconstructability\training_data\school\fine_ds_images"
+    import sys
+    output_root = sys.argv[1]
+    reconstructability_file_dir = os.path.join(output_root,"reconstructability")
+    error_point_cloud_dir = os.path.join(output_root,"accuracy_projected.ply")
+    img_dir = os.path.join(output_root,"images")
     img_rescale_size = (600,400)
 
-    if not os.path.exists(output_root):
-        os.mkdir(output_root)
+    if not os.path.exists(os.path.join(output_root, "training_data")):
+        os.mkdir(os.path.join(output_root, "training_data"))
     view, view_pair, point_attribute, view_paths = preprocess_data(
         reconstructability_file_dir,
         error_point_cloud_dir,
         img_dir
     )
-    np.savez_compressed(os.path.join(output_root, "views"), view)
-    np.savez_compressed(os.path.join(output_root, "view_pairs"), view_pair)
-    np.savez_compressed(os.path.join(output_root, "point_attribute"), point_attribute)
-    np.savez_compressed(os.path.join(output_root, "view_paths"), view_paths)
+    np.savez_compressed(os.path.join(output_root, "training_data/views"), view)
+    np.savez_compressed(os.path.join(output_root, "training_data/view_pairs"), view_pair)
+    np.savez_compressed(os.path.join(output_root, "training_data/point_attribute"), point_attribute)
+    np.savez_compressed(os.path.join(output_root, "training_data/view_paths"), view_paths)
     print("Pre-compute data done")
 
     print("Pre compute features")
-    pre_compute_img_features(view_paths, img_rescale_size, output_root, view)
+    pre_compute_img_features(view_paths, img_rescale_size, os.path.join(output_root,"training_data"), view)
     print("Pre compute done")
 

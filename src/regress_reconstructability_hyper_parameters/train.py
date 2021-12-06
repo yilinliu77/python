@@ -151,7 +151,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.log("Validation spearman baseline", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
                  on_epoch=True)
 
-        if not self.trainer.running_sanity_check:
+        if not self.trainer.sanity_checking:
             for dataset in self.train_dataset.datasets:
                 dataset.sample_points_to_different_patches()
 

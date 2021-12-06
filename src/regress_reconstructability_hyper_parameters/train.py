@@ -124,7 +124,7 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         return loss
 
-    def on_train_start(self) -> None:
+    def on_epoch_start(self) -> None:
         for dataset in self.train_dataset.datasets:
             dataset.sample_points_to_different_patches()
 

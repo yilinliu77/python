@@ -124,10 +124,6 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         return loss
 
-    def on_epoch_start(self) -> None:
-        for dataset in self.train_dataset.datasets:
-            dataset.sample_points_to_different_patches()
-
     def validation_step(self, batch, batch_idx):
         data = batch
         results = self.forward(data)
@@ -154,6 +150,11 @@ class Regress_hyper_parameters(pl.LightningModule):
         spearmanr_factor = stats.spearmanr(whole_points_prediction_error[:, 0], whole_points_prediction_error[:, 1])[0]
         self.log("Validation spearman baseline", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
                  on_epoch=True)
+
+        if self.train_dataset is not None:
+            for dataset in self.train_dataset.datasets:
+                dataset.sample_points_to_different_patches()
+
         pass
 
     def test_step(self, batch, batch_idx)->None:

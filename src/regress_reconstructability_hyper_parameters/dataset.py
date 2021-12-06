@@ -18,8 +18,68 @@ from scipy import stats
 import multiprocessing as mp
 import ctypes
 from src.regress_reconstructability_hyper_parameters.preprocess_data import pre_compute_img_features
-from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet2_utils import farthest_point_sample, sample_and_group
+from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet2_utils import farthest_point_sample, \
+    index_points, square_distance
 
+
+def query_ball_point(radius, nsample, xyz, new_xyz):
+    """
+    Input:
+        radius: local region radius
+        nsample: max sample number in local region
+        xyz: all points, [B, N, 3]
+        new_xyz: query points, [B, S, 3]
+    Return:
+        group_idx: grouped points index, [B, S, nsample]
+    """
+    device = xyz.device
+    B, N, C = xyz.shape
+    _, S, _ = new_xyz.shape
+    group_idx = torch.arange(N, dtype=torch.long).to(device).view(1, 1, N).repeat([B, S, 1])
+    sqrdists = square_distance(new_xyz, xyz)
+    index_argmin = sqrdists.argmin(dim=2)
+    group_idx[sqrdists > radius ** 2] = N
+    for idx in range(group_idx.shape[1]):
+        group_idx[:, idx] = group_idx[:, idx, torch.randperm(group_idx.shape[2])]
+        valid_index = group_idx[:, idx,][group_idx[:, idx,]!=N]
+        group_idx[:,idx]=index_argmin[:, idx]
+        group_idx[:, idx,:valid_index.shape[0]]=valid_index
+    group_idx = group_idx[:, :, :nsample]
+    # group_idx = group_idx.sort(dim=-1)[0][:, :, :nsample]
+    # group_first = group_idx[:, :, 0].view(B, S, 1).repeat([1, 1, nsample])
+    # mask = group_idx == N
+    # group_idx[mask] = group_first[mask]
+    return group_idx
+
+def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
+    """
+    Input:
+        npoint:
+        radius:
+        nsample:
+        xyz: input points position data, [B, N, 3]
+        points: input points data, [B, N, D]
+    Return:
+        new_xyz: sampled points position data, [B, npoint, nsample, 3]
+        new_points: sampled points data, [B, npoint, nsample, 3+D]
+    """
+    B, N, C = xyz.shape
+    S = npoint
+    fps_idx = farthest_point_sample(xyz, npoint) # [B, npoint, C]
+    new_xyz = index_points(xyz, fps_idx)
+    idx = query_ball_point(radius, nsample, xyz, new_xyz)
+    grouped_xyz = index_points(xyz, idx) # [B, npoint, nsample, C]
+    grouped_xyz_norm = grouped_xyz - new_xyz.view(B, S, 1, C)
+
+    if points is not None:
+        grouped_points = index_points(points, idx)
+        new_points = torch.cat([grouped_xyz_norm, grouped_points], dim=-1) # [B, npoint, nsample, C+D]
+    else:
+        new_points = grouped_xyz_norm
+    if returnfps:
+        return new_xyz, new_points, grouped_xyz, fps_idx
+    else:
+        return new_xyz, new_points
 
 class Regress_hyper_parameters_dataset(torch.utils.data.Dataset):
     def __init__(self, v_params, v_mode):
@@ -98,13 +158,19 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
     def sample_points_to_different_patches(self):
         print("KNN Sample")
         # seed points, radius, max local points,
-        new_xyz, new_points, grouped_xyz, fps_idx = sample_and_group(
-            4096, 0.05, int(self.params["model"]["num_points_per_batch"]),
-            torch.tensor(self.original_points, dtype=torch.float32).unsqueeze(0),
-            torch.arange(self.original_points.shape[0]).unsqueeze(0).unsqueeze(-1),
-            True)
-        if np.unique(new_points[0][:,:,3].reshape(-1).numpy()).shape[0]!=self.point_attribute.shape[0]:
-            print("Uneven samplen only sample {}/{}".format(np.unique(new_points[0][:,:,3].reshape(-1).numpy()).shape[0],self.point_attribute.shape[0]))
+        accept_sample=False
+        num_seeds = 4096
+        while not accept_sample:
+            new_xyz, new_points, grouped_xyz, fps_idx = sample_and_group(
+                num_seeds, 0.07, int(self.params["model"]["num_points_per_batch"]),
+                torch.tensor(self.original_points, dtype=torch.float32).unsqueeze(0),
+                torch.arange(self.original_points.shape[0]).unsqueeze(0).unsqueeze(-1),
+                True)
+            if np.unique(new_points[0][:,:,3].reshape(-1).numpy()).shape[0]!=self.point_attribute.shape[0]:
+                print("Uneven sampling, only sample {}/{}".format(np.unique(new_points[0][:,:,3].reshape(-1).numpy()).shape[0],self.point_attribute.shape[0]))
+            else:
+                accept_sample=True
+            num_seeds+=1024
 
         self.points = new_points[0]
         mask = self.point_attribute[:, 0] < 9999999

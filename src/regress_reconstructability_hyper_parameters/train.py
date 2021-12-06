@@ -70,11 +70,13 @@ class Regress_hyper_parameters(pl.LightningModule):
                                  )
 
     def val_dataloader(self):
+        use_part_dataset_to_validate = len(self.hydra_conf["trainer"]["train_dataset"].split("*")) == 1
+
         dataset_paths = self.hydra_conf["trainer"]["valid_dataset"].split("*")
         datasets=[]
         for dataset_path in dataset_paths:
             datasets.append(Regress_hyper_parameters_dataset_with_imgs(dataset_path, self.hydra_conf,
-                                                                       "validation" if len(dataset_paths)==1 else "testing",))
+                                                                       "validation" if use_part_dataset_to_validate else "testing",))
         self.valid_dataset = torch.utils.data.ConcatDataset(datasets)
         return DataLoader(self.valid_dataset,
                           batch_size=self.batch_size,

@@ -136,7 +136,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.log("Validation Predict spearman", loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
         self.log("Validation num valid point", num_valid_point, prog_bar=False, logger=True, on_step=False, on_epoch=True)
 
-        return torch.cat([results,data["point_attribute"][:,:,2:3]],dim=2)
+        return torch.cat([results, data["point_attribute"][:, :, 2:3], data["points"][:,:,3:4]], dim=2)
 
     def validation_epoch_end(self, outputs) -> None:
         result = torch.cat(outputs, dim=0).cpu().detach().numpy()

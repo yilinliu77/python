@@ -344,7 +344,8 @@ class Uncertainty_Modeling(nn.Module):
         # self.img_feature_extractor = torchvision.models.segmentation.fcn_resnet50(pretrained=True)
 
         # self.geometrical_feature_extractor = Correlation_nn(hparams)
-        self.geometrical_feature_extractor = Brute_force_nn(hparams)
+        # self.geometrical_feature_extractor = Brute_force_nn(hparams)
+        self.geometrical_feature_extractor = Correlation_nn(hparams)
         if not self.hydra_conf["model"]["open_weights"]:
             self.geometrical_feature_extractor.requires_grad_(False)
 

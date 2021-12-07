@@ -22,11 +22,6 @@ from src.regress_reconstructability_hyper_parameters.preprocess_data import pre_
 from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet2_utils import farthest_point_sample, \
     index_points, square_distance
 
-def permute_columns(x):
-    ix_i = np.random.sample(x.shape).argsort(axis=0)
-    ix_j = np.tile(np.arange(x.shape[1]), (x.shape[0], 1))
-    return x[ix_i, ix_j]
-
 def query_ball_point(radius, nsample, xyz, new_xyz):
     """
     Input:

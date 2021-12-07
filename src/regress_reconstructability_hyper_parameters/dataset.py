@@ -1,3 +1,4 @@
+import math
 import os
 import pickle
 
@@ -21,6 +22,10 @@ from src.regress_reconstructability_hyper_parameters.preprocess_data import pre_
 from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet2_utils import farthest_point_sample, \
     index_points, square_distance
 
+def permute_columns(x):
+    ix_i = np.random.sample(x.shape).argsort(axis=0)
+    ix_j = np.tile(np.arange(x.shape[1]), (x.shape[0], 1))
+    return x[ix_i, ix_j]
 
 def query_ball_point(radius, nsample, xyz, new_xyz):
     """
@@ -35,21 +40,14 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
     device = xyz.device
     B, N, C = xyz.shape
     _, S, _ = new_xyz.shape
-    group_idx = torch.arange(N, dtype=torch.long).to(device).view(1, 1, N).repeat([B, S, 1])
     sqrdists = square_distance(new_xyz, xyz)
-    index_argmin = sqrdists.argmin(dim=2)
-    group_idx[sqrdists > radius ** 2] = N
-    for idx in range(group_idx.shape[1]):
-        group_idx[:, idx] = group_idx[:, idx, torch.randperm(group_idx.shape[2])]
-        valid_index = group_idx[:, idx,][group_idx[:, idx,]!=N]
-        group_idx[:,idx]=index_argmin[:, idx]
-        group_idx[:, idx,:valid_index.shape[0]]=valid_index
-    group_idx = group_idx[:, :, :nsample]
-    # group_idx = group_idx.sort(dim=-1)[0][:, :, :nsample]
-    # group_first = group_idx[:, :, 0].view(B, S, 1).repeat([1, 1, nsample])
-    # mask = group_idx == N
-    # group_idx[mask] = group_first[mask]
-    return group_idx
+    gussian_distance = torch.exp(-0.5*(sqrdists*2)**2) / 1.2529964086141667 # (0.5*math.sqrt(6.28))
+    gussian_distance[sqrdists > radius ** 2]=0
+    group_idxs=[]
+    for id_batch in range(B):
+        group_idx = torch.multinomial(gussian_distance[id_batch], nsample,replacement=True)
+        group_idxs.append(group_idx)
+    return torch.stack(group_idxs,dim=0)
 
 def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
     """
@@ -69,7 +67,8 @@ def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
     new_xyz = index_points(xyz, fps_idx)
     idx = query_ball_point(radius, nsample, xyz, new_xyz)
     grouped_xyz = index_points(xyz, idx) # [B, npoint, nsample, C]
-    grouped_xyz_norm = grouped_xyz - new_xyz.view(B, S, 1, C)
+    # grouped_xyz_norm = grouped_xyz - new_xyz.view(B, S, 1, C)
+    grouped_xyz_norm = grouped_xyz
 
     if points is not None:
         grouped_points = index_points(points, idx)
@@ -152,6 +151,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.view_paths = np.load(os.path.join(v_path, "view_paths.npz"), allow_pickle=True)[
             "arr_0"]
         self.original_points = self.point_attribute[:, 3:]
+        self.num_seeds = 4096 + 1024
         self.sample_points_to_different_patches()
         pass
 
@@ -159,19 +159,28 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         print("KNN Sample")
         # seed points, radius, max local points,
         accept_sample=False
-        num_seeds = 4096
+        self.num_seeds -= 1024
         while not accept_sample:
             new_xyz, new_points, grouped_xyz, fps_idx = sample_and_group(
-                num_seeds, 0.07, int(self.params["model"]["num_points_per_batch"]),
+                self.num_seeds, 0.75, int(self.params["model"]["num_points_per_batch"]),
                 torch.tensor(self.original_points, dtype=torch.float32).unsqueeze(0),
                 torch.arange(self.original_points.shape[0]).unsqueeze(0).unsqueeze(-1),
                 True)
-            if np.unique(new_points[0][:,:,3].reshape(-1).numpy()).shape[0]!=self.point_attribute.shape[0]:
-                print("Uneven sampling, only sample {}/{}".format(np.unique(new_points[0][:,:,3].reshape(-1).numpy()).shape[0],self.point_attribute.shape[0]))
+            unique_result = np.unique(new_points[0][:, :, 3].reshape(-1).numpy(),return_counts=True)
+            if unique_result[0].shape[0] != self.point_attribute.shape[0]:
+                print("Uneven sampling, only sample {}/{}".format(unique_result[0].shape[0],self.point_attribute.shape[0]))
+                print("Uneven sampling, sampling density: {}".format(np.mean(unique_result[1])))
             else:
                 accept_sample=True
-            num_seeds+=1024
-
+            self.num_seeds+=1024
+        if False:
+            pcl = o3d.geometry.PointCloud()
+            pcl.points = o3d.utility.Vector3dVector(new_xyz.numpy()[0, :, :3])
+            o3d.io.write_point_cloud("seed_point.ply", pcl)
+            for id_item,item in enumerate(new_points[0]):
+                pcl = o3d.geometry.PointCloud()
+                pcl.points=o3d.utility.Vector3dVector(item.numpy()[:,:3])
+                o3d.io.write_point_cloud("{}.ply".format(id_item),pcl)
         self.points = new_points[0]
         mask = self.point_attribute[:, 0] < 9999999
 

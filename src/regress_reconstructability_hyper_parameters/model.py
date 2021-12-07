@@ -194,30 +194,30 @@ class Brute_force_nn(nn.Module):
 
 
 class Correlation_nn(nn.Module):
-    def __init__(self, hparams):
+    def __init__(self, hparams, v_drop_out=0.5):
         super(Correlation_nn, self).__init__()
         self.hydra_conf = hparams
         self.view_feature_extractor = nn.Sequential(
             nn.Linear(6, 256),
             nn.LeakyReLU(),
-            nn.Dropout(0.5),
+            nn.Dropout(v_drop_out),
             nn.Linear(256, 256),
             nn.LeakyReLU(),
-            nn.Dropout(0.5),
+            nn.Dropout(v_drop_out),
             nn.Linear(256, 256),
             nn.LeakyReLU(),
         )
-        self.view_feature_fusioner1 = nn.MultiheadAttention(embed_dim=256, num_heads=2,dropout=0.5)
+        self.view_feature_fusioner1 = nn.MultiheadAttention(embed_dim=256, num_heads=2,dropout=v_drop_out)
         self.view_feature_fusioner_linear1 = nn.Linear(256, 256)
         self.view_feature_fusioner_relu1 = nn.LeakyReLU()
-        self.view_feature_fusioner2 = nn.MultiheadAttention(embed_dim=256, num_heads=2,dropout=0.5)
+        self.view_feature_fusioner2 = nn.MultiheadAttention(embed_dim=256, num_heads=2,dropout=v_drop_out)
         self.view_feature_fusioner_linear2 = nn.Linear(256, 256)
         self.view_feature_fusioner_relu2 = nn.LeakyReLU()
 
         self.reconstructability_to_error = nn.Sequential(
             nn.Linear(256, 256),
             nn.LeakyReLU(),
-            nn.Dropout(0.5),
+            # nn.Dropout(0.5),
             nn.Linear(256, 1),
         )
 
@@ -390,6 +390,103 @@ class Uncertainty_Modeling(nn.Module):
                                                                       key_padding_mask=v_data["point_features_mask"][
                                                                           id_batch])[0]
                 pixel_position_features = self.view_feature_fusioner_linear2(pixel_position_features.transpose(0, 1))
+                pixel_position_features = self.view_feature_fusioner_relu2(pixel_position_features)
+
+                img_features.append(torch.mean(pixel_position_features, dim=1))
+
+            img_features = torch.stack(img_features, dim=0)
+            point_features = torch.cat([points[:, :, :3], img_features], dim=2)
+            attention_time += time.time() - t
+            t = time.time()
+            # uncertainty = self.point_feature_extractor(point_features.transpose(1,2))[0].transpose(1,2) # PointNet++
+            uncertainty = self.point_feature_extractor(point_features.transpose(1, 2))[0]
+            pointnet_time += time.time() - t
+            t = time.time()
+        else:
+            uncertainty = 1
+
+        t = time.time()
+        geometrical_feature = self.geometrical_feature_extractor(v_data)
+        correlation_time += time.time() - t
+        # print("{}, {}, {}".format(attention_time,pointnet_time,correlation_time))
+        return geometrical_feature * uncertainty
+
+    def loss(self, v_point_attribute, v_prediction):
+        gt_reconstructability = v_point_attribute[:, 0]
+        gt_max_error = v_point_attribute[:, :, 1:2]
+        gt_avg_error = v_point_attribute[:, :, 2:3]
+
+        loss = torch.nn.functional.mse_loss(v_prediction, gt_avg_error)
+        # gt_spearmans=[]
+        # for id_item in range(v_point_attribute.shape[0]):
+        #     gt_spearman = stats.spearmanr(v_prediction[id_item,:,0].detach().cpu().numpy(),
+        #                                   gt_avg_error[id_item,:,0].detach().cpu().numpy())[0]
+        #     gt_spearmans.append(gt_spearman)
+
+        # return loss, np.mean(gt_spearmans), 0
+        return loss, 0, 0
+
+class Uncertainty_Modeling_wo_dropout(nn.Module):
+    def __init__(self, hparams):
+        super(Uncertainty_Modeling_wo_dropout, self).__init__()
+        self.hydra_conf = hparams
+        self.is_involve_img = self.hydra_conf["model"]["involve_img"]
+
+        self.point_feature_extractor = PointNet1()
+
+        # self.img_feature_extractor = torchvision.models.segmentation.fcn_resnet50(pretrained=True)
+
+        # self.geometrical_feature_extractor = Correlation_nn(hparams)
+        # self.geometrical_feature_extractor = Brute_force_nn(hparams)
+        self.geometrical_feature_extractor = Correlation_nn(hparams,0)
+        if not self.hydra_conf["model"]["open_weights"]:
+            self.geometrical_feature_extractor.requires_grad_(False)
+
+        self.view_feature_fusioner1 = nn.MultiheadAttention(embed_dim=32, num_heads=1)
+        self.view_feature_fusioner_linear1 = nn.Linear(32, 32)
+        self.view_feature_fusioner_relu1 = nn.LeakyReLU()
+        self.view_feature_fusioner2 = nn.MultiheadAttention(embed_dim=32, num_heads=1)
+        self.view_feature_fusioner_linear2 = nn.Linear(32, 32)
+        self.view_feature_fusioner_relu2 = nn.LeakyReLU()
+
+        for m in self.parameters():
+            if isinstance(m, (nn.Linear,)):
+                nn.init.kaiming_normal_(m.weight)
+
+    def forward(self, v_data):
+        # valid_flag, dx, dy, dz, distance_ratio, normal_angle, central_angle
+        attention_time = 0
+        pointnet_time = 0
+        correlation_time = 0
+        points = v_data["points"]
+        if self.is_involve_img:
+            img_features = []
+            t = time.time()
+            for id_batch, item_batch in enumerate(v_data["point_features"]):
+                pixel_position_features = item_batch
+
+                # Fuse the image features
+                pixel_position_features = pixel_position_features.transpose(0, 1)
+                pixel_position_features = self.view_feature_fusioner1(pixel_position_features,
+                                                                      pixel_position_features,
+                                                                      pixel_position_features,
+                                                                      # attn_mask = v_data["point_features_mask"][id_batch])[0]
+                                                                      key_padding_mask=
+                                                                      v_data["point_features_mask"][
+                                                                          id_batch])[0]
+                pixel_position_features = self.view_feature_fusioner_linear1(
+                    pixel_position_features.transpose(0, 1))
+                pixel_position_features = self.view_feature_fusioner_relu1(pixel_position_features)
+                pixel_position_features = pixel_position_features.transpose(0, 1)
+                pixel_position_features = self.view_feature_fusioner2(pixel_position_features,
+                                                                      pixel_position_features,
+                                                                      pixel_position_features,
+                                                                      # attn_mask = v_data["point_features_mask"][id_batch])[0]
+                                                                      key_padding_mask=
+                                                                      v_data["point_features_mask"][
+                                                                          id_batch])[0]
+                pixel_position_features = self.view_feature_fusioner_linear2(
+                    pixel_position_features.transpose(0, 1))
                 pixel_position_features = self.view_feature_fusioner_relu2(pixel_position_features)
 
                 img_features.append(torch.mean(pixel_position_features, dim=1))

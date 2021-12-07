@@ -200,24 +200,24 @@ class Correlation_nn(nn.Module):
         self.view_feature_extractor = nn.Sequential(
             nn.Linear(6, 256),
             nn.LeakyReLU(),
-            # nn.Dropout(0.5),
+            nn.Dropout(0.5),
             nn.Linear(256, 256),
             nn.LeakyReLU(),
-            # nn.Dropout(0.5),
+            nn.Dropout(0.5),
             nn.Linear(256, 256),
             nn.LeakyReLU(),
         )
-        self.view_feature_fusioner1 = nn.MultiheadAttention(embed_dim=256, num_heads=1)
+        self.view_feature_fusioner1 = nn.MultiheadAttention(embed_dim=256, num_heads=2,dropout=0.5)
         self.view_feature_fusioner_linear1 = nn.Linear(256, 256)
         self.view_feature_fusioner_relu1 = nn.LeakyReLU()
-        self.view_feature_fusioner2 = nn.MultiheadAttention(embed_dim=256, num_heads=1)
+        self.view_feature_fusioner2 = nn.MultiheadAttention(embed_dim=256, num_heads=2,dropout=0.5)
         self.view_feature_fusioner_linear2 = nn.Linear(256, 256)
         self.view_feature_fusioner_relu2 = nn.LeakyReLU()
 
         self.reconstructability_to_error = nn.Sequential(
             nn.Linear(256, 256),
             nn.LeakyReLU(),
-            # nn.Dropout(0.5),
+            nn.Dropout(0.5),
             nn.Linear(256, 1),
         )
 

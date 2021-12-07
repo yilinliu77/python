@@ -157,7 +157,7 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         pass
 
-    def test_step(self, batch, batch_idx)->None:
+    def test_step(self, batch, batch_idx) -> None:
         data = batch
         results = self.forward(data)
 
@@ -211,7 +211,7 @@ def main(v_cfg: DictConfig):
         save_last=True
     )
 
-    trainer = Trainer(gpus=v_cfg["trainer"].gpu, weights_summary=None,
+    trainer = Trainer(gpus=v_cfg["trainer"].gpu, enable_model_summary=False,
                       accelerator="ddp" if v_cfg["trainer"].gpu > 1 else None,
                       # early_stop_callback=early_stop_callback,
                       callbacks=[model_check_point],

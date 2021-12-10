@@ -142,10 +142,12 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         # self.views_path=os.path.join(v_path, "views.npz")
         # self.view_pairs_path=os.path.join(v_path, "view_pairs.npz")
 
+        self.is_involve_img = self.params["model"]["involve_img"]
+
         self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npz"))["arr_0"]
         self.view_paths = np.load(os.path.join(v_path, "view_paths.npz"), allow_pickle=True)[
             "arr_0"]
-        self.original_points = self.point_attribute[:, 3:]
+        self.original_points = self.point_attribute[:, 3:6]
         self.num_seeds = 4096 + 1024
         self.sample_points_to_different_patches()
         pass
@@ -201,22 +203,25 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
             used_index = self.whole_index
         point_indexes = self.points[used_index[index], :, 3].int()
 
-        img_features_on_point_list=[]
-        for point_index in point_indexes:
-            point_path = os.path.join(self.data_root, "point_features",
-                                      str(point_index.item()) + ".npz")
+        point_features=None
+        point_features_mask=None
+        if self.is_involve_img:
+            img_features_on_point_list=[]
+            for point_index in point_indexes:
+                point_path = os.path.join(self.data_root, "point_features",
+                                          str(point_index.item()) + ".npz")
 
-            img_features_on_point_list.append(torch.tensor(np.load(point_path)["arr_0"],dtype=torch.float32))
-            num_features = img_features_on_point_list[-1].shape[1]
+                img_features_on_point_list.append(torch.tensor(np.load(point_path)["arr_0"],dtype=torch.float32))
+                num_features = img_features_on_point_list[-1].shape[1]
 
-            num_max_points=max(num_max_points,img_features_on_point_list[-1].shape[0])
+                num_max_points=max(num_max_points,img_features_on_point_list[-1].shape[0])
 
-        # Align the features
-        point_features = torch.zeros((num_point_per_patch,num_max_points,num_features),dtype=torch.float32)
-        point_features_mask = torch.ones((num_point_per_patch,num_max_points),dtype=torch.bool)
-        for id_item,item in enumerate(img_features_on_point_list):
-            point_features[id_item,:item.shape[0]]=item
-            point_features_mask[id_item,:item.shape[0]]=False
+            # Align the features
+            point_features = torch.zeros((num_point_per_patch,num_max_points,num_features),dtype=torch.float32)
+            point_features_mask = torch.ones((num_point_per_patch,num_max_points),dtype=torch.bool)
+            for id_item,item in enumerate(img_features_on_point_list):
+                point_features[id_item,:item.shape[0]]=item
+                point_features_mask[id_item,:item.shape[0]]=False
 
         output_dict = {
             # "views": torch.tensor(np.load(self.views_path,mmap_mode="r")["arr_0"][point_indexes], dtype=torch.float32),

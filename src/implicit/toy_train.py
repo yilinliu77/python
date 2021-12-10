@@ -18,33 +18,21 @@ from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 from shared.fast_dataloader import FastDataLoader
-from src.regress_reconstructability_hyper_parameters.dataset import Regress_hyper_parameters_dataset, \
-    Regress_hyper_parameters_dataset_with_imgs
-from src.regress_reconstructability_hyper_parameters.model import Regress_hyper_parameters_Model, Brute_force_nn, \
-    Correlation_nn
 
-import torchsort
-# from torchsort import soft_rank
 
 from scipy import stats
 
-from src.regress_reconstructability_hyper_parameters.preprocess_data import preprocess_data, pre_compute_img_features
 
 
-class Regress_hyper_parameters(pl.LightningModule):
+class Toy_train_pluto(pl.LightningModule):
     def __init__(self, hparams):
-        super(Regress_hyper_parameters, self).__init__()
+        super(Toy_train_pluto, self).__init__()
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"].learning_rate
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
-        # self.log(...,batch_size=self.batch_size)
+        self.log("batch_size",self.batch_size)
 
-        model_module = __import__("src")
-        model_module = getattr(model_module,"regress_reconstructability_hyper_parameters")
-        model_module = getattr(model_module,"model")
-        f = getattr(model_module,self.hydra_conf["model"]["model_name"])
 
-        self.model = f(hparams)
 
     def forward(self, v_data):
         data = self.model(v_data)
@@ -113,26 +101,27 @@ class Regress_hyper_parameters(pl.LightningModule):
         data = batch
         results = self.forward(data)
 
-        error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
+        loss, gt_spearman, num_valid_point = self.model.loss(data["point_attribute"], results)
 
-        self.log("Training Error Loss",error_loss, prog_bar=False,logger=True,on_step=False,on_epoch=True)
-        self.log("Training Inconsitency Loss",inconsitency_loss, prog_bar=True,logger=True,on_step=False,on_epoch=True)
-        self.log("Training Loss",total_loss, prog_bar=True,logger=True,on_step=False,on_epoch=True)
+        self.log("Training Predict spearman",loss, prog_bar=False,logger=True,on_step=False,on_epoch=True)
+        self.log("Training num valid point",num_valid_point, prog_bar=True,logger=True,on_step=False,on_epoch=True)
+        self.log("Training spearman baseline",gt_spearman, prog_bar=False,logger=True,on_step=True,on_epoch=True)
+        self.log("Training Loss",loss, prog_bar=True,logger=True,on_step=False,on_epoch=True)
 
-        if torch.isnan(total_loss).any() or torch.isinf(total_loss).any():
+        if torch.isnan(loss).any() or torch.isinf(loss).any():
             pass
 
-        return total_loss
+        return loss
 
     def validation_step(self, batch, batch_idx):
         data = batch
         results = self.forward(data)
 
-        error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
+        loss, gt_spearman, num_valid_point = self.model.loss(data["point_attribute"], results)
 
-        self.log("Validation Loss", total_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
-        self.log("Validation Error Loss", error_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
-        self.log("Validation Inconsitency Loss", inconsitency_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
+        self.log("Validation Loss", loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
+        self.log("Validation Predict spearman", loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
+        self.log("Validation num valid point", num_valid_point, prog_bar=False, logger=True, on_step=False, on_epoch=True)
 
         return torch.cat([results, data["point_attribute"][:, :, 2:3], data["points"][:,:,3:4]], dim=2)
 
@@ -217,11 +206,11 @@ def main(v_cfg: DictConfig):
                       callbacks=[model_check_point],
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,
                       max_epochs=3000,
-                      gradient_clip_val=0.1,
+                      # gradient_clip_val=0.1,
                       check_val_every_n_epoch=5
                       )
 
-    model = Regress_hyper_parameters(v_cfg)
+    model = Toy_train_pluto(v_cfg)
     if v_cfg["trainer"].resume_from_checkpoint is not None:
         state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
         for item in list(state_dict.keys()):

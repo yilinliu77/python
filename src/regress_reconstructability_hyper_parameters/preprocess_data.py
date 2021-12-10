@@ -16,8 +16,8 @@ from copy import deepcopy
 import open3d as o3d
 from scipy import stats
 
-def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str=None) -> (np.ndarray, np.ndarray):
 
+def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str = None) -> (np.ndarray, np.ndarray):
     print("Read point cloud")
     with open(v_error_point_cloud, "rb") as f:
         plydata = PlyData.read(f)
@@ -28,15 +28,15 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str=None) 
             max_error_list = plydata['vertex']['max_error'].copy()
             sum_error_list = plydata['vertex']['sum_error'].copy()
             num_list = plydata['vertex']['num'].copy()
-            avg_error = sum_error_list/(num_list+1e-6)
-            x_dim = (np.max(x)-np.min(x))/2
-            y_dim = (np.max(y)-np.min(y))/2
-            z_dim = (np.max(z)-np.min(z))/2
-            max_dim = max(x_dim,y_dim,z_dim)
-            x = (x-np.mean(x))/max_dim
-            y = (y-np.mean(y))/max_dim
-            z = (z-np.mean(z))/max_dim
-            error_list = np.stack([max_error_list,avg_error,x,y,z],axis=1)
+            avg_error = sum_error_list / (num_list + 1e-6)
+            x_dim = (np.max(x) - np.min(x)) / 2
+            y_dim = (np.max(y) - np.min(y)) / 2
+            z_dim = (np.max(z) - np.min(z)) / 2
+            max_dim = max(x_dim, y_dim, z_dim)
+            x = (x - np.mean(x)) / max_dim
+            y = (y - np.mean(y)) / max_dim
+            z = (z - np.mean(z)) / max_dim
+            error_list = np.stack([max_error_list, avg_error, x, y, z, max_error_list==0], axis=1)
         else:
             error_list = plydata['vertex']['error'].copy()
 
@@ -47,14 +47,14 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str=None) 
     num_points = error_list.shape[0]
     # Find max view numbers
     max_num_view = 0
-    for id_file, file in tqdm(enumerate(files)):
+    for id_file, file in enumerate(tqdm(files)):
         raw_data = [item.strip() for item in open(file).readlines()]
         num_views = int(raw_data[0])
         max_num_view = max(max_num_view, num_views)
-    max_num_view+=1
+    max_num_view += 1
     print("Read attribute with max view: ", max_num_view)
     view_paths = [[] for _ in range(num_points)]
-    views = np.zeros((num_points,max_num_view, 9), dtype=np.float16)
+    views = np.zeros((num_points, max_num_view, 9), dtype=np.float16)
     views_pair = np.zeros((num_points, max_num_view, max_num_view, 3), dtype=np.float16)
     valid_views_flag = [False for _ in range(num_points)]
     reconstructabilities = [0 for _ in range(num_points)]
@@ -63,12 +63,12 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str=None) 
 
         raw_data = [item.strip() for item in open(file).readlines()]
         num_views = int(raw_data[0])
-        if num_views>max_num_view-1:
+        if num_views > max_num_view - 1:
             raise
         reconstructability = float(raw_data[1])
-        if reconstructability!=0:
-            valid_views_flag[real_index]=True
-        reconstructabilities[real_index]=reconstructability
+        if reconstructability != 0:
+            valid_views_flag[real_index] = True
+        reconstructabilities[real_index] = reconstructability
         # Read views
         for i_view in range(num_views):
             view_data = raw_data[2 + i_view].split(",")
@@ -80,9 +80,9 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str=None) 
             pixel_pos_x = float(view_data[7])
             pixel_pos_y = float(view_data[8])
             if v_img_dir:
-                img_path = os.path.join(v_img_dir,img_name+".png")
+                img_path = os.path.join(v_img_dir, img_name + ".png")
                 if not os.path.exists(img_path):
-                    img_path=os.path.join(v_img_dir,img_name+".jpg")
+                    img_path = os.path.join(v_img_dir, img_name + ".jpg")
                 if not os.path.exists(img_path):
                     raise
                 view_paths[real_index].append(img_path)
@@ -99,10 +99,10 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str=None) 
             views[real_index][i_view][8] = pixel_pos_y
 
         # Read view pair
-        cur_iter=0
+        cur_iter = 0
         for i_view1 in range(max_num_view):
             for i_view2 in range(i_view1 + 1, max_num_view):
-                if i_view1>=num_views or i_view2>=num_views:
+                if i_view1 >= num_views or i_view2 >= num_views:
                     continue
                 view_pair_data = raw_data[2 + num_views + cur_iter].split(",")
                 alpha_ratio = float(view_pair_data[0])
@@ -110,19 +110,27 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str=None) 
                 views_pair[real_index][i_view1][i_view2][0] = 1
                 views_pair[real_index][i_view1][i_view2][1] = alpha_ratio
                 views_pair[real_index][i_view1][i_view2][2] = relative_distance_ratio
-                cur_iter+=1
+                cur_iter += 1
 
-    valid_flag=np.logical_and(np.array(valid_views_flag),error_list[:,2]!=0)
+    # valid_flag = np.logical_and(np.array(valid_views_flag), error_list[:, 2] != 0)
+    valid_flag = np.array(valid_views_flag)
 
-    views=views[valid_flag]
-    views_pair=views_pair[valid_flag]
-    view_paths=np.array(view_paths)[valid_flag]
-    reconstructabilities=np.asarray(reconstructabilities)[valid_flag]
+    views = views[valid_flag]
+    views_pair = views_pair[valid_flag]
+    view_paths = np.array(view_paths)[valid_flag]
+    reconstructabilities = np.asarray(reconstructabilities)[valid_flag]
     usable_indices = np.triu_indices(max_num_view, 1)
-    views_pair = views_pair[:,usable_indices[0],usable_indices[1]]
+    views_pair = views_pair[:, usable_indices[0], usable_indices[1]]
 
     error_list = error_list[valid_flag]
-    point_attribute = np.concatenate([reconstructabilities[:,np.newaxis],error_list],axis=1).astype(np.float16)
+    point_attribute = np.concatenate([reconstructabilities[:, np.newaxis], error_list], axis=1).astype(np.float16)
+    print("Totally {} points; {} points has error 0; {} points has 0 reconstructability, {} in it is not visible; Output {} points".format(
+        num_points,
+        error_list[:, -1].sum(),
+        num_points-valid_flag.sum(),
+        num_points-len(files),
+        point_attribute.shape[0]
+    ))
     return views, views_pair, point_attribute, view_paths
 
 
@@ -146,13 +154,13 @@ def pre_compute_img_features(v_view_paths: List[str], v_img_size, v_root_path, v
         os.mkdir(os.path.join(v_root_path, "view_features"))
 
     with torch.no_grad():
-        for id_point, point in tqdm(enumerate(v_view_paths)):
-            point_path = os.path.join(v_root_path, "point_features", str(id_point)+".npz")
+        for id_point, point in enumerate(tqdm(v_view_paths)):
+            point_path = os.path.join(v_root_path, "point_features", str(id_point) + ".npz")
             if os.path.exists(point_path):
                 continue
-            point_features=[]
-            for id_view,view_path in enumerate(point):
-                pixel_position = torch.tensor(v_view_attribute[id_point,id_view,7:9],dtype=torch.float32)
+            point_features = []
+            for id_view, view_path in enumerate(point):
+                pixel_position = torch.tensor(v_view_attribute[id_point, id_view, 7:9], dtype=torch.float32)
                 pixel_position = torch.cat([pixel_position - 1 / 400, pixel_position + 1 / 400], dim=-1)
 
                 # Get img features
@@ -161,8 +169,9 @@ def pre_compute_img_features(v_view_paths: List[str], v_img_size, v_root_path, v
                 img_features_saved_path = os.path.join(v_root_path, "view_features", item_name)
                 if os.path.exists(img_features_saved_path):
                     if img_features_saved_path not in img_features_dict:
-                        img_features_dict[img_features_saved_path] = torch.tensor(np.load(img_features_saved_path)["arr_0"], dtype=torch.float32).cuda()
-                    img_features =img_features_dict[img_features_saved_path]
+                        img_features_dict[img_features_saved_path] = torch.tensor(
+                            np.load(img_features_saved_path)["arr_0"], dtype=torch.float32).cuda()
+                    img_features = img_features_dict[img_features_saved_path]
                 else:
                     img = Image.open(view_path)
                     img = transform(img)
@@ -186,11 +195,12 @@ def pre_compute_img_features(v_view_paths: List[str], v_img_size, v_root_path, v
 
 if __name__ == '__main__':
     import sys
+
     output_root = sys.argv[1]
-    reconstructability_file_dir = os.path.join(output_root,"reconstructability")
-    error_point_cloud_dir = os.path.join(output_root,"accuracy_projected.ply")
-    img_dir = os.path.join(output_root,"images")
-    img_rescale_size = (600,400)
+    reconstructability_file_dir = os.path.join(output_root, "reconstructability")
+    error_point_cloud_dir = os.path.join(output_root, "accuracy_projected.ply")
+    img_dir = os.path.join(output_root, "images")
+    img_rescale_size = (600, 400)
 
     if not os.path.exists(os.path.join(output_root, "training_data")):
         os.mkdir(os.path.join(output_root, "training_data"))
@@ -206,6 +216,5 @@ if __name__ == '__main__':
     print("Pre-compute data done")
 
     print("Pre compute features")
-    pre_compute_img_features(view_paths, img_rescale_size, os.path.join(output_root,"training_data"), view)
+    pre_compute_img_features(view_paths, img_rescale_size, os.path.join(output_root, "training_data"), view)
     print("Pre compute done")
-

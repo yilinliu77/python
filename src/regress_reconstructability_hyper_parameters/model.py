@@ -315,7 +315,7 @@ class PointNet1(nn.Module):
         self.conv1 = torch.nn.Conv1d(1088, 512, 1)
         self.conv2 = torch.nn.Conv1d(512, 256, 1)
         self.conv3 = torch.nn.Conv1d(256, 128, 1)
-        self.conv4 = torch.nn.Conv1d(128, 1, 1)
+        self.conv4 = torch.nn.Conv1d(128, 2, 1)
         self.bn1 = nn.BatchNorm1d(512)
         self.bn2 = nn.BatchNorm1d(256)
         self.bn3 = nn.BatchNorm1d(128)
@@ -329,7 +329,7 @@ class PointNet1(nn.Module):
         x = F.relu(self.bn3(self.conv3(x)))
         x = self.conv4(x)
         x = x.transpose(2, 1).contiguous()
-        x = x.view(batchsize, n_pts, 1)
+        x = x.view(batchsize, n_pts, 2)
         return x, trans_feat
 
 
@@ -426,6 +426,7 @@ class Uncertainty_Modeling(nn.Module):
         # return loss, np.mean(gt_spearmans), 0
         return loss, 0, 0
 
+
 class Uncertainty_Modeling_wo_dropout(nn.Module):
     def __init__(self, hparams):
         super(Uncertainty_Modeling_wo_dropout, self).__init__()
@@ -496,24 +497,39 @@ class Uncertainty_Modeling_wo_dropout(nn.Module):
             attention_time += time.time() - t
             t = time.time()
             # uncertainty = self.point_feature_extractor(point_features.transpose(1,2))[0].transpose(1,2) # PointNet++
-            uncertainty = self.point_feature_extractor(point_features.transpose(1, 2))[0]
+            uncertainty = self.point_feature_extractor(point_features.transpose(1, 2))[0][:,:,0:1]
+            inconsistency_identifier = self.point_feature_extractor(point_features.transpose(1, 2))[0][:,:,1:2]
             pointnet_time += time.time() - t
             t = time.time()
         else:
             uncertainty = 1
+            inconsistency_identifier = torch.zeros((points.shape[0],points.shape[1],1),device=points.device)
 
         t = time.time()
         geometrical_feature = self.geometrical_feature_extractor(v_data)
+
+        geometrical_feature_with_uncertainty = geometrical_feature * uncertainty
+
         correlation_time += time.time() - t
         # print("{}, {}, {}".format(attention_time,pointnet_time,correlation_time))
-        return geometrical_feature * uncertainty
+        return torch.cat([geometrical_feature_with_uncertainty,inconsistency_identifier],dim=2)
 
     def loss(self, v_point_attribute, v_prediction):
+        predicted_error = v_prediction[:,:,0:1]
+        predicted_inconsistency = v_prediction[:,:,1:2]
+
         gt_reconstructability = v_point_attribute[:, 0]
         gt_max_error = v_point_attribute[:, :, 1:2]
         gt_avg_error = v_point_attribute[:, :, 2:3]
+        gt_error_mask_error = (1-v_point_attribute[:, :, 6:7]).bool() # Good Point -> True(1)
 
-        loss = torch.nn.functional.mse_loss(v_prediction, gt_avg_error)
+        error_loss = torch.nn.functional.mse_loss(predicted_error[gt_error_mask_error], gt_avg_error[gt_error_mask_error])
+        if self.is_involve_img:
+            inconsistency_loss = torch.nn.functional.binary_cross_entropy_with_logits(
+                predicted_inconsistency,
+                v_point_attribute[:, :, 6:7])
+        else:
+            inconsistency_loss = torch.zeros_like(error_loss)
         # gt_spearmans=[]
         # for id_item in range(v_point_attribute.shape[0]):
         #     gt_spearman = stats.spearmanr(v_prediction[id_item,:,0].detach().cpu().numpy(),
@@ -521,4 +537,4 @@ class Uncertainty_Modeling_wo_dropout(nn.Module):
         #     gt_spearmans.append(gt_spearman)
 
         # return loss, np.mean(gt_spearmans), 0
-        return loss, 0, 0
+        return error_loss, inconsistency_loss, 100 * error_loss + inconsistency_loss

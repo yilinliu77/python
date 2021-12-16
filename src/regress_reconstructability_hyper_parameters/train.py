@@ -1,7 +1,9 @@
+import math
 import shutil
 import sys, os
 
 import cv2
+from plyfile import PlyData, PlyElement
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from scipy import stats, optimize, interpolate
 from argparse import ArgumentParser
@@ -157,26 +159,83 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         pass
 
+    def on_test_epoch_start(self) -> None:
+        self.data_mean_std = np.load(os.path.join(self.test_dataset.data_root,"../data_centralize.npz"))["arr_0"]
+        if os.path.exists("temp/test_scene_output"):
+            shutil.rmtree("temp/test_scene_output")
+        os.mkdir("temp/test_scene_output")
+        pass
+
     def test_step(self, batch, batch_idx) -> None:
         data = batch
         results = self.forward(data)
 
         loss, gt_spearman, num_valid_point = self.model.loss(data["point_attribute"], results)
 
+        view_dir = -data["views"][:,:,:,1:4] * data["views"][:,:,:,4:5] * 60 # 60 is the distance baseline, - because it stores the view to point vector
+        points = data["points"][:,:,:3].cpu().numpy()* self.data_mean_std[3] + self.data_mean_std[:3]
+        views = points[:,:,np.newaxis] + view_dir.cpu().numpy()
+        views=np.concatenate([views,-view_dir.cpu().numpy(),data["views"][:,:,:,0:1].cpu().numpy()],axis=-1)
+
         self.log("Test Loss", loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
 
-        return torch.cat([results, data["point_attribute"][:, :, 2:3], data["points"][:,:,3:4]], dim=2)
+        return torch.cat([
+            results,  # Predict reconstructability and inconsistency
+            data["point_attribute"][:, :, [2,6]], # Avg error and Is point with 0 reconstructability
+            results.new(points)
+            ,data["points"][:,:,3:4] # Point index
+        ], dim=2), views # x,y,z, dx,dy,dz, valid
 
     def test_epoch_end(self, outputs) -> None:
-        result = torch.cat(outputs, dim=0).cpu().detach().numpy()
-        result = result.reshape(-1,result.shape[-1])
-        result = result[np.argsort(result[:,2])]
-        sorted_group = np.split(result[:, :3], np.unique(result[:, 2], return_index=True)[1][1:])
-        whole_points_prediction_error = np.zeros((self.test_dataset.point_attribute.shape[0],2),dtype=np.float32)
+        views = np.concatenate([item[1] for item in outputs], axis=0)
+        views=views.reshape([-1,views.shape[2],views.shape[3]])
+        predict_result = torch.cat([item[0] for item in outputs], dim=0).cpu().detach().numpy()
+        predict_result = predict_result.reshape(-1,predict_result.shape[-1])
+        valid_mask = predict_result[:,3] # Filter out the point with gt reconstructability = 0
+        print("{}/{} points invalid".format(valid_mask.sum(),predict_result.shape[0]))
+        # predict_result=predict_result[(1-valid_mask).astype(np.bool8)]
+        # views=views[(1-valid_mask).astype(np.bool8)]
+        sorted_index = np.argsort(predict_result[:, 7]) # Sort according to the point index
+        predict_result = predict_result[sorted_index]
+        views = views[sorted_index]
+        # Write views
+        sorted_views = views[np.unique(predict_result[:, 7], return_index=True)[1]]
+        for id_view, view in enumerate(tqdm(sorted_views)):
+            with open("temp/test_scene_output/{}.txt".format(id_view),"w") as f:
+                for item in view:
+                    if item[6] == 0:
+                        break
+                    item[3:6]/=np.linalg.norm(item[3:6])
+
+                    pitch = math.asin(item[5])
+                    yaw = math.atan2(item[4],item[3])
+
+                    f.write("xxx.png,{},{},{},{},{},{}\n".format(
+                        item[0],item[1],item[2],
+                        pitch/math.pi*180,0,yaw/math.pi*180,
+                    ))
+        sorted_group = np.split(predict_result, np.unique(predict_result[:, 7], return_index=True)[1][1:])
+        whole_points_prediction_error = np.zeros((self.test_dataset.point_attribute.shape[0],5),dtype=np.float32)
         print("Merge the duplication and calculate the spearman")
         for id_item in tqdm(range(len(sorted_group))):
-            whole_points_prediction_error[int(sorted_group[id_item][0][2]),0] = np.mean(sorted_group[id_item][:,0])
-            whole_points_prediction_error[int(sorted_group[id_item][0][2]),1] = sorted_group[id_item][0,1]
+            whole_points_prediction_error[int(sorted_group[id_item][0][7]),0] = np.mean(sorted_group[id_item][:,0])
+            whole_points_prediction_error[int(sorted_group[id_item][0][7]),1] = sorted_group[id_item][0,2]
+            whole_points_prediction_error[int(sorted_group[id_item][0][7]),2] = sorted_group[id_item][0,4]
+            whole_points_prediction_error[int(sorted_group[id_item][0][7]),3] = sorted_group[id_item][0,5]
+            whole_points_prediction_error[int(sorted_group[id_item][0][7]),4] = sorted_group[id_item][0,6]
+
+        # Write points
+        vertexes = PlyElement.describe(np.array([(item[2],item[3],item[4],item[0] if item[1]!=0 else 0,item[1]) for item in whole_points_prediction_error],
+                                          dtype=[('x','f8'),('y','f8'),('z','f8'),('reconstructability','f8'),('error','f8')]), 'vertex')
+
+        PlyData([vertexes]).write('temp/test_scene_output/whole_point.ply')
+
+        print("Consider {}/{} points to calculate the spearman".format(
+            np.logical_not(self.test_dataset.point_attribute[:,6].astype(np.bool8)).sum(),
+            whole_points_prediction_error.shape[0]))
+        whole_points_prediction_error=whole_points_prediction_error[
+            np.logical_not(self.test_dataset.point_attribute[:,6].astype(np.bool8))]
+
         print("{} points are not covered by the sampling".format(np.all(whole_points_prediction_error==0,axis=1).sum()))
         spearmanr_factor = stats.spearmanr(whole_points_prediction_error[:, 0], whole_points_prediction_error[:, 1])[0]
         self.log("Test spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,

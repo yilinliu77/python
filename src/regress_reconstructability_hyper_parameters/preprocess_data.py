@@ -33,6 +33,7 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str = None
             y_dim = (np.max(y) - np.min(y)) / 2
             z_dim = (np.max(z) - np.min(z)) / 2
             max_dim = max(x_dim, y_dim, z_dim)
+            np.savez(os.path.join(v_root,"../data_centralize"),np.array([np.mean(x),np.mean(y),np.mean(z),max_dim]))
             x = (x - np.mean(x)) / max_dim
             y = (y - np.mean(y)) / max_dim
             z = (z - np.mean(z)) / max_dim

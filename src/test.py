@@ -3,6 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 
+import pymap3d as pm
+from pyproj import Transformer,CRS
 
 if __name__ == '__main__':
     # plt.figure()
@@ -24,31 +26,11 @@ if __name__ == '__main__':
     #
     # plt.tight_layout()
     # plt.show()
+    transformer = Transformer.from_crs(CRS.from_epsg(4326), CRS.from_epsg(3857))
+    wgs_long_lat=np.array([113.934737085972,22.5322469005556,121.757])
+    print(transformer.transform(wgs_long_lat[1],wgs_long_lat[0]))
 
-    dataset=pd.read_csv("titanicTrain.csv")
-    plt.figure()
-    plt.subplot(1, 2, 1)
-    class1 = dataset[dataset["Pclass"] == 1]["Age"].to_numpy()
-    class2 = dataset[dataset["Pclass"] == 2]["Age"].to_numpy()
-    class3 = dataset[dataset["Pclass"] == 3]["Age"].to_numpy()
-    class1=class1[~np.isnan(class1)]
-    class2=class2[~np.isnan(class2)]
-    class3=class3[~np.isnan(class3)]
+    transformer = Transformer.from_crs(CRS.from_epsg(4547), CRS.from_epsg(3857))
+    cgcs2000_4547=np.array([-243.017,-370.281,-127.169])+np.array([493487.4722,2493097.072,179])
 
-    plt.hist(class1,bins=[0,10,20,30,40,50,60,70,80],color=(0,0,1),label="1st",alpha=0.1)
-    plt.hist(class2,bins=[0,10,20,30,40,50,60,70,80],color=(1,0,0),label="2nd",alpha=0.1)
-    plt.hist(class3,bins=[0,10,20,30,40,50,60,70,80],color=(0,1,0),label="3rd",alpha=0.1)
-    plt.xlabel("Age")
-    plt.ylabel("Count")
-    plt.legend()
-    plt.title("Passenger Class and Age Distribution")
-
-    plt.subplot(1, 2, 2)
-    sizes=[(dataset["Pclass"] == 1).sum(),(dataset["Pclass"] == 2).sum(),(dataset["Pclass"] == 3).sum()]
-    plt.pie(sizes,autopct='%1.1f%%',labels=["1","2","3"],explode=[0.1,0.1,0.1])
-    plt.title("Class Percentage")
-
-    plt.tight_layout()
-    plt.show()
-
-
+    print(transformer.transform(cgcs2000_4547[1],cgcs2000_4547[0]))

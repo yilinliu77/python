@@ -162,7 +162,7 @@ def pre_compute_img_features(v_view_paths: List[str], v_img_size, v_root_path, v
             point_features = []
             for id_view, view_path in enumerate(point):
                 pixel_position = torch.tensor(v_view_attribute[id_point, id_view, 7:9], dtype=torch.float32)
-                pixel_position = torch.cat([pixel_position - 1 / 400, pixel_position + 1 / 400], dim=-1)
+                pixel_position = torch.cat([pixel_position - 5 / 400, pixel_position + 5 / 400], dim=-1)
 
                 # Get img features
                 img_features = None

@@ -32,6 +32,88 @@ from scipy import stats
 
 from src.regress_reconstructability_hyper_parameters.preprocess_data import preprocess_data, pre_compute_img_features
 
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+# v_data: Predict reconstructability, Predict inconsistency, GT error, inconsistency (0 is consistent), Point index
+def output_test(v_data, v_num_total_points):
+    predict_result = v_data.reshape(-1, v_data.shape[-1])
+    invalid_mask = predict_result[:, 3]  # Filter out the point with gt reconstructability = 0
+    print("{}/{} predictions are inconsistent thus do not consider to calculate the spearman correlation".format(
+        invalid_mask.sum(), predict_result.shape[0]))
+    sorted_index = np.argsort(predict_result[:, 4])  # Sort according to the point index
+    predict_result = predict_result[sorted_index]
+    sorted_group = np.split(predict_result, np.unique(predict_result[:, 4], return_index=True)[1][1:])
+    whole_points_prediction_error = np.zeros((v_num_total_points, 4), dtype=np.float32)
+    print("Merge the duplication and calculate the spearman")
+    for id_item in tqdm(range(len(sorted_group))):
+        whole_points_prediction_error[int(sorted_group[id_item][0][4]), 0] = np.mean(sorted_group[id_item][:, 0])
+        whole_points_prediction_error[int(sorted_group[id_item][0][4]), 1] = sorted_group[id_item][0, 2]
+        whole_points_prediction_error[int(sorted_group[id_item][0][4]), 2] = np.mean(sorted_group[id_item][:, 1])
+        whole_points_prediction_error[int(sorted_group[id_item][0][4]), 3] = sorted_group[id_item][0, 3]
+
+    # Calculate consistency accuracy
+    predicted_good_point_mask = sigmoid(whole_points_prediction_error[:, 2]) > 0.5
+    gt_good_point_mask = 1 - whole_points_prediction_error[:, 3]
+    accuracy = (predicted_good_point_mask == gt_good_point_mask).sum() / gt_good_point_mask.shape[0]
+    # Calculate spearman factor
+    consistent_point_mask = whole_points_prediction_error[:, 3] == 0
+    print("Consider {}/{} points to calculate the spearman".format(
+        consistent_point_mask.sum(),
+        whole_points_prediction_error.shape[0]))
+
+    spearmanr_factor = stats.spearmanr(
+        whole_points_prediction_error[consistent_point_mask][:, 0],
+        whole_points_prediction_error[consistent_point_mask][:, 1]
+    )[0]
+
+    return spearmanr_factor,accuracy,whole_points_prediction_error # predict_recon, gt_recon, predict_consitency, gt_inconsistency
+
+# v_data: Predict reconstructability, Predict inconsistency, GT error, inconsistency (0 is consistent), Point index, x, y, z
+def output_test_with_pc_and_views(v_data, v_num_total_points):
+    prediction_result = torch.cat([item[0] for item in v_data], dim=0)
+    spearmanr_factor,accuracy,whole_points_prediction_error = output_test(prediction_result.cpu().numpy(),v_num_total_points)
+
+    prediction_result_reshape = prediction_result.reshape([-1, prediction_result.shape[-1]])
+    views = np.concatenate([item[1] for item in v_data], axis=0)
+    views = views.reshape([-1, views.shape[2], views.shape[3]])
+    # Write views
+    vertexes = np.zeros((v_num_total_points, 3), dtype=np.float32) # x, y, z
+    for id_view, view in enumerate(tqdm(views)):
+        id_point = int(prediction_result_reshape[id_view,7])
+        filename = "temp/test_scene_output/{}.txt".format(int(id_point))
+        if os.path.exists(filename):
+            continue
+
+        vertexes[id_point][0:3] = prediction_result_reshape[id_view,4:7].cpu().numpy()
+
+        # Write views
+        with open(filename, "w") as f:
+            for item in view:
+                if item[6] == 0:
+                    break
+                item[3:6] /= np.linalg.norm(item[3:6])
+
+                pitch = math.asin(item[5])
+                yaw = math.atan2(item[4], item[3])
+
+                f.write("xxx.png,{},{},{},{},{},{}\n".format(
+                    item[0], item[1], item[2],
+                    pitch / math.pi * 180, 0, yaw / math.pi * 180,
+                ))
+
+
+    vertexes_describer = PlyElement.describe(np.array(
+        [(item[0], item[1], item[2], item[3], item[4], item[5], 1-item[6]) for item in
+         np.concatenate([vertexes,whole_points_prediction_error],axis=1)],
+        dtype=[('x', 'f8'), ('y', 'f8'), ('z', 'f8'),
+               ('Predict_Recon', 'f8'), ('GT_Error', 'f8'),
+               ('Predict_Consistency', 'f8'), ('GT_Consistency', 'f8')]), 'vertex')
+
+    PlyData([vertexes_describer]).write('temp/test_scene_output/whole_point.ply')
+
+    return spearmanr_factor, accuracy
+
 
 class Regress_hyper_parameters(pl.LightningModule):
     def __init__(self, hparams):
@@ -136,22 +218,18 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.log("Validation Error Loss", error_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
         self.log("Validation Inconsitency Loss", inconsitency_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
 
-        return torch.cat([results, data["point_attribute"][:, :, 2:3], data["points"][:,:,3:4]], dim=2)
+        return torch.cat([results, data["point_attribute"][:, :, [2,6]], data["points"][:,:,3:4]], dim=2)
 
     def validation_epoch_end(self, outputs) -> None:
-        result = torch.cat(outputs, dim=0).cpu().detach().numpy()
-        result = result.reshape(-1, result.shape[-1])
-        result = result[np.argsort(result[:, 2])]
-        sorted_group = np.split(result[:, :3], np.unique(result[:, 2], return_index=True)[1][1:])
-        whole_points_prediction_error = np.zeros((self.valid_dataset.datasets[0].point_attribute.shape[0], 2), dtype=np.float32)
-        print("Merge the duplication and calculate the spearman")
-        for id_item in tqdm(range(len(sorted_group))):
-            whole_points_prediction_error[int(sorted_group[id_item][0][2]), 0] = np.mean(sorted_group[id_item][:, 0])
-            whole_points_prediction_error[int(sorted_group[id_item][0][2]), 1] = sorted_group[id_item][0, 1]
-        print("{} points are not covered by the sampling".format(np.all(whole_points_prediction_error == 0, axis=1).sum()))
-        spearmanr_factor = stats.spearmanr(whole_points_prediction_error[:, 0], whole_points_prediction_error[:, 1])[0]
-        self.log("Validation spearman baseline", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
+        spearmanr_factor,accuracy,whole_points_prediction_error  = output_test(
+            torch.cat([item for item in outputs], dim=0), self.valid_dataset.datasets[0].point_attribute.shape[0])
+
+        self.log("Validation spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
                  on_epoch=True)
+        self.log("Validation accuracy", accuracy, prog_bar=True, logger=True, on_step=False,
+                 on_epoch=True)
+
+        pass
 
         if not self.trainer.sanity_checking:
             for dataset in self.train_dataset.datasets:
@@ -182,63 +260,15 @@ class Regress_hyper_parameters(pl.LightningModule):
         return torch.cat([
             results,  # Predict reconstructability and inconsistency
             data["point_attribute"][:, :, [2,6]], # Avg error and Is point with 0 reconstructability
+            data["points"][:,:,3:4], # Point index
             results.new(points)
-            ,data["points"][:,:,3:4] # Point index
         ], dim=2), views # x,y,z, dx,dy,dz, valid
 
     def test_epoch_end(self, outputs) -> None:
-        views = np.concatenate([item[1] for item in outputs], axis=0)
-        views=views.reshape([-1,views.shape[2],views.shape[3]])
-        predict_result = torch.cat([item[0] for item in outputs], dim=0).cpu().detach().numpy()
-        predict_result = predict_result.reshape(-1,predict_result.shape[-1])
-        valid_mask = predict_result[:,3] # Filter out the point with gt reconstructability = 0
-        print("{}/{} points invalid".format(valid_mask.sum(),predict_result.shape[0]))
-        # predict_result=predict_result[(1-valid_mask).astype(np.bool8)]
-        # views=views[(1-valid_mask).astype(np.bool8)]
-        sorted_index = np.argsort(predict_result[:, 7]) # Sort according to the point index
-        predict_result = predict_result[sorted_index]
-        views = views[sorted_index]
-        # Write views
-        sorted_views = views[np.unique(predict_result[:, 7], return_index=True)[1]]
-        for id_view, view in enumerate(tqdm(sorted_views)):
-            with open("temp/test_scene_output/{}.txt".format(id_view),"w") as f:
-                for item in view:
-                    if item[6] == 0:
-                        break
-                    item[3:6]/=np.linalg.norm(item[3:6])
-
-                    pitch = math.asin(item[5])
-                    yaw = math.atan2(item[4],item[3])
-
-                    f.write("xxx.png,{},{},{},{},{},{}\n".format(
-                        item[0],item[1],item[2],
-                        pitch/math.pi*180,0,yaw/math.pi*180,
-                    ))
-        sorted_group = np.split(predict_result, np.unique(predict_result[:, 7], return_index=True)[1][1:])
-        whole_points_prediction_error = np.zeros((self.test_dataset.point_attribute.shape[0],5),dtype=np.float32)
-        print("Merge the duplication and calculate the spearman")
-        for id_item in tqdm(range(len(sorted_group))):
-            whole_points_prediction_error[int(sorted_group[id_item][0][7]),0] = np.mean(sorted_group[id_item][:,0])
-            whole_points_prediction_error[int(sorted_group[id_item][0][7]),1] = sorted_group[id_item][0,2]
-            whole_points_prediction_error[int(sorted_group[id_item][0][7]),2] = sorted_group[id_item][0,4]
-            whole_points_prediction_error[int(sorted_group[id_item][0][7]),3] = sorted_group[id_item][0,5]
-            whole_points_prediction_error[int(sorted_group[id_item][0][7]),4] = sorted_group[id_item][0,6]
-
-        # Write points
-        vertexes = PlyElement.describe(np.array([(item[2],item[3],item[4],item[0] if item[1]!=0 else 0,item[1]) for item in whole_points_prediction_error],
-                                          dtype=[('x','f8'),('y','f8'),('z','f8'),('reconstructability','f8'),('error','f8')]), 'vertex')
-
-        PlyData([vertexes]).write('temp/test_scene_output/whole_point.ply')
-
-        print("Consider {}/{} points to calculate the spearman".format(
-            np.logical_not(self.test_dataset.point_attribute[:,6].astype(np.bool8)).sum(),
-            whole_points_prediction_error.shape[0]))
-        whole_points_prediction_error=whole_points_prediction_error[
-            np.logical_not(self.test_dataset.point_attribute[:,6].astype(np.bool8))]
-
-        print("{} points are not covered by the sampling".format(np.all(whole_points_prediction_error==0,axis=1).sum()))
-        spearmanr_factor = stats.spearmanr(whole_points_prediction_error[:, 0], whole_points_prediction_error[:, 1])[0]
+        spearmanr_factor, accuracy = output_test_with_pc_and_views(outputs,self.test_dataset.point_attribute.shape[0])
         self.log("Test spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
+                 on_epoch=True)
+        self.log("Test accuracy", accuracy, prog_bar=True, logger=True, on_step=False,
                  on_epoch=True)
         pass
 

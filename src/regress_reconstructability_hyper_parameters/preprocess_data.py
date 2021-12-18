@@ -173,10 +173,11 @@ def pre_compute_img_features(v_view_paths: List[str], v_img_size, v_root_path, v
                     # if img_features_saved_path not in img_features_dict:
                     #     img_features_dict[img_features_saved_path] = torch.tensor(
                     #         np.load(img_features_saved_path)["arr_0"], dtype=torch.float32).cuda()
-                    # img_features = img_features_dict[img_features_saved_path]
                     # Disable cache, slow
                     img_features_dict[img_features_saved_path] = torch.tensor(
                         np.load(img_features_saved_path)["arr_0"], dtype=torch.float32).cuda()
+                    img_features = img_features_dict[img_features_saved_path]
+
                 else:
                     img = Image.open(view_path)
                     img = transform(img)

@@ -57,7 +57,7 @@ def output_test(v_data, v_num_total_points):
     gt_good_point_mask = 1 - whole_points_prediction_error[:, 3]
     accuracy = (predicted_good_point_mask == gt_good_point_mask).sum() / gt_good_point_mask.shape[0]
     # Calculate spearman factor
-    consistent_point_mask = whole_points_prediction_error[:, 3] == 0
+    consistent_point_mask = np.logical_and(whole_points_prediction_error[:, 0] != 0,whole_points_prediction_error[:, 3] == 0)
     print("Consider {}/{} points to calculate the spearman".format(
         consistent_point_mask.sum(),
         whole_points_prediction_error.shape[0]))
@@ -222,7 +222,7 @@ class Regress_hyper_parameters(pl.LightningModule):
 
     def validation_epoch_end(self, outputs) -> None:
         spearmanr_factor,accuracy,whole_points_prediction_error  = output_test(
-            torch.cat([item for item in outputs], dim=0), self.valid_dataset.datasets[0].point_attribute.shape[0])
+            torch.cat([item for item in outputs], dim=0).cpu().numpy(), self.valid_dataset.datasets[0].point_attribute.shape[0])
 
         self.log("Validation spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
                  on_epoch=True)

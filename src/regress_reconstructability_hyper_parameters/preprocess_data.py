@@ -1,5 +1,6 @@
 import os
 import pickle
+from multiprocessing import Pool
 
 import cv2
 import hydra
@@ -15,6 +16,7 @@ from tqdm import tqdm
 from copy import deepcopy
 import open3d as o3d
 from scipy import stats
+from tqdm.contrib.concurrent import thread_map
 
 
 def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str = None) -> (np.ndarray, np.ndarray):
@@ -154,49 +156,52 @@ def pre_compute_img_features(v_view_paths: List[str], v_img_size, v_root_path, v
     if not os.path.exists(os.path.join(v_root_path, "view_features")):
         os.mkdir(os.path.join(v_root_path, "view_features"))
 
+    def compute_features(id_point):
+        # for id_point, point in enumerate(tqdm(v_view_paths)):
+        point_path = os.path.join(v_root_path, "point_features", str(id_point) + ".npz")
+        if os.path.exists(point_path):
+            return 0
+        point_features = []
+        for id_view, view_path in enumerate(v_view_paths[id_point]):
+            pixel_position = torch.tensor(v_view_attribute[id_point, id_view, 7:9], dtype=torch.float32)
+            pixel_position = torch.cat([pixel_position - 5 / 400, pixel_position + 5 / 400], dim=-1)
+
+            # Get img features
+            img_features = None
+            item_name = view_path.split(".")[0].split("\\")[-1] + ".npz"
+            img_features_saved_path = os.path.join(v_root_path, "view_features", item_name)
+            if os.path.exists(img_features_saved_path):
+                # Enable cache, but potent to pose memory leak. Can be use in the small scene
+                if img_features_saved_path not in img_features_dict:
+                    img_features_dict[img_features_saved_path] = np.load(img_features_saved_path)["arr_0"]
+                img_features = torch.tensor(img_features_dict[img_features_saved_path], dtype=torch.float32).cuda()
+                # Disable cache, slow
+                # img_features = torch.tensor(
+                #     np.load(img_features_saved_path)["arr_0"], dtype=torch.float32).cuda()
+
+            else:
+                img = Image.open(view_path)
+                img = transform(img)
+                var = torch.var(img, dim=(0, 1), keepdim=True)
+                mean = torch.mean(img, dim=(0, 1), keepdim=True)
+                img = (img - mean) / (np.sqrt(var) + 0.00000001)
+                img_features = img_feature_extractor.feature(img[:3].unsqueeze(0).cuda())
+                np.savez_compressed(img_features_saved_path, img_features.cpu().numpy())
+
+            # Get the pixel features
+            pixel_position_features = torchvision.ops.ps_roi_align(
+                img_features,
+                [pixel_position.cuda().unsqueeze(0)],
+                1).squeeze(
+                -1).squeeze(-1)
+            point_features.append(pixel_position_features)
+
+        point_features = torch.cat(point_features, dim=0)
+        np.savez(point_path, point_features.cpu().numpy())
+
     with torch.no_grad():
-        for id_point, point in enumerate(tqdm(v_view_paths)):
-            point_path = os.path.join(v_root_path, "point_features", str(id_point) + ".npz")
-            if os.path.exists(point_path):
-                continue
-            point_features = []
-            for id_view, view_path in enumerate(point):
-                pixel_position = torch.tensor(v_view_attribute[id_point, id_view, 7:9], dtype=torch.float32)
-                pixel_position = torch.cat([pixel_position - 5 / 400, pixel_position + 5 / 400], dim=-1)
-
-                # Get img features
-                img_features = None
-                item_name = view_path.split(".")[0].split("\\")[-1] + ".npz"
-                img_features_saved_path = os.path.join(v_root_path, "view_features", item_name)
-                if os.path.exists(img_features_saved_path):
-                    # Enable cache, but potent to pose memory leak. Can be use in the small scene
-                    # if img_features_saved_path not in img_features_dict:
-                    #     img_features_dict[img_features_saved_path] = torch.tensor(
-                    #         np.load(img_features_saved_path)["arr_0"], dtype=torch.float32).cuda()
-                    # img_features = img_features_dict[img_features_saved_path]
-                    # Disable cache, slow
-                    img_features = torch.tensor(
-                        np.load(img_features_saved_path)["arr_0"], dtype=torch.float32).cuda()
-
-                else:
-                    img = Image.open(view_path)
-                    img = transform(img)
-                    var = torch.var(img, dim=(0, 1), keepdim=True)
-                    mean = torch.mean(img, dim=(0, 1), keepdim=True)
-                    img = (img - mean) / (np.sqrt(var) + 0.00000001)
-                    img_features = img_feature_extractor.feature(img[:3].unsqueeze(0).cuda())
-                    np.savez_compressed(img_features_saved_path, img_features.cpu().numpy())
-
-                # Get the pixel features
-                pixel_position_features = torchvision.ops.ps_roi_align(
-                    img_features,
-                    [pixel_position.cuda().unsqueeze(0)],
-                    1).squeeze(
-                    -1).squeeze(-1)
-                point_features.append(pixel_position_features)
-
-            point_features = torch.cat(point_features, dim=0)
-            np.savez(point_path, point_features.cpu().numpy())
+        r = thread_map(compute_features, range(len(v_view_paths)), max_workers=1)
+    return
 
 
 if __name__ == '__main__':
@@ -210,16 +215,28 @@ if __name__ == '__main__':
 
     if not os.path.exists(os.path.join(output_root, "training_data")):
         os.mkdir(os.path.join(output_root, "training_data"))
-    view, view_pair, point_attribute, view_paths = preprocess_data(
-        reconstructability_file_dir,
-        error_point_cloud_dir,
-        img_dir
-    )
-    np.savez_compressed(os.path.join(output_root, "training_data/views"), view)
-    np.savez_compressed(os.path.join(output_root, "training_data/view_pairs"), view_pair)
-    np.savez_compressed(os.path.join(output_root, "training_data/point_attribute"), point_attribute)
-    np.savez_compressed(os.path.join(output_root, "training_data/view_paths"), view_paths)
-    print("Pre-compute data done")
+    # view, view_pair, point_attribute, view_paths = preprocess_data(
+    #     reconstructability_file_dir,
+    #     error_point_cloud_dir,
+    #     img_dir
+    # )
+    # np.savez_compressed(os.path.join(output_root, "training_data/views"), view)
+    # np.savez_compressed(os.path.join(output_root, "training_data/view_pairs"), view_pair)
+    # np.savez_compressed(os.path.join(output_root, "training_data/point_attribute"), point_attribute)
+    # np.savez_compressed(os.path.join(output_root, "training_data/view_paths"), view_paths)
+    # print("Pre-compute data done")
+
+    """
+    debug
+    """
+    view = np.load(os.path.join(output_root, "views.npz"))["arr_0"]
+    view_pair = np.load(os.path.join(output_root, "view_pairs.npz"))["arr_0"]
+    point_attribute = np.load(os.path.join(output_root, "point_attribute.npz"))["arr_0"]
+    view_paths = np.load(os.path.join(output_root, "view_paths.npz"), allow_pickle=True)[
+        "arr_0"]
+    """
+    debug
+    """
 
     print("Pre compute features")
     pre_compute_img_features(view_paths, img_rescale_size, os.path.join(output_root, "training_data"), view)

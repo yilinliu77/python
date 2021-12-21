@@ -8,7 +8,7 @@ trainer:
 
   batch_size: 2
   auto_lr_find: false
-  resume_from_checkpoint:
+  resume_from_checkpoint: temp/last.ckpt
   evaluate: false
   running_sanity_check: false
 model:

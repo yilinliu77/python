@@ -80,12 +80,12 @@ def output_test_with_pc_and_views(v_data, v_num_total_points):
     # Write views
     vertexes = np.zeros((v_num_total_points, 3), dtype=np.float32) # x, y, z
     for id_view, view in enumerate(tqdm(views)):
-        id_point = int(prediction_result_reshape[id_view,7])
+        id_point = int(prediction_result_reshape[id_view,4])
         filename = "temp/test_scene_output/{}.txt".format(int(id_point))
         if os.path.exists(filename):
             continue
 
-        vertexes[id_point][0:3] = prediction_result_reshape[id_view,4:7].cpu().numpy()
+        vertexes[id_point][0:3] = prediction_result_reshape[id_view,5:8].cpu().numpy()
 
         # Write views
         with open(filename, "w") as f:

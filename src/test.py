@@ -20,14 +20,13 @@ def test1():
     print("Save")
     def test_thread(v_id):
         read_index = np.random.randint(0, num_item)
-        save_index = np.random.randint(0, num_item)
         read_filename = "test1/{}".format(read_index)
-        save_filename = "test1/{}".format(save_index)
         if os.path.exists(read_filename):
             np.load(read_filename)
         else:
-            np.savez(read_filename, a[read_index])
-        np.savez(save_filename, a[save_index])
+            for i in range(max(0,read_index-10),min(num_item,read_index+10)):
+                save_filename = "test1/{}".format(i)
+                np.savez(save_filename, a[i])
     # for i in tqdm(range(num_item)):
     #     test_thread(i)
 

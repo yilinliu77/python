@@ -200,7 +200,7 @@ def pre_compute_img_features(v_view_paths: List[str], v_img_size, v_root_path, v
         np.savez(point_path, point_features.cpu().numpy())
 
     with torch.no_grad():
-        r = thread_map(compute_features, range(len(v_view_paths)), max_workers=1)
+        r = thread_map(compute_features, range(len(v_view_paths)), max_workers=4)
     return
 
 
@@ -215,25 +215,25 @@ if __name__ == '__main__':
 
     if not os.path.exists(os.path.join(output_root, "training_data")):
         os.mkdir(os.path.join(output_root, "training_data"))
-    # view, view_pair, point_attribute, view_paths = preprocess_data(
-    #     reconstructability_file_dir,
-    #     error_point_cloud_dir,
-    #     img_dir
-    # )
-    # np.savez_compressed(os.path.join(output_root, "training_data/views"), view)
-    # np.savez_compressed(os.path.join(output_root, "training_data/view_pairs"), view_pair)
-    # np.savez_compressed(os.path.join(output_root, "training_data/point_attribute"), point_attribute)
-    # np.savez_compressed(os.path.join(output_root, "training_data/view_paths"), view_paths)
-    # print("Pre-compute data done")
+    view, view_pair, point_attribute, view_paths = preprocess_data(
+        reconstructability_file_dir,
+        error_point_cloud_dir,
+        img_dir
+    )
+    np.savez_compressed(os.path.join(output_root, "training_data/views"), view)
+    np.savez_compressed(os.path.join(output_root, "training_data/view_pairs"), view_pair)
+    np.savez_compressed(os.path.join(output_root, "training_data/point_attribute"), point_attribute)
+    np.savez_compressed(os.path.join(output_root, "training_data/view_paths"), view_paths)
+    print("Pre-compute data done")
 
     """
     debug
     """
-    view = np.load(os.path.join(output_root, "views.npz"))["arr_0"]
-    view_pair = np.load(os.path.join(output_root, "view_pairs.npz"))["arr_0"]
-    point_attribute = np.load(os.path.join(output_root, "point_attribute.npz"))["arr_0"]
-    view_paths = np.load(os.path.join(output_root, "view_paths.npz"), allow_pickle=True)[
-        "arr_0"]
+    # view = np.load(os.path.join(output_root, "views.npz"))["arr_0"]
+    # view_pair = np.load(os.path.join(output_root, "view_pairs.npz"))["arr_0"]
+    # point_attribute = np.load(os.path.join(output_root, "point_attribute.npz"))["arr_0"]
+    # view_paths = np.load(os.path.join(output_root, "view_paths.npz"), allow_pickle=True)[
+    #     "arr_0"]
     """
     debug
     """

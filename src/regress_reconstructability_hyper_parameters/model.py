@@ -309,16 +309,17 @@ class PointNet2(nn.Module):
 
 
 class PointNet1(nn.Module):
-    def __init__(self):
+    def __init__(self,v_num_channel_input,v_num_channel_output):
         super(PointNet1, self).__init__()
-        self.feat = PointNetEncoder(global_feat=False, feature_transform=True, channel=291)
+        self.feat = PointNetEncoder(global_feat=False, feature_transform=True, channel=v_num_channel_input)
         self.conv1 = torch.nn.Conv1d(1088, 512, 1)
         self.conv2 = torch.nn.Conv1d(512, 256, 1)
         self.conv3 = torch.nn.Conv1d(256, 128, 1)
-        self.conv4 = torch.nn.Conv1d(128, 2, 1)
+        self.conv4 = torch.nn.Conv1d(128, v_num_channel_output, 1)
         self.bn1 = nn.BatchNorm1d(512)
         self.bn2 = nn.BatchNorm1d(256)
         self.bn3 = nn.BatchNorm1d(128)
+
 
     def forward(self, x):
         batchsize = x.size()[0]
@@ -329,7 +330,7 @@ class PointNet1(nn.Module):
         x = F.relu(self.bn3(self.conv3(x)))
         x = self.conv4(x)
         x = x.transpose(2, 1).contiguous()
-        x = x.view(batchsize, n_pts, 2)
+        x = x.view(batchsize, n_pts, -1)
         return x, trans_feat
 
 
@@ -452,12 +453,28 @@ def loss_l2_recon_entropy_identifier(v_point_attribute,v_prediction, v_l2_weight
 
     return error_loss, inconsistency_loss, v_l2_weights * error_loss + inconsistency_loss
 
+def loss_l2_recon(v_point_attribute,v_prediction):
+    predicted_error = v_prediction[:, :, 0:1]
+    predicted_inconsistency = v_prediction[:, :, 1:2]
+
+    gt_reconstructability = v_point_attribute[:, 0]
+    gt_max_error = v_point_attribute[:, :, 1:2]
+    gt_avg_error = v_point_attribute[:, :, 2:3]
+    gt_error_mask_error = (1 - v_point_attribute[:, :, 6:7]).bool()  # Good Point -> True(1)
+
+    error_loss = torch.nn.functional.mse_loss(predicted_error[gt_error_mask_error], gt_avg_error[gt_error_mask_error])
+
+
+    return error_loss, 0, error_loss + 0
+
+
 class Uncertainty_Modeling_v2(nn.Module):
     def __init__(self, hparams):
         super(Uncertainty_Modeling_v2, self).__init__()
         self.hydra_conf = hparams
-
-        self.point_feature_extractor = PointNet1()
+        self.is_involve_img = self.hydra_conf["model"]["involve_img"]
+        self.phase_1_extractor = PointNet1(3 + 256, 1) # xyz + view_features
+        self.phase_2_extractor = PointNet1(3 + 256 + 32 + 1, 2) # xyz + view_features + img_features + predicted recon
 
         # Img features
         self.img_feature_fusioner = ImgFeatureFuser()
@@ -473,9 +490,12 @@ class Uncertainty_Modeling_v2(nn.Module):
         view_feature_time = 0
         correlation_time = 0
 
-        t = time.time()
         # Calculate img features
-        img_features = self.img_feature_fusioner(v_data["point_features"],v_data["point_features_mask"]) # B * num_point * 32
+        t = time.time()
+        if self.is_involve_img:
+            img_features = self.img_feature_fusioner(v_data["point_features"],v_data["point_features_mask"]) # B * num_point * 32
+        else:
+            img_features=None
         img_feature_time = time.time() - t
         t = time.time()
 
@@ -486,11 +506,20 @@ class Uncertainty_Modeling_v2(nn.Module):
         view_feature_time= time.time() - t
         t = time.time()
 
-        # Extract features using PointNet
+        # Phase 1, only use viewpoint features to predict recon
         points = v_data["points"] # B * num_point * 4 (x,y,z, index)
-        point_features = torch.cat([points[:, :, :3], view_features, img_features], dim=2)
+        point_features = torch.cat([points[:, :, :3], view_features], dim=2)
         # uncertainty = self.point_feature_extractor(point_features.transpose(1,2))[0].transpose(1,2) # PointNet++
-        predict_result = self.point_feature_extractor(point_features.transpose(1, 2))[0]
+        predict_reconstructability = self.phase_1_extractor(point_features.transpose(1, 2))[0]
+
+        # Phase 2, use img features to refine recon and predict proxy inconsistency
+        if self.is_involve_img:
+            point_features_plus = torch.cat(
+                [points[:, :, :3], view_features,predict_reconstructability, img_features], dim=2)
+            predict_result = self.phase_2_extractor(point_features_plus.transpose(1, 2))[0]
+            predict_result[...,0:1] = predict_result[...,0:1] + predict_reconstructability
+        else:
+            predict_result = torch.cat([predict_reconstructability,torch.zeros_like(predict_reconstructability)],dim=-1)
         predict_reconstructability = predict_result[...,0]
         inconsistency_identifier = predict_result[...,1]
         correlation_time = time.time() - t
@@ -499,8 +528,10 @@ class Uncertainty_Modeling_v2(nn.Module):
         return predict_result
 
     def loss(self, v_point_attribute, v_prediction):
-
-        return loss_l2_recon_entropy_identifier(v_point_attribute,v_prediction)
+        if self.is_involve_img:
+            return loss_l2_recon_entropy_identifier(v_point_attribute,v_prediction)
+        else:
+            return loss_l2_recon(v_point_attribute,v_prediction)
 
 
 class Uncertainty_Modeling_wo_dropout(nn.Module):

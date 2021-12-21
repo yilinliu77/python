@@ -4,11 +4,11 @@ trainer:
   num_worker: 0
   train_dataset: D:\Projects\Reconstructability\pre_computed\ds_fine_trajectory_fine_proxy_school\training_data*D:\Projects\Reconstructability\pre_computed\ds_inter_trajectory_inter_proxy_bridge\training_data*D:\Projects\Reconstructability\pre_computed\ds_coarse_trajectory_coarse_proxy_school\training_data
   valid_dataset: D:\Projects\Reconstructability\pre_computed\smith_inter_trajectory_inter_proxy_bridge\training_data
-  test_dataset: D:\Projects\Reconstructability\pre_computed\ds_coarse_trajectory_coarse_proxy_school\training_data
+  test_dataset: D:\Projects\Reconstructability\pre_computed\t\qiao_fine_ds_80\training_data
 
   batch_size: 2
   auto_lr_find: false
-  resume_from_checkpoint: temp/last.ckpt
+  resume_from_checkpoint:
   evaluate: false
   running_sanity_check: false
 model:
@@ -23,7 +23,7 @@ model:
 #  preprocess_path: D:\Projects\Reconstructability\pre_computed\bridge_inter # Output path
 #  #  preprocess_path: C:\repo\python\temp\regress_test_10k
 
-  involve_img: false
+  involve_img: true
   open_weights: true
   num_points_per_batch: 256
 

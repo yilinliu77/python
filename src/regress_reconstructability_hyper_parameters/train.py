@@ -248,14 +248,16 @@ class Regress_hyper_parameters(pl.LightningModule):
         data = batch
         results = self.forward(data)
 
-        loss, gt_spearman, num_valid_point = self.model.loss(data["point_attribute"], results)
+        error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
         view_dir = -data["views"][:,:,:,1:4] * data["views"][:,:,:,4:5] * 60 # 60 is the distance baseline, - because it stores the view to point vector
         points = data["points"][:,:,:3].cpu().numpy()* self.data_mean_std[3] + self.data_mean_std[:3]
         views = points[:,:,np.newaxis] + view_dir.cpu().numpy()
         views=np.concatenate([views,-view_dir.cpu().numpy(),data["views"][:,:,:,0:1].cpu().numpy()],axis=-1)
 
-        self.log("Test Loss", loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
+        self.log("Test Loss", total_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
+        self.log("Test Recon Loss", error_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
+        self.log("Test Inconsistency Loss", inconsitency_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
 
         return torch.cat([
             results,  # Predict reconstructability and inconsistency

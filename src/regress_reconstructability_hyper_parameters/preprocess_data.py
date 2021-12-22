@@ -256,24 +256,24 @@ if __name__ == '__main__':
     img_dir = os.path.join(output_root, "images")
     img_rescale_size = (400, 600)
 
-    # if not os.path.exists(os.path.join(output_root, "training_data")):
-    #     os.mkdir(os.path.join(output_root, "training_data"))
-    # view, view_pair, point_attribute, view_paths = preprocess_data(
-    #     reconstructability_file_dir,
-    #     error_point_cloud_dir,
-    #     img_dir
-    # )
-    # np.savez_compressed(os.path.join(output_root, "training_data/views"), view)
-    # np.savez_compressed(os.path.join(output_root, "training_data/view_pairs"), view_pair)
-    # np.savez_compressed(os.path.join(output_root, "training_data/point_attribute"), point_attribute)
-    # np.savez_compressed(os.path.join(output_root, "training_data/view_paths"), view_paths)
-    # print("Pre-compute data done")
+    if not os.path.exists(os.path.join(output_root, "training_data")):
+        os.mkdir(os.path.join(output_root, "training_data"))
+    view, view_pair, point_attribute, view_paths = preprocess_data(
+        reconstructability_file_dir,
+        error_point_cloud_dir,
+        img_dir
+    )
+    np.savez_compressed(os.path.join(output_root, "training_data/views"), view)
+    np.savez_compressed(os.path.join(output_root, "training_data/view_pairs"), view_pair)
+    np.savez_compressed(os.path.join(output_root, "training_data/point_attribute"), point_attribute)
+    np.savez_compressed(os.path.join(output_root, "training_data/view_paths"), view_paths)
+    print("Pre-compute data done")
 
     # debug
-    view = np.load(os.path.join(output_root, "training_data/views.npz"))["arr_0"]
-    point_attribute = np.load(os.path.join(output_root, "training_data/point_attribute.npz"))["arr_0"]
-    view_paths = np.load(os.path.join(output_root, "training_data/view_paths.npz"), allow_pickle=True)[
-        "arr_0"]
+    # view = np.load(os.path.join(output_root, "training_data/views.npz"))["arr_0"]
+    # point_attribute = np.load(os.path.join(output_root, "training_data/point_attribute.npz"))["arr_0"]
+    # view_paths = np.load(os.path.join(output_root, "training_data/view_paths.npz"), allow_pickle=True)[
+    #     "arr_0"]
     # debug
 
     print("Pre compute features")

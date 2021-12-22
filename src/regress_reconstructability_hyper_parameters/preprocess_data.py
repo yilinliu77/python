@@ -179,7 +179,7 @@ def compute_features(v_root_path,v_view_paths,v_view_attribute,transform,img_fea
                 # Enable cache, but potent to pose memory leak. Can be use in the small scene
                 if img_features_saved_path not in img_features_dict:
                     img_features_dict[img_features_saved_path] = np.load(img_features_saved_path)["arr_0"]
-                img_features = torch.tensor(img_features_dict[img_features_saved_path], dtype=torch.float32).cuda()
+                img_features = torch.tensor(img_features_dict[img_features_saved_path], dtype=torch.float32)
                 # Disable cache, slow
                 # img_features = torch.tensor(
                 #     np.load(img_features_saved_path)["arr_0"], dtype=torch.float32).cuda()
@@ -204,14 +204,14 @@ def compute_features(v_root_path,v_view_paths,v_view_attribute,transform,img_fea
             # # cv2.imshow("1", np.asarray(img))
             # cv2.waitKey(0)
             ## Debug
-            img_features = img_feature_extractor.feature(img_tensor[:3].unsqueeze(0).cuda())
+            img_features = img_feature_extractor.feature(img_tensor[:3].unsqueeze(0))
             # torch.save(img_features,img_features_saved_path)
             np.savez(img_features_saved_path, img_features.cpu().numpy())
 
         # Get the pixel features
         pixel_position_features = torchvision.ops.ps_roi_align(
             img_features,
-            [pixel_position.cuda().unsqueeze(0)],
+            [pixel_position.unsqueeze(0)],
             1).squeeze(
             -1).squeeze(-1)
         point_features.append(pixel_position_features)
@@ -231,7 +231,7 @@ def pre_compute_img_features(v_view_paths: List[str], v_img_size, v_root_path, v
     img_feature_extractor.load_state_dict(state_dict['model'], True)
     img_feature_extractor.requires_grad_(False)
     img_feature_extractor.eval()
-    img_feature_extractor.cuda()
+    img_feature_extractor
     img_features_dict = {}
     if not os.path.exists(os.path.join(v_root_path, "point_features")):
         os.mkdir(os.path.join(v_root_path, "point_features"))
@@ -267,7 +267,7 @@ if __name__ == '__main__':
     np.savez_compressed(os.path.join(output_root, "training_data/view_pairs"), view_pair)
     np.savez_compressed(os.path.join(output_root, "training_data/point_attribute"), point_attribute)
     np.savez_compressed(os.path.join(output_root, "training_data/view_paths"), view_paths)
-    print("Pre-compute data done")
+    # print("Pre-compute data done")
 
     # debug
     # view = np.load(os.path.join(output_root, "training_data/views.npz"))["arr_0"]

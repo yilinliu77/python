@@ -127,7 +127,7 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str = None
         return num_views
     num_view_list = thread_map(compute_max_view_number, files, max_workers=8)
     # num_view_list = process_map(compute_max_view_number, files, max_workers=8,chunksize=1)
-    max_num_view = max(num_view_list)
+    max_num_view = max(num_view_list) + 1
     print("Read attribute with max view: ", max_num_view)
     view_paths = [[] for _ in range(num_points)]
     views = np.zeros((num_points, max_num_view, 9), dtype=np.float16)
@@ -160,7 +160,7 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str = None
     ))
     return views, views_pair, point_attribute, view_paths
 
-def compute_features(v_root_path,v_view_paths,v_view_attribute,transform,img_feature_extractor,
+def compute_features(v_root_path,v_view_paths,v_view_attribute,transform,img_feature_extractor,img_features_dict,
                      id_point):
     point_path = os.path.join(v_root_path, "point_features", str(id_point) + ".npz")
     # Force regenerate data
@@ -174,16 +174,19 @@ def compute_features(v_root_path,v_view_paths,v_view_attribute,transform,img_fea
         # Get img features
         item_name = view_path.split(".")[0].split("\\")[-1] + ".npz"
         img_features_saved_path = os.path.join(v_root_path, "view_features", item_name)
-        if os.path.exists(img_features_saved_path):
-            # Enable cache, but potent to pose memory leak. Can be use in the small scene
-            # if img_features_saved_path not in img_features_dict:
-            #     img_features_dict[img_features_saved_path] = np.load(img_features_saved_path)["arr_0"]
-            # img_features = torch.tensor(img_features_dict[img_features_saved_path], dtype=torch.float32).cuda()
-            # Disable cache, slow
-            img_features = torch.tensor(
-                np.load(img_features_saved_path)["arr_0"], dtype=torch.float32).cuda()
-
-        else:
+        try:
+            if os.path.exists(img_features_saved_path):
+                # Enable cache, but potent to pose memory leak. Can be use in the small scene
+                if img_features_saved_path not in img_features_dict:
+                    img_features_dict[img_features_saved_path] = np.load(img_features_saved_path)["arr_0"]
+                img_features = torch.tensor(img_features_dict[img_features_saved_path], dtype=torch.float32).cuda()
+                # Disable cache, slow
+                # img_features = torch.tensor(
+                #     np.load(img_features_saved_path)["arr_0"], dtype=torch.float32).cuda()
+                # img_features = torch.load(img_features_saved_path+".ckpt",map_location="cuda:0")
+            else:
+                raise
+        except:
             img = Image.open(view_path)
             img = transform(img)
             var = torch.var(img, dim=(1, 2), keepdim=True)
@@ -199,9 +202,10 @@ def compute_features(v_root_path,v_view_paths,v_view_attribute,transform,img_fea
             # cv2.namedWindow("1",cv2.WINDOW_AUTOSIZE)
             # cv2.imshow("1", test_img)
             # # cv2.imshow("1", np.asarray(img))
-            # cv2.waitKey()
+            # cv2.waitKey(0)
             ## Debug
             img_features = img_feature_extractor.feature(img_tensor[:3].unsqueeze(0).cuda())
+            # torch.save(img_features,img_features_saved_path)
             np.savez(img_features_saved_path, img_features.cpu().numpy())
 
         # Get the pixel features
@@ -235,8 +239,11 @@ def pre_compute_img_features(v_view_paths: List[str], v_img_size, v_root_path, v
         os.mkdir(os.path.join(v_root_path, "view_features"))
 
     with torch.no_grad():
-        r = thread_map(partial(compute_features, v_root_path,v_view_paths,v_view_attribute,transform,img_feature_extractor),
-                       range(len(v_view_paths)), max_workers=10)
+        # r = thread_map(partial(compute_features, v_root_path,v_view_paths,v_view_attribute,transform,img_feature_extractor),
+        #                range(len(v_view_paths)), max_workers=10)
+        for v_id in tqdm(range(len(v_view_paths))):
+            partial(compute_features, v_root_path, v_view_paths, v_view_attribute,
+                    transform, img_feature_extractor,img_features_dict)(v_id)
     return
 
 
@@ -249,8 +256,8 @@ if __name__ == '__main__':
     img_dir = os.path.join(output_root, "images")
     img_rescale_size = (400, 600)
 
-    if not os.path.exists(os.path.join(output_root, "training_data")):
-        os.mkdir(os.path.join(output_root, "training_data"))
+    # if not os.path.exists(os.path.join(output_root, "training_data")):
+    #     os.mkdir(os.path.join(output_root, "training_data"))
     # view, view_pair, point_attribute, view_paths = preprocess_data(
     #     reconstructability_file_dir,
     #     error_point_cloud_dir,
@@ -264,7 +271,6 @@ if __name__ == '__main__':
 
     # debug
     view = np.load(os.path.join(output_root, "training_data/views.npz"))["arr_0"]
-    view_pair = np.load(os.path.join(output_root, "training_data/view_pairs.npz"))["arr_0"]
     point_attribute = np.load(os.path.join(output_root, "training_data/point_attribute.npz"))["arr_0"]
     view_paths = np.load(os.path.join(output_root, "training_data/view_paths.npz"), allow_pickle=True)[
         "arr_0"]

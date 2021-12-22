@@ -9,13 +9,13 @@ import numba
 import numpy as np
 from shared.trajectory import *
 
-centralized_point=(-493321., -2492684., 154) # Translate to origin point to prevent overflow
+centralized_point=(493260.00, 2492700.00, 0) # Translate to origin point to prevent overflow
 
-root_file = r"D:\Projects\Photos\2110-OPT-GDSZ-VCC-shendaL7_box4-52.1-0.02-7331-1314-PTBGAJKL\07.重建模型\SD_OPT_box4_obj4547"
-output_root = r"D:\Projects\Photos\2110-OPT-GDSZ-VCC-shendaL7_box4-52.1-0.02-7331-1314-PTBGAJKL\merge"
-origin_point = (493503.6571,2493128.305,181.5) # Origin point in "metadata.xml"
+root_file = r"D:\Projects\Photos\2110-CON-GDSZ-VCC-shendaL7_3w-52.2-0.02-5923-792-PTBGAJKL\07.重建模型\SD_CON_3w_obj4547"
+output_root = r"D:\Projects\Photos\2110-CON-GDSZ-VCC-shendaL7_3w-52.2-0.02-5923-792-PTBGAJKL\merge"
+origin_point = (493321.4174,2492684.131,154) # Origin point in "metadata.xml"
 # Set to -99999 if no requirement
-filter_z = 155 # L7 CGCS 2000
+filter_z = 1 # L7 CGCS 2000
 
 # L7
 # boundary_point_wgs84 = [
@@ -46,18 +46,18 @@ boundary_point_cgcs2000 = [
             [493278.805700, 2492687.305700],
             [493243.504700, 2492727.184000],
             [493283.216101, 2492762.276901],
-            [493312.950001, 2492808.542999],
-            [493354.885399, 2492809.196800],
-            [493355.296097, 2492790.177002],
+            [493312.950001, 2492810.542999],
+            [493354.885399, 2492805.196800],
+            [493355.296097, 2492785.177002],
             [493332.658897, 2492736.307999]
         ],
         [
             [493339.402496, 2492822.078499],
             [493339.575798, 2492838.753403],
             [493363.689301, 2492863.535507],
-            [493442.558807, 2492865.316696],
-            [493455.461502, 2492852.504807],
-            [493456.869400, 2492823.431297]
+            [493440.558807, 2492862.316696],
+            [493455.461502, 2492850.504807],
+            [493456.869400, 2492820.431297]
         ]
     ]
 
@@ -107,8 +107,8 @@ for i_building, _ in enumerate(boundary_point_cgcs2000):
     for i_point, _ in enumerate(boundary_point_cgcs2000[i_building]):
         # mercator = lonLat2Mercator(boundary_point_cgcs2000[i_building][i_point])
         mercator = boundary_point_cgcs2000[i_building][i_point]
-        boundary_point_cgcs2000[i_building][i_point][0] = mercator[0]+centralized_point[0]
-        boundary_point_cgcs2000[i_building][i_point][1] = mercator[1]+centralized_point[1]
+        boundary_point_cgcs2000[i_building][i_point][0] = mercator[0]-centralized_point[0]
+        boundary_point_cgcs2000[i_building][i_point][1] = mercator[1]-centralized_point[1]
 
 poly = [Polygon(item) for item in boundary_point_cgcs2000]
 
@@ -246,10 +246,14 @@ def test2():
 
 def f(v_args):
     item = v_args
-    p = Point(item[:2])
-    # is_in_boundary = [p.within(item) for item in poly]
-    is_in_boundary = [True]
-    return not (max(is_in_boundary) and item[2] > filter_z)
+    p1 = Point(v_args[0,:2])
+    p2 = Point(v_args[1,:2])
+    p3 = Point(v_args[2,:2])
+    is_in_boundary1 = np.array([p1.within(item) for item in poly])
+    is_in_boundary2 =  np.array([p2.within(item) for item in poly])
+    is_in_boundary3 =  np.array([p3.within(item) for item in poly])
+    # is_in_boundary = [True]
+    return not (np.logical_and(is_in_boundary1,is_in_boundary2,is_in_boundary3).max() and (v_args[:,2]>filter_z).max())
 
 
 def merge_mesh_and_filter_the_points_outside_boundary(v_root_file, v_output_folder):
@@ -264,13 +268,15 @@ def merge_mesh_and_filter_the_points_outside_boundary(v_root_file, v_output_fold
     for item in tqdm(files):
         mesh = o3d.io.read_triangle_mesh(item)
         mesh = mesh.translate(origin_point)
-        mesh = mesh.translate(centralized_point)
+        mesh = mesh.translate(-np.array(centralized_point))
         mesh_point = np.asarray(mesh.vertices)
-        remove_flag = pools.map(f, mesh_point)
+        mesh_faces = np.asarray(mesh.triangles)
+        remove_flag = pools.map(f, mesh_point[mesh_faces])
         remove_flag = np.asarray(remove_flag, np.int16)
         if (remove_flag > 0).sum() - mesh_point.shape[0] == 0:
             continue
-        mesh.remove_vertices_by_mask(remove_flag)
+        mesh.remove_triangles_by_mask(remove_flag)
+        mesh.remove_unreferenced_vertices()
         total_mesh += mesh
 
     o3d.io.write_triangle_mesh(os.path.join(v_output_folder, "mesh_centralized.ply"), total_mesh)

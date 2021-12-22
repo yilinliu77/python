@@ -1,5 +1,6 @@
 import os
 import shutil
+from functools import partial
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -34,8 +35,19 @@ def test1():
 
     return
 
+def test_thread2(v_id,v_array):
+    v_array[v_id]=0
+
+def test2():
+    num_item = 100000
+    a = np.random.random((num_item,200))
+
+    r = thread_map(partial(test_thread2, v_array=a), range(num_item), max_workers=4)
+
+    return
 
 if __name__ == '__main__':
+    test2()
     test1()
     # plt.figure()
     # plt.subplot(2,1,1)

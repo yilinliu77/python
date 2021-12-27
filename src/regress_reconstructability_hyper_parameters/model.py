@@ -375,12 +375,14 @@ class ViewFeatureFuser(nn.Module):
             feature_item = predict_reconstructability_per_view[
                            i * 1024:min(i * 1024 + 1024, predict_reconstructability_per_view.shape[0])]
             feature_item = torch.transpose(feature_item, 0, 1)
+            valid_mask_item = torch.logical_not(valid_mask[i * 1024:min(i * 1024 + 1024, predict_reconstructability_per_view.shape[0])])
+            valid_mask_item = valid_mask_item[:,:,0]
             #
-            attention_result = self.view_feature_fusioner1(feature_item, feature_item, feature_item)
+            attention_result = self.view_feature_fusioner1(feature_item, feature_item, feature_item,key_padding_mask=valid_mask_item)
             attention_result = self.view_feature_fusioner_linear1(torch.transpose(attention_result[0], 0, 1))
             attention_result = self.view_feature_fusioner_relu1(attention_result)
             feature_item = torch.transpose(attention_result, 0, 1)
-            attention_result = self.view_feature_fusioner2(feature_item, feature_item, feature_item)
+            attention_result = self.view_feature_fusioner2(feature_item, feature_item, feature_item,key_padding_mask=valid_mask_item)
             attention_result = self.view_feature_fusioner_linear2(torch.transpose(attention_result[0], 0, 1))
             attention_result = self.view_feature_fusioner_relu2(attention_result)
 
@@ -474,11 +476,12 @@ class Uncertainty_Modeling_v2(nn.Module):
         self.hydra_conf = hparams
         self.is_involve_img = self.hydra_conf["model"]["involve_img"]
         self.phase_1_extractor = PointNet1(3 + 256, 1) # xyz + view_features
-        self.phase_2_extractor = PointNet1(3 + 256 + 32 + 1, 2) # xyz + view_features + img_features + predicted recon
+        self.phase_2_extractor = PointNet1(3 + 256 + 256 + 32 + 1, 2) # xyz + view_features + img_view_features + img_features + predicted recon
 
         # Img features
         self.img_feature_fusioner = ImgFeatureFuser()
         self.view_feature_fusioner = ViewFeatureFuser()
+        self.img_view_feature_fusioner = ViewFeatureFuser()
 
         for m in self.parameters():
             if isinstance(m, (nn.Linear,)):
@@ -500,6 +503,16 @@ class Uncertainty_Modeling_v2(nn.Module):
         t = time.time()
 
         # Extract view features
+        if self.is_involve_img:
+            img_view_features = self.img_view_feature_fusioner(v_data["img_pose"])
+            if img_view_features.shape[0] != batch_size:
+                img_view_features = img_view_features.reshape(batch_size, -1, img_view_features.shape[1])  # B * num_point * 256
+        else:
+            img_view_features=None
+        img_view_feature_time = time.time() - t
+        t = time.time()
+
+        # Extract view features
         view_features = self.view_feature_fusioner(v_data["views"])
         if view_features.shape[0] != batch_size:
             view_features = view_features.reshape(batch_size, -1, view_features.shape[1]) # B * num_point * 256
@@ -515,7 +528,7 @@ class Uncertainty_Modeling_v2(nn.Module):
         # Phase 2, use img features to refine recon and predict proxy inconsistency
         if self.is_involve_img:
             point_features_plus = torch.cat(
-                [points[:, :, :3], view_features,predict_reconstructability, img_features], dim=2)
+                [points[:, :, :3], view_features,predict_reconstructability,img_view_features, img_features], dim=2)
             predict_result = self.phase_2_extractor(point_features_plus.transpose(1, 2))[0]
             predict_result[...,0:1] = predict_result[...,0:1] + predict_reconstructability
         else:

@@ -250,12 +250,15 @@ def pre_compute_img_features(v_view_paths: List[str], v_img_size, v_root_path, v
 if __name__ == '__main__':
     import sys
 
+    print("Using images, poses and sample points to compute img features")
+
     output_root = sys.argv[1]
     reconstructability_file_dir = os.path.join(output_root, "reconstructability")
     error_point_cloud_dir = os.path.join(output_root, "accuracy_projected.ply")
     img_dir = os.path.join(output_root, "images")
     img_rescale_size = (400, 600)
 
+    print("First, compute the geometric features from the viewpoint to sample points")
     if not os.path.exists(os.path.join(output_root, "training_data")):
         os.mkdir(os.path.join(output_root, "training_data"))
     view, view_pair, point_attribute, view_paths = preprocess_data(
@@ -264,10 +267,10 @@ if __name__ == '__main__':
         img_dir
     )
     np.savez_compressed(os.path.join(output_root, "training_data/views"), view)
-    np.savez_compressed(os.path.join(output_root, "training_data/view_pairs"), view_pair)
+    # np.savez_compressed(os.path.join(output_root, "training_data/view_pairs"), view_pair)
     np.savez_compressed(os.path.join(output_root, "training_data/point_attribute"), point_attribute)
     np.savez_compressed(os.path.join(output_root, "training_data/view_paths"), view_paths)
-    # print("Pre-compute data done")
+    print("Pre-compute data done")
 
     # debug
     # view = np.load(os.path.join(output_root, "training_data/views.npz"))["arr_0"]

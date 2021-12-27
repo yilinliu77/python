@@ -30,7 +30,6 @@ import torchsort
 
 from scipy import stats
 
-from src.regress_reconstructability_hyper_parameters.preprocess_data import preprocess_data, pre_compute_img_features
 
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
@@ -251,7 +250,10 @@ class Regress_hyper_parameters(pl.LightningModule):
         error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
         view_dir = -data["views"][:,:,:,1:4] * data["views"][:,:,:,4:5] * 60 # 60 is the distance baseline, - because it stores the view to point vector
-        points = data["points"][:,:,:3].cpu().numpy()* self.data_mean_std[3] + self.data_mean_std[:3]
+        centre_point_index = data["points"][:,:,4].cpu().numpy()
+        points = data["points"][:,:,:3].cpu().numpy()
+        points = points + self.test_dataset.original_points[centre_point_index.reshape(-1).astype(np.int)].reshape(points.shape)
+        points = points * self.data_mean_std[3] + self.data_mean_std[:3]
         views = points[:,:,np.newaxis] + view_dir.cpu().numpy()
         views=np.concatenate([views,-view_dir.cpu().numpy(),data["views"][:,:,:,0:1].cpu().numpy()],axis=-1)
 
@@ -262,7 +264,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         return torch.cat([
             results,  # Predict reconstructability and inconsistency
             data["point_attribute"][:, :, [2,6]], # Avg error and Is point with 0 reconstructability
-            data["points"][:,:,3:4], # Point index
+            data["points"][:,:,3:4], # Point index, centre point index
             results.new(points)
         ], dim=2), views # x,y,z, dx,dy,dz, valid
 

@@ -18,7 +18,6 @@ import open3d as o3d
 from scipy import stats
 import multiprocessing as mp
 import ctypes
-from src.regress_reconstructability_hyper_parameters.preprocess_data import pre_compute_img_features
 from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet2_utils import farthest_point_sample, \
     index_points, square_distance
 
@@ -64,8 +63,8 @@ def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
     new_xyz = index_points(xyz, fps_idx)
     idx = query_ball_point(radius, nsample, xyz, new_xyz)
     grouped_xyz = index_points(xyz, idx)  # [B, npoint, nsample, C]
-    # grouped_xyz_norm = grouped_xyz - new_xyz.view(B, S, 1, C)
     grouped_xyz_norm = grouped_xyz
+    grouped_xyz_norm = grouped_xyz - new_xyz.view(B, S, 1, C)
 
     if points is not None:
         grouped_points = index_points(points, idx)
@@ -132,6 +131,39 @@ class Regress_hyper_parameters_dataset(torch.utils.data.Dataset):
         }
 
 
+class Regress_hyper_parameters_img_dataset(torch.utils.data.Dataset):
+    def __init__(self, v_path, num_point_per_patch):
+        super(Regress_hyper_parameters_img_dataset, self).__init__()
+        self.data_root = v_path
+        self.views = np.load(os.path.join(v_path, "views.npz"))["arr_0"]
+        self.num_point_per_patch = num_point_per_patch
+
+    def __getitem__(self, point_indexes):
+        img_features_on_point_list = []
+        num_max_points = 0
+        for point_index in point_indexes:
+            point_path = os.path.join(self.data_root, "point_features",
+                                      str(point_index.item()) + ".npz")
+
+            img_features_on_point_list.append(torch.tensor(np.load(point_path)["arr_0"], dtype=torch.float32))
+            num_features = img_features_on_point_list[-1].shape[1]
+
+            num_max_points = max(num_max_points, img_features_on_point_list[-1].shape[0])
+
+        # Align the features
+        point_features = torch.zeros((self.num_point_per_patch, num_max_points, num_features), dtype=torch.float32)
+        point_features_mask = torch.ones((self.num_point_per_patch, num_max_points), dtype=torch.bool)
+        for id_item, item in enumerate(img_features_on_point_list):
+            point_features[id_item, :item.shape[0]] = item
+            point_features_mask[id_item, :item.shape[0]] = False
+
+        return point_features, point_features_mask, self.views[point_indexes]
+
+"""
+    views: num of patches * max views * 9 (valid_flag, dx, dy, dz, distance, angle to normal, angle to direction, px, py)
+    points: num of patches * num point per patch * 7 (x, y, z, index, id_centre)
+    point_attribute: baseline recon, max error, avg error, x, y, z, is inconsistent point
+"""
 class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
     def __init__(self, v_path, v_params, v_mode):
         super(Regress_hyper_parameters_dataset_with_imgs, self).__init__()
@@ -139,11 +171,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.params = v_params
         self.data_root = v_path
         self.views = np.load(os.path.join(v_path, "views.npz"))["arr_0"]
-        # self.view_pairs = np.load(os.path.join(v_path, "view_pairs.npz"))["arr_0"]
-        # shared_array_base = mp.Array(ctypes.c_float, self.views.shape)
-        # shared_array = np.ctypeslib.as_array(shared_array_base.get_obj())
-        # self.views_path=os.path.join(v_path, "views.npz")
-        # self.view_pairs_path=os.path.join(v_path, "view_pairs.npz")
+        img_dataset_path = open(os.path.join(v_path, "img_dataset_path.txt")).readline()
 
         self.is_involve_img = self.params["model"]["involve_img"]
 
@@ -153,8 +181,13 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.original_points = self.point_attribute[:, 3:6]
         self.num_seeds = 4096 + 1024
         self.sample_points_to_different_patches()
+        self.img_dataset = Regress_hyper_parameters_img_dataset(img_dataset_path, self.points.shape[1])
+
         pass
 
+    """
+    Points: num of patches * num point per patch * 7 (x, y, z, index, id_centre)
+    """
     def sample_points_to_different_patches(self):
         print("KNN Sample")
         # seed points, radius, max local points,
@@ -171,22 +204,22 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
                 print("Uneven sampling, only sample {}/{}".format(unique_result[0].shape[0],
                                                                   self.point_attribute.shape[0]))
                 print("Uneven sampling, sampling density: {}".format(np.mean(unique_result[1])))
-                pass
+                break
             else:
                 accept_sample = True
             self.num_seeds += 1024
         if True:
             pcl = o3d.geometry.PointCloud()
             pcl.points = o3d.utility.Vector3dVector(new_xyz.numpy()[0, :, :3])
-            o3d.io.write_point_cloud("seed_point.ply", pcl)
+            o3d.io.write_point_cloud("temp/seed_point.ply", pcl)
             # for id_item, item in enumerate(new_points[0]):
             #     pcl = o3d.geometry.PointCloud()
             #     pcl.points = o3d.utility.Vector3dVector(item.numpy()[:, :3])
             #     o3d.io.write_point_cloud("{}.ply".format(id_item), pcl)
-            pcl.points = o3d.utility.Vector3dVector(new_points.numpy()[0, :, :,:3].reshape([-1,3]))
-            o3d.io.write_point_cloud("total_point.ply", pcl)
+            pcl.points = o3d.utility.Vector3dVector(new_points.numpy()[0, :, :, :3].reshape([-1, 3]))
+            o3d.io.write_point_cloud("temp/total_point.ply", pcl)
 
-        self.points = new_points[0]
+        self.points = torch.cat([new_points[0],(fps_idx[0].unsqueeze(1).repeat(1,256)).unsqueeze(2)],dim=2)
         mask = self.point_attribute[:, 0] < 9999999
 
         stats.spearmanr(self.point_attribute[:, 0][mask], self.point_attribute[:, 2][mask])
@@ -199,10 +232,6 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.validation_index = self.whole_index[self.whole_index.shape[0] // 4 * 3:]
 
     def __getitem__(self, index):
-        num_point_per_patch = self.points.shape[1]
-        num_features = None
-        num_max_points = 0
-
         if self.trainer_mode == "training":
             used_index = self.train_index
         elif self.trainer_mode == "validation":
@@ -211,25 +240,9 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
             used_index = self.whole_index
         point_indexes = self.points[used_index[index], :, 3].int()
 
-        point_features = None
-        point_features_mask = None
+        point_features,point_features_mask,img_pose = None,None,None
         if self.is_involve_img:
-            img_features_on_point_list = []
-            for point_index in point_indexes:
-                point_path = os.path.join(self.data_root, "point_features",
-                                          str(point_index.item()) + ".npz")
-
-                img_features_on_point_list.append(torch.tensor(np.load(point_path)["arr_0"], dtype=torch.float32))
-                num_features = img_features_on_point_list[-1].shape[1]
-
-                num_max_points = max(num_max_points, img_features_on_point_list[-1].shape[0])
-
-            # Align the features
-            point_features = torch.zeros((num_point_per_patch, num_max_points, num_features), dtype=torch.float32)
-            point_features_mask = torch.ones((num_point_per_patch, num_max_points), dtype=torch.bool)
-            for id_item, item in enumerate(img_features_on_point_list):
-                point_features[id_item, :item.shape[0]] = item
-                point_features_mask[id_item, :item.shape[0]] = False
+            point_features, point_features_mask, img_pose = self.img_dataset[point_indexes]
 
         output_dict = {
             # "views": torch.tensor(np.load(self.views_path,mmap_mode="r")["arr_0"][point_indexes], dtype=torch.float32),
@@ -241,6 +254,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
             "points": self.points[used_index[index]],
             "point_features": point_features,
             "point_features_mask": point_features_mask,
+            "img_pose": torch.tensor(img_pose, dtype=torch.float32),
         }
         return output_dict
 
@@ -264,12 +278,14 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         point_features = [item["point_features"] for item in batch]
         points = [item["points"] for item in batch]
         point_features_mask = [item["point_features_mask"] for item in batch]
-
+        img_pose = [torch.transpose(item["img_pose"],0,1) for item in batch]
+        img_pose_pad = torch.transpose(torch.transpose(pad_sequence(img_pose), 0, 1), 1, 2)
         return {
             'views': views_pad,
             # 'view_pairs': view_pairs_pad,
             'point_attribute': torch.stack(point_attribute, dim=0),
             'point_features': point_features,
-            'points': torch.stack(points, dim=0),
             'point_features_mask': point_features_mask,
+            'points': torch.stack(points, dim=0),
+            'img_pose': img_pose_pad,
         }

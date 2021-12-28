@@ -29,10 +29,6 @@ def compute_view_features(max_num_view,valid_views_flag,reconstructabilities,v_i
     num_views = int(raw_data[0])
     if num_views > max_num_view - 1:
         raise
-    reconstructability = float(raw_data[1])
-    if reconstructability != 0:
-        valid_views_flag[real_index] = True
-    reconstructabilities[real_index] = reconstructability
     # Read views
     for i_view in range(num_views):
         view_data = raw_data[2 + i_view].split(",")
@@ -67,59 +63,26 @@ def compute_view_features(max_num_view,valid_views_flag,reconstructabilities,v_i
         """
         # cv2.namedWindow("1", cv2.WINDOW_AUTOSIZE)
         # img = cv2.resize(cv2.imread(view_paths[real_index][i_view]),(600,400))
-        # pt = np.array([pixel_pos_x*600,pixel_pos_y*400],dtype=np.int)
+        # pt = np.array([pixel_pos_x*600,pixel_pos_y*400],dtype=np.int32)
         # img[pt[1]-5:pt[1]+5,pt[0]-5:pt[0]+5]=(0,0,255)
         # cv2.imshow("1", img)
-        # # cv2.imshow("1", np.asarray(img))
         # cv2.waitKey()
         """
         debug done
         """
         continue
 
-    # Read view pair
-    cur_iter = 0
-    for i_view1 in range(max_num_view):
-        for i_view2 in range(i_view1 + 1, max_num_view):
-            if i_view1 >= num_views or i_view2 >= num_views:
-                continue
-            view_pair_data = raw_data[2 + num_views + cur_iter].split(",")
-            alpha_ratio = float(view_pair_data[0])
-            relative_distance_ratio = float(view_pair_data[1])
-            views_pair[real_index][i_view1][i_view2][0] = 1
-            views_pair[real_index][i_view1][i_view2][1] = alpha_ratio
-            views_pair[real_index][i_view1][i_view2][2] = relative_distance_ratio
-            cur_iter += 1
 
 def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str = None) -> (np.ndarray, np.ndarray):
     print("Read point cloud")
     with open(v_error_point_cloud, "rb") as f:
         plydata = PlyData.read(f)
-        if v_img_dir:
-            x = plydata['vertex']['x'].copy()
-            y = plydata['vertex']['y'].copy()
-            z = plydata['vertex']['z'].copy()
-            max_error_list = plydata['vertex']['max_error'].copy()
-            sum_error_list = plydata['vertex']['sum_error'].copy()
-            num_list = plydata['vertex']['num'].copy()
-            avg_error = sum_error_list / (num_list + 1e-6)
-            x_dim = (np.max(x) - np.min(x)) / 2
-            y_dim = (np.max(y) - np.min(y)) / 2
-            z_dim = (np.max(z) - np.min(z)) / 2
-            max_dim = max(x_dim, y_dim, z_dim)
-            np.savez(os.path.join(v_root,"../data_centralize"),np.array([np.mean(x),np.mean(y),np.mean(z),max_dim]))
-            x = (x - np.mean(x)) / max_dim
-            y = (y - np.mean(y)) / max_dim
-            z = (z - np.mean(z)) / max_dim
-            error_list = np.stack([max_error_list, avg_error, x, y, z, max_error_list==0], axis=1)
-        else:
-            error_list = plydata['vertex']['error'].copy()
+        num_points = plydata['vertex']['x'].shape[0]
 
     files = [os.path.join(v_root, item) for item in os.listdir(v_root)]
     files = list(filter(lambda item: ".txt" in item, files))
     files = sorted(files, key=lambda item: int(item.split("\\")[-1][:-4]))
 
-    num_points = error_list.shape[0]
     # Find max view numbers
     def compute_max_view_number(v_file):
         raw_data = [item.strip() for item in open(v_file).readlines()]
@@ -139,111 +102,55 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str = None
                        max_num_view,valid_views_flag,reconstructabilities,v_img_dir,views,views_pair,view_paths),
                files,max_workers=10)
 
-    # valid_flag = np.logical_and(np.array(valid_views_flag), error_list[:, 2] != 0)
-    valid_flag = np.array(valid_views_flag)
+    return views, view_paths
 
-    views = views[valid_flag]
-    views_pair = views_pair[valid_flag]
-    view_paths = np.array(view_paths)[valid_flag]
-    reconstructabilities = np.asarray(reconstructabilities)[valid_flag]
-    usable_indices = np.triu_indices(max_num_view, 1)
-    views_pair = views_pair[:, usable_indices[0], usable_indices[1]]
-
-    error_list = error_list[valid_flag]
-    point_attribute = np.concatenate([reconstructabilities[:, np.newaxis], error_list], axis=1).astype(np.float16)
-    print("Totally {} points; {} points has error 0; {} points has 0 reconstructability, {} in it is not visible; Output {} points".format(
-        num_points,
-        error_list[:, -1].sum(),
-        num_points-valid_flag.sum(),
-        num_points-len(files),
-        point_attribute.shape[0]
-    ))
-    return views, views_pair, point_attribute, view_paths
-
-def compute_features(v_root_path,v_view_paths,v_view_attribute,transform,img_feature_extractor,img_features_dict,
+def compute_features(v_root_path,v_view_paths,v_view_attribute,img_features_dict,
                      id_point):
     point_path = os.path.join(v_root_path, "point_features", str(id_point) + ".npz")
-    # Force regenerate data
-    # if os.path.exists(point_path):
-    #     return 0
+
     point_features = []
     for id_view, view_path in enumerate(v_view_paths[id_point]):
         pixel_position = torch.tensor(v_view_attribute[id_point, id_view, 7:9], dtype=torch.float32)
         pixel_position = torch.cat([pixel_position - 20 / 400, pixel_position + 20 / 400], dim=-1)
-
+        pixel_position[pixel_position>1]=1
+        pixel_position[pixel_position<0]=0
         # Get img features
-        item_name = view_path.split(".")[0].split("\\")[-1] + ".npz"
-        img_features_saved_path = os.path.join(v_root_path, "view_features", item_name)
-        try:
-            if os.path.exists(img_features_saved_path):
-                # Enable cache, but potent to pose memory leak. Can be use in the small scene
-                if img_features_saved_path not in img_features_dict:
-                    img_features_dict[img_features_saved_path] = np.load(img_features_saved_path)["arr_0"]
-                img_features = torch.tensor(img_features_dict[img_features_saved_path], dtype=torch.float32)
-                # Disable cache, slow
-                # img_features = torch.tensor(
-                #     np.load(img_features_saved_path)["arr_0"], dtype=torch.float32).cuda()
-                # img_features = torch.load(img_features_saved_path+".ckpt",map_location="cuda:0")
-            else:
-                raise
-        except:
-            img = Image.open(view_path)
-            img = transform(img)
-            var = torch.var(img, dim=(1, 2), keepdim=True)
-            mean = torch.mean(img, dim=(1, 2), keepdim=True)
-            img_tensor = (img - mean) / (np.sqrt(var) + 0.00000001)
-            ## Debug
-            # test_img=img.permute((1, 2, 0)).numpy()
-            # test_pixel_position=pixel_position.numpy()
-            # test_pixel_position[[0,2]]*=600
-            # test_pixel_position[[1,3]]*=400
-            # test_pixel_position=test_pixel_position.astype(np.int)
-            # test_img[test_pixel_position[1]:test_pixel_position[3],test_pixel_position[0]:test_pixel_position[2],:3]=(255,0,0)
-            # cv2.namedWindow("1",cv2.WINDOW_AUTOSIZE)
-            # cv2.imshow("1", test_img)
-            # # cv2.imshow("1", np.asarray(img))
-            # cv2.waitKey(0)
-            ## Debug
-            img_features = img_feature_extractor.feature(img_tensor[:3].unsqueeze(0))
-            # torch.save(img_features,img_features_saved_path)
-            np.savez(img_features_saved_path, img_features.cpu().numpy())
+        img_features=img_features_dict[view_path]
+        # Debug
+        # img = Image.open(view_path).resize((600,400))
+        # img=np.asarray(img).copy()
+        # test_pixel_position=pixel_position.numpy()
+        # test_pixel_position[[0,2]]*=600
+        # test_pixel_position[[1,3]]*=400
+        # test_pixel_position=test_pixel_position.astype(np.int)
+        # img[test_pixel_position[1]:test_pixel_position[3],test_pixel_position[0]:test_pixel_position[2],:3]=(255,0,0)
+        # cv2.namedWindow("1",cv2.WINDOW_AUTOSIZE)
+        # cv2.imshow("1", img)
+        # # cv2.imshow("1", np.asarray(img))
+        # cv2.waitKey(0)
+        # Debug
 
         # Get the pixel features
         pixel_position_features = torchvision.ops.ps_roi_align(
-            img_features,
+            torch.tensor(img_features),
             [pixel_position.unsqueeze(0)],
             1).squeeze(
             -1).squeeze(-1)
         point_features.append(pixel_position_features)
-
+    if len(point_features)==0:
+        return
     point_features = torch.cat(point_features, dim=0)
     np.savez(point_path, point_features.cpu().numpy())
 
-def pre_compute_img_features(v_view_paths: List[str], v_img_size, v_root_path, v_view_attribute):
-    transform = transforms.Compose([
-        transforms.Resize(v_img_size),
-        transforms.ToTensor(),
-    ])
-
-    from thirdparty.AA_RMVSNet.models.drmvsnet import AARMVSNet
-    img_feature_extractor = AARMVSNet()
-    state_dict = torch.load("thirdparty/AA_RMVSNet/model_release.ckpt")
-    img_feature_extractor.load_state_dict(state_dict['model'], True)
-    img_feature_extractor.requires_grad_(False)
-    img_feature_extractor.eval()
-    img_feature_extractor
-    img_features_dict = {}
+def pre_compute_img_features(v_view_paths: List[str], img_features_dict, v_root_path, v_view_attribute):
     if not os.path.exists(os.path.join(v_root_path, "point_features")):
         os.mkdir(os.path.join(v_root_path, "point_features"))
-    if not os.path.exists(os.path.join(v_root_path, "view_features")):
-        os.mkdir(os.path.join(v_root_path, "view_features"))
 
     with torch.no_grad():
-        # r = thread_map(partial(compute_features, v_root_path,v_view_paths,v_view_attribute,transform,img_feature_extractor),
-        #                range(len(v_view_paths)), max_workers=10)
-        for v_id in tqdm(range(len(v_view_paths))):
-            partial(compute_features, v_root_path, v_view_paths, v_view_attribute,
-                    transform, img_feature_extractor,img_features_dict)(v_id)
+        r = thread_map(partial(compute_features, v_root_path, v_view_paths, v_view_attribute, img_features_dict),
+                       range(len(v_view_paths)), max_workers=1)
+        # for v_id in tqdm(range(len(v_view_paths))):
+        #     partial(compute_features, v_root_path, v_view_paths, v_view_attribute, img_features_dict)(v_id)
     return
 
 
@@ -254,31 +161,65 @@ if __name__ == '__main__':
 
     output_root = sys.argv[1]
     reconstructability_file_dir = os.path.join(output_root, "reconstructability")
-    error_point_cloud_dir = os.path.join(output_root, "accuracy_projected.ply")
+    sample_points = os.path.join(output_root, "sample_points_proxy.ply")
     img_dir = os.path.join(output_root, "images")
     img_rescale_size = (400, 600)
 
     print("First, compute the geometric features from the viewpoint to sample points")
     if not os.path.exists(os.path.join(output_root, "training_data")):
         os.mkdir(os.path.join(output_root, "training_data"))
-    view, view_pair, point_attribute, view_paths = preprocess_data(
+    view, view_paths = preprocess_data(
         reconstructability_file_dir,
-        error_point_cloud_dir,
+        sample_points,
         img_dir
     )
     np.savez_compressed(os.path.join(output_root, "training_data/views"), view)
-    # np.savez_compressed(os.path.join(output_root, "training_data/view_pairs"), view_pair)
-    np.savez_compressed(os.path.join(output_root, "training_data/point_attribute"), point_attribute)
     np.savez_compressed(os.path.join(output_root, "training_data/view_paths"), view_paths)
     print("Pre-compute data done")
 
     # debug
     # view = np.load(os.path.join(output_root, "training_data/views.npz"))["arr_0"]
-    # point_attribute = np.load(os.path.join(output_root, "training_data/point_attribute.npz"))["arr_0"]
     # view_paths = np.load(os.path.join(output_root, "training_data/view_paths.npz"), allow_pickle=True)[
     #     "arr_0"]
     # debug
 
+    # Compute view features
+    print("Compute view features")
+    if not os.path.exists(os.path.join(output_root, "training_data/view_features")):
+        os.mkdir(os.path.join(output_root, "training_data/view_features"))
+    transform = transforms.Compose([
+        transforms.Resize(img_rescale_size),
+        transforms.ToTensor(),
+    ])
+    from thirdparty.AA_RMVSNet.models.drmvsnet import AARMVSNet
+    img_feature_extractor = AARMVSNet()
+    state_dict = torch.load("thirdparty/AA_RMVSNet/model_release.ckpt")
+    img_feature_extractor.load_state_dict(state_dict['model'], True)
+    img_feature_extractor.requires_grad_(False)
+    img_feature_extractor.eval()
+    img_feature_extractor
+    img_features_dict = {}
+
+    total_view_paths = set()
+    for item in view_paths:
+        total_view_paths = total_view_paths.union(set(item))
+    total_view_paths = list(total_view_paths)
+    for id_view in tqdm(range(0, len(total_view_paths))):
+        save_name = total_view_paths[id_view].split(".")[0].split("\\")[-1] + ".npz"
+        img_features_saved_path = os.path.join(os.path.join(output_root, "training_data"), "view_features", save_name)
+        if os.path.exists(img_features_saved_path):
+            img_features_dict[total_view_paths[id_view]]=np.load(img_features_saved_path)["arr_0"]
+        else:
+            img = Image.open(total_view_paths[id_view])
+            img = transform(img)
+            var = torch.var(img, dim=(1, 2), keepdim=True)
+            mean = torch.mean(img, dim=(1, 2), keepdim=True)
+            img_tensor = (img - mean) / (np.sqrt(var) + 0.00000001)
+            img_features = img_feature_extractor.feature(img_tensor.unsqueeze(0)[:, :3])
+            numpy_features = img_features.cpu().numpy()
+            img_features_dict[total_view_paths[id_view]] = numpy_features
+            np.savez(img_features_saved_path,numpy_features)
+
     print("Pre compute features")
-    pre_compute_img_features(view_paths, img_rescale_size, os.path.join(output_root, "training_data"), view)
+    pre_compute_img_features(view_paths, img_features_dict, os.path.join(output_root, "training_data"), view)
     print("Pre compute done")

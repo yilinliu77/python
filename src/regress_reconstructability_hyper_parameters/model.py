@@ -368,6 +368,8 @@ class ViewFeatureFuser(nn.Module):
         valid_mask[view_attribute[:, :, 0].bool()] = 1
         predict_reconstructability_per_view = predict_reconstructability_per_view * valid_mask
 
+        point_with_non_views = valid_mask[:,:,0].max(dim=1)[0]
+
         view_features = []
         for i in range(predict_reconstructability_per_view.shape[0] // 1024 + 1):
             if i * 1024 == predict_reconstructability_per_view.shape[0]:
@@ -379,19 +381,22 @@ class ViewFeatureFuser(nn.Module):
             valid_mask_item = valid_mask_item[:,:,0]
             #
             attention_result = self.view_feature_fusioner1(feature_item, feature_item, feature_item,key_padding_mask=valid_mask_item)
-            attention_result = self.view_feature_fusioner_linear1(torch.transpose(attention_result[0], 0, 1))
+            attention_result = torch.transpose(attention_result[0], 0, 1)
+            attention_result = self.view_feature_fusioner_linear1(attention_result)
             attention_result = self.view_feature_fusioner_relu1(attention_result)
             feature_item = torch.transpose(attention_result, 0, 1)
             attention_result = self.view_feature_fusioner2(feature_item, feature_item, feature_item,key_padding_mask=valid_mask_item)
-            attention_result = self.view_feature_fusioner_linear2(torch.transpose(attention_result[0], 0, 1))
+            attention_result = torch.transpose(attention_result[0], 0, 1)
+            attention_result = self.view_feature_fusioner_linear2(attention_result)
             attention_result = self.view_feature_fusioner_relu2(attention_result)
-
+            attention_result[torch.logical_not(point_with_non_views.int()[i * 1024:min(i * 1024 + 1024, predict_reconstructability_per_view.shape[0])])] = 0
             view_features.append(attention_result)
+
         view_features = torch.cat(view_features, dim=0)
         view_features = torch.sum(view_features,
                                                dim=1)  # Sum up all the view contribution of one point
-        view_features = view_features / torch.sum(
-            view_attribute[:, :, 0].bool(),dim=1).unsqueeze(-1)  # Normalize the features
+        view_features = view_features / (torch.sum(
+            view_attribute[:, :, 0].bool(),dim=1).unsqueeze(-1)+1e-6)  # Normalize the features
         return view_features
 
 

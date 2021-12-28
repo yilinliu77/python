@@ -132,18 +132,18 @@ class Regress_hyper_parameters_dataset(torch.utils.data.Dataset):
 
 
 class Regress_hyper_parameters_img_dataset(torch.utils.data.Dataset):
-    def __init__(self, v_path, num_point_per_patch):
+    def __init__(self, v_path, v_points_feature_path):
         super(Regress_hyper_parameters_img_dataset, self).__init__()
         self.data_root = v_path
-        self.views = np.load(os.path.join(v_path, "views.npz"))["arr_0"]
-        self.num_point_per_patch = num_point_per_patch
+        self.views = np.load(os.path.join(v_path, "../views.npz"))["arr_0"]
+        self.num_point_per_patch = v_points_feature_path.shape[0]
+        self.points_feature_path = v_points_feature_path
 
     def __getitem__(self, point_indexes):
         img_features_on_point_list = []
         num_max_points = 0
         for point_index in point_indexes:
-            point_path = os.path.join(self.data_root, "point_features",
-                                      str(point_index.item()) + ".npz")
+            point_path = self.points_feature_path[point_index]
 
             img_features_on_point_list.append(torch.tensor(np.load(point_path)["arr_0"], dtype=torch.float32))
             num_features = img_features_on_point_list[-1].shape[1]
@@ -151,8 +151,8 @@ class Regress_hyper_parameters_img_dataset(torch.utils.data.Dataset):
             num_max_points = max(num_max_points, img_features_on_point_list[-1].shape[0])
 
         # Align the features
-        point_features = torch.zeros((self.num_point_per_patch, num_max_points, num_features), dtype=torch.float32)
-        point_features_mask = torch.ones((self.num_point_per_patch, num_max_points), dtype=torch.bool)
+        point_features = torch.zeros((point_indexes.shape[0], num_max_points, num_features), dtype=torch.float32)
+        point_features_mask = torch.ones((point_indexes.shape[0], num_max_points), dtype=torch.bool)
         for id_item, item in enumerate(img_features_on_point_list):
             point_features[id_item, :item.shape[0]] = item
             point_features_mask[id_item, :item.shape[0]] = False
@@ -171,7 +171,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.params = v_params
         self.data_root = v_path
         self.views = np.load(os.path.join(v_path, "views.npz"))["arr_0"]
-        img_dataset_path = open(os.path.join(v_path, "img_dataset_path.txt")).readline()
+        img_dataset_path = open(os.path.join(v_path, "../img_dataset_path.txt")).readline()
 
         self.is_involve_img = self.params["model"]["involve_img"]
 
@@ -181,7 +181,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.original_points = self.point_attribute[:, 3:6]
         self.num_seeds = 4096 + 1024
         self.sample_points_to_different_patches()
-        self.img_dataset = Regress_hyper_parameters_img_dataset(img_dataset_path, self.points.shape[1])
+        self.img_dataset = Regress_hyper_parameters_img_dataset(img_dataset_path, self.view_paths)
 
         pass
 
@@ -254,7 +254,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
             "points": self.points[used_index[index]],
             "point_features": point_features,
             "point_features_mask": point_features_mask,
-            "img_pose": torch.tensor(img_pose, dtype=torch.float32),
+            "img_pose": torch.tensor(img_pose, dtype=torch.float32) if img_pose is not None else torch.tensor(self.views[point_indexes], dtype=torch.float32),
         }
         return output_dict
 

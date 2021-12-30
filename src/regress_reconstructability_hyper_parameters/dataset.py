@@ -204,7 +204,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
                 print("Uneven sampling, only sample {}/{}".format(unique_result[0].shape[0],
                                                                   self.point_attribute.shape[0]))
                 print("Uneven sampling, sampling density: {}".format(np.mean(unique_result[1])))
-                break
+                # break
             else:
                 accept_sample = True
             self.num_seeds += 1024

@@ -148,7 +148,7 @@ def pre_compute_img_features(v_view_paths: List[str], img_features_dict, v_root_
 
     with torch.no_grad():
         r = thread_map(partial(compute_features, v_root_path, v_view_paths, v_view_attribute, img_features_dict),
-                       range(len(v_view_paths)), max_workers=1)
+                       range(len(v_view_paths)), max_workers=10)
         # for v_id in tqdm(range(len(v_view_paths))):
         #     partial(compute_features, v_root_path, v_view_paths, v_view_attribute, img_features_dict)(v_id)
     return

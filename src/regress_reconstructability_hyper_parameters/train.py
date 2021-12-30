@@ -34,22 +34,22 @@ from scipy import stats
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
-# v_data: Predict reconstructability, Predict inconsistency, GT error, inconsistency (0 is consistent), Point index
+# v_data: Predict reconstructability, Predict inconsistency, valid_flag, GT error, inconsistency (0 is consistent), Point index
 def output_test(v_data, v_num_total_points):
     predict_result = v_data.reshape(-1, v_data.shape[-1])
-    invalid_mask = predict_result[:, 3]  # Filter out the point with gt reconstructability = 0
+    invalid_mask = predict_result[:, 4]  # Filter out the point with gt reconstructability = 0
     print("{}/{} predictions are inconsistent thus do not consider to calculate the spearman correlation".format(
         invalid_mask.sum(), predict_result.shape[0]))
-    sorted_index = np.argsort(predict_result[:, 4])  # Sort according to the point index
+    sorted_index = np.argsort(predict_result[:, 5])  # Sort according to the point index
     predict_result = predict_result[sorted_index]
-    sorted_group = np.split(predict_result, np.unique(predict_result[:, 4], return_index=True)[1][1:])
+    sorted_group = np.split(predict_result, np.unique(predict_result[:, 5], return_index=True)[1][1:])
     whole_points_prediction_error = np.zeros((v_num_total_points, 4), dtype=np.float32)
     print("Merge the duplication and calculate the spearman")
     for id_item in tqdm(range(len(sorted_group))):
-        whole_points_prediction_error[int(sorted_group[id_item][0][4]), 0] = np.mean(sorted_group[id_item][:, 0])
-        whole_points_prediction_error[int(sorted_group[id_item][0][4]), 1] = sorted_group[id_item][0, 2]
-        whole_points_prediction_error[int(sorted_group[id_item][0][4]), 2] = np.mean(sorted_group[id_item][:, 1])
-        whole_points_prediction_error[int(sorted_group[id_item][0][4]), 3] = sorted_group[id_item][0, 3]
+        whole_points_prediction_error[int(sorted_group[id_item][0][5]), 0] = np.mean(sorted_group[id_item][:, 0])
+        whole_points_prediction_error[int(sorted_group[id_item][0][5]), 1] = sorted_group[id_item][0, 3]
+        whole_points_prediction_error[int(sorted_group[id_item][0][5]), 2] = np.mean(sorted_group[id_item][:, 1])
+        whole_points_prediction_error[int(sorted_group[id_item][0][5]), 3] = sorted_group[id_item][0, 4]
 
     # Calculate consistency accuracy
     predicted_good_point_mask = sigmoid(whole_points_prediction_error[:, 2]) > 0.5
@@ -68,7 +68,7 @@ def output_test(v_data, v_num_total_points):
 
     return spearmanr_factor,accuracy,whole_points_prediction_error # predict_recon, gt_recon, predict_consitency, gt_inconsistency
 
-# v_data: Predict reconstructability, Predict inconsistency, GT error, inconsistency (0 is consistent), Point index, x, y, z
+# v_data: Predict reconstructability, Predict inconsistency, valid_flag, GT error, inconsistency (0 is consistent), Point index
 def output_test_with_pc_and_views(v_data, v_num_total_points):
     prediction_result = torch.cat([item[0] for item in v_data], dim=0)
     spearmanr_factor,accuracy,whole_points_prediction_error = output_test(prediction_result.cpu().numpy(),v_num_total_points)
@@ -311,7 +311,7 @@ def main(v_cfg: DictConfig):
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,
                       max_epochs=3000,
                       gradient_clip_val=0.1,
-                      check_val_every_n_epoch=5
+                      check_val_every_n_epoch=1
                       )
 
     model = Regress_hyper_parameters(v_cfg)

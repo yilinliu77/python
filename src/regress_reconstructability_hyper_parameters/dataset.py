@@ -144,6 +144,9 @@ class Regress_hyper_parameters_img_dataset(torch.utils.data.Dataset):
         num_max_points = 0
         for point_index in point_indexes:
             point_path = self.points_feature_path[point_index]
+            data = point_path.split("\\")
+            data = point_path.split("/") if len(data)==1 else data
+            point_path = os.path.join(self.data_root,data[-1])
 
             img_features_on_point_list.append(torch.tensor(np.load(point_path)["arr_0"], dtype=torch.float32))
             num_features = img_features_on_point_list[-1].shape[1]

@@ -174,7 +174,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.params = v_params
         self.data_root = v_path
         self.views = np.load(os.path.join(v_path, "views.npz"))["arr_0"]
-        img_dataset_path = open(os.path.join(v_path, "../img_dataset_path.txt")).readline()
+        img_dataset_path = open(os.path.join(v_path, "../img_dataset_path.txt")).readline().strip()
 
         self.is_involve_img = self.params["model"]["involve_img"]
 

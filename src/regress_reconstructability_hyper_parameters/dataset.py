@@ -136,19 +136,24 @@ class Regress_hyper_parameters_img_dataset(torch.utils.data.Dataset):
         super(Regress_hyper_parameters_img_dataset, self).__init__()
         self.data_root = v_path
         self.views = np.load(os.path.join(v_path, "../views.npz"))["arr_0"]
+        self.data_dirs = os.listdir(self.data_root)
         self.num_point_per_patch = v_points_feature_path.shape[0]
         self.points_feature_path = v_points_feature_path
 
     def __getitem__(self, point_indexes):
         img_features_on_point_list = []
         num_max_points = 0
+        real_indexes = []
         for point_index in point_indexes:
             point_path = self.points_feature_path[point_index]
             data = point_path.split("\\")
             data = point_path.split("/") if len(data)==1 else data
             point_path = os.path.join(self.data_root,data[-1])
-
-            img_features_on_point_list.append(torch.tensor(np.load(point_path)["arr_0"], dtype=torch.float32))
+            real_indexes.append(int(data[-1].split(".")[0]))
+            if not os.path.exists(point_path):
+                img_features_on_point_list.append(torch.zeros((0,32),dtype=torch.float32))
+            else:
+                img_features_on_point_list.append(torch.tensor(np.load(point_path)["arr_0"], dtype=torch.float32))
             num_features = img_features_on_point_list[-1].shape[1]
 
             num_max_points = max(num_max_points, img_features_on_point_list[-1].shape[0])
@@ -160,7 +165,7 @@ class Regress_hyper_parameters_img_dataset(torch.utils.data.Dataset):
             point_features[id_item, :item.shape[0]] = item
             point_features_mask[id_item, :item.shape[0]] = False
 
-        return point_features, point_features_mask, self.views[point_indexes]
+        return point_features, point_features_mask, self.views[real_indexes]
 
 """
     views: num of patches * max views * 9 (valid_flag, dx, dy, dz, distance, angle to normal, angle to direction, px, py)

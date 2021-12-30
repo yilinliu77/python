@@ -1,12 +1,54 @@
 import os
+import shutil
+from functools import partial
+
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 
 import pymap3d as pm
 from pyproj import Transformer,CRS
+from tqdm import tqdm
+from tqdm.contrib.concurrent import thread_map
+
+
+def test1():
+    num_item = 100000
+    a = np.random.random((num_item,200))
+    if os.path.exists("test1"):
+        shutil.rmtree("test1")
+    os.mkdir("test1")
+    print("Save")
+    def test_thread(v_id):
+        read_index = np.random.randint(0, num_item)
+        read_filename = "test1/{}".format(read_index)
+        if os.path.exists(read_filename):
+            np.load(read_filename)
+        else:
+            for i in range(max(0,read_index-10),min(num_item,read_index+10)):
+                save_filename = "test1/{}".format(i)
+                np.savez(save_filename, a[i])
+    # for i in tqdm(range(num_item)):
+    #     test_thread(i)
+
+    r = thread_map(test_thread, range(num_item), max_workers=4)
+
+    return
+
+def test_thread2(v_id,v_array):
+    v_array[v_id]=0
+
+def test2():
+    num_item = 100000
+    a = np.random.random((num_item,200))
+
+    r = thread_map(partial(test_thread2, v_array=a), range(num_item), max_workers=4)
+
+    return
 
 if __name__ == '__main__':
+    test2()
+    test1()
     # plt.figure()
     # plt.subplot(2,1,1)
     # x = np.random.randint(0,500,100)

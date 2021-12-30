@@ -30,27 +30,26 @@ import torchsort
 
 from scipy import stats
 
-from src.regress_reconstructability_hyper_parameters.preprocess_data import preprocess_data, pre_compute_img_features
 
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
-# v_data: Predict reconstructability, Predict inconsistency, GT error, inconsistency (0 is consistent), Point index
+# v_data: Predict reconstructability, Predict inconsistency, valid_flag, GT error, inconsistency (0 is consistent), Point index
 def output_test(v_data, v_num_total_points):
     predict_result = v_data.reshape(-1, v_data.shape[-1])
-    invalid_mask = predict_result[:, 3]  # Filter out the point with gt reconstructability = 0
+    invalid_mask = predict_result[:, 4]  # Filter out the point with gt reconstructability = 0
     print("{}/{} predictions are inconsistent thus do not consider to calculate the spearman correlation".format(
         invalid_mask.sum(), predict_result.shape[0]))
-    sorted_index = np.argsort(predict_result[:, 4])  # Sort according to the point index
+    sorted_index = np.argsort(predict_result[:, 5])  # Sort according to the point index
     predict_result = predict_result[sorted_index]
-    sorted_group = np.split(predict_result, np.unique(predict_result[:, 4], return_index=True)[1][1:])
+    sorted_group = np.split(predict_result, np.unique(predict_result[:, 5], return_index=True)[1][1:])
     whole_points_prediction_error = np.zeros((v_num_total_points, 4), dtype=np.float32)
     print("Merge the duplication and calculate the spearman")
     for id_item in tqdm(range(len(sorted_group))):
-        whole_points_prediction_error[int(sorted_group[id_item][0][4]), 0] = np.mean(sorted_group[id_item][:, 0])
-        whole_points_prediction_error[int(sorted_group[id_item][0][4]), 1] = sorted_group[id_item][0, 2]
-        whole_points_prediction_error[int(sorted_group[id_item][0][4]), 2] = np.mean(sorted_group[id_item][:, 1])
-        whole_points_prediction_error[int(sorted_group[id_item][0][4]), 3] = sorted_group[id_item][0, 3]
+        whole_points_prediction_error[int(sorted_group[id_item][0][5]), 0] = np.mean(sorted_group[id_item][:, 0])
+        whole_points_prediction_error[int(sorted_group[id_item][0][5]), 1] = sorted_group[id_item][0, 3]
+        whole_points_prediction_error[int(sorted_group[id_item][0][5]), 2] = np.mean(sorted_group[id_item][:, 1])
+        whole_points_prediction_error[int(sorted_group[id_item][0][5]), 3] = sorted_group[id_item][0, 4]
 
     # Calculate consistency accuracy
     predicted_good_point_mask = sigmoid(whole_points_prediction_error[:, 2]) > 0.5
@@ -69,7 +68,7 @@ def output_test(v_data, v_num_total_points):
 
     return spearmanr_factor,accuracy,whole_points_prediction_error # predict_recon, gt_recon, predict_consitency, gt_inconsistency
 
-# v_data: Predict reconstructability, Predict inconsistency, GT error, inconsistency (0 is consistent), Point index, x, y, z
+# v_data: Predict reconstructability, Predict inconsistency, valid_flag, GT error, inconsistency (0 is consistent), Point index
 def output_test_with_pc_and_views(v_data, v_num_total_points):
     prediction_result = torch.cat([item[0] for item in v_data], dim=0)
     spearmanr_factor,accuracy,whole_points_prediction_error = output_test(prediction_result.cpu().numpy(),v_num_total_points)
@@ -80,12 +79,12 @@ def output_test_with_pc_and_views(v_data, v_num_total_points):
     # Write views
     vertexes = np.zeros((v_num_total_points, 3), dtype=np.float32) # x, y, z
     for id_view, view in enumerate(tqdm(views)):
-        id_point = int(prediction_result_reshape[id_view,7])
+        id_point = int(prediction_result_reshape[id_view,4])
         filename = "temp/test_scene_output/{}.txt".format(int(id_point))
         if os.path.exists(filename):
             continue
 
-        vertexes[id_point][0:3] = prediction_result_reshape[id_view,4:7].cpu().numpy()
+        vertexes[id_point][0:3] = prediction_result_reshape[id_view,5:8].cpu().numpy()
 
         # Write views
         with open(filename, "w") as f:
@@ -248,19 +247,24 @@ class Regress_hyper_parameters(pl.LightningModule):
         data = batch
         results = self.forward(data)
 
-        loss, gt_spearman, num_valid_point = self.model.loss(data["point_attribute"], results)
+        error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
         view_dir = -data["views"][:,:,:,1:4] * data["views"][:,:,:,4:5] * 60 # 60 is the distance baseline, - because it stores the view to point vector
-        points = data["points"][:,:,:3].cpu().numpy()* self.data_mean_std[3] + self.data_mean_std[:3]
+        centre_point_index = data["points"][:,:,4].cpu().numpy()
+        points = data["points"][:,:,:3].cpu().numpy()
+        points = points + self.test_dataset.original_points[centre_point_index.reshape(-1).astype(np.int)].reshape(points.shape)
+        points = points * self.data_mean_std[3] + self.data_mean_std[:3]
         views = points[:,:,np.newaxis] + view_dir.cpu().numpy()
         views=np.concatenate([views,-view_dir.cpu().numpy(),data["views"][:,:,:,0:1].cpu().numpy()],axis=-1)
 
-        self.log("Test Loss", loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
+        self.log("Test Loss", total_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
+        self.log("Test Recon Loss", error_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
+        self.log("Test Inconsistency Loss", inconsitency_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
 
         return torch.cat([
             results,  # Predict reconstructability and inconsistency
             data["point_attribute"][:, :, [2,6]], # Avg error and Is point with 0 reconstructability
-            data["points"][:,:,3:4], # Point index
+            data["points"][:,:,3:4], # Point index, centre point index
             results.new(points)
         ], dim=2), views # x,y,z, dx,dy,dz, valid
 
@@ -307,7 +311,7 @@ def main(v_cfg: DictConfig):
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,
                       max_epochs=3000,
                       gradient_clip_val=0.1,
-                      check_val_every_n_epoch=5
+                      check_val_every_n_epoch=1
                       )
 
     model = Regress_hyper_parameters(v_cfg)

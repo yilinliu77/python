@@ -84,7 +84,7 @@ def output_test_with_pc_and_views(v_data, v_num_total_points):
         if os.path.exists(filename):
             continue
 
-        vertexes[id_point][0:3] = prediction_result_reshape[id_view,6:7].cpu().numpy()
+        vertexes[id_point][0:3] = prediction_result_reshape[id_view,6:9].cpu().numpy()
 
         # Write views
         with open(filename, "w") as f:

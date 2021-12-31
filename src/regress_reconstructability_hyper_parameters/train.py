@@ -68,7 +68,7 @@ def output_test(v_data, v_num_total_points):
 
     return spearmanr_factor,accuracy,whole_points_prediction_error # predict_recon, gt_recon, predict_consitency, gt_inconsistency
 
-# v_data: Predict reconstructability, Predict inconsistency, valid_flag, GT error, inconsistency (0 is consistent), Point index
+# v_data: Predict reconstructability, Predict inconsistency, valid_flag, GT error, inconsistency (0 is consistent), Point index, x, y, z
 def output_test_with_pc_and_views(v_data, v_num_total_points):
     prediction_result = torch.cat([item[0] for item in v_data], dim=0)
     spearmanr_factor,accuracy,whole_points_prediction_error = output_test(prediction_result.cpu().numpy(),v_num_total_points)
@@ -79,12 +79,12 @@ def output_test_with_pc_and_views(v_data, v_num_total_points):
     # Write views
     vertexes = np.zeros((v_num_total_points, 3), dtype=np.float32) # x, y, z
     for id_view, view in enumerate(tqdm(views)):
-        id_point = int(prediction_result_reshape[id_view,4])
+        id_point = int(prediction_result_reshape[id_view,5])
         filename = "temp/test_scene_output/{}.txt".format(int(id_point))
         if os.path.exists(filename):
             continue
 
-        vertexes[id_point][0:3] = prediction_result_reshape[id_view,5:8].cpu().numpy()
+        vertexes[id_point][0:3] = prediction_result_reshape[id_view,6:7].cpu().numpy()
 
         # Write views
         with open(filename, "w") as f:

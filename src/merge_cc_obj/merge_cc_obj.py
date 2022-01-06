@@ -7,9 +7,11 @@ from shapely.geometry import Polygon, Point
 from tqdm import tqdm
 import numba
 import numpy as np
+from tqdm.contrib.concurrent import thread_map, process_map
+
 from shared.trajectory import *
 
-centralized_point=(493260.00, 2492700.00, 0) # Translate to origin point to prevent overflow
+centralized_point=(1.26826e7,2.57652e6,0) # Translate to origin point to prevent overflow
 
 root_file = r"D:\Projects\Photos\2110-OPT-GDSZ-VCC-shendaL7_box3-52.1-0.02-8890-1464-PTBGAJKL\07.重建模型\SD_OPT_box3_obj4547"
 output_root = r"D:\Projects\Photos\2110-OPT-GDSZ-VCC-shendaL7_box3-52.1-0.02-8890-1464-PTBGAJKL\merge"
@@ -18,30 +20,30 @@ origin_point = (493504.4363,2492785.125,131.5) # Origin point in "metadata.xml"
 filter_z = 1 # L7 CGCS 2000
 
 # L7
-# boundary_point_wgs84 = [
-#     # 0th
-#     [
-#         [113.9346571,22.53175914],
-#         [113.935193,22.53221303],
-#         [113.9354288,22.53270332],
-#         [113.9354285,22.53289409],
-#         [113.9349824,22.53289853],
-#         [113.9346911,22.53248555],
-#         [113.9342935,22.5321344]
-#     ],
-#     # 1th
-#     [
-#         [113.9352184,22.53295035],
-#         [113.9364326,22.53296924],
-#         [113.9364192,22.53329267],
-#         [113.9362734,22.53342562],
-#         [113.9354814,22.53340215],
-#         [113.9352163,22.53317406],
-#     ]
-# ]
+l7_boundary_point_wgs84 = [
+    # 0th
+    [
+        [113.9346571,22.53175914],
+        [113.935193,22.53221303],
+        [113.9354288,22.53270332],
+        [113.9354285,22.53289409],
+        [113.9349824,22.53289853],
+        [113.9346911,22.53248555],
+        [113.9342935,22.5321344]
+    ],
+    # 1th
+    [
+        [113.9352184,22.53295035],
+        [113.9364326,22.53296924],
+        [113.9364192,22.53329267],
+        [113.9362734,22.53342562],
+        [113.9354814,22.53340215],
+        [113.9352163,22.53317406],
+    ]
+]
 
 # L7
-boundary_point_cgcs2000 = [
+L7_boundary_point_cgcs2000 = [
         [
             [493280.264198, 2492680.963400],
             [493234.691498, 2492729.714399],
@@ -62,55 +64,56 @@ boundary_point_cgcs2000 = [
     ]
 
 # Huiwen
-# boundary_point_wgs84 =[
-#     [
-#         [113.9304898,22.53998704],
-#         [113.9307016,22.5402481],
-#         [113.9305809,22.54033197],
-#         [113.9304613,22.54017008],
-#         [113.9298159,22.54062068],
-#         [113.9295466,22.54061191],
-#         [113.9295347,22.54083723],
-#         [113.9287873,22.54083075],
-#         [113.9287853,22.54061132],
-#         [113.9286057,22.54060819],
-#         [113.9286083,22.54047422],
-#         [113.9297707,22.54049303],
-#     ],
-#     [
-#         [113.9307276,22.54028904],
-#         [113.9301828,22.540681],
-#         [113.930327,22.54086299],
-#         [113.9302004,22.54095884],
-#         [113.9301935,22.5412511],
-#         [113.9300134,22.5412469],
-#         [113.9300188,22.54099347],
-#         [113.9292388,22.54098648],
-#         [113.9292288,22.54115068],
-#         [113.9296099,22.54115351],
-#         [113.9296126,22.54140958],
-#         [113.9303284,22.54142874],
-#         [113.9303327,22.5410559],
-#         [113.9309774,22.54058873],
-#     ],
-#     [
-#         [113.9310857,22.54071253],
-#         [113.9306105,22.54106074],
-#         [113.9308258,22.54132147],
-#         [113.931317,22.54100089],
-#
-#     ]
-# ]
+huiwen_boundary_point_wgs84 =[
+    [
+        [113.9305898,22.53988704],
+        [113.9308016,22.5402481],
+        [113.9306809,22.54033197],
+        [113.9304613,22.54017008],
+        [113.9298159,22.54062068],
+        [113.9295466,22.54061191],
+        [113.9295447,22.54083723],
+        [113.9287873,22.54083075],
+        [113.9287853,22.54061132],
+        [113.9286057,22.54060819],
+        [113.9286083,22.54037422],
+        [113.9297707,22.54039303],
+    ],
+    [
+        [113.9308276,22.54018904],
+        [113.9301828,22.540681],
+        [113.930327,22.54086299],
+        [113.9302004,22.54095884],
+        [113.9301935,22.5411511],
+        [113.9301134,22.5411469],
+        [113.9301188,22.54096347],
+        [113.9292388,22.54096648],
+        [113.9292288,22.54115068],
+        [113.9296099,22.54115351],
+        [113.9296126,22.54140958],
+        [113.9304284,22.54142874],
+        [113.9303327,22.5410559],
+        [113.9310774,22.54058873],
+    ],
+    [
+        [113.9310857,22.54061253],
+        [113.9306105,22.54106074],
+        [113.9308258,22.54142147],
+        [113.931417,22.54110089],
 
+    ]
+]
 
-for i_building, _ in enumerate(boundary_point_cgcs2000):
-    for i_point, _ in enumerate(boundary_point_cgcs2000[i_building]):
-        # mercator = lonLat2Mercator(boundary_point_cgcs2000[i_building][i_point])
-        mercator = boundary_point_cgcs2000[i_building][i_point]
-        boundary_point_cgcs2000[i_building][i_point][0] = mercator[0]-centralized_point[0]
-        boundary_point_cgcs2000[i_building][i_point][1] = mercator[1]-centralized_point[1]
+used_boundary = l7_boundary_point_wgs84
 
-poly = [Polygon(item) for item in boundary_point_cgcs2000]
+for i_building, _ in enumerate(used_boundary):
+    for i_point, _ in enumerate(used_boundary[i_building]):
+        mercator = lonLat2Mercator(used_boundary[i_building][i_point])
+        # mercator = used_boundary[i_building][i_point]
+        used_boundary[i_building][i_point][0] = mercator[0]-centralized_point[0]
+        used_boundary[i_building][i_point][1] = mercator[1]-centralized_point[1]
+
+poly = [Polygon(item) for item in used_boundary]
 
 def back_up_cgcs2000():
     # centralized_point=(-492700,-2493600,-0)
@@ -244,6 +247,22 @@ def test2():
             f.write(line + "\n")
 
 
+def filter_mesh_according_to_boundary_and_sample_points():
+    v_output_folder = r"D:\Projects\Reconstructability\real_proxy"
+    mesh = o3d.io.read_triangle_mesh(os.path.join(v_output_folder,"L7_100w.ply"))
+    mesh_point = np.asarray(mesh.vertices)
+    mesh_faces = np.asarray(mesh.triangles)
+    remove_flag = thread_map(f,mesh_point[mesh_faces])
+    # remove_flag = process_map(f,mesh_point[mesh_faces],chunksize=1)
+    remove_flag = np.asarray(remove_flag, np.int16)
+    mesh.remove_triangles_by_mask(remove_flag)
+    mesh.remove_unreferenced_vertices()
+    # o3d.io.write_triangle_mesh(
+    #     os.path.join(r"D:\Projects\Reconstructability\real_proxy", "mesh_centralized.ply"), mesh)
+    pcl_4 = mesh.sample_points_poisson_disk(number_of_points=int(1e4))
+    o3d.io.write_point_cloud(os.path.join(v_output_folder, "1e4.ply"), pcl_4)
+
+
 def f(v_args):
     item = v_args
     p1 = Point(v_args[0,:2])
@@ -285,9 +304,25 @@ def merge_mesh_and_filter_the_points_outside_boundary(v_root_file, v_output_fold
     o3d.io.write_point_cloud(os.path.join(v_output_folder, "1e5.ply"), pcl_5)
     o3d.io.write_point_cloud(os.path.join(v_output_folder, "1e7.ply"), pcl_7)
 
+import numba as nb
+from numba.typed import List
+
+class A:
+    def __init__(self,v_a):
+        self.a=v_a
+
+@nb.njit()
+def test(v_arg):
+    for item in v_arg:
+        print(item)
+    return
 
 if __name__ == '__main__':
-    # test3()
+    test_list = [0.1 for item in range(10)]
+    test(List(test_list,))
+
+
+    filter_mesh_according_to_boundary_and_sample_points()
     # test2()
     # test()
     merge_mesh_and_filter_the_points_outside_boundary(root_file,

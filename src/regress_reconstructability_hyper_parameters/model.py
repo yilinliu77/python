@@ -538,6 +538,8 @@ class Uncertainty_Modeling_v2(nn.Module):
         # uncertainty = self.point_feature_extractor(point_features.transpose(1,2))[0].transpose(1,2) # PointNet++
         predict_reconstructability = self.phase_1_extractor(point_features.transpose(1, 2))[0]
         inconsistency_identifier = torch.zeros_like(predict_reconstructability)
+        inconsistency_identifier = torch.cat(
+            [inconsistency_identifier, inconsistency_identifier], dim=-1)
         # Phase 2, only use viewpoint features to predict recon
         if self.is_involve_img:
             is_point_can_be_seen_with_at_least_one_view = (v_data["img_pose"][:, :, 0, 0]).bool()

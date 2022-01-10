@@ -25,7 +25,7 @@ from src.regress_reconstructability_hyper_parameters.dataset import Regress_hype
 from src.regress_reconstructability_hyper_parameters.model import Regress_hyper_parameters_Model, Brute_force_nn, \
     Correlation_nn
 
-import torchsort
+# import torchsort
 # from torchsort import soft_rank
 
 from scipy import stats
@@ -34,7 +34,7 @@ from scipy import stats
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
-# v_data: Predict reconstructability, Predict inconsistency, valid_flag, GT error, inconsistency (0 is consistent), Point index
+# v_data: Predict reconstructability, Predict inconsistency, valid_flag, GT error, inconsistency (0 is consistent), Point index, x, y, z
 def output_test(v_data, v_num_total_points):
     predict_result = v_data.reshape(-1, v_data.shape[-1])
     invalid_mask = predict_result[:, 4]  # Filter out the point with gt reconstructability = 0
@@ -245,6 +245,7 @@ class Regress_hyper_parameters(pl.LightningModule):
 
     def test_step(self, batch, batch_idx) -> None:
         data = batch
+
         results = self.forward(data)
 
         error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
@@ -252,7 +253,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         view_dir = -data["views"][:,:,:,1:4] * data["views"][:,:,:,4:5] * 60 # 60 is the distance baseline, - because it stores the view to point vector
         centre_point_index = data["points"][:,:,4].cpu().numpy()
         points = data["points"][:,:,:3].cpu().numpy()
-        points = points + self.test_dataset.original_points[centre_point_index.reshape(-1).astype(np.int)].reshape(points.shape)
+        points = points + self.test_dataset.original_points[centre_point_index.reshape(-1).astype(np.int32)].reshape(points.shape)
         points = points * self.data_mean_std[3] + self.data_mean_std[:3]
         views = points[:,:,np.newaxis] + view_dir.cpu().numpy()
         views=np.concatenate([views,-view_dir.cpu().numpy(),data["views"][:,:,:,0:1].cpu().numpy()],axis=-1)
@@ -321,9 +322,19 @@ def main(v_cfg: DictConfig):
             if "point_feature_extractor" in item:
                 state_dict.pop(item)
         model.load_state_dict(state_dict, strict=False)
+
+    views = torch.load(r"C:\repo\C\build\src\sig22_reconstructability\optimize_trajectory\views.pt").cuda()
+    points = torch.load(r"C:\repo\C\build\src\sig22_reconstructability\optimize_trajectory\points.pt").cuda()
+    data_new = {"views": views, "points": points}
+    model.cuda()
+    model.eval()
+    with torch.no_grad():
+        results = model.forward(data_new)
+
     if v_cfg["trainer"].auto_lr_find:
         trainer.tune(model)
         print(model.learning_rate)
+    # model.save('temp/model.pt')
     if v_cfg["trainer"].evaluate:
         trainer.test(model)
     else:

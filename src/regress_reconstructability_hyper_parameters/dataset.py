@@ -189,7 +189,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.original_points = self.point_attribute[:, 3:6]
         self.num_seeds = 4096 + 1024
         self.sample_points_to_different_patches()
-        self.img_dataset = Regress_hyper_parameters_img_dataset(img_dataset_path, self.view_paths)
+        self.img_dataset = Regress_hyper_parameters_img_dataset(os.path.join(v_path,img_dataset_path), self.view_paths)
 
         pass
 

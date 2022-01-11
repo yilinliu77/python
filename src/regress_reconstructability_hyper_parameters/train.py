@@ -323,14 +323,6 @@ def main(v_cfg: DictConfig):
                 state_dict.pop(item)
         model.load_state_dict(state_dict, strict=False)
 
-    # views = torch.load(r"C:\repo\C\build\src\sig22_reconstructability\optimize_trajectory\views.pt").cuda()
-    # points = torch.load(r"C:\repo\C\build\src\sig22_reconstructability\optimize_trajectory\points.pt").cuda()
-    # data_new = {"views": views, "points": points}
-    # model.cuda()
-    # model.eval()
-    # with torch.no_grad():
-    #     results = model.forward(data_new)
-
     if v_cfg["trainer"].auto_lr_find:
         trainer.tune(model)
         print(model.learning_rate)

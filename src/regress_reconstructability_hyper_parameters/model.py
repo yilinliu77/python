@@ -538,8 +538,8 @@ class Uncertainty_Modeling_v2(nn.Module):
         # Phase 1
         # Extract view features
         # t = time.time()
-        view_features = self.view_feature_fusioner(v_data["views"]) # Note that some features are not reasonable
-        view_features[torch.logical_not(valid_view_mask)] = 0 # Mark these features to 0
+        view_features = self.view_feature_fusioner(v_data["views"])  # Note that some features are not reasonable
+        view_features[torch.logical_not(valid_view_mask)] = 0  # Mark these features to 0
         # view_feature_time = time.time() - t
 
         # Phase 1, only use viewpoint features to predict recon
@@ -604,7 +604,7 @@ class Uncertainty_Modeling_v2(nn.Module):
 
         # Done
         predict_result = torch.cat([predict_reconstructability, inconsistency_identifier], dim=2)
-        predict_result[torch.logical_not(valid_view_mask)][:,0] = 0
+        predict_result[torch.logical_not(valid_view_mask)] = 0
 
         # print("{}, {}, {}".format(attention_time,pointnet_time,correlation_time))
         return predict_result
@@ -616,24 +616,34 @@ class Uncertainty_Modeling_v2(nn.Module):
             return loss_l2_recon(v_point_attribute, v_prediction)
 
 
-class Uncertainty_Modeling_release(nn.Module):
+class Uncertainty_Modeling_wo_pointnet(nn.Module):
     def __init__(self, hparams):
-        super(Uncertainty_Modeling_release, self).__init__()
+        super(Uncertainty_Modeling_wo_pointnet, self).__init__()
         self.hydra_conf = hparams
         self.is_involve_img = self.hydra_conf["model"]["involve_img"]
-        self.phase_1_extractor = PointNet1(3 + 256, 1)  # xyz + view_features
-        self.phase_2_extractor = PointNet1(3 + 256 + 256 + 32 + 1,
-                                           256)  # xyz + view_features + img_view_features + img_features + predicted recon
+        self.phase_1_extractor = nn.Sequential(
+            nn.Linear(256, 256),
+            nn.LeakyReLU(),
+            nn.Dropout(0.),
+            nn.Linear(256, 1),
+        )
+        self.phase_2_extractor = nn.Sequential(
+            nn.Linear(256, 256),
+            nn.LeakyReLU(),
+            nn.Dropout(0.),
+            nn.Linear(256, 1),
+        )
+
         self.phase_2_recon = nn.Sequential(
             nn.Linear(256, 256),
             nn.LeakyReLU(),
-            nn.Dropout(0),
+            nn.Dropout(0.),
             nn.Linear(256, 1),
         )
         self.phase_2_inconsistency = nn.Sequential(
             nn.Linear(256, 256),
             nn.LeakyReLU(),
-            nn.Dropout(0),
+            nn.Dropout(0.),
             nn.Linear(256, 1),
         )
 
@@ -646,29 +656,34 @@ class Uncertainty_Modeling_release(nn.Module):
             if isinstance(m, (nn.Linear,)):
                 nn.init.kaiming_normal_(m.weight)
 
-    def forward(self, v_data):
+    # @torch.jit.script_method
+    def forward(self, v_data: Dict[str, torch.Tensor]):
         batch_size = v_data["views"].shape[0]
+
+        valid_view_mask = v_data["views"][:, :, 0, 0].type(torch.bool)
+        # Fake generate 1 view for those point which can not been seen
+        # in order to prevent NAN in attention module
+        v_data["views"][torch.logical_not(valid_view_mask)] = 1
+
         img_feature_time = 0
         view_feature_time = 0
         correlation_time = 0
 
         # Phase 1
         # Extract view features
-        t = time.time()
-        view_features = self.view_feature_fusioner(v_data["views"])
-        view_feature_time = time.time() - t
+        # t = time.time()
+        view_features = self.view_feature_fusioner(v_data["views"])  # Note that some features are not reasonable
+        view_features[torch.logical_not(valid_view_mask)] = 0  # Mark these features to 0
+        # view_feature_time = time.time() - t
 
         # Phase 1, only use viewpoint features to predict recon
-        points = v_data["points"]  # B * num_point * 5 (x,y,z, index, centre_point_index)
-        point_features = torch.cat([points[:, :, :3], view_features], dim=2)
-        # uncertainty = self.point_feature_extractor(point_features.transpose(1,2))[0].transpose(1,2) # PointNet++
-        predict_reconstructability = self.phase_1_extractor(point_features.transpose(1, 2))[0]
+        predict_reconstructability = self.phase_1_extractor(view_features)
         inconsistency_identifier = torch.zeros_like(predict_reconstructability)
         inconsistency_identifier = torch.cat(
             [inconsistency_identifier, torch.ones_like(inconsistency_identifier)], dim=-1)
         # Phase 2, only use viewpoint features to predict recon
         if self.is_involve_img:
-            is_point_can_be_seen_with_at_least_one_view = (v_data["img_pose"][:, :, 0, 0]).bool()
+            is_point_can_be_seen_with_at_least_one_view = (v_data["img_pose"][:, :, 0, 0]).type(torch.bool)
             img_view_features = torch.zeros_like(view_features)
             img_features = torch.zeros((batch_size, img_view_features.shape[1], 32),
                                        device=img_view_features.device)
@@ -680,17 +695,17 @@ class Uncertainty_Modeling_release(nn.Module):
                 valid_oblique_img_features_mask_per_point = v_data["point_features_mask"][
                     id_batch][is_point_can_be_seen_with_at_least_one_view[id_batch]]
                 # Extract view features of the pre-collected pattern
-                t = time.time()
+                # t = time.time()
                 img_view_features_item = self.view_feature_fusioner(valid_oblique_view_features_per_point)
-                img_view_feature_time = time.time() - t
+                # img_view_feature_time = time.time() - t
 
                 # Calculate img features
-                t = time.time()
+                # t = time.time()
                 img_features_item = self.img_feature_fusioner(
                     valid_oblique_img_features_per_point.unsqueeze(0),
                     valid_oblique_img_features_mask_per_point.unsqueeze(0))
-                img_feature_time = time.time() - t
-                t = time.time()
+                # img_feature_time = time.time() - t
+                # t = time.time()
 
                 img_view_features[id_batch][is_point_can_be_seen_with_at_least_one_view[id_batch]] \
                     = img_view_features_item \
@@ -702,12 +717,12 @@ class Uncertainty_Modeling_release(nn.Module):
             # Phase 2, use img features to refine recon and predict proxy inconsistency
             point_features_plus = torch.cat(
                 [
-                    points[:, :, :3],
+                    # points[:, :, :3],
                     view_features,
                     predict_reconstructability,
                     img_view_features,
                     img_features], dim=2)
-            predict_features = self.phase_2_extractor(point_features_plus.transpose(1, 2))[0]
+            predict_features = self.phase_2_extractor(point_features_plus)
             delta_recon = self.phase_2_recon(predict_features)
             inconsistency = self.phase_2_inconsistency(predict_features)
 
@@ -719,6 +734,8 @@ class Uncertainty_Modeling_release(nn.Module):
 
         # Done
         predict_result = torch.cat([predict_reconstructability, inconsistency_identifier], dim=2)
+        predict_result[torch.logical_not(valid_view_mask)] = 0
+
         # print("{}, {}, {}".format(attention_time,pointnet_time,correlation_time))
         return predict_result
 

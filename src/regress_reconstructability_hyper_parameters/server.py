@@ -25,13 +25,21 @@ def main(v_cfg: DictConfig):
     model = Uncertainty_Modeling_v2(v_cfg)
     best_model = torch.load(r"temp/1_7_train_v2.ckpt")
     model.load_state_dict({item.split("model.")[1]:best_model["state_dict"][item] for item in best_model["state_dict"]})
+    model.eval()
     sm = torch.jit.script(model)
     sm.save("temp/model.pt")
     sm.eval()
-    sm.forward({
-        "views":torch.ones(1,256, 131, 9),
-        "points":torch.ones(1, 256, 5)
-    })
+    sm.cuda()
+
+    views = torch.load(r"C:\repo\C\build\src\sig22_reconstructability\optimize_trajectory\views.pt").cuda()
+    points = torch.load(r"C:\repo\C\build\src\sig22_reconstructability\optimize_trajectory\points.pt").cuda()
+    data_new = {"views": views, "points": points}
+    model.cuda()
+    with torch.no_grad():
+        results1 = model.forward(data_new)
+        results2 = sm.forward(data_new)
+        assert torch.abs(results1[:,:,0]-results2[:,:,0]).sum() < 1e-6
+
     if v_cfg["trainer"].resume_from_checkpoint is not None:
         state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
         for item in list(state_dict.keys()):

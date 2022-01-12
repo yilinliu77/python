@@ -137,7 +137,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         dataset_paths = self.hydra_conf["trainer"]["train_dataset"].split("*")
         datasets=[]
         for dataset_path in dataset_paths:
-            datasets.append(Regress_hyper_parameters_dataset_with_imgs(dataset_path, self.hydra_conf,
+            datasets.append(Regress_hyper_parameters_dataset(dataset_path, self.hydra_conf,
                                                                        "training" if len(
                                                                            dataset_paths) == 1 else "testing", ))
 
@@ -150,7 +150,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                                  shuffle=True,
                                  drop_last=True,
                                  pin_memory=True,
-                                 collate_fn=Regress_hyper_parameters_dataset_with_imgs.collate_fn,
+                                 collate_fn=Regress_hyper_parameters_dataset.collate_fn,
                                  )
 
     def val_dataloader(self):
@@ -159,7 +159,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         dataset_paths = self.hydra_conf["trainer"]["valid_dataset"].split("*")
         datasets=[]
         for dataset_path in dataset_paths:
-            datasets.append(Regress_hyper_parameters_dataset_with_imgs(dataset_path, self.hydra_conf,
+            datasets.append(Regress_hyper_parameters_dataset(dataset_path, self.hydra_conf,
                                                                        "validation" if use_part_dataset_to_validate else "testing",))
         self.valid_dataset = torch.utils.data.ConcatDataset(datasets)
         return DataLoader(self.valid_dataset,
@@ -168,7 +168,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                           drop_last=False,
                           shuffle=False,
                           pin_memory=True,
-                          collate_fn=Regress_hyper_parameters_dataset_with_imgs.collate_fn,
+                          collate_fn=Regress_hyper_parameters_dataset.collate_fn,
                           )
 
     def test_dataloader(self):

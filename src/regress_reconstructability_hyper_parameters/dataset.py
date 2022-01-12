@@ -78,56 +78,57 @@ def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
 
 
 class Regress_hyper_parameters_dataset(torch.utils.data.Dataset):
-    def __init__(self, v_params, v_mode):
+    def __init__(self, v_path, v_params, v_mode):
         super(Regress_hyper_parameters_dataset, self).__init__()
-        self.is_training = v_mode == "training"
+        self.trainer_mode = v_mode
         self.params = v_params
-        self.views = np.load(os.path.join(v_params["model"].preprocess_path, "views.npz"))["arr_0"]
-        self.view_pairs = np.load(os.path.join(v_params["model"].preprocess_path, "view_pairs.npz"))["arr_0"]
-        self.point_attribute = np.load(os.path.join(v_params["model"].preprocess_path, "point_attribute.npz"))["arr_0"]
-        self.view_paths = np.load(os.path.join(v_params["model"].preprocess_path, "view_paths.npz"), allow_pickle=True)[
-            "arr_0"]
-        # mask = self.target_data[:, 0, -1] < 10
-        mask = self.point_attribute[:, 0] < 9999999
-        stats.spearmanr(self.point_attribute[:, 0][mask], self.point_attribute[:, 1][mask])
+        self.views = np.load(os.path.join(v_path, "views.npz"))["arr_0"]
+        self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npz"))["arr_0"]
+        self.points = np.concatenate([self.point_attribute[:,3:6],np.arange(self.point_attribute.shape[0])[:,np.newaxis]],axis=1)
+        self.num_item = self.point_attribute.shape[0]
 
-        batch_size = self.params["trainer"]["batch_size"]
-        self.num_item = self.point_attribute.shape[0] // batch_size * 5
-
-        whole_index = np.arange(self.point_attribute.shape[0])
-        np.random.shuffle(whole_index)
-        self.train_index = whole_index[:whole_index.shape[0] // 4 * 3]
-        self.test_index = whole_index[whole_index.shape[0] // 4 * 3:]
+        self.whole_index = np.arange(self.num_item)
+        np.random.shuffle(self.whole_index)
+        self.train_index = self.whole_index[:self.whole_index.shape[0] // 4 * 3]
+        self.validation_index = self.whole_index[self.whole_index.shape[0] // 4 * 3:]
 
         pass
 
     def __getitem__(self, index):
-        if self.is_training:
-            batch_index = np.random.choice(self.train_index, self.params["trainer"]["batch_size"],
-                                           False)
+        if self.trainer_mode == "training":
+            used_index = self.train_index
+        elif self.trainer_mode == "validation":
+            used_index = self.validation_index
         else:
-            # batch_index = np.arange(self.views.shape[0])
-            batch_index = self.test_index[[index]]
+            used_index = self.whole_index
         output_dict = {
-            "views": torch.tensor(self.views[batch_index], dtype=torch.float32),
-            "view_pairs": torch.tensor(self.view_pairs[batch_index], dtype=torch.float32),
-            "point_attribute": torch.tensor(self.point_attribute[batch_index], dtype=torch.float32),
+            "views": torch.tensor(self.views[used_index[index]], dtype=torch.float32),
+            "point_attribute": torch.tensor(self.point_attribute[used_index[index]], dtype=torch.float32),
+            "points": torch.tensor(self.points[used_index[index]], dtype=torch.float32),
         }
         return output_dict
 
     def __len__(self):
-        return self.num_item if self.is_training else self.test_index.shape[0]
+        if self.trainer_mode == "training":
+            return self.train_index.shape[0]
+        elif self.trainer_mode == "validation":
+            return self.validation_index.shape[0]
+        else:
+            return self.whole_index.shape[0]
 
     @staticmethod
     def collate_fn(batch):
         views = [item["views"] for item in batch]
-        view_pairs = [item["view_pairs"] for item in batch]
+        from torch.nn.utils.rnn import pad_sequence
+        views_pad = torch.transpose(pad_sequence(views, padding_value=0.0), 0, 1)
+        # view_pairs = [torch.transpose(item["view_pairs"],0,1) for item in batch]
+        # view_pairs_pad = torch.transpose(torch.transpose(pad_sequence(view_pairs),0,1),1,2)
         point_attribute = [item["point_attribute"] for item in batch]
-
+        points = [item["points"] for item in batch]
         return {
-            'views': torch.cat(views),
-            'view_pairs': torch.cat(view_pairs),
-            'point_attribute': torch.cat(point_attribute),
+            'views': views_pad.unsqueeze(1),
+            'point_attribute': torch.stack(point_attribute, dim=0).unsqueeze(1),
+            'points': torch.stack(points, dim=0).unsqueeze(1),
         }
 
 

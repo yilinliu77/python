@@ -104,7 +104,7 @@ huiwen_boundary_point_wgs84 =[
     ]
 ]
 
-used_boundary = l7_boundary_point_wgs84
+used_boundary = huiwen_boundary_point_wgs84
 
 for i_building, _ in enumerate(used_boundary):
     for i_point, _ in enumerate(used_boundary[i_building]):
@@ -249,7 +249,7 @@ def test2():
 
 def filter_mesh_according_to_boundary_and_sample_points():
     v_output_folder = r"D:\Projects\Reconstructability\real_proxy"
-    mesh = o3d.io.read_triangle_mesh(os.path.join(v_output_folder,"L7_100w.ply"))
+    mesh = o3d.io.read_triangle_mesh(os.path.join(v_output_folder,"huiwen_fine.ply"))
     mesh_point = np.asarray(mesh.vertices)
     mesh_faces = np.asarray(mesh.triangles)
     remove_flag = thread_map(f,mesh_point[mesh_faces])
@@ -257,8 +257,8 @@ def filter_mesh_according_to_boundary_and_sample_points():
     remove_flag = np.asarray(remove_flag, np.int16)
     mesh.remove_triangles_by_mask(remove_flag)
     mesh.remove_unreferenced_vertices()
-    # o3d.io.write_triangle_mesh(
-    #     os.path.join(r"D:\Projects\Reconstructability\real_proxy", "mesh_centralized.ply"), mesh)
+    o3d.io.write_triangle_mesh(
+        os.path.join(r"D:\Projects\Reconstructability\real_proxy", "mesh_centralized.ply"), mesh)
     pcl_4 = mesh.sample_points_poisson_disk(number_of_points=int(1e4))
     o3d.io.write_point_cloud(os.path.join(v_output_folder, "1e4.ply"), pcl_4)
 
@@ -304,24 +304,8 @@ def merge_mesh_and_filter_the_points_outside_boundary(v_root_file, v_output_fold
     o3d.io.write_point_cloud(os.path.join(v_output_folder, "1e5.ply"), pcl_5)
     o3d.io.write_point_cloud(os.path.join(v_output_folder, "1e7.ply"), pcl_7)
 
-import numba as nb
-from numba.typed import List
-
-class A:
-    def __init__(self,v_a):
-        self.a=v_a
-
-@nb.njit()
-def test(v_arg):
-    for item in v_arg:
-        print(item)
-    return
 
 if __name__ == '__main__':
-    test_list = [0.1 for item in range(10)]
-    test(List(test_list,))
-
-
     filter_mesh_according_to_boundary_and_sample_points()
     # test2()
     # test()

@@ -398,11 +398,12 @@ class ViewFeatureFuser(nn.Module):
             view_features.append(attention_result)
 
         view_features = torch.cat(view_features, dim=0)
+        view_features = view_features * valid_mask
         view_features = torch.sum(view_features,
                                   dim=1)  # Sum up all the view contribution of one point
         view_features = view_features / (torch.sum(
-            view_attribute[:, :, 0].type(torch.bool), dim=1).unsqueeze(-1) + 1e-6)  # Normalize the features
-        if view_features.shape[0] != v_data.shape[0]:
+            valid_mask[:, :, 0].type(torch.bool), dim=1).unsqueeze(-1) + 1e-6)  # Normalize the features
+        if len(v_data.shape) == 4:
             view_features = view_features.reshape(v_data.shape[0], -1,
                                                   view_features.shape[1])  # B * num_point * 256
         return view_features
@@ -744,6 +745,7 @@ class Uncertainty_Modeling_wo_pointnet(nn.Module):
             return loss_l2_recon_entropy_identifier(v_point_attribute, v_prediction)
         else:
             return loss_l2_recon(v_point_attribute, v_prediction)
+
 
 
 class Uncertainty_Modeling_wo_dropout(nn.Module):

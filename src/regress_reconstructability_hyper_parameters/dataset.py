@@ -94,6 +94,10 @@ class Regress_hyper_parameters_dataset(torch.utils.data.Dataset):
 
         pass
 
+    def sample_points_to_different_patches(self):
+        pass
+
+
     def __getitem__(self, index):
         if self.trainer_mode == "training":
             used_index = self.train_index

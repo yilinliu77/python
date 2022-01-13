@@ -172,7 +172,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                           )
 
     def test_dataloader(self):
-        self.test_dataset = Regress_hyper_parameters_dataset_with_imgs(self.hydra_conf["trainer"]["test_dataset"],
+        self.test_dataset = Regress_hyper_parameters_dataset(self.hydra_conf["trainer"]["test_dataset"],
                                                                        self.hydra_conf, "testing",)
 
         return DataLoader(self.test_dataset,
@@ -181,7 +181,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                           drop_last=False,
                           shuffle=False,
                           pin_memory=True,
-                          collate_fn=self.test_dataset.collate_fn
+                          collate_fn=Regress_hyper_parameters_dataset.collate_fn
                           )
 
     def configure_optimizers(self):
@@ -250,13 +250,24 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
-        view_dir = -data["views"][:,:,:,1:4] * data["views"][:,:,:,4:5] * 60 # 60 is the distance baseline, - because it stores the view to point vector
-        centre_point_index = data["points"][:,:,4].cpu().numpy()
+        normals = data["point_attribute"][:,:,7:10].cpu().numpy()
+        normal_theta = np.arccos(normals[:,:,2])
+        normal_phi = np.arctan2(normals[:,:,1], normals[:,:,0])
+
+        theta = data["views"][:, :, :, 1].cpu().numpy() + normal_theta[:,:,np.newaxis]
+        phi = data["views"][:, :, :, 2].cpu().numpy() + normal_phi[:,:,np.newaxis]
+
+        dz = np.cos(theta)
+        dx = np.sin(theta) * np.cos(phi)
+        dy = np.sin(theta) * np.sin(phi)
+
+        view_dir = np.stack([dx,dy,dz],axis=3) * data["views"][:,:,:,3:4].cpu().numpy() * 60
+        # centre_point_index = data["points"][:,:,4].cpu().numpy()
         points = data["points"][:,:,:3].cpu().numpy()
-        points = points + self.test_dataset.original_points[centre_point_index.reshape(-1).astype(np.int32)].reshape(points.shape)
+        # points = points + self.test_dataset.original_points[centre_point_index.reshape(-1).astype(np.int32)].reshape(points.shape)
         points = points * self.data_mean_std[3] + self.data_mean_std[:3]
-        views = points[:,:,np.newaxis] + view_dir.cpu().numpy()
-        views=np.concatenate([views,-view_dir.cpu().numpy(),data["views"][:,:,:,0:1].cpu().numpy()],axis=-1)
+        views = points[:,:,np.newaxis] + view_dir
+        views=np.concatenate([views,-view_dir,data["views"][:,:,:,0:1].cpu().numpy()],axis=-1)
 
         self.log("Test Loss", total_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
         self.log("Test Recon Loss", error_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)

@@ -82,6 +82,7 @@ class Regress_hyper_parameters_dataset(torch.utils.data.Dataset):
         super(Regress_hyper_parameters_dataset, self).__init__()
         self.trainer_mode = v_mode
         self.params = v_params
+        self.data_root = v_path
         self.views = np.load(os.path.join(v_path, "views.npz"))["arr_0"]
         self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npz"))["arr_0"]
         self.points = np.concatenate([self.point_attribute[:,3:6],np.arange(self.point_attribute.shape[0])[:,np.newaxis]],axis=1)
@@ -173,9 +174,9 @@ class Regress_hyper_parameters_img_dataset(torch.utils.data.Dataset):
         return point_features, point_features_mask, self.views[real_indexes]
 
 """
-    views: num of patches * max views * 9 (valid_flag, dx, dy, dz, distance, angle to normal, angle to direction, px, py)
+    views: num of patches * max views * 8 (valid_flag, delta_theta, delta_phi, distance, angle to normal, angle to direction, px, py)
     points: num of patches * num point per patch * 7 (x, y, z, index, id_centre)
-    point_attribute: baseline recon, max error, avg error, x, y, z, is inconsistent point
+    point_attribute: baseline recon, max error, avg error, x, y, z, is inconsistent point, nx, ny, nz
 """
 class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
     def __init__(self, v_path, v_params, v_mode):

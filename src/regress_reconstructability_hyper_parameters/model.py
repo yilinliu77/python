@@ -338,7 +338,7 @@ class ViewFeatureFuser(nn.Module):
     def __init__(self):
         super(ViewFeatureFuser, self).__init__()
         self.view_feature_extractor = nn.Sequential(
-            nn.Linear(6, 256),
+            nn.Linear(5, 256),
             nn.LeakyReLU(),
             nn.Dropout(0.),
             nn.Linear(256, 256),
@@ -347,23 +347,20 @@ class ViewFeatureFuser(nn.Module):
             nn.Linear(256, 256),
             nn.LeakyReLU(),
         )
-        self.view_feature_fusioner1 = nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.)
-        self.view_feature_fusioner_linear1 = nn.Linear(256, 256)
-        self.view_feature_fusioner_relu1 = nn.LeakyReLU()
-        self.view_feature_fusioner2 = nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.)
-        self.view_feature_fusioner_linear2 = nn.Linear(256, 256)
-        self.view_feature_fusioner_relu2 = nn.LeakyReLU()
+        self.view_feature_fusioner1 = nn.TransformerEncoderLayer(256,2,256,0,F.leaky_relu_,batch_first=True)
+        self.view_feature_fusioner2 = nn.TransformerEncoderLayer(256,2,256,0,F.leaky_relu_,batch_first=True)
 
-    # valid_flag, dx, dy, dz, distance_ratio, normal_angle, central_angle
+    # valid_flag, delta_theta, delta_phi, distance_ratio, normal_angle, central_angle
     def forward(self, v_data):
         if len(v_data.shape) == 4:
             view_attribute = v_data.view(-1, v_data.shape[2], v_data.shape[3])
         else:
             view_attribute = v_data
-        view_attribute[:, :, 1:4] = view_attribute[:, :, 1:4] / (
-                torch.norm(view_attribute[:, :, 1:4], dim=2).unsqueeze(-1) + 1e-6)  # Normalize the view direction
+        # Normalize the view direction, no longer needed since we use phi and theta now
+        # view_attribute[:, :, 1:4] = view_attribute[:, :, 1:4] / (
+        #         torch.norm(view_attribute[:, :, 1:4], dim=2).unsqueeze(-1) + 1e-6)
         predict_reconstructability_per_view = self.view_feature_extractor(
-            view_attribute[:, :, 1:7])  # Compute the reconstructabilty of every single view
+            view_attribute[:, :, 1:6])  # Compute the reconstructabilty of every single view
         valid_mask = torch.zeros_like(predict_reconstructability_per_view)  # Filter out the unusable view
         valid_mask[view_attribute[:, :, 0].type(torch.bool)] = 1
         predict_reconstructability_per_view = predict_reconstructability_per_view * valid_mask
@@ -377,32 +374,35 @@ class ViewFeatureFuser(nn.Module):
             end_index = min(i * 1024 + 1024, predict_reconstructability_per_view.shape[0])
 
             feature_item = predict_reconstructability_per_view[start_index:end_index]
+            attn_mask_item = torch.ones((feature_item.shape[0],feature_item.shape[1],feature_item.shape[1],),
+                                         dtype=torch.bool,device=feature_item.device)
             valid_mask_item = torch.logical_not(valid_mask[start_index:end_index])
+            for i_batch in range(feature_item.shape[0]):
+                attn_mask_item[i_batch] = torch.logical_not(valid_mask_item)[i_batch,:,0].float().unsqueeze(1)@(
+                    torch.logical_not(valid_mask_item)[i_batch,:,0].float().T).unsqueeze(0)
+            attn_mask_item = torch.logical_not(attn_mask_item)
 
-            #
-            feature_item_filter = torch.transpose(feature_item, 0, 1)
+            # feature_item_filter = torch.transpose(feature_item, 0, 1)
             attention_result = self.view_feature_fusioner1(
-                feature_item_filter, feature_item_filter, feature_item_filter,
-                key_padding_mask=valid_mask_item[:, :, 0])
-            attention_result = torch.transpose(attention_result[0], 0, 1)
-            attention_result = self.view_feature_fusioner_linear1(attention_result)
-            attention_result = self.view_feature_fusioner_relu1(attention_result)
-            feature_item_filter = torch.transpose(attention_result, 0, 1)
+                feature_item,
+                src_key_padding_mask=valid_mask_item[:, :, 0],
+                # src_mask=attn_mask_item.repeat_interleave(2,0), # The output will be NAN, which bring problem when backpropogate the gradient
+            )
+            attention_result[valid_mask_item]=0
             attention_result = self.view_feature_fusioner2(
-                feature_item_filter, feature_item_filter, feature_item_filter,
-                key_padding_mask=valid_mask_item[:, :, 0])
-            attention_result = torch.transpose(attention_result[0], 0, 1)
-            attention_result = self.view_feature_fusioner_linear2(attention_result)
-            attention_result = self.view_feature_fusioner_relu2(attention_result)
+                attention_result,
+                src_key_padding_mask=valid_mask_item[:, :, 0],
+                # src_mask=attn_mask_item.repeat_interleave(2,0),
+            )
+            attention_result[valid_mask_item]=0 # Set invalid feature to 0, because we will do sum operator on this feature
 
             view_features.append(attention_result)
 
         view_features = torch.cat(view_features, dim=0)
-        view_features = view_features * valid_mask
+        view_features[torch.logical_not(valid_mask.type(torch.bool))] = 0
         view_features = torch.sum(view_features,
                                   dim=1)  # Sum up all the view contribution of one point
-        view_features = view_features / (torch.sum(
-            valid_mask[:, :, 0].type(torch.bool), dim=1).unsqueeze(-1) + 1e-6)  # Normalize the features
+        view_features = view_features / 50  # Normalize the features, encode the view num here
         if len(v_data.shape) == 4:
             view_features = view_features.reshape(v_data.shape[0], -1,
                                                   view_features.shape[1])  # B * num_point * 256

@@ -1,3 +1,4 @@
+import math
 import os
 import pickle
 from functools import partial
@@ -21,7 +22,7 @@ from tqdm.contrib.concurrent import thread_map, process_map
 
 
 def compute_view_features(max_num_view, valid_views_flag, reconstructabilities,
-                          views, views_pair, point_feature_paths,point_feature_root_dir,
+                          views, views_pair, point_feature_paths,point_feature_root_dir, error_list,
                           v_file):
     real_index = int(v_file.split("\\")[-1][:-4])
 
@@ -46,14 +47,23 @@ def compute_view_features(max_num_view, valid_views_flag, reconstructabilities,
         pixel_pos_x = float(view_data[7])
         pixel_pos_y = float(view_data[8])
         views[real_index][i_view][0] = 1
-        views[real_index][i_view][1] = view_to_point[0]
-        views[real_index][i_view][2] = view_to_point[1]
-        views[real_index][i_view][3] = view_to_point[2]
-        views[real_index][i_view][4] = distance_ratio
-        views[real_index][i_view][5] = angle_to_normal_ratio
-        views[real_index][i_view][6] = angle_to_direction_ratio
-        views[real_index][i_view][7] = pixel_pos_x
-        views[real_index][i_view][8] = pixel_pos_y
+
+        assert abs(np.linalg.norm(view_to_point) - distance_ratio * 60) < 1
+        point_to_view_normalized = -view_to_point / np.linalg.norm(view_to_point)
+        point_to_view_theta = math.acos(point_to_view_normalized[2])
+        point_to_view_phi = math.atan2(point_to_view_normalized[1], point_to_view_normalized[0])
+
+        normal_normalized = error_list[real_index][6:9]
+        normal_theta = math.acos(normal_normalized[2])
+        normal_phi = math.atan2(normal_normalized[1], normal_normalized[0])
+
+        views[real_index][i_view][1] = point_to_view_theta - normal_theta
+        views[real_index][i_view][2] = point_to_view_phi - normal_phi
+        views[real_index][i_view][3] = distance_ratio
+        views[real_index][i_view][4] = angle_to_normal_ratio
+        views[real_index][i_view][5] = angle_to_direction_ratio
+        views[real_index][i_view][6] = pixel_pos_x
+        views[real_index][i_view][7] = pixel_pos_y
         continue
 
     # Read view pair
@@ -77,6 +87,13 @@ def preprocess_data(v_root: str, v_error_point_cloud: str) -> (np.ndarray, np.nd
         x = plydata['vertex']['x'].copy()
         y = plydata['vertex']['y'].copy()
         z = plydata['vertex']['z'].copy()
+        nx = plydata['vertex']['nx'].copy()
+        ny = plydata['vertex']['ny'].copy()
+        nz = plydata['vertex']['nz'].copy()
+        length = np.sqrt(nx ** 2 + ny ** 2 + nz ** 2)
+        nx = nx / length
+        ny = ny / length
+        nz = nz / length
         max_error_list = plydata['vertex']['max_error'].copy()
         sum_error_list = plydata['vertex']['sum_error'].copy()
         num_list = plydata['vertex']['num'].copy()
@@ -89,7 +106,7 @@ def preprocess_data(v_root: str, v_error_point_cloud: str) -> (np.ndarray, np.nd
         x = (x - np.mean(x)) / max_dim
         y = (y - np.mean(y)) / max_dim
         z = (z - np.mean(z)) / max_dim
-        error_list = np.stack([max_error_list, avg_error, x, y, z, max_error_list==0], axis=1)
+        error_list = np.stack([max_error_list, avg_error, x, y, z, max_error_list==0, nx, ny, nz], axis=1)
 
     point_feature_root_dir = open(os.path.join(v_root,"../img_dataset_path.txt")).readline()
 
@@ -104,28 +121,30 @@ def preprocess_data(v_root: str, v_error_point_cloud: str) -> (np.ndarray, np.nd
         num_views = int(raw_data[0])
         return num_views
     num_view_list = thread_map(compute_max_view_number, files, max_workers=8)
-    # num_view_list = process_map(compute_max_view_number, files, max_workers=8,chunksize=1)
     max_num_view = max(num_view_list) + 1
+    # max_num_view = 200
     print("Read attribute with max view: ", max_num_view)
     point_features_path = []
-    views = np.zeros((num_points, max_num_view, 9), dtype=np.float16)
-    views_pair = np.zeros((num_points, max_num_view, max_num_view, 3), dtype=np.float16)
+    views = np.zeros((num_points, max_num_view, 8), dtype=np.float16)
+    # views_pair = np.zeros((num_points, max_num_view, max_num_view, 3), dtype=np.float16)
+    views_pair = None
     valid_views_flag = [False for _ in range(num_points)]
     reconstructabilities = [0 for _ in range(num_points)]
 
     thread_map(partial(compute_view_features,
-                       max_num_view,valid_views_flag,reconstructabilities,views,views_pair,point_features_path,point_feature_root_dir),
+                       max_num_view,valid_views_flag,reconstructabilities,views,views_pair,
+                       point_features_path,point_feature_root_dir,error_list),
                files,max_workers=10)
 
     # valid_flag = np.logical_and(np.array(valid_views_flag), error_list[:, 2] != 0)
     valid_flag = np.array(valid_views_flag)
 
     views = views[valid_flag]
-    views_pair = views_pair[valid_flag]
+    # views_pair = views_pair[valid_flag]
     point_features_path = np.array(point_features_path)
     reconstructabilities = np.asarray(reconstructabilities)[valid_flag]
     usable_indices = np.triu_indices(max_num_view, 1)
-    views_pair = views_pair[:, usable_indices[0], usable_indices[1]]
+    # views_pair = views_pair[:, usable_indices[0], usable_indices[1]]
 
     error_list = error_list[valid_flag]
     point_attribute = np.concatenate([reconstructabilities[:, np.newaxis], error_list], axis=1).astype(np.float16)
@@ -154,7 +173,7 @@ if __name__ == '__main__':
         error_point_cloud_dir
     )
     np.savez_compressed(os.path.join(output_root, "training_data/views"), view)
-    np.savez_compressed(os.path.join(output_root, "training_data/view_pairs"), view_pair)
+    # np.savez_compressed(os.path.join(output_root, "training_data/view_pairs"), view_pair)
     np.savez_compressed(os.path.join(output_root, "training_data/point_attribute"), point_attribute)
     np.savez_compressed(os.path.join(output_root, "training_data/view_paths"), view_paths)
     print("Pre-compute data done")

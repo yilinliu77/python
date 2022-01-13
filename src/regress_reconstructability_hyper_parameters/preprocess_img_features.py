@@ -1,3 +1,4 @@
+import math
 import os
 import pickle
 from functools import partial
@@ -21,7 +22,7 @@ from tqdm.contrib.concurrent import thread_map, process_map
 
 
 def compute_view_features(max_num_view,valid_views_flag,reconstructabilities,v_img_dir,
-                          views,views_pair,view_paths,
+                          views,views_pair,view_paths, point_normal,
                           v_file):
     real_index = int(v_file.split("\\")[-1][:-4])
 
@@ -48,15 +49,23 @@ def compute_view_features(max_num_view,valid_views_flag,reconstructabilities,v_i
             view_paths[real_index].append(img_path)
             # cv2.imshow("",cv2.resize(cv2.imread(img_path),(600,400)))
             # cv2.waitKey()
-        views[real_index][i_view][0] = 1
-        views[real_index][i_view][1] = view_to_point[0]
-        views[real_index][i_view][2] = view_to_point[1]
-        views[real_index][i_view][3] = view_to_point[2]
-        views[real_index][i_view][4] = distance_ratio
-        views[real_index][i_view][5] = angle_to_normal_ratio
-        views[real_index][i_view][6] = angle_to_direction_ratio
-        views[real_index][i_view][7] = pixel_pos_x
-        views[real_index][i_view][8] = pixel_pos_y
+
+        assert abs(np.linalg.norm(view_to_point) - distance_ratio * 60) < 1
+        point_to_view_normalized = -view_to_point / np.linalg.norm(view_to_point)
+        point_to_view_theta = math.acos(point_to_view_normalized[2])
+        point_to_view_phi = math.atan2(point_to_view_normalized[1], point_to_view_normalized[0])
+
+        normal_normalized = point_normal[real_index][0:3]
+        normal_theta = math.acos(normal_normalized[2])
+        normal_phi = math.atan2(normal_normalized[1], normal_normalized[0])
+
+        views[real_index][i_view][1] = point_to_view_theta - normal_theta
+        views[real_index][i_view][2] = point_to_view_phi - normal_phi
+        views[real_index][i_view][3] = distance_ratio
+        views[real_index][i_view][4] = angle_to_normal_ratio
+        views[real_index][i_view][5] = angle_to_direction_ratio
+        views[real_index][i_view][6] = pixel_pos_x
+        views[real_index][i_view][7] = pixel_pos_y
 
         """
         debug
@@ -78,6 +87,14 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str = None
     with open(v_error_point_cloud, "rb") as f:
         plydata = PlyData.read(f)
         num_points = plydata['vertex']['x'].shape[0]
+        nx = plydata['vertex']['nx'].copy()
+        ny = plydata['vertex']['ny'].copy()
+        nz = plydata['vertex']['nz'].copy()
+        length = np.sqrt(nx ** 2 + ny ** 2 + nz ** 2)
+        nx = nx / length
+        ny = ny / length
+        nz = nz / length
+        point_normal = np.stack([nx, ny, nz], axis=1)
 
     files = [os.path.join(v_root, item) for item in os.listdir(v_root)]
     files = list(filter(lambda item: ".txt" in item, files))
@@ -93,13 +110,13 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str = None
     max_num_view = max(num_view_list) + 1
     print("Read attribute with max view: ", max_num_view)
     view_paths = [[] for _ in range(num_points)]
-    views = np.zeros((num_points, max_num_view, 9), dtype=np.float16)
+    views = np.zeros((num_points, max_num_view, 8), dtype=np.float16)
     views_pair = np.zeros((num_points, max_num_view, max_num_view, 3), dtype=np.float16)
     valid_views_flag = [False for _ in range(num_points)]
     reconstructabilities = [0 for _ in range(num_points)]
 
     thread_map(partial(compute_view_features,
-                       max_num_view,valid_views_flag,reconstructabilities,v_img_dir,views,views_pair,view_paths),
+                       max_num_view,valid_views_flag,reconstructabilities,v_img_dir,views,views_pair,view_paths, point_normal),
                files,max_workers=10)
 
     return views, view_paths

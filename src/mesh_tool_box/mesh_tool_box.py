@@ -1,8 +1,10 @@
 import os
+import sys
 from multiprocessing import Pool
 
 import open3d as o3d
 from numba import njit
+from pyproj import Transformer, CRS
 from shapely.geometry import Polygon, Point
 from tqdm import tqdm
 import numba
@@ -11,95 +13,95 @@ from tqdm.contrib.concurrent import thread_map, process_map
 
 from shared.trajectory import *
 
-centralized_point=(1.26826e7,2.57652e6,0) # Translate to origin point to prevent overflow
+centralized_point = (1.26826e7, 2.57652e6, 0)  # Translate to origin point to prevent overflow
 
 root_file = r"D:\Projects\Photos\2110-OPT-GDSZ-VCC-shendaL7_box3-52.1-0.02-8890-1464-PTBGAJKL\07.重建模型\SD_OPT_box3_obj4547"
 output_root = r"D:\Projects\Photos\2110-OPT-GDSZ-VCC-shendaL7_box3-52.1-0.02-8890-1464-PTBGAJKL\merge"
-origin_point = (493504.4363,2492785.125,131.5) # Origin point in "metadata.xml"
+origin_point = (493504.4363, 2492785.125, 131.5)  # Origin point in "metadata.xml"
 # Set to -99999 if no requirement
-filter_z = 1 # L7 CGCS 2000
+filter_z = 1  # L7 CGCS 2000
 
 # L7
 l7_boundary_point_wgs84 = [
     # 0th
     [
-        [113.9346571,22.53175914],
-        [113.935193,22.53221303],
-        [113.9354288,22.53270332],
-        [113.9354285,22.53289409],
-        [113.9349824,22.53289853],
-        [113.9346911,22.53248555],
-        [113.9342935,22.5321344]
+        [113.9346571, 22.53175914],
+        [113.935193, 22.53221303],
+        [113.9354288, 22.53270332],
+        [113.9354285, 22.53289409],
+        [113.9349824, 22.53289853],
+        [113.9346911, 22.53248555],
+        [113.9342935, 22.5321344]
     ],
     # 1th
     [
-        [113.9352184,22.53295035],
-        [113.9364326,22.53296924],
-        [113.9364192,22.53329267],
-        [113.9362734,22.53342562],
-        [113.9354814,22.53340215],
-        [113.9352163,22.53317406],
+        [113.9352184, 22.53295035],
+        [113.9364326, 22.53296924],
+        [113.9364192, 22.53329267],
+        [113.9362734, 22.53342562],
+        [113.9354814, 22.53340215],
+        [113.9352163, 22.53317406],
     ]
 ]
 
 # L7
 L7_boundary_point_cgcs2000 = [
-        [
-            [493280.264198, 2492680.963400],
-            [493234.691498, 2492729.714399],
-            [493281.155197, 2492765.563797],
-            [493311.327599, 2492813.793999],
-            [493358.606003, 2492814.020699],
-            [493359.778595, 2492789.761703],
-            [493335.862503, 2492733.190300]
-        ],
-        [
-            [493333.475189, 2492817.767899],
-            [493333.395905, 2492842.758804],
-            [493360.219696, 2492869.892502],
-            [493447.201706, 2492870.637405],
-            [493468.051208, 2492850.659195],
-            [493467.150208, 2492816.107903]
-        ]
+    [
+        [493280.264198, 2492680.963400],
+        [493234.691498, 2492729.714399],
+        [493281.155197, 2492765.563797],
+        [493311.327599, 2492813.793999],
+        [493358.606003, 2492814.020699],
+        [493359.778595, 2492789.761703],
+        [493335.862503, 2492733.190300]
+    ],
+    [
+        [493333.475189, 2492817.767899],
+        [493333.395905, 2492842.758804],
+        [493360.219696, 2492869.892502],
+        [493447.201706, 2492870.637405],
+        [493468.051208, 2492850.659195],
+        [493467.150208, 2492816.107903]
     ]
+]
 
 # Huiwen
-huiwen_boundary_point_wgs84 =[
+huiwen_boundary_point_wgs84 = [
     [
-        [113.9305898,22.53988704],
-        [113.9308016,22.5402481],
-        [113.9306809,22.54033197],
-        [113.9304613,22.54017008],
-        [113.9298159,22.54062068],
-        [113.9295466,22.54061191],
-        [113.9295447,22.54083723],
-        [113.9287873,22.54083075],
-        [113.9287853,22.54061132],
-        [113.9286057,22.54060819],
-        [113.9286083,22.54037422],
-        [113.9297707,22.54039303],
+        [113.9305898, 22.53988704],
+        [113.9308016, 22.5402481],
+        [113.9306809, 22.54033197],
+        [113.9304613, 22.54017008],
+        [113.9298159, 22.54062068],
+        [113.9295466, 22.54061191],
+        [113.9295447, 22.54083723],
+        [113.9287873, 22.54083075],
+        [113.9287853, 22.54061132],
+        [113.9286057, 22.54060819],
+        [113.9286083, 22.54037422],
+        [113.9297707, 22.54039303],
     ],
     [
-        [113.9308276,22.54018904],
-        [113.9301828,22.540681],
-        [113.930327,22.54086299],
-        [113.9302004,22.54095884],
-        [113.9301935,22.5411511],
-        [113.9301134,22.5411469],
-        [113.9301188,22.54096347],
-        [113.9292388,22.54096648],
-        [113.9292288,22.54115068],
-        [113.9296099,22.54115351],
-        [113.9296126,22.54140958],
-        [113.9304284,22.54142874],
-        [113.9303327,22.5410559],
-        [113.9310774,22.54058873],
+        [113.9308276, 22.54018904],
+        [113.9301828, 22.540681],
+        [113.930327, 22.54086299],
+        [113.9302004, 22.54095884],
+        [113.9301935, 22.5411511],
+        [113.9301134, 22.5411469],
+        [113.9301188, 22.54096347],
+        [113.9292388, 22.54096648],
+        [113.9292288, 22.54115068],
+        [113.9296099, 22.54115351],
+        [113.9296126, 22.54140958],
+        [113.9304284, 22.54142874],
+        [113.9303327, 22.5410559],
+        [113.9310774, 22.54058873],
     ],
     [
-        [113.9310857,22.54061253],
-        [113.9306105,22.54106074],
-        [113.9308258,22.54142147],
-        [113.931417,22.54110089],
+        [113.9310857, 22.54061253],
+        [113.9306105, 22.54106074],
+        [113.9308258, 22.54142147],
+        [113.931417, 22.54110089],
 
     ]
 ]
@@ -110,10 +112,11 @@ for i_building, _ in enumerate(used_boundary):
     for i_point, _ in enumerate(used_boundary[i_building]):
         mercator = lonLat2Mercator(used_boundary[i_building][i_point])
         # mercator = used_boundary[i_building][i_point]
-        used_boundary[i_building][i_point][0] = mercator[0]-centralized_point[0]
-        used_boundary[i_building][i_point][1] = mercator[1]-centralized_point[1]
+        used_boundary[i_building][i_point][0] = mercator[0] - centralized_point[0]
+        used_boundary[i_building][i_point][1] = mercator[1] - centralized_point[1]
 
 poly = [Polygon(item) for item in used_boundary]
+
 
 def back_up_cgcs2000():
     # centralized_point=(-492700,-2493600,-0)
@@ -249,10 +252,10 @@ def test2():
 
 def filter_mesh_according_to_boundary_and_sample_points():
     v_output_folder = r"D:\Projects\Reconstructability\real_proxy"
-    mesh = o3d.io.read_triangle_mesh(os.path.join(v_output_folder,"huiwen_fine.ply"))
+    mesh = o3d.io.read_triangle_mesh(os.path.join(v_output_folder, "huiwen_fine.ply"))
     mesh_point = np.asarray(mesh.vertices)
     mesh_faces = np.asarray(mesh.triangles)
-    remove_flag = thread_map(f,mesh_point[mesh_faces])
+    remove_flag = thread_map(f, mesh_point[mesh_faces])
     # remove_flag = process_map(f,mesh_point[mesh_faces],chunksize=1)
     remove_flag = np.asarray(remove_flag, np.int16)
     mesh.remove_triangles_by_mask(remove_flag)
@@ -265,14 +268,15 @@ def filter_mesh_according_to_boundary_and_sample_points():
 
 def f(v_args):
     item = v_args
-    p1 = Point(v_args[0,:2])
-    p2 = Point(v_args[1,:2])
-    p3 = Point(v_args[2,:2])
+    p1 = Point(v_args[0, :2])
+    p2 = Point(v_args[1, :2])
+    p3 = Point(v_args[2, :2])
     is_in_boundary1 = np.array([p1.within(item) for item in poly])
-    is_in_boundary2 =  np.array([p2.within(item) for item in poly])
-    is_in_boundary3 =  np.array([p3.within(item) for item in poly])
+    is_in_boundary2 = np.array([p2.within(item) for item in poly])
+    is_in_boundary3 = np.array([p3.within(item) for item in poly])
     # is_in_boundary = [True]
-    return not (np.logical_and(is_in_boundary1,is_in_boundary2,is_in_boundary3).max() and (v_args[:,2]>filter_z).max())
+    return not (np.logical_and(is_in_boundary1, is_in_boundary2, is_in_boundary3).max() and (
+            v_args[:, 2] > filter_z).max())
 
 
 def merge_mesh_and_filter_the_points_outside_boundary(v_root_file, v_output_folder):
@@ -305,15 +309,43 @@ def merge_mesh_and_filter_the_points_outside_boundary(v_root_file, v_output_fold
     o3d.io.write_point_cloud(os.path.join(v_output_folder, "1e7.ply"), pcl_7)
 
 
+def convert_coordinate(v_source_coor: int, v_source_coor_shift: np.ndarray, v_target_coor: int, v_input_mesh: str,
+                       v_output_mesh: str):
+    mesh = o3d.io.read_triangle_mesh(v_input_mesh)
+    mesh = mesh.translate(v_source_coor_shift)
+    vertices = np.asarray(mesh.vertices)
+
+    source_coor: int = v_source_coor  # First x (12683207), then y (2575391)
+    # source_coor: int = 4326 # First latitude (22), then longitude (113)
+    target_coor: int = v_target_coor  # First x (2492686), then y (493332)
+
+    transformer = Transformer.from_crs(CRS.from_epsg(source_coor), CRS.from_epsg(target_coor))
+    target_vertices = transformer.transform(vertices[:, 1], vertices[:, 0], vertices[:, 2])
+
+    mesh.vertices = o3d.utility.Vector3dVector(np.stack(target_vertices, axis=1))
+    o3d.io.write_triangle_mesh(v_output_mesh, mesh)
+
+
 if __name__ == '__main__':
-    filter_mesh_according_to_boundary_and_sample_points()
-    # test2()
-    # test()
-    merge_mesh_and_filter_the_points_outside_boundary(root_file,
-                                                      # r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\Ours"
-                                                      # r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\dronescan"
-                                                      # r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\dronescan_plusplus"
-                                                      # r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\oblique"
-                                                      output_root
-                                                      # r"D:\Projects\Building_data\Huiwen\CON_Fine"
-                                                      )
+    selected_tool: int = 0
+    if len(sys.argv) > 1:
+        selected_tool = int(sys.argv[1])
+    selected_tool = 2
+    if selected_tool == 1:
+        filter_mesh_according_to_boundary_and_sample_points()
+    elif selected_tool == 2:  # Convert coordinate
+        source_coor: int = int(sys.argv[2])
+        source_coor_shift: np.ndarray = np.array([0, 0, 0])
+        target_coor: int = int(sys.argv[4])
+        input_mesh: str = str(sys.argv[5])
+        output_mesh: str = str(sys.argv[6])
+        convert_coordinate(source_coor, source_coor_shift, target_coor, input_mesh, output_mesh)
+    elif selected_tool == 2:  # Merge mesh
+        merge_mesh_and_filter_the_points_outside_boundary(root_file,
+                                                          # r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\Ours"
+                                                          # r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\dronescan"
+                                                          # r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\dronescan_plusplus"
+                                                          # r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\oblique"
+                                                          output_root
+                                                          # r"D:\Projects\Building_data\Huiwen\CON_Fine"
+                                                          )

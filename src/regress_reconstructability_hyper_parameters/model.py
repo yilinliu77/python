@@ -576,6 +576,22 @@ def loss_l2_recon(v_point_attribute, v_prediction):
 
     return error_loss, 0, error_loss + 0
 
+def loss_truncated_entropy(v_point_attribute, v_prediction):
+    predicted_error = v_prediction[:, :, 0:1]
+    predicted_inconsistency = v_prediction[:, :, 1:2]
+
+    gt_reconstructability = v_point_attribute[:, 0]
+    gt_max_error = v_point_attribute[:, :, 1:2]
+    gt_avg_error_truncated = v_point_attribute[:, :, 2:3]
+    gt_error_mask_error = (1 - v_point_attribute[:, :, 6:7]).bool()  # Good Point -> True(1)
+
+    error_loss = torch.nn.functional.binary_cross_entropy_with_logits(
+        predicted_error[gt_error_mask_error],
+        gt_avg_error_truncated[gt_error_mask_error]
+    )
+
+    return error_loss, 0, error_loss + 0
+
 
 # class Uncertainty_Modeling_v2(torch.jit.ScriptModule):
 class Uncertainty_Modeling_v2(nn.Module):
@@ -966,8 +982,12 @@ class Uncertainty_Modeling_w_pointnet(nn.Module):
     def loss(self, v_point_attribute, v_prediction):
         if self.is_involve_img:
             return loss_l2_recon_entropy_identifier(v_point_attribute, v_prediction)
-        else:
+        elif self.hydra_conf["trainer"]["loss"] == "loss_truncated_entropy":
+            return loss_truncated_entropy(v_point_attribute, v_prediction)
+        elif self.hydra_conf["trainer"]["loss"] == "loss_l2_recon":
             return loss_l2_recon(v_point_attribute, v_prediction)
+        else:
+            raise
 
 
 class Uncertainty_Modeling_wo_dropout(nn.Module):

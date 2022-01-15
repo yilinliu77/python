@@ -50,7 +50,7 @@ def compute_view_features(max_num_view,valid_views_flag,reconstructabilities,v_i
             # cv2.imshow("",cv2.resize(cv2.imread(img_path),(600,400)))
             # cv2.waitKey()
 
-        assert abs(np.linalg.norm(view_to_point) - distance_ratio * 60) < 1
+        # assert abs(np.linalg.norm(view_to_point) - distance_ratio * 60) < 1
         point_to_view_normalized = -view_to_point / np.linalg.norm(view_to_point)
         point_to_view_theta = math.acos(point_to_view_normalized[2])
         point_to_view_phi = math.atan2(point_to_view_normalized[1], point_to_view_normalized[0])
@@ -127,14 +127,14 @@ def compute_features(v_root_path,v_view_paths,v_view_attribute,img_features_dict
 
     point_features = []
     for id_view, view_path in enumerate(v_view_paths[id_point]):
-        pixel_position = torch.tensor(v_view_attribute[id_point, id_view, 7:9], dtype=torch.float32)
-        pixel_position = torch.cat([pixel_position - 20 / 400, pixel_position + 20 / 400], dim=-1)
+        pixel_position = torch.tensor(v_view_attribute[id_point, id_view, 6:8], dtype=torch.float32)
+        pixel_position = torch.cat([pixel_position - 5 / 400, pixel_position + 5 / 400], dim=-1)
         pixel_position[pixel_position>1]=1
         pixel_position[pixel_position<0]=0
         # Get img features
         img_features=img_features_dict[view_path]
         # Debug
-        # img = Image.open(view_path).resize((600,400))
+        # img = cv2.resize(cv2.imread(view_path,cv2.IMREAD_UNCHANGED),(600,400))
         # img=np.asarray(img).copy()
         # test_pixel_position=pixel_position.numpy()
         # test_pixel_position[[0,2]]*=600
@@ -143,7 +143,7 @@ def compute_features(v_root_path,v_view_paths,v_view_attribute,img_features_dict
         # img[test_pixel_position[1]:test_pixel_position[3],test_pixel_position[0]:test_pixel_position[2],:3]=(255,0,0)
         # cv2.namedWindow("1",cv2.WINDOW_AUTOSIZE)
         # cv2.imshow("1", img)
-        # # cv2.imshow("1", np.asarray(img))
+        # cv2.imshow("1", np.asarray(img))
         # cv2.waitKey(0)
         # Debug
 

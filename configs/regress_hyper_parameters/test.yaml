@@ -5,6 +5,7 @@ trainer:
   train_dataset: D:\Projects\Reconstructability\pre_computed\ds_fine_trajectory_fine_proxy_school\training_data*D:\Projects\Reconstructability\pre_computed\ds_inter_trajectory_inter_proxy_bridge\training_data*D:\Projects\Reconstructability\pre_computed\ds_coarse_trajectory_coarse_proxy_school\training_data
   valid_dataset: D:\Projects\Reconstructability\pre_computed\smith_inter_trajectory_inter_proxy_bridge\training_data
   test_dataset: D:\Projects\Reconstructability\pre_computed\ds_fine_trajectory_fine_proxy_school\training_data
+  loss: loss_truncated_entropy
 
   batch_size: 2
   auto_lr_find: false

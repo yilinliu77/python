@@ -303,3 +303,133 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
             'points': torch.stack(points, dim=0),
             'img_pose': img_pose_pad,
         }
+
+
+class Regress_hyper_parameters_dataset_with_imgs_with_truncated_error(torch.utils.data.Dataset):
+    def __init__(self, v_path, v_params, v_mode):
+        super(Regress_hyper_parameters_dataset_with_imgs_with_truncated_error, self).__init__()
+        self.trainer_mode = v_mode
+        self.params = v_params
+        self.data_root = v_path
+        self.views = np.load(os.path.join(v_path, "views.npz"))["arr_0"]
+        img_dataset_path = open(os.path.join(v_path, "../img_dataset_path.txt")).readline().strip()
+        self.truncated_error = float(open(os.path.join(v_path, "../suggest_error.txt")).readline().strip())
+
+        self.is_involve_img = self.params["model"]["involve_img"]
+
+        self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npz"))["arr_0"]
+        self.view_paths = np.load(os.path.join(v_path, "view_paths.npz"), allow_pickle=True)[
+            "arr_0"]
+        self.original_points = self.point_attribute[:, 3:6]
+        self.num_seeds = 4096 + 1024
+        self.sample_points_to_different_patches()
+        self.img_dataset = Regress_hyper_parameters_img_dataset(os.path.join(v_path,img_dataset_path), self.view_paths)
+
+        pass
+
+    """
+    Points: num of patches * num point per patch * 7 (x, y, z, index, id_centre)
+    """
+    def sample_points_to_different_patches(self):
+        print("KNN Sample")
+        # seed points, radius, max local points,
+        accept_sample = False
+        self.num_seeds -= 1024
+        while not accept_sample:
+            new_xyz, new_points, grouped_xyz, fps_idx = sample_and_group(
+                self.num_seeds, 0.75, int(self.params["model"]["num_points_per_batch"]),
+                torch.tensor(self.original_points, dtype=torch.float32).unsqueeze(0),
+                torch.arange(self.original_points.shape[0]).unsqueeze(0).unsqueeze(-1),
+                True)
+            unique_result = np.unique(new_points[0][:, :, 3].reshape(-1).numpy(), return_counts=True)
+            if unique_result[0].shape[0] != self.point_attribute.shape[0]:
+                print("Uneven sampling, only sample {}/{}".format(unique_result[0].shape[0],
+                                                                  self.point_attribute.shape[0]))
+                print("Uneven sampling, sampling density: {}".format(np.mean(unique_result[1])))
+                # break
+            else:
+                accept_sample = True
+            self.num_seeds += 1024
+        if True:
+            pcl = o3d.geometry.PointCloud()
+            pcl.points = o3d.utility.Vector3dVector(new_xyz.numpy()[0, :, :3])
+            o3d.io.write_point_cloud("temp/seed_point.ply", pcl)
+            # for id_item, item in enumerate(new_points[0]):
+            #     pcl = o3d.geometry.PointCloud()
+            #     pcl.points = o3d.utility.Vector3dVector(item.numpy()[:, :3])
+            #     o3d.io.write_point_cloud("{}.ply".format(id_item), pcl)
+            pcl.points = o3d.utility.Vector3dVector(new_points.numpy()[0, :, :, :3].reshape([-1, 3]))
+            o3d.io.write_point_cloud("temp/total_point.ply", pcl)
+
+        self.points = torch.cat([new_points[0],(fps_idx[0].unsqueeze(1).repeat(1,256)).unsqueeze(2)],dim=2)
+        mask = self.point_attribute[:, 0] < 9999999
+
+        stats.spearmanr(self.point_attribute[:, 0][mask], self.point_attribute[:, 2][mask])
+
+        self.num_item = self.points.shape[0]
+
+        self.whole_index = np.arange(self.num_item)
+        np.random.shuffle(self.whole_index)
+        self.train_index = self.whole_index[:self.whole_index.shape[0] // 4 * 3]
+        self.validation_index = self.whole_index[self.whole_index.shape[0] // 4 * 3:]
+
+    def __getitem__(self, index):
+        if self.trainer_mode == "training":
+            used_index = self.train_index
+        elif self.trainer_mode == "validation":
+            used_index = self.validation_index
+        else:
+            used_index = self.whole_index
+        point_indexes = self.points[used_index[index], :, 3].int()
+
+        point_features,point_features_mask,img_pose = None,None,None
+        if self.is_involve_img:
+            point_features, point_features_mask, img_pose = self.img_dataset[point_indexes]
+
+        truncated_error = self.point_attribute[point_indexes].copy()
+        truncated_error[:,2:3] = truncated_error[:,2:3] > self.truncated_error
+        output_dict = {
+            # "views": torch.tensor(np.load(self.views_path,mmap_mode="r")["arr_0"][point_indexes], dtype=torch.float32),
+            # "view_pairs": torch.tensor(np.load(self.view_pairs_path,mmap_mode="r")["arr_0"][point_indexes], dtype=torch.float32),
+            "views": torch.tensor(self.views[point_indexes], dtype=torch.float32),
+            # "view_pairs": torch.tensor(self.view_pairs[point_indexes], dtype=torch.float32),
+
+            "point_attribute": torch.tensor(truncated_error, dtype=torch.float32),
+            "points": self.points[used_index[index]],
+            "point_features": point_features,
+            "point_features_mask": point_features_mask,
+            "img_pose": torch.tensor(img_pose, dtype=torch.float32) if img_pose is not None else torch.tensor(self.views[point_indexes], dtype=torch.float32),
+        }
+        return output_dict
+
+    def __len__(self):
+        if self.trainer_mode == "training":
+            return self.train_index.shape[0]
+        elif self.trainer_mode == "validation":
+            return self.validation_index.shape[0]
+        else:
+            return self.whole_index.shape[0]
+            # return 32
+
+    @staticmethod
+    def collate_fn(batch):
+        views = [torch.transpose(item["views"], 0, 1) for item in batch]
+        from torch.nn.utils.rnn import pad_sequence
+        views_pad = torch.transpose(torch.transpose(pad_sequence(views), 0, 1), 1, 2)
+        # view_pairs = [torch.transpose(item["view_pairs"],0,1) for item in batch]
+        # view_pairs_pad = torch.transpose(torch.transpose(pad_sequence(view_pairs),0,1),1,2)
+        point_attribute = [item["point_attribute"] for item in batch]
+        point_features = [item["point_features"] for item in batch]
+        points = [item["points"] for item in batch]
+        point_features_mask = [item["point_features_mask"] for item in batch]
+        img_pose = [torch.transpose(item["img_pose"],0,1) for item in batch]
+        img_pose_pad = torch.transpose(torch.transpose(pad_sequence(img_pose), 0, 1), 1, 2)
+        return {
+            'views': views_pad,
+            # 'view_pairs': view_pairs_pad,
+            'point_attribute': torch.stack(point_attribute, dim=0),
+            'point_features': point_features,
+            'point_features_mask': point_features_mask,
+            'points': torch.stack(points, dim=0),
+            'img_pose': img_pose_pad,
+        }

@@ -172,8 +172,13 @@ class Regress_hyper_parameters(pl.LightningModule):
                           )
 
     def test_dataloader(self):
-        self.test_dataset = Regress_hyper_parameters_dataset_with_imgs_with_truncated_error(self.hydra_conf["trainer"]["test_dataset"],
-                                                                       self.hydra_conf, "testing",)
+        dataset_paths = self.hydra_conf["trainer"]["test_dataset"].split("*")
+        datasets = []
+        for dataset_path in dataset_paths:
+            datasets.append(
+                Regress_hyper_parameters_dataset_with_imgs_with_truncated_error(dataset_path, self.hydra_conf,"testing"))
+
+        self.test_dataset = torch.utils.data.ConcatDataset(datasets)
 
         return DataLoader(self.test_dataset,
                           batch_size=self.hydra_conf["trainer"]["batch_size"],
@@ -237,7 +242,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         pass
 
     def on_test_epoch_start(self) -> None:
-        self.data_mean_std = np.load(os.path.join(self.test_dataset.data_root,"../data_centralize.npz"))["arr_0"]
+        self.data_mean_std = np.load(os.path.join(self.test_dataset.datasets[0].data_root,"../data_centralize.npz"))["arr_0"]
         if os.path.exists("temp/test_scene_output"):
             shutil.rmtree("temp/test_scene_output")
         os.mkdir("temp/test_scene_output")
@@ -281,7 +286,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         ], dim=2), views # x,y,z, dx,dy,dz, valid
 
     def test_epoch_end(self, outputs) -> None:
-        spearmanr_factor, accuracy = output_test_with_pc_and_views(outputs,self.test_dataset.point_attribute.shape[0])
+        spearmanr_factor, accuracy = output_test_with_pc_and_views(outputs,self.test_dataset.datasets[0].point_attribute.shape[0])
         self.log("Test spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
                  on_epoch=True)
         self.log("Test accuracy", accuracy, prog_bar=True, logger=True, on_step=False,
@@ -329,10 +334,10 @@ def main(v_cfg: DictConfig):
     model = Regress_hyper_parameters(v_cfg)
     if v_cfg["trainer"].resume_from_checkpoint is not None:
         state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
-        for item in list(state_dict.keys()):
-            if "point_feature_extractor" in item:
-                state_dict.pop(item)
-        model.load_state_dict(state_dict, strict=False)
+        # for item in list(state_dict.keys()):
+        #     if "point_feature_extractor" in item:
+        #         state_dict.pop(item)
+        model.load_state_dict(state_dict, strict=True)
 
     if v_cfg["trainer"].auto_lr_find:
         trainer.tune(model)

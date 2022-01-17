@@ -10,7 +10,7 @@ do
     then
           echo Jump $file
     else
-        if [[ ($file =~ $str3) || ($file =~ $str2) || ($file =~ $str1)  && !($file =~ "qx") ]]
+        if [[ ($file =~ $str3 || $file =~ $str2 || $file =~ $str1)  && !($file =~ "qx") ]]
         then
 #            echo $file
 

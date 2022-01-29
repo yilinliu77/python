@@ -320,9 +320,12 @@ def convert_coordinate(v_source_coor: int, v_source_coor_shift: np.ndarray, v_ta
     target_coor: int = v_target_coor  # First x (2492686), then y (493332)
 
     transformer = Transformer.from_crs(CRS.from_epsg(source_coor), CRS.from_epsg(target_coor))
-    target_vertices = transformer.transform(vertices[:, 1], vertices[:, 0], vertices[:, 2])
+    if source_coor == 3857:
+        target_vertices = transformer.transform(vertices[:, 0], vertices[:, 1], vertices[:, 2])
+        mesh.vertices = o3d.utility.Vector3dVector(np.stack([target_vertices[1],target_vertices[0],target_vertices[2]], axis=1))
+    else:
+        raise "Unsupported"
 
-    mesh.vertices = o3d.utility.Vector3dVector(np.stack(target_vertices, axis=1))
     o3d.io.write_triangle_mesh(v_output_mesh, mesh)
 
 
@@ -330,12 +333,11 @@ if __name__ == '__main__':
     selected_tool: int = 0
     if len(sys.argv) > 1:
         selected_tool = int(sys.argv[1])
-    selected_tool = 2
     if selected_tool == 1:
         filter_mesh_according_to_boundary_and_sample_points()
     elif selected_tool == 2:  # Convert coordinate
         source_coor: int = int(sys.argv[2])
-        source_coor_shift: np.ndarray = np.array([0, 0, 0])
+        source_coor_shift: np.ndarray = np.array([1.26826e7,2.57652e6,0])
         target_coor: int = int(sys.argv[4])
         input_mesh: str = str(sys.argv[5])
         output_mesh: str = str(sys.argv[6])

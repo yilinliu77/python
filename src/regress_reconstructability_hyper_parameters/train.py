@@ -127,6 +127,10 @@ class Regress_hyper_parameters(pl.LightningModule):
         model_module = getattr(model_module,"model")
         f = getattr(model_module,self.hydra_conf["model"]["model_name"])
 
+        dataset_module = __import__("src")
+        dataset_module = getattr(dataset_module,"regress_reconstructability_hyper_parameters")
+        dataset_module = getattr(dataset_module,"dataset")
+        self.dataset_builder = getattr(dataset_module,self.hydra_conf["trainer"]["dataset_name"])
         self.model = f(hparams)
 
     def forward(self, v_data):
@@ -137,7 +141,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         dataset_paths = self.hydra_conf["trainer"]["train_dataset"].split("*")
         datasets=[]
         for dataset_path in dataset_paths:
-            datasets.append(Regress_hyper_parameters_dataset_with_imgs_with_truncated_error(dataset_path, self.hydra_conf,
+            datasets.append(self.dataset_builder(dataset_path, self.hydra_conf,
                                                                        "training" if len(
                                                                            dataset_paths) == 1 else "testing", ))
 
@@ -150,7 +154,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                                  shuffle=True,
                                  drop_last=True,
                                  pin_memory=True,
-                                 collate_fn=Regress_hyper_parameters_dataset_with_imgs_with_truncated_error.collate_fn,
+                                 collate_fn=self.dataset_builder.collate_fn,
                                  )
 
     def val_dataloader(self):
@@ -159,7 +163,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         dataset_paths = self.hydra_conf["trainer"]["valid_dataset"].split("*")
         datasets=[]
         for dataset_path in dataset_paths:
-            datasets.append(Regress_hyper_parameters_dataset_with_imgs_with_truncated_error(dataset_path, self.hydra_conf,
+            datasets.append(self.dataset_builder(dataset_path, self.hydra_conf,
                                                                        "validation" if use_part_dataset_to_validate else "testing",))
         self.valid_dataset = torch.utils.data.ConcatDataset(datasets)
         return DataLoader(self.valid_dataset,
@@ -168,7 +172,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                           drop_last=False,
                           shuffle=False,
                           pin_memory=True,
-                          collate_fn=Regress_hyper_parameters_dataset_with_imgs_with_truncated_error.collate_fn,
+                          collate_fn=self.dataset_builder.collate_fn,
                           )
 
     def test_dataloader(self):
@@ -176,7 +180,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         datasets = []
         for dataset_path in dataset_paths:
             datasets.append(
-                Regress_hyper_parameters_dataset_with_imgs_with_truncated_error(dataset_path, self.hydra_conf,"testing"))
+                self.dataset_builder(dataset_path, self.hydra_conf,"testing"))
 
         self.test_dataset = torch.utils.data.ConcatDataset(datasets)
 
@@ -186,7 +190,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                           drop_last=False,
                           shuffle=False,
                           pin_memory=True,
-                          collate_fn=Regress_hyper_parameters_dataset_with_imgs_with_truncated_error.collate_fn
+                          collate_fn=self.dataset_builder.collate_fn
                           )
 
     def configure_optimizers(self):
@@ -267,9 +271,9 @@ class Regress_hyper_parameters(pl.LightningModule):
         dy = np.sin(theta) * np.sin(phi)
 
         view_dir = np.stack([dx,dy,dz],axis=3) * data["views"][:,:,:,3:4].cpu().numpy() * 60
-        # centre_point_index = data["points"][:,:,4].cpu().numpy()
+        centre_point_index = data["points"][:,:,4].cpu().numpy()
         points = data["points"][:,:,:3].cpu().numpy()
-        # points = points + self.test_dataset.original_points[centre_point_index.reshape(-1).astype(np.int32)].reshape(points.shape)
+        points = points + self.test_dataset.datasets[0].original_points[centre_point_index.reshape(-1).astype(np.int32)].reshape(points.shape)
         points = points * self.data_mean_std[3] + self.data_mean_std[:3]
         views = points[:,:,np.newaxis] + view_dir
         views=np.concatenate([views,-view_dir,data["views"][:,:,:,0:1].cpu().numpy()],axis=-1)
@@ -304,6 +308,14 @@ class Regress_hyper_parameters(pl.LightningModule):
         if not valid_gradients:
             print(f'detected inf or nan values in gradients. not updating model parameters')
             self.zero_grad()
+
+    """
+    v_points
+    v_views
+    v_visibility
+    """
+    def predict_recon(self):
+        pass
 
 @hydra.main(config_name="test.yaml")
 def main(v_cfg: DictConfig):

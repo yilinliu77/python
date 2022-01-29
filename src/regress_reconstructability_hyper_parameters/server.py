@@ -4,7 +4,8 @@ from flask import Flask, request
 from omegaconf import OmegaConf, DictConfig
 from pytorch_lightning import seed_everything
 
-from src.regress_reconstructability_hyper_parameters.model import Uncertainty_Modeling_v2
+from src.regress_reconstructability_hyper_parameters.model import Uncertainty_Modeling_v2, \
+    Uncertainty_Modeling_w_pointnet
 from src.regress_reconstructability_hyper_parameters.train import Regress_hyper_parameters
 
 app = Flask(__name__)
@@ -22,8 +23,8 @@ def main(v_cfg: DictConfig):
     seed_everything(0)
 
     global model
-    model = Uncertainty_Modeling_v2(v_cfg)
-    best_model = torch.load(r"temp/1_7_train_v2.ckpt")
+    model = Uncertainty_Modeling_w_pointnet(v_cfg)
+    best_model = torch.load(r"temp/continuous_error.ckpt")
     model.load_state_dict({item.split("model.")[1]:best_model["state_dict"][item] for item in best_model["state_dict"]})
     model.eval()
     sm = torch.jit.script(model)
@@ -33,7 +34,10 @@ def main(v_cfg: DictConfig):
 
     views = torch.load(r"C:\repo\C\build\src\sig22_reconstructability\optimize_trajectory\views.pt").cuda()
     points = torch.load(r"C:\repo\C\build\src\sig22_reconstructability\optimize_trajectory\points.pt").cuda()
-    data_new = {"views": views, "points": points}
+    point_attribute = torch.load(r"C:\repo\C\build\src\sig22_reconstructability\optimize_trajectory\point_attributes.pt").cuda()
+    data_new = {"views": views,
+                "points": points,
+                "point_attribute":point_attribute}
     model.cuda()
     with torch.no_grad():
         results1 = model.forward(data_new)

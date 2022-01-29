@@ -7,72 +7,27 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 import pymap3d as pm
-from pyproj import Transformer,CRS
+from plyfile import PlyData
+from pyproj import Transformer, CRS
 from tqdm import tqdm
 from tqdm.contrib.concurrent import thread_map
 
-
-def test1():
-    num_item = 100000
-    a = np.random.random((num_item,200))
-    if os.path.exists("test1"):
-        shutil.rmtree("test1")
-    os.mkdir("test1")
-    print("Save")
-    def test_thread(v_id):
-        read_index = np.random.randint(0, num_item)
-        read_filename = "test1/{}".format(read_index)
-        if os.path.exists(read_filename):
-            np.load(read_filename)
-        else:
-            for i in range(max(0,read_index-10),min(num_item,read_index+10)):
-                save_filename = "test1/{}".format(i)
-                np.savez(save_filename, a[i])
-    # for i in tqdm(range(num_item)):
-    #     test_thread(i)
-
-    r = thread_map(test_thread, range(num_item), max_workers=4)
-
-    return
-
-def test_thread2(v_id,v_array):
-    v_array[v_id]=0
-
-def test2():
-    num_item = 100000
-    a = np.random.random((num_item,200))
-
-    r = thread_map(partial(test_thread2, v_array=a), range(num_item), max_workers=4)
-
-    return
-
 if __name__ == '__main__':
-    test2()
-    test1()
-    # plt.figure()
-    # plt.subplot(2,1,1)
-    # x = np.random.randint(0,500,100)
-    # y = np.random.standard_normal(100)
-    # plt.scatter(x,y,color="g")
-    # plt.xlabel("Random integers")
-    # plt.ylabel("Random normal dist.")
-    # plt.title("A beautiful Scatter Plot of the Standard normal distribution")
-    #
-    # plt.subplot(2, 1, 2)
-    # x = np.arange(0,11,0.01)
-    # y = np.sin(x)
-    # plt.plot(x, y)
-    # plt.xlabel("x")
-    # plt.ylabel("sin(x)")
-    # plt.title("Visualizing Sin")
-    #
-    # plt.tight_layout()
-    # plt.show()
-    transformer = Transformer.from_crs(CRS.from_epsg(4326), CRS.from_epsg(3857))
-    wgs_long_lat=np.array([113.934737085972,22.5322469005556,121.757])
-    print(transformer.transform(wgs_long_lat[1],wgs_long_lat[0]))
+    with open(r"C:\repo\C\build\src\sig22_reconstructability\optimize_trajectory\log\init_points.ply", "rb") as f:
+        plydata = PlyData.read(f)
+        c_recon = plydata['vertex']['recon'].copy()
 
-    transformer = Transformer.from_crs(CRS.from_epsg(4547), CRS.from_epsg(3857))
-    cgcs2000_4547=np.array([-243.017,-370.281,-127.169])+np.array([493487.4722,2493097.072,179])
+        filename = list(
+            map(lambda item: int(item[:-4]),
+                filter(
+                    lambda x: x[-4:] == ".txt",
+                    os.listdir(r"D:\Projects\Reconstructability\PathPlanning\test_predict\reconstructability")))
+        )
+        filename.sort()
+        c_recon=c_recon[filename]
+    python_recon = np.zeros_like(c_recon)
+    with open(r"C:\repo\python\temp\test_scene_output\whole_point.ply", "rb") as f:
+        plydata = PlyData.read(f)
+        part_python_recon = plydata['vertex']['Predict_Recon'].copy()
 
-    print(transformer.transform(cgcs2000_4547[1],cgcs2000_4547[0]))
+    pass

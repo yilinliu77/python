@@ -424,17 +424,17 @@ class ViewFeatureFuserWithPoints(nn.Module):
             nn.LeakyReLU(),
         )
         self.view_feature_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(256, 2, 256, 0, F.leaky_relu_, batch_first=True),
+            nn.TransformerEncoderLayer(256, 2, 256, 0., F.leaky_relu_, batch_first=True),
             2
         )
         self.point_feature_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(256, 2, 256, 0, F.leaky_relu_, batch_first=True),
+            nn.TransformerEncoderLayer(256, 2, 256, 0., F.leaky_relu_, batch_first=True),
             2
         )
 
 
         self.point_feature_decoder = nn.TransformerDecoder(
-            nn.TransformerDecoderLayer(256, 2, 256, 0, F.leaky_relu_, batch_first=True),
+            nn.TransformerDecoderLayer(256, 2, 256, 0., F.leaky_relu_, batch_first=True),
             2
         )
 
@@ -714,8 +714,12 @@ class Uncertainty_Modeling_v2(nn.Module):
     def loss(self, v_point_attribute, v_prediction):
         if self.is_involve_img:
             return loss_l2_recon_entropy_identifier(v_point_attribute, v_prediction)
-        else:
+        elif self.hydra_conf["trainer"]["loss"] == "loss_truncated_entropy":
+            return loss_truncated_entropy(v_point_attribute, v_prediction)
+        elif self.hydra_conf["trainer"]["loss"] == "loss_l2_recon":
             return loss_l2_recon(v_point_attribute, v_prediction)
+        else:
+            raise
 
 
 class Uncertainty_Modeling_wo_pointnet(nn.Module):
@@ -894,7 +898,7 @@ class Uncertainty_Modeling_w_pointnet(nn.Module):
     def forward(self, v_data: Dict[str, torch.Tensor]):
         batch_size = v_data["views"].shape[0]
 
-        valid_view_mask = v_data["views"][:, :, 0, 0].type(torch.bool)
+        valid_view_mask = torch.abs(v_data["views"][:, :, 0, 0]) > .5
         # Fake generate 1 view for those point which can not been seen
         # in order to prevent NAN in attention module
         v_data["views"][torch.logical_not(valid_view_mask)] = 1
@@ -936,7 +940,7 @@ class Uncertainty_Modeling_w_pointnet(nn.Module):
                     id_batch][is_point_can_be_seen_with_at_least_one_view[id_batch]]
                 # Extract view features of the pre-collected pattern
                 # t = time.time()
-                img_view_features_item = self.view_feature_fusioner(valid_oblique_view_features_per_point)
+                img_view_features_item = self.view_feature_fusioner(valid_oblique_view_features_per_point, point_features)
                 # img_view_feature_time = time.time() - t
 
                 # Calculate img features
@@ -974,7 +978,7 @@ class Uncertainty_Modeling_w_pointnet(nn.Module):
 
         # Done
         predict_result = torch.cat([predict_reconstructability, inconsistency_identifier], dim=2)
-        predict_result[torch.logical_not(valid_view_mask)] = 0
+        predict_result[torch.logical_not(valid_view_mask)] = 0.
 
         # print("{}, {}, {}".format(attention_time,pointnet_time,correlation_time))
         return predict_result

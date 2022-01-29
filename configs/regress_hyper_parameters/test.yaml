@@ -2,6 +2,8 @@ trainer:
   learning_rate: 1e-4
   gpu: 1
   num_worker: 0
+#  dataset_name: Regress_hyper_parameters_dataset_with_imgs_with_truncated_error
+  dataset_name: Regress_hyper_parameters_dataset_with_imgs
   train_dataset: D:\Projects\Reconstructability\pre_computed\ds_fine_trajectory_fine_proxy_school\training_data*D:\Projects\Reconstructability\pre_computed\ds_inter_trajectory_inter_proxy_bridge\training_data*D:\Projects\Reconstructability\pre_computed\ds_coarse_trajectory_coarse_proxy_school\training_data
   valid_dataset: D:\Projects\Reconstructability\pre_computed\smith_inter_trajectory_inter_proxy_bridge\training_data
   test_dataset: D:\Projects\Reconstructability\pre_computed\ds_fine_trajectory_fine_proxy_school\training_data

@@ -31,9 +31,12 @@ def compute_view_features(max_num_view, valid_views_flag, reconstructabilities,
     if num_views > max_num_view - 1:
         raise
     reconstructability = float(raw_data[1])
-    if reconstructability != 0:
+    if num_views >=2: # Unstable change!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    # if reconstructability != 0:
         point_feature_paths.append(os.path.join(point_feature_root_dir, str(real_index) + ".npz"))
         valid_views_flag[real_index] = True
+    else:
+        print(0)
     reconstructabilities[real_index] = reconstructability
     # Read views
     for i_view in range(num_views):

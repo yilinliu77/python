@@ -194,8 +194,10 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
             "arr_0"]
         self.original_points = self.point_attribute[:, 3:6]
         self.num_seeds = 4096 + 1024
+        # self.num_seeds = 20
         self.sample_points_to_different_patches()
-        self.img_dataset = Regress_hyper_parameters_img_dataset(os.path.join(v_path,img_dataset_path), self.view_paths)
+        if self.is_involve_img:
+            self.img_dataset = Regress_hyper_parameters_img_dataset(os.path.join(v_path,img_dataset_path), self.view_paths)
 
         pass
 
@@ -222,6 +224,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
             else:
                 accept_sample = True
             self.num_seeds += 1024
+            # self.num_seeds += 5
         if True:
             pcl = o3d.geometry.PointCloud()
             pcl.points = o3d.utility.Vector3dVector(new_xyz.numpy()[0, :, :3])
@@ -321,9 +324,11 @@ class Regress_hyper_parameters_dataset_with_imgs_with_truncated_error(torch.util
         self.view_paths = np.load(os.path.join(v_path, "view_paths.npz"), allow_pickle=True)[
             "arr_0"]
         self.original_points = self.point_attribute[:, 3:6]
-        self.num_seeds = 4096 + 1024
+        # self.num_seeds = 4096 + 1024
+        self.num_seeds = 20
         self.sample_points_to_different_patches()
-        self.img_dataset = Regress_hyper_parameters_img_dataset(os.path.join(v_path,img_dataset_path), self.view_paths)
+        if self.is_involve_img:
+            self.img_dataset = Regress_hyper_parameters_img_dataset(os.path.join(v_path,img_dataset_path), self.view_paths)
 
         pass
 
@@ -334,7 +339,7 @@ class Regress_hyper_parameters_dataset_with_imgs_with_truncated_error(torch.util
         print("KNN Sample")
         # seed points, radius, max local points,
         accept_sample = False
-        self.num_seeds -= 1024
+        # self.num_seeds -= 1024
         while not accept_sample:
             new_xyz, new_points, grouped_xyz, fps_idx = sample_and_group(
                 self.num_seeds, 0.75, int(self.params["model"]["num_points_per_batch"]),
@@ -349,7 +354,8 @@ class Regress_hyper_parameters_dataset_with_imgs_with_truncated_error(torch.util
                 # break
             else:
                 accept_sample = True
-            self.num_seeds += 1024
+            # self.num_seeds += 1024
+            self.num_seeds += 5
         if True:
             pcl = o3d.geometry.PointCloud()
             pcl.points = o3d.utility.Vector3dVector(new_xyz.numpy()[0, :, :3])

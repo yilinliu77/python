@@ -291,11 +291,10 @@ def filter_points_according_to_boundary():
     total_points = o3d.io.read_point_cloud(os.path.join(
         r"D:\Projects\Building_data\2110-las-sz-vcc-hwl+L7S-0.04+0.03-las", "L7S_0 - Cloud.ply"))
 
-    pools = Pool(4)
     mesh_point = np.asarray(total_points.points)
-    mask = pools.map(f, mesh_point)
-    mask = np.asarray(mask, np.int16)
-    total_points.points = o3d.utility.Vector3dVector(mesh_point[np.logical_not(mask)])
+    remove_flag = process_map(f_point,mesh_point,chunksize=1000)
+    remove_flag = np.asarray(remove_flag, np.int16)
+    total_points.points = o3d.utility.Vector3dVector(mesh_point[np.logical_not(remove_flag)])
     o3d.io.write_point_cloud(os.path.join(v_output_folder,"gt_points.ply"), total_points)
     pass
 

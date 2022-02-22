@@ -347,8 +347,8 @@ class ViewFeatureFuser(nn.Module):
             nn.Linear(256, 256),
             nn.LeakyReLU(),
         )
-        self.view_feature_fusioner1 = nn.TransformerEncoderLayer(256, 2, 256, 0, F.leaky_relu_, batch_first=True)
-        self.view_feature_fusioner2 = nn.TransformerEncoderLayer(256, 2, 256, 0, F.leaky_relu_, batch_first=True)
+        self.view_feature_fusioner1 = nn.TransformerEncoderLayer(256, 2, 256, 0., F.leaky_relu_, batch_first=True)
+        self.view_feature_fusioner2 = nn.TransformerEncoderLayer(256, 2, 256, 0., F.leaky_relu_, batch_first=True)
 
     # valid_flag, delta_theta, delta_phi, distance_ratio, normal_angle, central_angle
     def forward(self, v_data):
@@ -779,6 +779,8 @@ class Uncertainty_Modeling_wo_pointnet(nn.Module):
         # Extract view features
         # t = time.time()
         view_features = self.view_feature_fusioner(v_data["views"])  # Note that some features are not reasonable
+
+        v_data["views"][torch.logical_not(valid_view_mask)] = 0
         view_features[torch.logical_not(valid_view_mask)] = 0  # Mark these features to 0
         # view_feature_time = time.time() - t
 

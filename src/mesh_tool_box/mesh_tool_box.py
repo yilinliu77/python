@@ -283,7 +283,7 @@ def f_point(v_args):
     p1 = Point(v_args[:2])
     is_in_boundary1 = np.array([p1.within(item) for item in poly])
     return not (is_in_boundary1 and (
-            v_args[2] > filter_z).max())
+            v_args[2] > filter_z))
 
 
 def filter_points_according_to_boundary():
@@ -292,7 +292,7 @@ def filter_points_according_to_boundary():
         r"D:\Projects\Building_data\2110-las-sz-vcc-hwl+L7S-0.04+0.03-las", "L7S_0 - Cloud.ply"))
 
     mesh_point = np.asarray(total_points.points)
-    remove_flag = process_map(f_point,mesh_point,chunksize=1000)
+    remove_flag = process_map(f_point,mesh_point,chunksize=1000,max_workers=0)
     remove_flag = np.asarray(remove_flag, np.int16)
     total_points.points = o3d.utility.Vector3dVector(mesh_point[np.logical_not(remove_flag)])
     o3d.io.write_point_cloud(os.path.join(v_output_folder,"gt_points.ply"), total_points)

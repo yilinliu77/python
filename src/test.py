@@ -91,31 +91,15 @@ def bak():
 #     pass
 
 if __name__ == '__main__':
-    # ready to run example: PythonClient/multirotor/hello_drone.py
-    import airsim
-    import os
+    import open3d as o3d
 
-    # connect to the AirSim simulator
-    client = airsim.MultirotorClient()
-    client.confirmConnection()
-    client.enableApiControl(True)
-    client.armDisarm(True)
+    recon = o3d.io.read_triangle_mesh(r"C:\\Users\\yilin\\Documents\\Tencent Files\\1787609016\\FileRecv\\xiaozhen_smart3d.ply")
+    gt = o3d.io.read_triangle_mesh(r"C:\\Users\\yilin\\Documents\\Tencent Files\\1787609016\\FileRecv\\chengbao_fine.ply")
 
-    # Async methods returns Future. Call join() to wait for task to complete.
-    client.takeoffAsync().join()
-    client.moveToPositionAsync(-10, 10, -10, 5).join()
-
-    # take images
-    responses = client.simGetImages([
-        airsim.ImageRequest("0", airsim.ImageType.DepthVis),
-        airsim.ImageRequest("1", airsim.ImageType.DepthPlanar, True)])
-    print('Retrieved images: %d', len(responses))
-
-    # do something with the images
-    for response in responses:
-        if response.pixels_as_float:
-            print("Type %d, size %d" % (response.image_type, len(response.image_data_float)))
-            airsim.write_pfm(os.path.normpath('test/py1.pfm'), airsim.get_pfm_array(response))
-        else:
-            print("Type %d, size %d" % (response.image_type, len(response.image_data_uint8)))
-            airsim.write_file(os.path.normpath('test/py1.png'), response.image_data_uint8)
+    for i in range(5):
+        evaluation = o3d.pipelines.registration.registration_icp(
+            recon.sample_points_uniformly(1000000,True), gt.sample_points_uniformly(1000000,True), 0.25, np.diag([1.,1.,1.,1.]),
+            o3d.pipelines.registration.TransformationEstimationPointToPlane())
+        recon = recon.transform(evaluation.transformation)
+        print(evaluation)
+    o3d.io.write_triangle_mesh("C:\\Users\\yilin\\Documents\\Tencent Files\\1787609016\\FileRecv\\xiaozhen_smart3d1.ply",recon)

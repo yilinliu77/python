@@ -66,6 +66,26 @@ L7_boundary_point_cgcs2000 = [
     ]
 ]
 
+l7_boundary_point_cgcs2000_huyue = [
+        [
+            [493280.264198, 2492680.963400],
+            [493234.691498, 2492729.714399],
+            [493281.155197, 2492765.563797],
+            [493311.327599, 2492813.793999],
+            [493358.606003, 2492814.020699],
+            [493359.778595, 2492789.761703],
+            [493335.862503, 2492733.190300]
+        ],
+        [
+            [493333.475189, 2492817.767899],
+            [493333.395905, 2492842.758804],
+            [493360.219696, 2492869.892502],
+            [493447.201706, 2492870.637405],
+            [493468.051208, 2492850.659195],
+            [493467.150208, 2492816.107903]
+        ]
+    ]
+
 # Huiwen
 huiwen_boundary_point_wgs84 = [
     [
@@ -107,7 +127,7 @@ huiwen_boundary_point_wgs84 = [
     ]
 ]
 
-used_boundary = L7_boundary_point_cgcs2000
+used_boundary = l7_boundary_point_cgcs2000_huyue
 
 for i_building, _ in enumerate(used_boundary):
     for i_point, _ in enumerate(used_boundary[i_building]):

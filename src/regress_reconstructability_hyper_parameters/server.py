@@ -2,12 +2,13 @@ import hydra
 import torch
 from flask import Flask, request
 from omegaconf import OmegaConf, DictConfig
+from plyfile import PlyData
 from pytorch_lightning import seed_everything
 
 from src.regress_reconstructability_hyper_parameters.model import Uncertainty_Modeling_v2, \
     Uncertainty_Modeling_w_pointnet, Uncertainty_Modeling_wo_pointnet
 from src.regress_reconstructability_hyper_parameters.train import Regress_hyper_parameters
-
+import numpy as np
 app = Flask(__name__)
 
 model = None
@@ -40,10 +41,21 @@ def main(v_cfg: DictConfig):
                 "points": points,
                 "point_attribute":point_attribute}
     model.cuda()
+    num_points = (points[:, :, 3:4].reshape(-1).unique()).shape[0]
     with torch.no_grad():
         results2 = sm.forward(data_new)
         results1 = model.forward(data_new)
-        assert torch.abs(results1[:,:,0]-results2[:,:,0]).sum() < 1e-6
+        result_python_flatten = np.zeros(num_points)
+        result_cpp_flatten = np.zeros(num_points)
+        result_cpp_flatten[points[:, :, 3:4].int().cpu().numpy()] = results2[:,:,0:1].cpu().numpy()
+        result_python_flatten[points[:, :, 3:4].int().cpu().numpy()] = results1[:,:,0:1].cpu().numpy()
+        assert np.abs(result_python_flatten - result_cpp_flatten).sum() < 1e-6
+
+    with open(r"D:\Projects\Reconstructability\PathPlanning\test_xuexiao_sparse\accuracy_projected.ply", "rb") as f:
+        plydata = PlyData.read(f)
+        gt_error = plydata['vertex']['sum_error'].copy()/plydata['vertex']['num'].copy()
+        visible_index = result_python_flatten!=0
+        l2_loss = np.mean((gt_error[visible_index] - result_python_flatten[visible_index]) ** 2)
 
     if v_cfg["trainer"].resume_from_checkpoint is not None:
         state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]

@@ -14,13 +14,13 @@ from tqdm.contrib.concurrent import thread_map, process_map
 from shared.trajectory import *
 
 # centralized_point = (1.26826e7, 2.57652e6, 0)  # Translate to origin point to prevent overflow
-centralized_point = (0, 0, 0)  # Translate to origin point to prevent overflow
+centralized_point = (493260.00, 2492700.00, 0)  # Translate to origin point to prevent overflow
 
 root_file = r"D:\Projects\Photos\2110-OPT-GDSZ-VCC-shendaL7_box3-52.1-0.02-8890-1464-PTBGAJKL\07.重建模型\SD_OPT_box3_obj4547"
 output_root = r"D:\Projects\Photos\2110-OPT-GDSZ-VCC-shendaL7_box3-52.1-0.02-8890-1464-PTBGAJKL\merge"
 origin_point = (493504.4363, 2492785.125, 131.5)  # Origin point in "metadata.xml"
 # Set to -99999 if no requirement
-filter_z = 1  # L7 CGCS 2000
+filter_z = 1.5  # L7 CGCS 2000
 
 # L7
 l7_boundary_point_wgs84 = [
@@ -271,9 +271,9 @@ def test2():
             f.write(line + "\n")
 
 
-def filter_mesh_according_to_boundary_and_sample_points():
-    v_output_folder = r"D:\Projects\Building_data"
-    mesh = o3d.io.read_triangle_mesh(os.path.join(v_output_folder, "mesh.ply"))
+def filter_mesh_according_to_boundary_and_sample_points(v_input_dir,v_input_name):
+    v_output_folder = v_input_dir
+    mesh = o3d.io.read_triangle_mesh(os.path.join(v_output_folder, v_input_name))
     mesh_point = np.asarray(mesh.vertices)
     mesh_faces = np.asarray(mesh.triangles)
     # remove_flag = thread_map(f, mesh_point[mesh_faces])
@@ -373,7 +373,7 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         selected_tool = int(sys.argv[1])
     if selected_tool == 1:
-        filter_mesh_according_to_boundary_and_sample_points()
+        filter_mesh_according_to_boundary_and_sample_points(sys.argv[2],sys.argv[3])
     if selected_tool == 2:
         filter_points_according_to_boundary()
     elif selected_tool == 3:  # Convert coordinate

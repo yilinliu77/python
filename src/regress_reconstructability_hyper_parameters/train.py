@@ -18,6 +18,7 @@ import numpy as np
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
+from tqdm.contrib.concurrent import thread_map
 
 from shared.fast_dataloader import FastDataLoader
 from src.regress_reconstructability_hyper_parameters.dataset import Regress_hyper_parameters_dataset, \
@@ -78,13 +79,15 @@ def output_test_with_pc_and_views(v_data, v_num_total_points):
     views = views.reshape([-1, views.shape[2], views.shape[3]])
     # Write views
     vertexes = np.zeros((v_num_total_points, 3), dtype=np.float32) # x, y, z
-    for id_view, view in enumerate(tqdm(views)):
-        id_point = int(prediction_result_reshape[id_view,5])
+
+    def write_views_to_txt_file(v_args):
+        id_view, view = v_args
+        id_point = int(prediction_result_reshape[id_view, 5])
         filename = "temp/test_scene_output/{}.txt".format(int(id_point))
         if os.path.exists(filename):
-            continue
+            return
 
-        vertexes[id_point][0:3] = prediction_result_reshape[id_view,6:9].cpu().numpy()
+        vertexes[id_point][0:3] = prediction_result_reshape[id_view, 6:9].cpu().numpy()
 
         # Write views
         with open(filename, "w") as f:
@@ -101,6 +104,7 @@ def output_test_with_pc_and_views(v_data, v_num_total_points):
                     pitch / math.pi * 180, 0, yaw / math.pi * 180,
                 ))
 
+    thread_map(write_views_to_txt_file, enumerate(views))
 
     vertexes_describer = PlyElement.describe(np.array(
         [(item[0], item[1], item[2], item[3], item[4], item[5], 1-item[6]) for item in

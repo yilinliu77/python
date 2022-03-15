@@ -766,7 +766,7 @@ class Uncertainty_Modeling_wo_pointnet(nn.Module):
     def forward(self, v_data: Dict[str, torch.Tensor]):
         batch_size = v_data["views"].shape[0]
 
-        valid_view_mask = v_data["views"][:, :, 0, 0].type(torch.bool)
+        valid_view_mask = v_data["views"][:, :, 1, 0] > 1e-3
         # Fake generate 1 view for those point which can not been seen
         # in order to prevent NAN in attention module
         v_data["views"][torch.logical_not(valid_view_mask)] = 1

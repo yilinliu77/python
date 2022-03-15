@@ -17,3 +17,7 @@ Some modifies to this package. Apply it and run `python setup.py build_ext --inp
   - 139+: `sys.path.insert(0, "config")
     cfg = getattr(importlib.import_module(os.path.splitext(cfg_filename)[0].split("/")[1]), 'cfg')`
   - Comment the rest
+
+- Installation
+  pip3 install torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio===0.11.0+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html
+  pip3 install open3d tqdm opencv-python hydra-core scikit-image matplotlib plyfile pytorch_lightning argparse omegaconf --user

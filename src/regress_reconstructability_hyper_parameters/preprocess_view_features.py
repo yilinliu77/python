@@ -43,7 +43,7 @@ def compute_view_features(max_num_view, valid_views_flag, reconstructabilities,
         view_data = raw_data[2 + i_view].split(",")
         img_name = view_data[0]
         img_name = os.path.join(point_feature_root_dir, "../../images/{}.png".format(img_name))
-        view_to_point = np.array(view_data[1:4], dtype=np.float16)
+        view_to_point = np.array(view_data[1:4], dtype=np.float32)
         distance_ratio = float(view_data[4])
         angle_to_normal_ratio = float(view_data[5])
         angle_to_direction_ratio = float(view_data[6])

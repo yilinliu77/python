@@ -91,15 +91,31 @@ def bak():
 #     pass
 
 if __name__ == '__main__':
-    import open3d as o3d
+    dirs = os.listdir(r"D:\Projects\Reconstructability\training_data\v4")
+    dirs.remove("raw")
+    info_matrix = np.zeros((len(dirs),8)).astype(np.object)
+    for id, dir in enumerate(tqdm(dirs)):
+        views = np.load(os.path.join(r"D:\Projects\Reconstructability\training_data\v4",dir,"training_data/views.npz"))["arr_0"].astype(np.float32)
+        points = np.load(os.path.join(r"D:\Projects\Reconstructability\training_data\v4",dir,"training_data/point_attribute.npz"))["arr_0"].astype(np.float32)
+        valid_error = points[points[:,5]==0,1]
+        # print(dir)
+        # print(views.shape[0])
+        # print(views.shape[1])
+        # print(views[:,1,0].sum())
+        # print(points.shape[0]-points[:,5].sum())
+        # print(valid_error.mean())
+        # print(np.percentile(valid_error,50))
+        # print(np.percentile(valid_error,90))
+        # print("====================================================")
+        # print("====================================================")
+        info_matrix[id,0] = dir
+        info_matrix[id,1] = views.shape[0]
+        info_matrix[id,2] = views.shape[1]
+        info_matrix[id,3] = views[:,1,0].sum()
+        info_matrix[id,4] = points.shape[0]-points[:,5].sum()
+        info_matrix[id,5] = valid_error.mean()
+        info_matrix[id,6] = np.percentile(valid_error,50)
+        info_matrix[id,7] = np.percentile(valid_error,90)
+        # break
 
-    recon = o3d.io.read_triangle_mesh(r"C:\\Users\\yilin\\Documents\\Tencent Files\\1787609016\\FileRecv\\xiaozhen_smart3d.ply")
-    gt = o3d.io.read_triangle_mesh(r"C:\\Users\\yilin\\Documents\\Tencent Files\\1787609016\\FileRecv\\chengbao_fine.ply")
-
-    for i in range(5):
-        evaluation = o3d.pipelines.registration.registration_icp(
-            recon.sample_points_uniformly(1000000,True), gt.sample_points_uniformly(1000000,True), 0.25, np.diag([1.,1.,1.,1.]),
-            o3d.pipelines.registration.TransformationEstimationPointToPlane())
-        recon = recon.transform(evaluation.transformation)
-        print(evaluation)
-    o3d.io.write_triangle_mesh("C:\\Users\\yilin\\Documents\\Tencent Files\\1787609016\\FileRecv\\xiaozhen_smart3d1.ply",recon)
+    np.savetxt("temp/info.csv",info_matrix, fmt="%s", delimiter=',')

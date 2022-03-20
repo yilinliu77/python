@@ -57,7 +57,7 @@ def output_test(v_data, v_num_total_points):
     gt_good_point_mask = 1 - whole_points_prediction_error[:, 3]
     accuracy = (predicted_good_point_mask == gt_good_point_mask).sum() / gt_good_point_mask.shape[0]
     # Calculate spearman factor
-    consistent_point_mask = np.logical_and(whole_points_prediction_error[:, 0] != 0,whole_points_prediction_error[:, 3] == 0)
+    consistent_point_mask = np.logical_and(whole_points_prediction_error[:, 0] != 0, whole_points_prediction_error[:, 3] == 0)
     print("Consider {}/{} points to calculate the spearman".format(
         consistent_point_mask.sum(),
         whole_points_prediction_error.shape[0]))
@@ -159,6 +159,8 @@ class Regress_hyper_parameters(pl.LightningModule):
                                  drop_last=True,
                                  pin_memory=True,
                                  collate_fn=self.dataset_builder.collate_fn,
+                                 persistent_workers=True,
+                                 prefetch_factor=10
                                  )
 
     def val_dataloader(self):
@@ -194,7 +196,9 @@ class Regress_hyper_parameters(pl.LightningModule):
                           drop_last=False,
                           shuffle=False,
                           pin_memory=True,
-                          collate_fn=self.dataset_builder.collate_fn
+                          collate_fn=self.dataset_builder.collate_fn,
+                          persistent_workers=True,
+                          prefetch_factor=10
                           )
 
     def configure_optimizers(self):
@@ -218,7 +222,16 @@ class Regress_hyper_parameters(pl.LightningModule):
         if torch.isnan(total_loss).any() or torch.isinf(total_loss).any():
             pass
 
-        return total_loss
+        return {
+            "loss":total_loss,
+            "result":torch.cat([results, data["point_attribute"][:, :, [1,5]], data["points"][:,:,3:4]], dim=2).detach()
+        }
+
+    def training_epoch_end(self, outputs) -> None:
+        spearmanr_factor,accuracy,whole_points_prediction_error  = output_test(
+            torch.cat([item["result"] for item in outputs], dim=0).cpu().numpy(), self.valid_dataset.datasets[0].point_attribute.shape[0])
+        self.log("Training spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
+                 on_epoch=True)
 
     def validation_step(self, batch, batch_idx):
         data = batch
@@ -230,7 +243,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.log("Validation Error Loss", error_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
         self.log("Validation Inconsitency Loss", inconsitency_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
 
-        return torch.cat([results, data["point_attribute"][:, :, [2,6]], data["points"][:,:,3:4]], dim=2)
+        return torch.cat([results, data["point_attribute"][:, :, [1,5]], data["points"][:,:,3:4]], dim=2)
 
     def validation_epoch_end(self, outputs) -> None:
         spearmanr_factor,accuracy,whole_points_prediction_error  = output_test(

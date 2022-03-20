@@ -43,7 +43,7 @@ def compute_view_features(max_num_view, valid_views_flag, reconstructabilities,
         view_data = raw_data[2 + i_view].split(",")
         img_name = view_data[0]
         img_name = os.path.join(point_feature_root_dir, "../../images/{}.png".format(img_name))
-        view_to_point = np.array(view_data[1:4], dtype=np.float16)
+        view_to_point = np.array(view_data[1:4], dtype=np.float32)
         distance_ratio = float(view_data[4])
         angle_to_normal_ratio = float(view_data[5])
         angle_to_direction_ratio = float(view_data[6])
@@ -56,7 +56,7 @@ def compute_view_features(max_num_view, valid_views_flag, reconstructabilities,
         point_to_view_theta = math.acos(point_to_view_normalized[2])
         point_to_view_phi = math.atan2(point_to_view_normalized[1], point_to_view_normalized[0])
 
-        normal_normalized = error_list[real_index][6:9]
+        normal_normalized = error_list[real_index][5:8]
         normal_theta = math.acos(normal_normalized[2])
         normal_phi = math.atan2(normal_normalized[1], normal_normalized[0])
 
@@ -97,10 +97,7 @@ def preprocess_data(v_root: str, v_error_point_cloud: str) -> (np.ndarray, np.nd
         nx = nx / length
         ny = ny / length
         nz = nz / length
-        max_error_list = plydata['vertex']['max_error'].copy()
-        sum_error_list = plydata['vertex']['sum_error'].copy()
-        num_list = plydata['vertex']['num'].copy()
-        avg_error = sum_error_list / (num_list + 1e-6)
+        avg_error_error_list = plydata['vertex']['avg_error'].copy()
         x_dim = (np.max(x) - np.min(x)) / 2
         y_dim = (np.max(y) - np.min(y)) / 2
         z_dim = (np.max(z) - np.min(z)) / 2
@@ -109,9 +106,10 @@ def preprocess_data(v_root: str, v_error_point_cloud: str) -> (np.ndarray, np.nd
         x = (x - np.mean(x)) / max_dim
         y = (y - np.mean(y)) / max_dim
         z = (z - np.mean(z)) / max_dim
-        error_list = np.stack([max_error_list, avg_error, x, y, z, max_error_list==0, nx, ny, nz], axis=1)
+        error_list = np.stack([avg_error_error_list, x, y, z, avg_error_error_list < 0, nx, ny, nz], axis=1)
 
     point_feature_root_dir = open(os.path.join(v_root,"../img_dataset_path.txt")).readline()
+    # point_feature_root_dir = None
 
     files = [os.path.join(v_root, item) for item in os.listdir(v_root)]
     files = list(filter(lambda item: ".txt" in item, files))

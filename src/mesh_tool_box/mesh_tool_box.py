@@ -13,13 +13,14 @@ from tqdm.contrib.concurrent import thread_map, process_map
 
 from shared.trajectory import *
 
-centralized_point = (1.26826e7, 2.57652e6, 0)  # Translate to origin point to prevent overflow
+# centralized_point = (1.26826e7, 2.57652e6, 0)  # Translate to origin point to prevent overflow
+centralized_point = (493260.00, 2492700.00, 0)  # Translate to origin point to prevent overflow
 
 root_file = r"D:\Projects\Photos\2110-OPT-GDSZ-VCC-shendaL7_box3-52.1-0.02-8890-1464-PTBGAJKL\07.重建模型\SD_OPT_box3_obj4547"
 output_root = r"D:\Projects\Photos\2110-OPT-GDSZ-VCC-shendaL7_box3-52.1-0.02-8890-1464-PTBGAJKL\merge"
 origin_point = (493504.4363, 2492785.125, 131.5)  # Origin point in "metadata.xml"
 # Set to -99999 if no requirement
-filter_z = 1  # L7 CGCS 2000
+filter_z = 1.5  # L7 CGCS 2000
 
 # L7
 l7_boundary_point_wgs84 = [
@@ -65,6 +66,26 @@ L7_boundary_point_cgcs2000 = [
     ]
 ]
 
+l7_boundary_point_cgcs2000_huyue = [
+        [
+            [493280.264198, 2492680.963400],
+            [493234.691498, 2492729.714399],
+            [493281.155197, 2492765.563797],
+            [493311.327599, 2492813.793999],
+            [493358.606003, 2492814.020699],
+            [493359.778595, 2492789.761703],
+            [493335.862503, 2492733.190300]
+        ],
+        [
+            [493333.475189, 2492817.767899],
+            [493333.395905, 2492842.758804],
+            [493360.219696, 2492869.892502],
+            [493447.201706, 2492870.637405],
+            [493468.051208, 2492850.659195],
+            [493467.150208, 2492816.107903]
+        ]
+    ]
+
 # Huiwen
 huiwen_boundary_point_wgs84 = [
     [
@@ -106,12 +127,12 @@ huiwen_boundary_point_wgs84 = [
     ]
 ]
 
-used_boundary = huiwen_boundary_point_wgs84
+used_boundary = l7_boundary_point_cgcs2000_huyue
 
 for i_building, _ in enumerate(used_boundary):
     for i_point, _ in enumerate(used_boundary[i_building]):
-        mercator = lonLat2Mercator(used_boundary[i_building][i_point])
-        # mercator = used_boundary[i_building][i_point]
+        # mercator = lonLat2Mercator(used_boundary[i_building][i_point])
+        mercator = used_boundary[i_building][i_point]
         used_boundary[i_building][i_point][0] = mercator[0] - centralized_point[0]
         used_boundary[i_building][i_point][1] = mercator[1] - centralized_point[1]
 
@@ -250,18 +271,18 @@ def test2():
             f.write(line + "\n")
 
 
-def filter_mesh_according_to_boundary_and_sample_points():
-    v_output_folder = r"D:\Projects\Reconstructability\real_proxy"
-    mesh = o3d.io.read_triangle_mesh(os.path.join(v_output_folder, "huiwen_fine.ply"))
+def filter_mesh_according_to_boundary_and_sample_points(v_input_dir,v_input_name):
+    v_output_folder = v_input_dir
+    mesh = o3d.io.read_triangle_mesh(os.path.join(v_output_folder, v_input_name))
     mesh_point = np.asarray(mesh.vertices)
     mesh_faces = np.asarray(mesh.triangles)
-    remove_flag = thread_map(f, mesh_point[mesh_faces])
-    # remove_flag = process_map(f,mesh_point[mesh_faces],chunksize=1)
+    # remove_flag = thread_map(f, mesh_point[mesh_faces])
+    remove_flag = process_map(f,mesh_point[mesh_faces],chunksize=1000)
     remove_flag = np.asarray(remove_flag, np.int16)
     mesh.remove_triangles_by_mask(remove_flag)
     mesh.remove_unreferenced_vertices()
     o3d.io.write_triangle_mesh(
-        os.path.join(r"D:\Projects\Reconstructability\real_proxy", "mesh_centralized.ply"), mesh)
+        os.path.join(v_output_folder, "mesh_centralized.ply"), mesh)
     pcl_4 = mesh.sample_points_poisson_disk(number_of_points=int(1e4))
     o3d.io.write_point_cloud(os.path.join(v_output_folder, "1e4.ply"), pcl_4)
 
@@ -278,6 +299,24 @@ def f(v_args):
     return not (np.logical_and(is_in_boundary1, is_in_boundary2, is_in_boundary3).max() and (
             v_args[:, 2] > filter_z).max())
 
+def f_point(v_args):
+    p1 = Point(v_args[:2])
+    is_in_boundary1 = np.array([p1.within(item) for item in poly])
+    return not (is_in_boundary1.max() and (
+            v_args[2] > filter_z))
+
+
+def filter_points_according_to_boundary():
+    v_output_folder = r"D:\Projects\Building_data"
+    total_points = o3d.io.read_point_cloud(os.path.join(
+        r"D:\Projects\Building_data\2110-las-sz-vcc-hwl+L7S-0.04+0.03-las", "L7S_0 - Cloud.ply"))
+
+    mesh_point = np.asarray(total_points.points)
+    remove_flag = process_map(f_point,mesh_point,chunksize=1000)
+    remove_flag = np.asarray(remove_flag, np.int16)
+    total_points.points = o3d.utility.Vector3dVector(mesh_point[np.logical_not(remove_flag)])
+    o3d.io.write_point_cloud(os.path.join(v_output_folder,"gt_points.ply"), total_points)
+    pass
 
 def merge_mesh_and_filter_the_points_outside_boundary(v_root_file, v_output_folder):
     if not os.path.exists(v_output_folder):
@@ -330,19 +369,21 @@ def convert_coordinate(v_source_coor: int, v_source_coor_shift: np.ndarray, v_ta
 
 
 if __name__ == '__main__':
-    selected_tool: int = 0
+    selected_tool: int = 1
     if len(sys.argv) > 1:
         selected_tool = int(sys.argv[1])
     if selected_tool == 1:
-        filter_mesh_according_to_boundary_and_sample_points()
-    elif selected_tool == 2:  # Convert coordinate
+        filter_mesh_according_to_boundary_and_sample_points(sys.argv[2],sys.argv[3])
+    if selected_tool == 2:
+        filter_points_according_to_boundary()
+    elif selected_tool == 3:  # Convert coordinate
         source_coor: int = int(sys.argv[2])
         source_coor_shift: np.ndarray = np.array([1.26826e7,2.57652e6,0])
         target_coor: int = int(sys.argv[4])
         input_mesh: str = str(sys.argv[5])
         output_mesh: str = str(sys.argv[6])
         convert_coordinate(source_coor, source_coor_shift, target_coor, input_mesh, output_mesh)
-    elif selected_tool == 2:  # Merge mesh
+    elif selected_tool == 24:  # Merge mesh
         merge_mesh_and_filter_the_points_outside_boundary(root_file,
                                                           # r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\Ours"
                                                           # r"D:\Projects\SEAR\Real\Huiyuan\COMPARISON\dronescan"

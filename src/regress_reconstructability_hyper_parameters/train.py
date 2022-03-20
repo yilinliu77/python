@@ -18,6 +18,7 @@ import numpy as np
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
+from tqdm.contrib.concurrent import thread_map
 
 from shared.fast_dataloader import FastDataLoader
 from src.regress_reconstructability_hyper_parameters.dataset import Regress_hyper_parameters_dataset, \
@@ -56,7 +57,7 @@ def output_test(v_data, v_num_total_points):
     gt_good_point_mask = 1 - whole_points_prediction_error[:, 3]
     accuracy = (predicted_good_point_mask == gt_good_point_mask).sum() / gt_good_point_mask.shape[0]
     # Calculate spearman factor
-    consistent_point_mask = np.logical_and(whole_points_prediction_error[:, 0] != 0,whole_points_prediction_error[:, 3] == 0)
+    consistent_point_mask = np.logical_and(whole_points_prediction_error[:, 0] != 0, whole_points_prediction_error[:, 3] == 0)
     print("Consider {}/{} points to calculate the spearman".format(
         consistent_point_mask.sum(),
         whole_points_prediction_error.shape[0]))
@@ -78,13 +79,15 @@ def output_test_with_pc_and_views(v_data, v_num_total_points):
     views = views.reshape([-1, views.shape[2], views.shape[3]])
     # Write views
     vertexes = np.zeros((v_num_total_points, 3), dtype=np.float32) # x, y, z
-    for id_view, view in enumerate(tqdm(views)):
-        id_point = int(prediction_result_reshape[id_view,5])
+
+    def write_views_to_txt_file(v_args):
+        id_view, view = v_args
+        id_point = int(prediction_result_reshape[id_view, 5])
         filename = "temp/test_scene_output/{}.txt".format(int(id_point))
         if os.path.exists(filename):
-            continue
+            return
 
-        vertexes[id_point][0:3] = prediction_result_reshape[id_view,6:9].cpu().numpy()
+        vertexes[id_point][0:3] = prediction_result_reshape[id_view, 6:9].cpu().numpy()
 
         # Write views
         with open(filename, "w") as f:
@@ -101,6 +104,7 @@ def output_test_with_pc_and_views(v_data, v_num_total_points):
                     pitch / math.pi * 180, 0, yaw / math.pi * 180,
                 ))
 
+    thread_map(write_views_to_txt_file, enumerate(views))
 
     vertexes_describer = PlyElement.describe(np.array(
         [(item[0], item[1], item[2], item[3], item[4], item[5], 1-item[6]) for item in
@@ -155,6 +159,8 @@ class Regress_hyper_parameters(pl.LightningModule):
                                  drop_last=True,
                                  pin_memory=True,
                                  collate_fn=self.dataset_builder.collate_fn,
+                                 persistent_workers=True,
+                                 prefetch_factor=10
                                  )
 
     def val_dataloader(self):
@@ -190,7 +196,9 @@ class Regress_hyper_parameters(pl.LightningModule):
                           drop_last=False,
                           shuffle=False,
                           pin_memory=True,
-                          collate_fn=self.dataset_builder.collate_fn
+                          collate_fn=self.dataset_builder.collate_fn,
+                          persistent_workers=True,
+                          prefetch_factor=10
                           )
 
     def configure_optimizers(self):
@@ -214,7 +222,16 @@ class Regress_hyper_parameters(pl.LightningModule):
         if torch.isnan(total_loss).any() or torch.isinf(total_loss).any():
             pass
 
-        return total_loss
+        return {
+            "loss":total_loss,
+            "result":torch.cat([results, data["point_attribute"][:, :, [1,5]], data["points"][:,:,3:4]], dim=2).detach()
+        }
+
+    def training_epoch_end(self, outputs) -> None:
+        spearmanr_factor,accuracy,whole_points_prediction_error  = output_test(
+            torch.cat([item["result"] for item in outputs], dim=0).cpu().numpy(), self.valid_dataset.datasets[0].point_attribute.shape[0])
+        self.log("Training spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
+                 on_epoch=True)
 
     def validation_step(self, batch, batch_idx):
         data = batch
@@ -226,7 +243,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.log("Validation Error Loss", error_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
         self.log("Validation Inconsitency Loss", inconsitency_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
 
-        return torch.cat([results, data["point_attribute"][:, :, [2,6]], data["points"][:,:,3:4]], dim=2)
+        return torch.cat([results, data["point_attribute"][:, :, [1,5]], data["points"][:,:,3:4]], dim=2)
 
     def validation_epoch_end(self, outputs) -> None:
         spearmanr_factor,accuracy,whole_points_prediction_error  = output_test(

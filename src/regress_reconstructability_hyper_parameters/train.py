@@ -227,11 +227,11 @@ class Regress_hyper_parameters(pl.LightningModule):
             "result":torch.cat([results, data["point_attribute"][:, :, [1,5]], data["points"][:,:,3:4]], dim=2).detach()
         }
 
-    def training_epoch_end(self, outputs) -> None:
-        spearmanr_factor,accuracy,whole_points_prediction_error  = output_test(
-            torch.cat([item["result"] for item in outputs], dim=0).cpu().numpy(), self.valid_dataset.datasets[0].point_attribute.shape[0])
-        self.log("Training spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
-                 on_epoch=True)
+    # def training_epoch_end(self, outputs) -> None:
+        # spearmanr_factor,accuracy,whole_points_prediction_error  = output_test(
+        #     torch.cat([item["result"] for item in outputs], dim=0).cpu().numpy(), self.train.datasets[0].point_attribute.shape[0])
+        # self.log("Training spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
+        #          on_epoch=True)
 
     def validation_step(self, batch, batch_idx):
         data = batch

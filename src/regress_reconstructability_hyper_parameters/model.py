@@ -834,7 +834,7 @@ class Uncertainty_Modeling_wo_pointnet(nn.Module):
 
         # Img features
         self.img_feature_fusioner = ImgFeatureFuser()
-        # self.view_feature_fusioner = ViewFeatureFuser()
+        self.view_feature_fusioner = ViewFeatureFuser()
 
         for m in self.parameters():
             if isinstance(m, (nn.Linear,)):

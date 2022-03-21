@@ -104,7 +104,7 @@ def output_test_with_pc_and_views(v_data, v_num_total_points):
                     pitch / math.pi * 180, 0, yaw / math.pi * 180,
                 ))
 
-    thread_map(write_views_to_txt_file, enumerate(views))
+    # thread_map(write_views_to_txt_file, enumerate(views))
 
     vertexes_describer = PlyElement.describe(np.array(
         [(item[0], item[1], item[2], item[3], item[4], item[5], 1-item[6]) for item in
@@ -276,7 +276,7 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
-        normals = data["point_attribute"][:,:,7:10].cpu().numpy()
+        normals = data["point_attribute"][:,:,6:9].cpu().numpy()
         normal_theta = np.arccos(normals[:,:,2])
         normal_phi = np.arctan2(normals[:,:,1], normals[:,:,0])
 
@@ -288,7 +288,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         dy = np.sin(theta) * np.sin(phi)
 
         view_dir = np.stack([dx,dy,dz],axis=3) * data["views"][:,:,:,3:4].cpu().numpy() * 60
-        centre_point_index = data["points"][:,:,4].cpu().numpy()
+        centre_point_index = data["points"][:,:,3].cpu().numpy()
         points = data["points"][:,:,:3].cpu().numpy()
         points = points + self.test_dataset.datasets[0].original_points[centre_point_index.reshape(-1).astype(np.int32)].reshape(points.shape)
         points = points * self.data_mean_std[3] + self.data_mean_std[:3]
@@ -301,7 +301,7 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         return torch.cat([
             results,  # Predict reconstructability and inconsistency
-            data["point_attribute"][:, :, [2,6]], # Avg error and Is point with 0 reconstructability
+            data["point_attribute"][:, :, [1,5]], # Avg error and Is point with 0 reconstructability
             data["points"][:,:,3:4], # Point index, centre point index
             results.new(points)
         ], dim=2), views # x,y,z, dx,dy,dz, valid

@@ -428,7 +428,6 @@ class ViewFeatureFuser2(nn.Module):
         self.max_error = 0.2
         self.features_to_error = nn.Sequential(
                     nn.Linear(256, 1),
-                    nn.LeakyReLU(),
                 )
 
     # valid_flag, delta_theta, delta_phi, distance_ratio, normal_angle, central_angle

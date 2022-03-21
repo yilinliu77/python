@@ -104,7 +104,7 @@ def output_test_with_pc_and_views(v_data, v_num_total_points):
                     pitch / math.pi * 180, 0, yaw / math.pi * 180,
                 ))
 
-    # thread_map(write_views_to_txt_file, enumerate(views))
+    thread_map(write_views_to_txt_file, enumerate(views))
 
     vertexes_describer = PlyElement.describe(np.array(
         [(item[0], item[1], item[2], item[3], item[4], item[5], 1-item[6]) for item in

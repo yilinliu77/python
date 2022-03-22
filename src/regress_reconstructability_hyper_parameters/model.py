@@ -7,6 +7,7 @@ from scipy.stats import stats
 from torch import nn
 import numpy as np
 import torch.nn.functional as F
+from torch.nn.init import xavier_uniform_
 
 from fast_soft_sort.pytorch_ops import soft_rank
 from torchvision.models import resnet18
@@ -488,26 +489,35 @@ class ViewFeatureFuser2(nn.Module):
         return error_per_view
 
 
-class ViewFeatureFuser3(nn.Module):
+class ViewFeatureFuser4(nn.Module):
     def __init__(self):
-        super(ViewFeatureFuser3, self).__init__()
+        super(ViewFeatureFuser4, self).__init__()
         self.view_feature_extractor = nn.Sequential(
             nn.Linear(5, 256),
             nn.LayerNorm(256),
-            nn.LeakyReLU(),
-            nn.Dropout(0.2),
+            nn.ReLU(),
+            nn.Dropout(0.1),
             nn.Linear(256, 256),
             nn.LayerNorm(256),
-            nn.LeakyReLU(),
-            nn.Dropout(0.2),
+            nn.ReLU(),
+            nn.Dropout(0.1),
             nn.Linear(256, 256),
         )
-        self.view_feature_fusioner1 = nn.TransformerEncoderLayer(256, 2, 256, 0.2, F.leaky_relu_, batch_first=True)
-        self.view_feature_fusioner2 = nn.TransformerEncoderLayer(256, 2, 256, 0.2, F.leaky_relu_, batch_first=True)
+        self.view_feature_fusioner1 = nn.TransformerEncoderLayer(256, 2, 256, 0.1, batch_first=True)
+        self.view_feature_fusioner2 = nn.TransformerEncoderLayer(256, 2, 256, 0.1, batch_first=True)
         self.max_error = 0.2
         self.features_to_error = nn.Sequential(
                     nn.Linear(256, 1),
                 )
+
+        for p in self.parameters():
+            if p.dim() > 1:
+                xavier_uniform_(p)
+
+        for m in self.modules():
+            if isinstance(m, (nn.Linear,)):
+                nn.init.xavier_uniform_(m.weight)
+                # nn.init.kaiming_normal_(m.weight)
 
     # valid_flag, delta_theta, delta_phi, distance_ratio, normal_angle, central_angle
     def forward(self, v_data):
@@ -515,9 +525,6 @@ class ViewFeatureFuser3(nn.Module):
             view_attribute = v_data.view(-1, v_data.shape[2], v_data.shape[3])
         else:
             view_attribute = v_data
-        # Normalize the view direction, no longer needed since we use phi and theta now
-        # view_attribute[:, :, 1:4] = view_attribute[:, :, 1:4] / (
-        #         torch.norm(view_attribute[:, :, 1:4], dim=2).unsqueeze(-1) + 1e-6)
         predict_reconstructability_per_view = self.view_feature_extractor(
             view_attribute[:, :, 1:6])  # Compute the reconstructabilty of every single view
         valid_mask = torch.zeros_like(predict_reconstructability_per_view)  # Filter out the unusable view
@@ -533,25 +540,15 @@ class ViewFeatureFuser3(nn.Module):
             end_index = min(i * 1024 + 1024, predict_reconstructability_per_view.shape[0])
 
             feature_item = predict_reconstructability_per_view[start_index:end_index]
-            attn_mask_item = torch.ones((feature_item.shape[0], feature_item.shape[1], feature_item.shape[1],),
-                                        dtype=torch.bool, device=feature_item.device)
             valid_mask_item = torch.logical_not(valid_mask[start_index:end_index])
-            for i_batch in range(feature_item.shape[0]):
-                attn_mask_item[i_batch] = torch.logical_not(valid_mask_item)[i_batch, :, 0].float().unsqueeze(1) @ (
-                    torch.logical_not(valid_mask_item)[i_batch, :, 0].float().T).unsqueeze(0)
-            attn_mask_item = torch.logical_not(attn_mask_item)
-
-            # feature_item_filter = torch.transpose(feature_item, 0, 1)
             attention_result = self.view_feature_fusioner1(
                 feature_item,
                 src_key_padding_mask=valid_mask_item[:, :, 0],
-                # src_mask=attn_mask_item.repeat_interleave(2,0), # The output will be NAN, which bring problem when backpropogate the gradient
             )
             attention_result[valid_mask_item] = 0
             attention_result = self.view_feature_fusioner2(
                 attention_result,
                 src_key_padding_mask=valid_mask_item[:, :, 0],
-                # src_mask=attn_mask_item.repeat_interleave(2,0),
             )
             attention_result[
                 valid_mask_item] = 0  # Set invalid feature to 0, because we will do sum operator on this feature
@@ -560,9 +557,91 @@ class ViewFeatureFuser3(nn.Module):
 
         view_features = torch.cat(view_features, dim=0)
         error_per_view = self.features_to_error(view_features)
-        error_per_view[torch.logical_not(valid_mask[:,:,0].type(torch.bool))] = 0
         error_per_view = self.max_error - torch.sum(error_per_view,
                                   dim=1)  # Sum up all the view contribution of one point
+        if len(v_data.shape) == 4:
+            error_per_view = error_per_view.reshape(v_data.shape[0], -1, 1)  # B * num_point * 1
+        return error_per_view
+
+
+class ViewFeatureFuser3(nn.Module):
+    def __init__(self):
+        super(ViewFeatureFuser3, self).__init__()
+        self.view_feature_extractor = nn.Sequential(
+            nn.Linear(5, 256),
+            nn.LayerNorm(256),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(256, 256),
+            nn.LayerNorm(256),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(256, 256),
+        )
+        self.view_feature_fusioner1 = nn.TransformerEncoderLayer(256, 2, 256, 0.1, batch_first=True)
+        self.view_feature_fusioner2 = nn.TransformerEncoderLayer(256, 2, 256, 0.1, batch_first=True)
+        self.max_error = 0.2
+        self.features_to_error = nn.Sequential(
+                    nn.Linear(256, 1),
+                )
+        self.magic_class_token = nn.Parameter(torch.randn(1,1,256))
+
+        for p in self.parameters():
+            if p.dim() > 1:
+                xavier_uniform_(p)
+
+        for m in self.modules():
+            if isinstance(m, (nn.Linear,)):
+                nn.init.xavier_uniform_(m.weight)
+                # nn.init.kaiming_normal_(m.weight)
+
+    # valid_flag, delta_theta, delta_phi, distance_ratio, normal_angle, central_angle
+    def forward(self, v_data):
+        if len(v_data.shape) == 4:
+            view_attribute = v_data.view(-1, v_data.shape[2], v_data.shape[3])
+        else:
+            view_attribute = v_data
+        # Normalize the view direction, no longer needed since we use phi and theta now
+        predict_reconstructability_per_view = self.view_feature_extractor(
+            view_attribute[:, :, 1:6])  # Compute the reconstructabilty of every single view
+        predict_reconstructability_per_view = torch.cat([
+            torch.tile(self.magic_class_token,[predict_reconstructability_per_view.shape[0],1,1]),
+            predict_reconstructability_per_view
+        ],dim=1)
+
+        valid_mask = torch.zeros_like(predict_reconstructability_per_view)  # Filter out the unusable view
+        valid_mask[
+            torch.cat([torch.tensor([True],device=view_attribute.device).reshape(-1,1).tile([view_attribute.shape[0],1]),
+                       view_attribute[:, :, 0].type(torch.bool)],dim=1)
+        ] = 1
+        predict_reconstructability_per_view = predict_reconstructability_per_view * valid_mask
+
+        view_features = []
+        for i in range(predict_reconstructability_per_view.shape[0] // 1024 + 1):
+            if i * 1024 == predict_reconstructability_per_view.shape[0]:
+                break
+
+            start_index = i * 1024
+            end_index = min(i * 1024 + 1024, predict_reconstructability_per_view.shape[0])
+
+            feature_item = predict_reconstructability_per_view[start_index:end_index]
+            valid_mask_item = torch.logical_not(valid_mask[start_index:end_index])
+            attention_result = self.view_feature_fusioner1(
+                feature_item,
+                src_key_padding_mask=valid_mask_item[:, :, 0],
+            )
+            attention_result[valid_mask_item] = 0
+            attention_result = self.view_feature_fusioner2(
+                attention_result,
+                src_key_padding_mask=valid_mask_item[:, :, 0],
+            )
+            attention_result[
+                valid_mask_item] = 0  # Set invalid feature to 0, because we will do sum operator on this feature
+
+            view_features.append(attention_result)
+
+        view_features = torch.cat(view_features, dim=0)
+        error_per_view = self.features_to_error(view_features[:,0])
         if len(v_data.shape) == 4:
             error_per_view = error_per_view.reshape(v_data.shape[0], -1, 1)  # B * num_point * 1
         return error_per_view
@@ -1101,6 +1180,59 @@ class Uncertainty_Modeling_wo_pointnet3(nn.Module):
         self.is_involve_img = self.hydra_conf["model"]["involve_img"]
 
         self.view_feature_fusioner = ViewFeatureFuser3()
+
+        for m in self.parameters():
+            if isinstance(m, (nn.Linear,)):
+                nn.init.kaiming_normal_(m.weight)
+
+    # @torch.jit.script_method
+    def forward(self, v_data: Dict[str, torch.Tensor]):
+        batch_size = v_data["views"].shape[0]
+
+        valid_view_mask = v_data["views"][:, :, 1, 0] > 1e-3
+        # Fake generate 1 view for those point which can not been seen
+        # in order to prevent NAN in attention module
+        v_data["views"][torch.logical_not(valid_view_mask)] = 1
+
+        img_feature_time = 0
+        view_feature_time = 0
+        correlation_time = 0
+
+        # Phase 1
+        # Extract view features
+        # t = time.time()
+        point_error = self.view_feature_fusioner(v_data["views"])  # Note that some features are not reasonable
+
+        v_data["views"][torch.logical_not(valid_view_mask)] = 0
+        point_error[torch.logical_not(valid_view_mask)] = 0  # Mark these features to 0
+        # view_feature_time = time.time() - t
+
+        # Phase 1, only use viewpoint features to predict recon
+        inconsistency_identifier = torch.zeros_like(point_error)
+        inconsistency_identifier = torch.cat(
+            [inconsistency_identifier, torch.ones_like(inconsistency_identifier)], dim=-1)
+
+        # Done
+        predict_result = torch.cat([point_error, inconsistency_identifier], dim=2)
+        predict_result[torch.logical_not(valid_view_mask)] = 0
+
+        # print("{}, {}, {}".format(attention_time,pointnet_time,correlation_time))
+        return predict_result
+
+    def loss(self, v_point_attribute, v_prediction):
+        if self.is_involve_img:
+            return loss_l2_recon_entropy_identifier(v_point_attribute, v_prediction)
+        else:
+            return loss_l2_recon(v_point_attribute, v_prediction)
+
+
+class Uncertainty_Modeling_wo_pointnet4(nn.Module):
+    def __init__(self, hparams):
+        super(Uncertainty_Modeling_wo_pointnet4, self).__init__()
+        self.hydra_conf = hparams
+        self.is_involve_img = self.hydra_conf["model"]["involve_img"]
+
+        self.view_feature_fusioner = ViewFeatureFuser4()
 
         for m in self.parameters():
             if isinstance(m, (nn.Linear,)):

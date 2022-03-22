@@ -179,6 +179,8 @@ class Regress_hyper_parameters(pl.LightningModule):
                           shuffle=False,
                           pin_memory=True,
                           collate_fn=self.dataset_builder.collate_fn,
+                          persistent_workers=True,
+                          prefetch_factor=10
                           )
 
     def test_dataloader(self):

@@ -345,7 +345,6 @@ class ViewFeatureFuser(nn.Module):
             nn.LeakyReLU(),
             nn.Dropout(0.),
             nn.Linear(256, 256),
-            nn.LeakyReLU(),
         )
         self.view_feature_fusioner1 = nn.TransformerEncoderLayer(256, 2, 256, 0., F.leaky_relu_, batch_first=True)
         self.view_feature_fusioner2 = nn.TransformerEncoderLayer(256, 2, 256, 0., F.leaky_relu_, batch_first=True)
@@ -421,7 +420,6 @@ class ViewFeatureFuser2(nn.Module):
             nn.LeakyReLU(),
             nn.Dropout(0.),
             nn.Linear(256, 256),
-            nn.LeakyReLU(),
         )
         self.view_feature_fusioner1 = nn.TransformerEncoderLayer(256, 2, 256, 0., F.leaky_relu_, batch_first=True)
         self.view_feature_fusioner2 = nn.TransformerEncoderLayer(256, 2, 256, 0., F.leaky_relu_, batch_first=True)
@@ -503,8 +501,6 @@ class ViewFeatureFuser3(nn.Module):
             nn.LeakyReLU(),
             nn.Dropout(0.2),
             nn.Linear(256, 256),
-            nn.LayerNorm(256),
-            nn.LeakyReLU(),
         )
         self.view_feature_fusioner1 = nn.TransformerEncoderLayer(256, 2, 256, 0.2, F.leaky_relu_, batch_first=True)
         self.view_feature_fusioner2 = nn.TransformerEncoderLayer(256, 2, 256, 0.2, F.leaky_relu_, batch_first=True)

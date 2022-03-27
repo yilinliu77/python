@@ -60,8 +60,19 @@ def compute_view_features(max_num_view, valid_views_flag, reconstructabilities,
         normal_theta = math.acos(normal_normalized[2])
         normal_phi = math.atan2(normal_normalized[1], normal_normalized[0])
 
-        views[real_index][i_view][1] = point_to_view_theta - normal_theta
-        views[real_index][i_view][2] = point_to_view_phi - normal_phi
+        delta_theta:float = point_to_view_theta - normal_theta
+        delta_phi:float = point_to_view_phi - normal_phi
+        while delta_theta < -math.pi:
+            delta_theta+=math.pi*2
+        while delta_theta > math.pi:
+            delta_theta-=math.pi*2
+        while delta_phi < -math.pi:
+            delta_phi += math.pi * 2
+        while delta_phi > math.pi:
+            delta_phi -= math.pi * 2
+
+        views[real_index][i_view][1] = delta_theta
+        views[real_index][i_view][2] = delta_phi
         views[real_index][i_view][3] = distance_ratio
         views[real_index][i_view][4] = angle_to_normal_ratio
         views[real_index][i_view][5] = angle_to_direction_ratio

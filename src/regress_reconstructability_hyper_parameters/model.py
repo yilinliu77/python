@@ -1,11 +1,11 @@
 import math
 import time
-from typing import Dict
+from typing import Dict, Optional, Tuple, List
 
 import torch
 import torchvision
 from scipy.stats import stats
-from torch import nn
+from torch import nn, Tensor
 import numpy as np
 import torch.nn.functional as F
 from torch.nn import TransformerEncoderLayer, init, MultiheadAttention
@@ -1284,7 +1284,7 @@ class TFEncorder(TransformerEncoderLayer):
         super(TFEncorder, self).__init__(d_model, nhead, dim_feedforward, dropout=dropout, activation=activation,
                                          batch_first=batch_first)
 
-    def forward(self, src, src_mask=None, src_key_padding_mask=None):
+    def forward(self, src, src_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         x = src
         dx, weights = self._sa_block(x, src_mask, src_key_padding_mask)
         x = x + dx
@@ -1293,11 +1293,11 @@ class TFEncorder(TransformerEncoderLayer):
 
     # self-attention block
     def _sa_block(self, x,
-                  attn_mask, key_padding_mask):
+                  attn_mask: Optional[Tensor] = None, key_padding_mask: Optional[Tensor] = None):
         x, weights = self.self_attn(x, x, x,
-                           attn_mask=attn_mask,
-                           key_padding_mask=key_padding_mask,
-                           need_weights=True)
+                                    attn_mask=attn_mask,
+                                    key_padding_mask=key_padding_mask,
+                                    need_weights=True)
         return self.dropout1(x), weights
 
 
@@ -1319,7 +1319,8 @@ class Uncertainty_Modeling_wo_pointnet5(nn.Module):
             nn.Linear(256, 256),
         )
         self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.1, batch_first=True)
-        self.view_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.1, batch_first=True,add_bias_kv=True)
+        self.view_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.1, batch_first=True,
+                                                                   add_bias_kv=True)
 
         self.features_to_error = nn.Sequential(
             nn.Linear(256, 1),
@@ -1370,7 +1371,7 @@ class Uncertainty_Modeling_wo_pointnet5(nn.Module):
         predict_reconstructability_per_view = predict_reconstructability_per_view * valid_mask
 
         view_features = []
-        weights = []
+        weights:List[Tensor] = []
         for i in range(predict_reconstructability_per_view.shape[0] // 1024 + 1):
             if i * 1024 == predict_reconstructability_per_view.shape[0]:
                 break
@@ -1386,6 +1387,7 @@ class Uncertainty_Modeling_wo_pointnet5(nn.Module):
             )
             attention_result[valid_mask_item] = 0
             view_features.append(attention_result)
+            assert weight_item is not None
             weights.append(weight_item)
 
         view_features = torch.cat(view_features, dim=0)
@@ -1402,14 +1404,13 @@ class Uncertainty_Modeling_wo_pointnet5(nn.Module):
         predict_result = torch.cat([point_error, inconsistency_identifier], dim=2)
         predict_result[torch.logical_not(valid_view_mask)] = 0
 
-        return predict_result
+        return predict_result, weights
 
     def loss(self, v_point_attribute, v_prediction):
         if self.is_involve_img:
             return loss_l2_recon_entropy_identifier(v_point_attribute, v_prediction)
         else:
             return loss_l2_recon(v_point_attribute, v_prediction)
-
 
 
 class Uncertainty_Modeling_wo_pointnet6(nn.Module):
@@ -1430,7 +1431,8 @@ class Uncertainty_Modeling_wo_pointnet6(nn.Module):
             nn.Linear(256, 256),
         )
         self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.1, batch_first=True)
-        self.view_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.1, batch_first=True,add_bias_kv=True)
+        self.view_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.1, batch_first=True,
+                                                                   add_bias_kv=True)
 
         self.features_to_error = nn.Sequential(
             nn.Linear(256, 1),

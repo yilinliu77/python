@@ -1,3 +1,5 @@
+import time
+
 import hydra
 import torch
 from flask import Flask, request
@@ -6,7 +8,7 @@ from plyfile import PlyData
 from pytorch_lightning import seed_everything
 
 from src.regress_reconstructability_hyper_parameters.model import Uncertainty_Modeling_v2, \
-    Uncertainty_Modeling_w_pointnet, Uncertainty_Modeling_wo_pointnet
+    Uncertainty_Modeling_w_pointnet, Uncertainty_Modeling_wo_pointnet, Uncertainty_Modeling_wo_pointnet5
 from src.regress_reconstructability_hyper_parameters.train import Regress_hyper_parameters
 import numpy as np
 app = Flask(__name__)
@@ -25,12 +27,12 @@ def main(v_cfg: DictConfig):
 
     global model
     # model = Uncertainty_Modeling_w_pointnet(v_cfg)
-    model = Uncertainty_Modeling_wo_pointnet(v_cfg)
-    best_model = torch.load(r"temp/recon_model/wo_pointnet_epoch34.ckpt")
+    model = Uncertainty_Modeling_wo_pointnet5(v_cfg)
+    best_model = torch.load(r"temp/recon_model/total_net5.ckpt")
     model.load_state_dict({item.split("model.")[1]:best_model["state_dict"][item] for item in best_model["state_dict"]})
     model.eval()
     sm = torch.jit.script(model)
-    sm.save("temp/model.pt")
+    sm.save("temp/recon_model/model.pt")
     sm.eval()
     sm.cuda()
 
@@ -43,7 +45,14 @@ def main(v_cfg: DictConfig):
     model.cuda()
     num_points = (points[:, :, 3:4].reshape(-1).unique()).shape[0]
     with torch.no_grad():
+        running_time=0
         results2 = sm.forward(data_new)
+        for i in range(10):
+            cur = time.time()
+            results2 = sm.forward(data_new)
+            running_time += time.time()-cur
+        print(running_time/10)
+        print(views.shape)
         results1 = model.forward(data_new)
         result_python_flatten = np.zeros(num_points)
         result_cpp_flatten = np.zeros(num_points)

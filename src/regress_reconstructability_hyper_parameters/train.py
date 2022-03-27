@@ -213,7 +213,7 @@ class Regress_hyper_parameters(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         data = batch
-        results = self.forward(data)
+        results,weights = self.forward(data)
 
         error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
@@ -237,7 +237,7 @@ class Regress_hyper_parameters(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         data = batch
-        results = self.forward(data)
+        results,weights = self.forward(data)
 
         error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
@@ -274,7 +274,7 @@ class Regress_hyper_parameters(pl.LightningModule):
     def test_step(self, batch, batch_idx) -> None:
         data = batch
 
-        results = self.forward(data)
+        results,weights = self.forward(data)
 
         error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
 

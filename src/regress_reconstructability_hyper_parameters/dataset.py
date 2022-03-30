@@ -189,7 +189,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.is_involve_img = self.params["model"]["involve_img"]
 
         self.scene_name = self.data_root.split("\\")
-        self.scene_name = self.scene_name if len(self.scene_name)!=1 else self.scene_name.split("/")
+        self.scene_name = self.scene_name if len(self.scene_name)!=1 else self.scene_name[0].split("/")
         self.scene_name = self.scene_name[-2]
 
         self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npz"))["arr_0"]

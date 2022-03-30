@@ -364,7 +364,7 @@ class Regress_hyper_parameters(pl.LightningModule):
     def predict_recon(self):
         pass
 
-@hydra.main(config_name="test.yaml")
+@hydra.main(config_name="test.yaml", config_path="../../configs/regress_hyper_parameters/")
 def main(v_cfg: DictConfig):
     print(OmegaConf.to_yaml(v_cfg))
     seed_everything(0)

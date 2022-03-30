@@ -121,6 +121,7 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str = None
 
     return views, view_paths
 
+
 def compute_features(v_root_path,v_view_paths,v_view_attribute,img_features_dict,
                      id_point):
     point_path = os.path.join(v_root_path, "point_features", str(id_point) + ".npz")
@@ -159,6 +160,7 @@ def compute_features(v_root_path,v_view_paths,v_view_attribute,img_features_dict
     point_features = torch.cat(point_features, dim=0)
     np.savez(point_path, point_features.cpu().numpy())
 
+
 def pre_compute_img_features(v_view_paths: List[str], img_features_dict, v_root_path, v_view_attribute):
     if not os.path.exists(os.path.join(v_root_path, "point_features")):
         os.mkdir(os.path.join(v_root_path, "point_features"))
@@ -178,7 +180,7 @@ if __name__ == '__main__':
 
     output_root = sys.argv[1]
     reconstructability_file_dir = os.path.join(output_root, "reconstructability")
-    sample_points = os.path.join(output_root, "sample_points_proxy.ply")
+    sample_points = os.path.join(output_root, "sampling_points.ply")
     img_dir = os.path.join(output_root, "images")
     img_rescale_size = (400, 600)
 

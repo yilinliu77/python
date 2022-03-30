@@ -213,21 +213,23 @@ class Regress_hyper_parameters(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         data = batch
-        results = self.forward(data)
+        results,weights = self.forward(data)
 
         error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
-        self.log("Training Error Loss",error_loss, prog_bar=False,logger=True,on_step=False,on_epoch=True)
-        self.log("Training Inconsitency Loss",inconsitency_loss, prog_bar=True,logger=True,on_step=False,on_epoch=True)
-        self.log("Training Loss",total_loss, prog_bar=True,logger=True,on_step=False,on_epoch=True)
+        self.log("Training Error Loss",error_loss.detach(), prog_bar=False,logger=True,on_step=False,on_epoch=True)
+        self.log("Training Inconsitency Loss",inconsitency_loss.detach(), prog_bar=True,logger=True,on_step=False,on_epoch=True)
+        self.log("Training Loss",total_loss.detach(), prog_bar=True,logger=True,on_step=False,on_epoch=True)
 
         if torch.isnan(total_loss).any() or torch.isinf(total_loss).any():
             pass
 
-        return {
-            "loss":total_loss,
-            "result":torch.cat([results, data["point_attribute"][:, :, [1,5]], data["points"][:,:,3:4]], dim=2).detach()
-        }
+        return error_loss
+
+        # return {
+        #     "loss":total_loss,
+        #     "result":torch.cat([results, data["point_attribute"][:, :, [1,5]], data["points"][:,:,3:4]], dim=2).detach()
+        # }
 
     # def training_epoch_end(self, outputs) -> None:
         # spearmanr_factor,accuracy,whole_points_prediction_error  = output_test(
@@ -235,9 +237,12 @@ class Regress_hyper_parameters(pl.LightningModule):
         # self.log("Training spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
         #          on_epoch=True)
 
+    """
+    predicted error, predicted uncertainty, gt error, gt valid flag, index, 
+    """
     def validation_step(self, batch, batch_idx):
         data = batch
-        results = self.forward(data)
+        results,weights = self.forward(data)
 
         error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
@@ -245,22 +250,45 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.log("Validation Error Loss", error_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
         self.log("Validation Inconsitency Loss", inconsitency_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
 
-        return torch.cat([results, data["point_attribute"][:, :, [1,5]], data["points"][:,:,3:4]], dim=2)
+        return {
+            "predicted error": results[:,:,0],
+            "predicted uncertainty": results[:,:,1],
+            "gt error": data["point_attribute"][:, :, 1],
+            "gt valid flag": data["point_attribute"][:, :, 5],
+            "index": data["points"][:,:,3:4],
+            "scene_name":  data["scene_name"]
+        }
 
     def validation_epoch_end(self, outputs) -> None:
-        spearmanr_factor,accuracy,whole_points_prediction_error  = output_test(
-            torch.cat([item for item in outputs], dim=0).cpu().numpy(), self.valid_dataset.datasets[0].point_attribute.shape[0])
+        scene_dict = {}
+        for prediction_result in outputs:
+            valid_mask = (1-prediction_result["gt valid flag"]).bool()
+            for scene in prediction_result["scene_name"]:
+                if scene not in scene_dict:
+                    scene_dict[scene] = [[],[]]
+                scene_dict[scene][0].append(prediction_result["predicted error"][valid_mask])
+                scene_dict[scene][1].append(prediction_result["gt error"][valid_mask])
 
-        self.log("Validation spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
-                 on_epoch=True)
-        self.log("Validation accuracy", accuracy, prog_bar=True, logger=True, on_step=False,
-                 on_epoch=True)
+        spearman_dict = {}
+        for scene_item in scene_dict:
+            predicted_error = torch.cat(scene_dict[scene_item][0],dim=0).cpu().numpy()
+            gt_error = torch.cat(scene_dict[scene_item][1],dim=0).cpu().numpy()
+            spearmanr_factor = stats.spearmanr(
+                predicted_error,
+                gt_error
+            )[0]
+            spearman_dict[scene_item] = spearmanr_factor
 
-        pass
+        self.trainer.logger.experiment.add_text("Validation spearman",str(spearman_dict),global_step=self.trainer.current_epoch)
+        # spearmanr_factor,accuracy,whole_points_prediction_error = output_test(
+        #     torch.cat([item for item in outputs], dim=0).cpu().numpy(), self.valid_dataset.datasets[0].point_attribute.shape[0])
 
-        if not self.trainer.sanity_checking:
-            for dataset in self.train_dataset.datasets:
-                dataset.sample_points_to_different_patches()
+        # self.log("Validation spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
+        #          on_epoch=True)
+
+        # if not self.trainer.sanity_checking:
+        #     for dataset in self.train_dataset.datasets:
+        #         dataset.sample_points_to_different_patches()
 
         pass
 
@@ -274,7 +302,7 @@ class Regress_hyper_parameters(pl.LightningModule):
     def test_step(self, batch, batch_idx) -> None:
         data = batch
 
-        results = self.forward(data)
+        results,weights = self.forward(data)
 
         error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
@@ -336,11 +364,11 @@ class Regress_hyper_parameters(pl.LightningModule):
     def predict_recon(self):
         pass
 
-@hydra.main(config_name="test.yaml")
+@hydra.main(config_name="test.yaml", config_path="../../configs/regress_hyper_parameters/")
 def main(v_cfg: DictConfig):
     print(OmegaConf.to_yaml(v_cfg))
     seed_everything(0)
-
+    torch.autograd.set_detect_anomaly(True)
     early_stop_callback = EarlyStopping(
         patience=100,
         monitor="Validation Loss"

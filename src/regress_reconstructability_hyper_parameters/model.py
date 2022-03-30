@@ -1,14 +1,14 @@
 import math
 import time
-from typing import Dict
+from typing import Dict, Optional, Tuple, List
 
 import torch
 import torchvision
 from scipy.stats import stats
-from torch import nn
+from torch import nn, Tensor
 import numpy as np
 import torch.nn.functional as F
-from torch.nn import TransformerEncoderLayer, init, MultiheadAttention
+from torch.nn import TransformerEncoderLayer, init, MultiheadAttention, TransformerDecoderLayer
 from torch.nn.init import xavier_uniform_
 
 from fast_soft_sort.pytorch_ops import soft_rank
@@ -786,19 +786,18 @@ def loss_l2_recon_entropy_identifier(v_point_attribute, v_prediction, v_l2_weigh
     predicted_error = v_prediction[:, :, 0:1]
     predicted_inconsistency = v_prediction[:, :, 1:2]
 
-    point_has_at_least_one_view_see_it = v_prediction[:, :, 2:3].bool()
-
     gt_reconstructability = v_point_attribute[:, 0]
-    gt_max_error = v_point_attribute[:, :, 1:2]
-    gt_avg_error = v_point_attribute[:, :, 2:3]
-    gt_error_mask_error = (1 - v_point_attribute[:, :, 6:7]).bool()  # Good Point -> True(1)
+    gt_avg_error = v_point_attribute[:, :, 1:2]
+    gt_error_mask_error = (1 - v_point_attribute[:, :, 5:6]).bool()  # Good Point -> True(1)
 
-    error_loss = torch.nn.functional.mse_loss(predicted_error[gt_error_mask_error], gt_avg_error[gt_error_mask_error])
-    inconsistency_loss = torch.nn.functional.binary_cross_entropy_with_logits(
-        predicted_inconsistency[point_has_at_least_one_view_see_it],
-        v_point_attribute[:, :, 6:7][point_has_at_least_one_view_see_it])
+    error_loss = torch.nn.functional.l1_loss(predicted_error[gt_error_mask_error], gt_avg_error[gt_error_mask_error])
+    gt_uncertainty = torch.abs(gt_avg_error - predicted_error.detach()) / gt_avg_error
+    gt_uncertainty = torch.clamp_max(gt_uncertainty, 1.)
 
-    # return error_loss, inconsistency_loss, inconsistency_loss
+    inconsistency_loss = torch.nn.functional.l1_loss(
+        predicted_inconsistency[gt_error_mask_error],
+        gt_uncertainty[gt_error_mask_error])
+
     return error_loss, inconsistency_loss, v_l2_weights * error_loss + inconsistency_loss
 
 
@@ -815,7 +814,7 @@ def loss_l2_recon(v_point_attribute, v_prediction):
     # error_loss = torch.nn.functional.mse_loss(predicted_error[gt_error_mask_error], gt_avg_error[gt_error_mask_error])
     error_loss = torch.nn.functional.l1_loss(predicted_error[gt_error_mask_error], gt_avg_error[gt_error_mask_error])
 
-    return error_loss, 0, error_loss + 0
+    return error_loss, torch.tensor(0), error_loss + 0
 
 
 def loss_truncated_entropy(v_point_attribute, v_prediction):
@@ -1284,7 +1283,8 @@ class TFEncorder(TransformerEncoderLayer):
         super(TFEncorder, self).__init__(d_model, nhead, dim_feedforward, dropout=dropout, activation=activation,
                                          batch_first=batch_first)
 
-    def forward(self, src, src_mask=None, src_key_padding_mask=None):
+    def forward(self, src, src_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tuple[
+        Tensor, Optional[Tensor]]:
         x = src
         dx, weights = self._sa_block(x, src_mask, src_key_padding_mask)
         x = x + dx
@@ -1293,11 +1293,11 @@ class TFEncorder(TransformerEncoderLayer):
 
     # self-attention block
     def _sa_block(self, x,
-                  attn_mask, key_padding_mask):
+                  attn_mask: Optional[Tensor] = None, key_padding_mask: Optional[Tensor] = None):
         x, weights = self.self_attn(x, x, x,
-                           attn_mask=attn_mask,
-                           key_padding_mask=key_padding_mask,
-                           need_weights=True)
+                                    attn_mask=attn_mask,
+                                    key_padding_mask=key_padding_mask,
+                                    need_weights=True)
         return self.dropout1(x), weights
 
 
@@ -1319,7 +1319,8 @@ class Uncertainty_Modeling_wo_pointnet5(nn.Module):
             nn.Linear(256, 256),
         )
         self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.1, batch_first=True)
-        self.view_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.1, batch_first=True,add_bias_kv=True)
+        self.view_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.1, batch_first=True,
+                                                                   add_bias_kv=True)
 
         self.features_to_error = nn.Sequential(
             nn.Linear(256, 1),
@@ -1370,7 +1371,7 @@ class Uncertainty_Modeling_wo_pointnet5(nn.Module):
         predict_reconstructability_per_view = predict_reconstructability_per_view * valid_mask
 
         view_features = []
-        weights = []
+        weights: List[Tensor] = []
         for i in range(predict_reconstructability_per_view.shape[0] // 1024 + 1):
             if i * 1024 == predict_reconstructability_per_view.shape[0]:
                 break
@@ -1386,6 +1387,7 @@ class Uncertainty_Modeling_wo_pointnet5(nn.Module):
             )
             attention_result[valid_mask_item] = 0
             view_features.append(attention_result)
+            assert weight_item is not None
             weights.append(weight_item)
 
         view_features = torch.cat(view_features, dim=0)
@@ -1402,14 +1404,13 @@ class Uncertainty_Modeling_wo_pointnet5(nn.Module):
         predict_result = torch.cat([point_error, inconsistency_identifier], dim=2)
         predict_result[torch.logical_not(valid_view_mask)] = 0
 
-        return predict_result
+        return predict_result, weights
 
     def loss(self, v_point_attribute, v_prediction):
         if self.is_involve_img:
             return loss_l2_recon_entropy_identifier(v_point_attribute, v_prediction)
         else:
             return loss_l2_recon(v_point_attribute, v_prediction)
-
 
 
 class Uncertainty_Modeling_wo_pointnet6(nn.Module):
@@ -1430,7 +1431,8 @@ class Uncertainty_Modeling_wo_pointnet6(nn.Module):
             nn.Linear(256, 256),
         )
         self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.1, batch_first=True)
-        self.view_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.1, batch_first=True,add_bias_kv=True)
+        self.view_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.1, batch_first=True,
+                                                                   add_bias_kv=True)
 
         self.features_to_error = nn.Sequential(
             nn.Linear(256, 1),
@@ -1506,6 +1508,166 @@ class Uncertainty_Modeling_wo_pointnet6(nn.Module):
         predict_result[torch.logical_not(valid_view_mask)] = 0
 
         return predict_result
+
+    def loss(self, v_point_attribute, v_prediction):
+        if self.is_involve_img:
+            return loss_l2_recon_entropy_identifier(v_point_attribute, v_prediction)
+        else:
+            return loss_l2_recon(v_point_attribute, v_prediction)
+
+class TFDecorder(TransformerDecoderLayer):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation=F.relu,
+                 layer_norm_eps=1e-5, batch_first=False, norm_first=False,
+                 device=None, dtype=None) -> None:
+        super(TFDecorder, self).__init__(d_model, nhead, dim_feedforward, dropout=dropout, activation=activation,
+                                         batch_first=batch_first)
+
+    def forward(self, v_point_features_from_img: Tensor, v_fused_view_features: Tensor,
+                v_point_features_mask: Optional[Tensor] = None):
+        x = v_point_features_from_img
+
+        dx, sa_weights = self._sa_block(x, key_padding_mask = v_point_features_mask)
+        x = x + dx
+        dx2, mha_weights = self.multihead_attn(v_fused_view_features, x, x,
+                            key_padding_mask=v_point_features_mask,
+                            need_weights=True)
+        x = v_fused_view_features + dx2
+        x = x + self._ff_block(x)
+
+        return x, sa_weights, mha_weights
+
+    def _sa_block(self, x,
+                  attn_mask: Optional[Tensor] = None, key_padding_mask: Optional[Tensor] = None):
+        x, weights = self.self_attn(x, x, x,
+                                    attn_mask=attn_mask,
+                                    key_padding_mask=key_padding_mask,
+                                    need_weights=True)
+        return self.dropout1(x), weights
+
+    def _mha_block(self, x: Tensor, mem: Tensor,
+                   attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]):
+        x,weights = self.multihead_attn(x, mem, mem,
+                                attn_mask=attn_mask,
+                                key_padding_mask=key_padding_mask,
+                                need_weights=True)
+        return self.dropout2(x), weights
+
+
+class Uncertainty_Modeling_wo_pointnet7(nn.Module):
+    def __init__(self, hparams):
+        super(Uncertainty_Modeling_wo_pointnet7, self).__init__()
+        self.hydra_conf = hparams
+        self.is_involve_img = self.hydra_conf["model"]["involve_img"]
+
+        self.view_feature_extractor = nn.Sequential(
+            nn.Linear(5, 256),
+            # nn.LayerNorm(256),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(256, 256),
+            # nn.LayerNorm(256),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(256, 256),
+        )
+        self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.1, batch_first=True)
+        self.view_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.1, batch_first=True,
+                                                                   add_bias_kv=True)
+
+        self.img_feature_expander=nn.Sequential(
+            nn.Linear(32, 256),
+            nn.ReLU(),
+        )
+        self.img_feature_fusioner1 = TFDecorder(256, 2, 256, 0.1, batch_first=True)
+        self.img_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.1, batch_first=True,
+                                                                  add_bias_kv=True)
+
+        self.features_to_error = nn.Sequential(
+            nn.Linear(256, 1),
+        )
+        self.features_to_uncertainty = nn.Sequential(
+            nn.Linear(256, 1),
+            nn.Sigmoid()
+        )
+
+        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 256))
+
+        for module in [self.view_feature_extractor, self.img_feature_expander]:
+            for m in module.modules():
+                if isinstance(m, (nn.Linear,)):
+                    nn.init.kaiming_normal_(m.weight)
+                    fan_in, _ = init._calculate_fan_in_and_fan_out(m.weight)
+                    bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+                    init.normal_(m.bias, -bound, bound)
+
+        for transformer_module in [self.view_feature_fusioner1, self.img_feature_fusioner1]:
+            nn.init.kaiming_normal_(transformer_module.self_attn.in_proj_weight)
+
+            init.normal_(transformer_module.self_attn.in_proj_bias)
+            init.normal_(transformer_module.self_attn.out_proj.bias)
+            init.xavier_normal_(transformer_module.self_attn.bias_k)
+            init.xavier_normal_(transformer_module.self_attn.bias_v)
+
+    # @torch.jit.script_method
+    def forward(self, v_data: Dict[str, torch.Tensor]):
+        batch_size = v_data["views"].shape[0]
+
+        valid_view_mask = v_data["views"][:, :, 1, 0] > 1e-3
+        v_data["views"][torch.logical_not(valid_view_mask)] = 1
+
+        views = v_data["views"]
+
+        if len(views.shape) == 4:
+            view_attribute = views.view(-1, views.shape[2], views.shape[3])
+        else:
+            view_attribute = views
+        # Normalize the view direction, no longer needed since we use phi and theta now
+        predict_reconstructability_per_view = self.view_feature_extractor(
+            view_attribute[:, :, 1:6])  # Compute the reconstructabilty of every single view
+        predict_reconstructability_per_view = torch.cat([
+            torch.tile(self.magic_class_token, [predict_reconstructability_per_view.shape[0], 1, 1]),
+            predict_reconstructability_per_view
+        ], dim=1)
+
+        valid_mask = torch.zeros_like(predict_reconstructability_per_view)  # Filter out the unusable view
+        valid_mask[
+            torch.cat(
+                [torch.tensor([True], device=view_attribute.device).reshape(-1, 1).tile([view_attribute.shape[0], 1]),
+                 view_attribute[:, :, 0].type(torch.bool)], dim=1)
+        ] = 1
+        predict_reconstructability_per_view = predict_reconstructability_per_view * valid_mask
+
+        fused_view_features, weights = self.view_feature_fusioner1(
+            predict_reconstructability_per_view,
+            src_key_padding_mask=torch.logical_not(valid_mask)[:, :, 0],
+        )
+        fused_view_features[torch.logical_not(valid_mask)] = 0
+
+        fused_view_features = fused_view_features[:, 0]
+        point_error = self.features_to_error(fused_view_features)
+        if len(views.shape) == 4:
+            point_error = point_error.reshape(views.shape[0], -1, 1)  # B * num_point * 1
+
+        v_data["views"][torch.logical_not(valid_view_mask)] = 0
+        point_error[torch.logical_not(valid_view_mask)] = 0  # Mark these features to 0
+
+        uncertainty = torch.zeros_like(point_error)
+        if self.is_involve_img:
+            fused_view_features
+            point_features_from_imgs = v_data["point_features"]
+            point_features_mask = v_data["point_features_mask"]
+
+            point_features_from_imgs = self.img_feature_expander(point_features_from_imgs)
+            point_features_from_imgs = point_features_from_imgs * (1-point_features_mask.float()).unsqueeze(-1).tile(1,1,point_features_from_imgs.shape[2])
+
+            fused_point_feature, point_feature_weight, cross_weight = self.img_feature_fusioner1(
+                point_features_from_imgs, fused_view_features.unsqueeze(1),
+                v_point_features_mask=point_features_mask)
+            uncertainty = self.features_to_uncertainty(fused_point_feature)
+        predict_result = torch.cat([point_error, uncertainty], dim=2)
+        predict_result[torch.logical_not(valid_view_mask)] = 0
+
+        return predict_result, weights
 
     def loss(self, v_point_attribute, v_prediction):
         if self.is_involve_img:

@@ -271,16 +271,15 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         spearman_dict = {}
         for scene_item in scene_dict:
-            predicted_error = torch.stack(scene_dict[scene_item][0])[:,0].cpu().numpy()
-            gt_error = torch.stack(scene_dict[scene_item][1])[:,0].cpu().numpy()
+            predicted_error = torch.cat(scene_dict[scene_item][0],dim=0).cpu().numpy()
+            gt_error = torch.cat(scene_dict[scene_item][1],dim=0).cpu().numpy()
             spearmanr_factor = stats.spearmanr(
                 predicted_error,
                 gt_error
             )[0]
             spearman_dict[scene_item] = spearmanr_factor
 
-        self.log("Validation spearman",spearman_dict)
-
+        self.trainer.logger.experiment.add_text("Validation spearman",str(spearman_dict),global_step=self.trainer.current_epoch)
         # spearmanr_factor,accuracy,whole_points_prediction_error = output_test(
         #     torch.cat([item for item in outputs], dim=0).cpu().numpy(), self.valid_dataset.datasets[0].point_attribute.shape[0])
 

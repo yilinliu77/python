@@ -1515,6 +1515,7 @@ class Uncertainty_Modeling_wo_pointnet6(nn.Module):
         else:
             return loss_l2_recon(v_point_attribute, v_prediction)
 
+
 class TFDecorder(TransformerDecoderLayer):
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation=F.relu,
                  layer_norm_eps=1e-5, batch_first=False, norm_first=False,
@@ -1607,6 +1608,14 @@ class Uncertainty_Modeling_wo_pointnet7(nn.Module):
             init.normal_(transformer_module.self_attn.out_proj.bias)
             init.xavier_normal_(transformer_module.self_attn.bias_k)
             init.xavier_normal_(transformer_module.self_attn.bias_v)
+
+        if self.hydra_conf["model"]["open_weights"] is False:
+            for module in self.view_feature_extractor:
+                module.requires_grad_(False)
+            self.features_to_uncertainty.requires_grad_(True)
+            self.img_feature_expander.requires_grad_(True)
+            self.img_feature_fusioner1.requires_grad_(True)
+
 
     # @torch.jit.script_method
     def forward(self, v_data: Dict[str, torch.Tensor]):

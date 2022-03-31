@@ -224,7 +224,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         if torch.isnan(total_loss).any() or torch.isinf(total_loss).any():
             pass
 
-        return error_loss
+        return total_loss
 
         # return {
         #     "loss":total_loss,
@@ -270,6 +270,9 @@ class Regress_hyper_parameters(pl.LightningModule):
                 scene_dict[scene][1].append(prediction_result["gt error"][valid_mask])
 
         spearman_dict = {}
+
+        log_str=""
+        mean_spearman=0
         for scene_item in scene_dict:
             predicted_error = torch.cat(scene_dict[scene_item][0],dim=0).cpu().numpy()
             gt_error = torch.cat(scene_dict[scene_item][1],dim=0).cpu().numpy()
@@ -278,13 +281,14 @@ class Regress_hyper_parameters(pl.LightningModule):
                 gt_error
             )[0]
             spearman_dict[scene_item] = spearmanr_factor
-
-        self.trainer.logger.experiment.add_text("Validation spearman",str(spearman_dict),global_step=self.trainer.current_epoch)
+            mean_spearman+=spearmanr_factor
+            log_str += "{}: {:2f}\n".format(scene_item,spearmanr_factor)
+        mean_spearman = mean_spearman / len(scene_dict)
+        self.trainer.logger.experiment.add_text("Validation spearman",log_str,global_step=self.trainer.global_step)
         # spearmanr_factor,accuracy,whole_points_prediction_error = output_test(
         #     torch.cat([item for item in outputs], dim=0).cpu().numpy(), self.valid_dataset.datasets[0].point_attribute.shape[0])
 
-        # self.log("Validation spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
-        #          on_epoch=True)
+        self.log("Validation mean spearman", mean_spearman, prog_bar=True, logger=True, on_step=False, on_epoch=True)
 
         # if not self.trainer.sanity_checking:
         #     for dataset in self.train_dataset.datasets:

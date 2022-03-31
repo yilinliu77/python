@@ -1671,7 +1671,7 @@ class Uncertainty_Modeling_wo_pointnet7(nn.Module):
 
     def loss(self, v_point_attribute, v_prediction):
         if self.is_involve_img:
-            return loss_l2_recon_entropy_identifier(v_point_attribute, v_prediction)
+            return loss_l2_recon_entropy_identifier(v_point_attribute, v_prediction, 5)
         else:
             return loss_l2_recon(v_point_attribute, v_prediction)
 

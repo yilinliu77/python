@@ -1613,6 +1613,7 @@ class Uncertainty_Modeling_wo_pointnet7(nn.Module):
             self.view_feature_extractor.requires_grad_(False)
             self.view_feature_fusioner1.requires_grad_(False)
             self.features_to_error.requires_grad_(False)
+            self.magic_class_token.requires_grad_(False)
 
 
     # @torch.jit.script_method

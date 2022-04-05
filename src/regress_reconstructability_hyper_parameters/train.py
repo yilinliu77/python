@@ -125,7 +125,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.learning_rate = self.hydra_conf["trainer"].learning_rate
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
         # self.log(...,batch_size=self.batch_size)
-
+        self.save_hyperparameters(hparams)
         model_module = __import__("src")
         model_module = getattr(model_module,"regress_reconstructability_hyper_parameters")
         model_module = getattr(model_module,"model")
@@ -204,7 +204,8 @@ class Regress_hyper_parameters(pl.LightningModule):
                           )
 
     def configure_optimizers(self):
-        optimizer = Adam(self.parameters(), lr=self.learning_rate, )
+        optimizer = Adam(filter(lambda p: p.requires_grad, self.parameters()), lr=self.learning_rate, )
+
         return {
             'optimizer': optimizer,
             # 'lr_scheduler': CosineAnnealingLR(optimizer, T_max=500., eta_min=3e-5),

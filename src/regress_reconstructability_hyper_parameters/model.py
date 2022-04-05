@@ -1610,11 +1610,9 @@ class Uncertainty_Modeling_wo_pointnet7(nn.Module):
             init.xavier_normal_(transformer_module.self_attn.bias_v)
 
         if self.hydra_conf["model"]["open_weights"] is False:
-            for module in self.view_feature_extractor:
-                module.requires_grad_(False)
-            self.features_to_uncertainty.requires_grad_(True)
-            self.img_feature_expander.requires_grad_(True)
-            self.img_feature_fusioner1.requires_grad_(True)
+            self.view_feature_extractor.requires_grad_(False)
+            self.view_feature_fusioner1.requires_grad_(False)
+            self.features_to_error.requires_grad_(False)
 
 
     # @torch.jit.script_method

@@ -8,7 +8,8 @@ from plyfile import PlyData
 from pytorch_lightning import seed_everything
 
 from src.regress_reconstructability_hyper_parameters.model import Uncertainty_Modeling_v2, \
-    Uncertainty_Modeling_w_pointnet, Uncertainty_Modeling_wo_pointnet, Uncertainty_Modeling_wo_pointnet5
+    Uncertainty_Modeling_w_pointnet, Uncertainty_Modeling_wo_pointnet, Uncertainty_Modeling_wo_pointnet5, \
+    Uncertainty_Modeling_wo_pointnet7
 from src.regress_reconstructability_hyper_parameters.train import Regress_hyper_parameters
 import numpy as np
 app = Flask(__name__)
@@ -20,15 +21,15 @@ def main():
     a=request
     pass
 
-@hydra.main(config_name="test.yaml")
+@hydra.main(config_name="test.yaml", config_path="../../configs/regress_hyper_parameters/")
 def main(v_cfg: DictConfig):
     print(OmegaConf.to_yaml(v_cfg))
     seed_everything(0)
 
     global model
     # model = Uncertainty_Modeling_w_pointnet(v_cfg)
-    model = Uncertainty_Modeling_wo_pointnet5(v_cfg)
-    best_model = torch.load(r"temp/recon_model/total_net5.ckpt")
+    model = Uncertainty_Modeling_wo_pointnet7(v_cfg)
+    best_model = torch.load(r"temp/recon_model/total_latest_p0.ckpt")
     model.load_state_dict({item.split("model.")[1]:best_model["state_dict"][item] for item in best_model["state_dict"]})
     model.eval()
     sm = torch.jit.script(model)

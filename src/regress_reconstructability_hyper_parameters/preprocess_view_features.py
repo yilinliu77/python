@@ -108,7 +108,8 @@ def preprocess_data(v_root: str, v_error_point_cloud: str) -> (np.ndarray, np.nd
         nx = nx / length
         ny = ny / length
         nz = nz / length
-        avg_error_error_list = plydata['vertex']['avg_error'].copy()
+        avg_recon_error_list = plydata['vertex']['avg_recon_error'].copy()
+        avg_gt_error_list = plydata['vertex']['avg_gt_error'].copy()
         x_dim = (np.max(x) - np.min(x)) / 2
         y_dim = (np.max(y) - np.min(y)) / 2
         z_dim = (np.max(z) - np.min(z)) / 2
@@ -117,7 +118,7 @@ def preprocess_data(v_root: str, v_error_point_cloud: str) -> (np.ndarray, np.nd
         x = (x - np.mean(x)) / max_dim
         y = (y - np.mean(y)) / max_dim
         z = (z - np.mean(z)) / max_dim
-        error_list = np.stack([avg_error_error_list, x, y, z, avg_error_error_list < 0, nx, ny, nz], axis=1)
+        error_list = np.stack([avg_recon_error_list, avg_gt_error_list, x, y, z, avg_recon_error_list < 0, nx, ny, nz], axis=1)
 
     point_feature_root_dir = open(os.path.join(v_root,"../img_dataset_path.txt")).readline()
     # point_feature_root_dir = None

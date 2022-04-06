@@ -35,7 +35,7 @@ from scipy import stats
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
-# v_data: Predict reconstructability, Predict inconsistency, valid_flag, GT error, inconsistency (0 is consistent), Point index, x, y, z
+# v_data: Predict reconstructability, Predict inconsistency, smith18 recon, GT error, inconsistency (0 is consistent), Point index, x, y, z
 def output_test(v_data, v_num_total_points):
     predict_result = v_data.reshape(-1, v_data.shape[-1])
     invalid_mask = predict_result[:, 4]  # Filter out the point with gt reconstructability = 0
@@ -44,35 +44,33 @@ def output_test(v_data, v_num_total_points):
     sorted_index = np.argsort(predict_result[:, 5])  # Sort according to the point index
     predict_result = predict_result[sorted_index]
     sorted_group = np.split(predict_result, np.unique(predict_result[:, 5], return_index=True)[1][1:])
-    whole_points_prediction_error = np.zeros((v_num_total_points, 4), dtype=np.float32)
+    whole_points_prediction_error = np.zeros((v_num_total_points, 5), dtype=np.float32) # predict_recon, gt_recon, predict_consitency, gt_inconsistency, smith recon
     print("Merge the duplication and calculate the spearman")
     for id_item in tqdm(range(len(sorted_group))):
         whole_points_prediction_error[int(sorted_group[id_item][0][5]), 0] = np.mean(sorted_group[id_item][:, 0])
         whole_points_prediction_error[int(sorted_group[id_item][0][5]), 1] = sorted_group[id_item][0, 3]
         whole_points_prediction_error[int(sorted_group[id_item][0][5]), 2] = np.mean(sorted_group[id_item][:, 1])
-        whole_points_prediction_error[int(sorted_group[id_item][0][5]), 3] = sorted_group[id_item][0, 4]
+        whole_points_prediction_error[int(sorted_group[id_item][0][5]), 4] = np.mean(sorted_group[id_item][:, 2])
 
-    # Calculate consistency accuracy
-    predicted_good_point_mask = sigmoid(whole_points_prediction_error[:, 2]) > 0.5
-    gt_good_point_mask = 1 - whole_points_prediction_error[:, 3]
-    accuracy = (predicted_good_point_mask == gt_good_point_mask).sum() / gt_good_point_mask.shape[0]
-    # Calculate spearman factor
-    consistent_point_mask = np.logical_and(whole_points_prediction_error[:, 0] != 0, whole_points_prediction_error[:, 3] == 0)
-    print("Consider {}/{} points to calculate the spearman".format(
-        consistent_point_mask.sum(),
-        whole_points_prediction_error.shape[0]))
+    whole_points_prediction_error[:, 3] = np.abs(whole_points_prediction_error[:,1] - whole_points_prediction_error[:,0]) / whole_points_prediction_error[:,1]
+    whole_points_prediction_error[:, 3] = np.clip(whole_points_prediction_error[:, 3],0. , 1.)
 
     spearmanr_factor = stats.spearmanr(
-        whole_points_prediction_error[consistent_point_mask][:, 0],
-        whole_points_prediction_error[consistent_point_mask][:, 1]
+        whole_points_prediction_error[whole_points_prediction_error[:,1]!=-1][:, 0],
+        whole_points_prediction_error[whole_points_prediction_error[:,1]!=-1][:, 1]
     )[0]
 
-    return spearmanr_factor,accuracy,whole_points_prediction_error # predict_recon, gt_recon, predict_consitency, gt_inconsistency
+    smith_spearmanr_factor = stats.spearmanr(
+        whole_points_prediction_error[whole_points_prediction_error[:,1]!=-1][:, 4],
+        whole_points_prediction_error[whole_points_prediction_error[:,1]!=-1][:, 1]
+    )[0]
 
-# v_data: Predict reconstructability, Predict inconsistency, valid_flag, GT error, inconsistency (0 is consistent), Point index, x, y, z
+    return spearmanr_factor,smith_spearmanr_factor,whole_points_prediction_error
+
+# v_data: Predict reconstructability, Predict inconsistency, smith 18 recon, GT error, inconsistency (0 is consistent), Point index, x, y, z
 def output_test_with_pc_and_views(v_data, v_num_total_points):
     prediction_result = torch.cat([item[0] for item in v_data], dim=0)
-    spearmanr_factor,accuracy,whole_points_prediction_error = output_test(prediction_result.cpu().numpy(),v_num_total_points)
+    spearmanr, smith_spearmanr, whole_points_prediction_error = output_test(prediction_result.cpu().numpy(), v_num_total_points)
 
     prediction_result_reshape = prediction_result.reshape([-1, prediction_result.shape[-1]])
     views = np.concatenate([item[1] for item in v_data], axis=0)
@@ -115,7 +113,7 @@ def output_test_with_pc_and_views(v_data, v_num_total_points):
 
     PlyData([vertexes_describer]).write('temp/test_scene_output/whole_point.ply')
 
-    return spearmanr_factor, accuracy
+    return spearmanr, smith_spearmanr
 
 
 class Regress_hyper_parameters(pl.LightningModule):
@@ -336,16 +334,16 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         return torch.cat([
             results,  # Predict reconstructability and inconsistency
-            data["point_attribute"][:, :, [1,5]], # Avg error and Is point with 0 reconstructability
+            data["point_attribute"][:, :, [0,1,5]], # smith18 recon, Avg error and Is point with 0 reconstructability
             data["points"][:,:,3:4], # Point index, centre point index
             results.new(points)
         ], dim=2), views # x,y,z, dx,dy,dz, valid
 
     def test_epoch_end(self, outputs) -> None:
-        spearmanr_factor, accuracy = output_test_with_pc_and_views(outputs,self.test_dataset.datasets[0].point_attribute.shape[0])
-        self.log("Test spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
+        spearmanr, smith_spearmanr = output_test_with_pc_and_views(outputs,self.test_dataset.datasets[0].point_attribute.shape[0])
+        self.log("Test spearman", spearmanr, prog_bar=True, logger=False, on_step=False,
                  on_epoch=True)
-        self.log("Test accuracy", accuracy, prog_bar=True, logger=True, on_step=False,
+        self.log("Baseline spearman", smith_spearmanr, prog_bar=True, logger=False, on_step=False,
                  on_epoch=True)
         pass
 

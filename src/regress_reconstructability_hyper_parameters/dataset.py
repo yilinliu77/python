@@ -174,7 +174,7 @@ class Regress_hyper_parameters_img_dataset(torch.utils.data.Dataset):
 """
     views: num of patches * max views * 8 (valid_flag, delta_theta, delta_phi, distance, angle to normal, angle to direction, px, py)
     points: num of patches * num point per patch * 7 (x, y, z, index, id_centre)
-    point_attribute: baseline recon, avg error, x, y, z, is inconsistent point, nx, ny, nz
+    point_attribute: baseline recon, avg recon error, avg gt error, x, y, z, is inconsistent point, nx, ny, nz
 """
 class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
     def __init__(self, v_path, v_params, v_mode):
@@ -195,7 +195,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npz"))["arr_0"]
         self.view_paths = np.load(os.path.join(v_path, "view_paths.npz"), allow_pickle=True)[
             "arr_0"]
-        self.original_points = self.point_attribute[:, 2:5]
+        self.original_points = self.point_attribute[:, 3:6]
         self.num_seeds = 4096 + 1024
         # self.num_seeds = 20
         self.sample_points_to_different_patches()
@@ -208,7 +208,6 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
     Points: num of patches * num point per patch * 7 (x, y, z, index, id_centre)
     """
     def sample_points_to_different_patches(self):
-
         if True:
             new_xyz = torch.tensor(self.original_points,dtype=torch.float32).unsqueeze(0)
             new_points = torch.zeros_like(new_xyz).unsqueeze(2)

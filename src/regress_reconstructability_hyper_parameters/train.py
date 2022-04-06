@@ -35,42 +35,64 @@ from scipy import stats
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
-# v_data: Predict reconstructability, Predict inconsistency, smith18 recon, GT error, inconsistency (0 is consistent), Point index, x, y, z
+# v_data: Predict recon error, Predict gt error, smith 18 recon, avg recon error, avg gt error, inconsistency (0 is consistent), Point index, x, y, z
 def output_test(v_data, v_num_total_points):
     predict_result = v_data.reshape(-1, v_data.shape[-1])
-    invalid_mask = predict_result[:, 4]  # Filter out the point with gt reconstructability = 0
+    invalid_mask = predict_result[:, 5]  # Filter out the point with gt reconstructability = 0
     print("{}/{} predictions are inconsistent thus do not consider to calculate the spearman correlation".format(
         invalid_mask.sum(), predict_result.shape[0]))
-    sorted_index = np.argsort(predict_result[:, 5])  # Sort according to the point index
+    sorted_index = np.argsort(predict_result[:, 6])  # Sort according to the point index
     predict_result = predict_result[sorted_index]
-    sorted_group = np.split(predict_result, np.unique(predict_result[:, 5], return_index=True)[1][1:])
-    whole_points_prediction_error = np.zeros((v_num_total_points, 5), dtype=np.float32) # predict_recon, gt_recon, predict_consitency, gt_inconsistency, smith recon
+    sorted_group = np.split(predict_result, np.unique(predict_result[:, 6], return_index=True)[1][1:])
+    whole_points_prediction_error = np.zeros((v_num_total_points, 5), dtype=np.float32) # predict_recon, smith recon, gt_recon, predict_consitency, gt_inconsistency,
     print("Merge the duplication and calculate the spearman")
     for id_item in tqdm(range(len(sorted_group))):
         whole_points_prediction_error[int(sorted_group[id_item][0][5]), 0] = np.mean(sorted_group[id_item][:, 0])
-        whole_points_prediction_error[int(sorted_group[id_item][0][5]), 1] = sorted_group[id_item][0, 3]
+        whole_points_prediction_error[int(sorted_group[id_item][0][5]), 1] = np.mean(sorted_group[id_item][:, 2])
         whole_points_prediction_error[int(sorted_group[id_item][0][5]), 2] = np.mean(sorted_group[id_item][:, 1])
-        whole_points_prediction_error[int(sorted_group[id_item][0][5]), 4] = np.mean(sorted_group[id_item][:, 2])
-
-    whole_points_prediction_error[:, 3] = np.abs(whole_points_prediction_error[:,1] - whole_points_prediction_error[:,0]) / whole_points_prediction_error[:,1]
-    whole_points_prediction_error[:, 3] = np.clip(whole_points_prediction_error[:, 3],0. , 1.)
+        whole_points_prediction_error[int(sorted_group[id_item][0][5]), 3] = np.mean(sorted_group[id_item][:, 3])
+        whole_points_prediction_error[int(sorted_group[id_item][0][5]), 4] = np.mean(sorted_group[id_item][:, 4])
 
     spearmanr_factor = stats.spearmanr(
         whole_points_prediction_error[whole_points_prediction_error[:,1]!=-1][:, 0],
-        whole_points_prediction_error[whole_points_prediction_error[:,1]!=-1][:, 1]
+        whole_points_prediction_error[whole_points_prediction_error[:,1]!=-1][:, 2]
     )[0]
 
     smith_spearmanr_factor = stats.spearmanr(
-        whole_points_prediction_error[whole_points_prediction_error[:,1]!=-1][:, 4],
-        whole_points_prediction_error[whole_points_prediction_error[:,1]!=-1][:, 1]
+        whole_points_prediction_error[whole_points_prediction_error[:,1]!=-1][:, 1],
+        whole_points_prediction_error[whole_points_prediction_error[:,1]!=-1][:, 2]
     )[0]
 
     return spearmanr_factor,smith_spearmanr_factor,whole_points_prediction_error
 
-# v_data: Predict reconstructability, Predict inconsistency, smith 18 recon, GT error, inconsistency (0 is consistent), Point index, x, y, z
+# v_data: Predict recon error, Predict gt error, smith 18 recon, avg recon error, avg gt error, inconsistency (0 is consistent), Point index, x, y, z
 def output_test_with_pc_and_views(v_data, v_num_total_points):
     prediction_result = torch.cat([item[0] for item in v_data], dim=0)
-    spearmanr, smith_spearmanr, whole_points_prediction_error = output_test(prediction_result.cpu().numpy(), v_num_total_points)
+    # spearmanr, smith_spearmanr, whole_points_prediction_error = output_test(prediction_result.cpu().numpy(), v_num_total_points)
+
+    prediction_result=prediction_result.cpu().numpy()
+    predicted_recon = prediction_result[:,0,0]
+    predicted_gt = prediction_result[:,0,1]
+    smith_recon = prediction_result[:,0,2]
+    gt_recon = prediction_result[:,0,3]
+    gt_gt = prediction_result[:,0,4]
+
+    recon_spearmanr = stats.spearmanr(
+        predicted_recon[gt_recon != -1],
+        gt_recon[gt_recon!= -1]
+    )[0]
+    gt_spearmanr = stats.spearmanr(
+        predicted_gt[gt_gt != -1],
+        gt_gt[gt_gt != -1]
+    )[0]
+    smith_recon_spearmanr = stats.spearmanr(
+        smith_recon[gt_recon != -1],
+        gt_recon[gt_recon != -1]
+    )[0]
+    smith_gt_spearmanr = stats.spearmanr(
+        smith_recon[gt_gt != -1],
+        gt_gt[gt_gt != -1]
+    )[0]
 
     prediction_result_reshape = prediction_result.reshape([-1, prediction_result.shape[-1]])
     views = np.concatenate([item[1] for item in v_data], axis=0)
@@ -80,12 +102,12 @@ def output_test_with_pc_and_views(v_data, v_num_total_points):
 
     def write_views_to_txt_file(v_args):
         id_view, view = v_args
-        id_point = int(prediction_result_reshape[id_view, 5])
+        id_point = int(prediction_result_reshape[id_view, 6])
         filename = "temp/test_scene_output/{}.txt".format(int(id_point))
         if os.path.exists(filename):
             return
 
-        vertexes[id_point][0:3] = prediction_result_reshape[id_view, 6:9].cpu().numpy()
+        vertexes[id_point][0:3] = prediction_result_reshape[id_view, 7:10]
 
         # Write views
         with open(filename, "w") as f:
@@ -102,18 +124,18 @@ def output_test_with_pc_and_views(v_data, v_num_total_points):
                     pitch / math.pi * 180, 0, yaw / math.pi * 180,
                 ))
 
-    thread_map(write_views_to_txt_file, enumerate(views))
+    thread_map(write_views_to_txt_file, enumerate(views),max_workers=32)
 
     vertexes_describer = PlyElement.describe(np.array(
-        [(item[0], item[1], item[2], item[3], item[4], item[5], 1-item[6]) for item in
-         np.concatenate([vertexes,whole_points_prediction_error],axis=1)],
+        [(item[0], item[1], item[2], item[3], item[4], item[5], item[6]) for item in
+         np.concatenate([vertexes,predicted_recon[:,np.newaxis],gt_recon[:,np.newaxis],predicted_gt[:,np.newaxis],gt_gt[:,np.newaxis]],axis=1)],
         dtype=[('x', 'f8'), ('y', 'f8'), ('z', 'f8'),
-               ('Predict_Recon', 'f8'), ('GT_Error', 'f8'),
-               ('Predict_Consistency', 'f8'), ('GT_Consistency', 'f8')]), 'vertex')
+               ('Predict_Recon', 'f8'), ('GT_Recon', 'f8'),
+               ('Predict_Gt', 'f8'), ('GT_Gt', 'f8')]), 'vertex')
 
     PlyData([vertexes_describer]).write('temp/test_scene_output/whole_point.ply')
 
-    return spearmanr, smith_spearmanr
+    return recon_spearmanr, gt_spearmanr, smith_recon_spearmanr, smith_gt_spearmanr
 
 
 class Regress_hyper_parameters(pl.LightningModule):
@@ -214,10 +236,10 @@ class Regress_hyper_parameters(pl.LightningModule):
         data = batch
         results,weights = self.forward(data)
 
-        error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
+        recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
-        self.log("Training Error Loss",error_loss.detach(), prog_bar=False,logger=True,on_step=False,on_epoch=True)
-        self.log("Training Inconsitency Loss",inconsitency_loss.detach(), prog_bar=True,logger=True,on_step=False,on_epoch=True)
+        self.log("Training Recon Loss",recon_loss.detach(), prog_bar=False,logger=True,on_step=False,on_epoch=True)
+        self.log("Training Gt Loss",gt_loss.detach(), prog_bar=True,logger=True,on_step=False,on_epoch=True)
         self.log("Training Loss",total_loss.detach(), prog_bar=True,logger=True,on_step=False,on_epoch=True)
 
         if torch.isnan(total_loss).any() or torch.isinf(total_loss).any():
@@ -243,17 +265,17 @@ class Regress_hyper_parameters(pl.LightningModule):
         data = batch
         results,weights = self.forward(data)
 
-        error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
+        recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
         self.log("Validation Loss", total_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
-        self.log("Validation Error Loss", error_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
-        self.log("Validation Inconsitency Loss", inconsitency_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
+        self.log("Validation Recon Loss", recon_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
+        self.log("Validation Gt Loss", gt_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
 
         return {
-            "predicted error": results[:,:,0],
-            "predicted uncertainty": results[:,:,1],
-            "gt error": data["point_attribute"][:, :, 1],
-            "gt valid flag": data["point_attribute"][:, :, 5],
+            "predicted recon error": results[:,:,0],
+            "predicted gt error": results[:,:,1],
+            "gt recon error": data["point_attribute"][:, :, 1],
+            "gt gt error": data["point_attribute"][:, :, 2],
             "index": data["points"][:,:,3:4],
             "scene_name":  data["scene_name"]
         }
@@ -261,12 +283,19 @@ class Regress_hyper_parameters(pl.LightningModule):
     def validation_epoch_end(self, outputs) -> None:
         scene_dict = {}
         for prediction_result in outputs:
-            valid_mask = (1-prediction_result["gt valid flag"]).bool()
+            if not self.hparams["model"]["involve_img"]:
+                valid_mask = (prediction_result["gt recon error"]!=-1).bool()
+            else:
+                valid_mask = (prediction_result["gt gt error"]!=-1).bool()
             for scene in prediction_result["scene_name"]:
                 if scene not in scene_dict:
                     scene_dict[scene] = [[],[]]
-                scene_dict[scene][0].append(prediction_result["predicted error"][valid_mask])
-                scene_dict[scene][1].append(prediction_result["gt error"][valid_mask])
+                if not self.hparams["model"]["involve_img"]:
+                    scene_dict[scene][0].append(prediction_result["predicted recon error"][valid_mask])
+                    scene_dict[scene][1].append(prediction_result["gt recon error"][valid_mask])
+                else:
+                    scene_dict[scene][0].append(prediction_result["predicted gt error"][valid_mask])
+                    scene_dict[scene][1].append(prediction_result["gt gt error"][valid_mask])
 
         spearman_dict = {}
 
@@ -307,9 +336,9 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         results,weights = self.forward(data)
 
-        error_loss, inconsitency_loss, total_loss = self.model.loss(data["point_attribute"], results)
+        recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
-        normals = data["point_attribute"][:,:,6:9].cpu().numpy()
+        normals = data["point_attribute"][:,:,7:10].cpu().numpy()
         normal_theta = np.arccos(normals[:,:,2])
         normal_phi = np.arctan2(normals[:,:,1], normals[:,:,0])
 
@@ -329,22 +358,28 @@ class Regress_hyper_parameters(pl.LightningModule):
         views=np.concatenate([views,-view_dir,data["views"][:,:,:,0:1].cpu().numpy()],axis=-1)
 
         self.log("Test Loss", total_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
-        self.log("Test Recon Loss", error_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
-        self.log("Test Inconsistency Loss", inconsitency_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
+        self.log("Test Recon Loss", recon_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
+        self.log("Test Gt Loss", gt_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
 
         return torch.cat([
             results,  # Predict reconstructability and inconsistency
-            data["point_attribute"][:, :, [0,1,5]], # smith18 recon, Avg error and Is point with 0 reconstructability
+            data["point_attribute"][:, :, [0,1,2,5]], # smith18 recon, Avg recon error, Avg gt error and Is point with 0 reconstructability
             data["points"][:,:,3:4], # Point index, centre point index
             results.new(points)
         ], dim=2), views # x,y,z, dx,dy,dz, valid
 
     def test_epoch_end(self, outputs) -> None:
-        spearmanr, smith_spearmanr = output_test_with_pc_and_views(outputs,self.test_dataset.datasets[0].point_attribute.shape[0])
-        self.log("Test spearman", spearmanr, prog_bar=True, logger=False, on_step=False,
+        recon_spearmanr, gt_spearmanr, smith_recon_spearmanr, smith_gt_spearmanr = \
+            output_test_with_pc_and_views(outputs,self.test_dataset.datasets[0].point_attribute.shape[0])
+        self.log("recon_spearmanr", recon_spearmanr, prog_bar=True, logger=False, on_step=False,
                  on_epoch=True)
-        self.log("Baseline spearman", smith_spearmanr, prog_bar=True, logger=False, on_step=False,
+        self.log("gt_spearmanr", gt_spearmanr, prog_bar=True, logger=False, on_step=False,
                  on_epoch=True)
+        self.log("smith_recon_spearmanr", smith_recon_spearmanr, prog_bar=True, logger=False, on_step=False,
+                 on_epoch=True)
+        self.log("smith_gt_spearmanr", smith_gt_spearmanr, prog_bar=True, logger=False, on_step=False,
+                 on_epoch=True)
+
         pass
 
     def on_after_backward(self) -> None:

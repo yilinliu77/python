@@ -1708,8 +1708,6 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
         # ========================================Phase 1========================================
         self.img_feature_expander = nn.Sequential(
             nn.Linear(32, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
         )
         self.img_feature_fusioner1 = TFDecorder(256, 2, 256, 0.1, batch_first=True)
         self.img_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.1, batch_first=True,

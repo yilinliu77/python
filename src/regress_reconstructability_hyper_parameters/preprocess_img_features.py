@@ -178,22 +178,23 @@ if __name__ == '__main__':
 
     print("Using images, poses and sample points to compute img features")
 
-    output_root = sys.argv[1]
-    reconstructability_file_dir = os.path.join(output_root, "reconstructability")
-    sample_points = os.path.join(output_root, "sampling_points.ply")
-    img_dir = os.path.join(output_root, "images")
+    v_data_root = sys.argv[1]
+    v_output_root = sys.argv[2]
+    reconstructability_file_dir = os.path.join(v_data_root, "reconstructability")
+    sample_points = os.path.join(v_data_root, "sampling_points.ply")
+    img_dir = os.path.join(v_data_root, "images")
     img_rescale_size = (400, 600)
 
     print("First, compute the geometric features from the viewpoint to sample points")
-    if not os.path.exists(os.path.join(output_root, "training_data")):
-        os.mkdir(os.path.join(output_root, "training_data"))
+    if not os.path.exists(v_output_root):
+        os.mkdir(v_output_root)
     view, view_paths = preprocess_data(
         reconstructability_file_dir,
         sample_points,
         img_dir
     )
-    np.savez_compressed(os.path.join(output_root, "training_data/views"), view)
-    np.savez_compressed(os.path.join(output_root, "training_data/view_paths"), view_paths)
+    np.savez_compressed(os.path.join(v_output_root, "views"), view)
+    np.savez_compressed(os.path.join(v_output_root, "view_paths"), view_paths)
     print("Pre-compute data done")
 
     # debug
@@ -204,8 +205,8 @@ if __name__ == '__main__':
 
     # Compute view features
     print("Compute view features")
-    if not os.path.exists(os.path.join(output_root, "training_data/view_features")):
-        os.mkdir(os.path.join(output_root, "training_data/view_features"))
+    if not os.path.exists(os.path.join(v_data_root, "view_features")):
+        os.mkdir(os.path.join(v_data_root, "view_features"))
     transform = transforms.Compose([
         transforms.Resize(img_rescale_size),
         transforms.ToTensor(),
@@ -225,7 +226,7 @@ if __name__ == '__main__':
     total_view_paths = list(total_view_paths)
     for id_view in tqdm(range(0, len(total_view_paths))):
         save_name = total_view_paths[id_view].split(".")[0].split("\\")[-1] + ".npz"
-        img_features_saved_path = os.path.join(os.path.join(output_root, "training_data"), "view_features", save_name)
+        img_features_saved_path = os.path.join(v_data_root, "view_features", save_name)
         if os.path.exists(img_features_saved_path):
             img_features_dict[total_view_paths[id_view]]=np.load(img_features_saved_path)["arr_0"]
         else:
@@ -240,5 +241,5 @@ if __name__ == '__main__':
             np.savez(img_features_saved_path,numpy_features)
 
     print("Pre compute features")
-    pre_compute_img_features(view_paths, img_features_dict, os.path.join(output_root, "training_data"), view)
+    pre_compute_img_features(view_paths, img_features_dict, v_output_root, view)
     print("Pre compute done")

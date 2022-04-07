@@ -258,9 +258,6 @@ class Regress_hyper_parameters(pl.LightningModule):
         # self.log("Training spearman", spearmanr_factor, prog_bar=True, logger=True, on_step=False,
         #          on_epoch=True)
 
-    """
-    predicted error, predicted uncertainty, gt error, gt valid flag, index, 
-    """
     def validation_step(self, batch, batch_idx):
         data = batch
         results,weights = self.forward(data)
@@ -310,7 +307,7 @@ class Regress_hyper_parameters(pl.LightningModule):
             )[0]
             spearman_dict[scene_item] = spearmanr_factor
             mean_spearman+=spearmanr_factor
-            log_str += "{}: {:2f}\n".format(scene_item,spearmanr_factor)
+            log_str += "{:<35}: {:.2f}  \n".format(scene_item,spearmanr_factor)
         mean_spearman = mean_spearman / len(scene_dict)
         self.trainer.logger.experiment.add_text("Validation spearman",log_str,global_step=self.trainer.global_step)
         # spearmanr_factor,accuracy,whole_points_prediction_error = output_test(

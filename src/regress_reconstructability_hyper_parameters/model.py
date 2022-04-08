@@ -1680,7 +1680,7 @@ class Uncertainty_Modeling_wo_pointnet7(nn.Module):
         else:
             return loss_l2_recon_error(v_point_attribute, v_prediction)
 
-
+# version 51
 class Uncertainty_Modeling_wo_pointnet8(nn.Module):
     def __init__(self, hparams):
         super(Uncertainty_Modeling_wo_pointnet8, self).__init__()
@@ -1814,7 +1814,7 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
         else:
             return loss_l2_recon_error(v_point_attribute, v_prediction)
 
-
+# Delete dropout in the first few layer; useful; version 52
 class Uncertainty_Modeling_wo_pointnet9(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):
         super(Uncertainty_Modeling_wo_pointnet9, self).__init__(hparams)
@@ -1873,7 +1873,7 @@ class Uncertainty_Modeling_wo_pointnet9(Uncertainty_Modeling_wo_pointnet8):
             self.features_to_recon_error.requires_grad_(False)
             self.magic_class_token.requires_grad_(False)
 
-
+# Delete dropout in transformer; not useful; version 53
 class Uncertainty_Modeling_wo_pointnet10(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):
         super(Uncertainty_Modeling_wo_pointnet10, self).__init__(hparams)
@@ -1932,7 +1932,7 @@ class Uncertainty_Modeling_wo_pointnet10(Uncertainty_Modeling_wo_pointnet8):
             self.features_to_recon_error.requires_grad_(False)
             self.magic_class_token.requires_grad_(False)
 
-
+# Delete dropout in transformer and reduce feature dimension; useful; version 54
 class Uncertainty_Modeling_wo_pointnet11(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):
         super(Uncertainty_Modeling_wo_pointnet11, self).__init__(hparams)
@@ -1991,7 +1991,11 @@ class Uncertainty_Modeling_wo_pointnet11(Uncertainty_Modeling_wo_pointnet8):
             self.features_to_recon_error.requires_grad_(False)
             self.magic_class_token.requires_grad_(False)
 
-
+# version 55; version 56 (4 gpus)
+# more dimension
+# it is complicated to say the effect of multi gpu training
+# Generally, multi-gpu version has lower loss
+# more dimension is not useful
 class Uncertainty_Modeling_wo_pointnet12(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):
         super(Uncertainty_Modeling_wo_pointnet12, self).__init__(hparams)
@@ -2050,7 +2054,65 @@ class Uncertainty_Modeling_wo_pointnet12(Uncertainty_Modeling_wo_pointnet8):
             self.features_to_recon_error.requires_grad_(False)
             self.magic_class_token.requires_grad_(False)
 
+# version 55; version 56
+# 128 dimension with dropout in transformer
+class Uncertainty_Modeling_wo_pointnet13(Uncertainty_Modeling_wo_pointnet8):
+    def __init__(self, hparams):
+        super(Uncertainty_Modeling_wo_pointnet13, self).__init__(hparams)
+        self.hydra_conf = hparams
+        self.is_involve_img = self.hydra_conf["model"]["involve_img"]
 
+        # ========================================Phase 0========================================
+        self.view_feature_extractor = nn.Sequential(
+            nn.Linear(5, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+        )
+        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.1, batch_first=True)
+        self.view_feature_fusioner1.self_attn = MultiheadAttention(128, 1, dropout=0.1, batch_first=True,
+                                                                   add_bias_kv=True)
+
+        self.features_to_recon_error = nn.Sequential(
+            nn.Linear(128, 1),
+        )
+
+        # ========================================Phase 1========================================
+        self.img_feature_expander = nn.Sequential(
+            nn.Linear(32, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+        )
+        self.img_feature_fusioner1 = TFDecorder(128, 1, 128, 0.1, batch_first=True)
+        self.img_feature_fusioner1.self_attn = MultiheadAttention(128, 1, dropout=0.1, batch_first=True,
+                                                                  add_bias_kv=True)
+
+        self.features_to_gt_error = nn.Sequential(
+            nn.Linear(128, 1),
+        )
+
+        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 128))
+
+        for module in [self.view_feature_extractor, self.img_feature_expander]:
+            for m in module.modules():
+                if isinstance(m, (nn.Linear,)):
+                    nn.init.kaiming_normal_(m.weight)
+                    fan_in, _ = init._calculate_fan_in_and_fan_out(m.weight)
+                    bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+                    init.normal_(m.bias, -bound, bound)
+
+        for transformer_module in [self.view_feature_fusioner1, self.img_feature_fusioner1]:
+            nn.init.kaiming_normal_(transformer_module.self_attn.in_proj_weight)
+
+            init.normal_(transformer_module.self_attn.in_proj_bias)
+            init.normal_(transformer_module.self_attn.out_proj.bias)
+            init.xavier_normal_(transformer_module.self_attn.bias_k)
+            init.xavier_normal_(transformer_module.self_attn.bias_v)
+
+        if self.hydra_conf["model"]["open_weights"] is False:
+            self.view_feature_extractor.requires_grad_(False)
+            self.view_feature_fusioner1.requires_grad_(False)
+            self.features_to_recon_error.requires_grad_(False)
+            self.magic_class_token.requires_grad_(False)
 
 class Uncertainty_Modeling_w_pointnet(nn.Module):
     def __init__(self, hparams):

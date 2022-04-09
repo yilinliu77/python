@@ -224,7 +224,8 @@ class Regress_hyper_parameters(pl.LightningModule):
                           )
 
     def configure_optimizers(self):
-        optimizer = Adam(filter(lambda p: p.requires_grad, self.parameters()), lr=self.learning_rate, )
+        # optimizer = Adam(filter(lambda p: p.requires_grad, self.parameters()), lr=self.learning_rate, )
+        optimizer = Adam(self.parameters(), lr=self.learning_rate, )
 
         return {
             'optimizer': optimizer,

@@ -1793,7 +1793,7 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
             predicted_recon_error = predicted_recon_error.reshape(views.shape[0], -1, 1)  # B * num_point * 1
 
         v_data["views"][torch.logical_not(valid_view_mask)] = 0
-        predicted_recon_error[torch.logical_not(valid_view_mask)] = 0  # Mark these features to 0
+        predicted_recon_error = valid_view_mask.unsqueeze(-1) * predicted_recon_error # Mark these features to 0
 
         # ========================================Phase 1========================================
         predicted_gt_error = torch.zeros_like(predicted_recon_error)
@@ -1812,7 +1812,7 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
                 v_point_features_mask=point_features_mask)
             predicted_gt_error = self.features_to_gt_error(fused_point_feature)
         predict_result = torch.cat([predicted_recon_error, predicted_gt_error], dim=2)
-        predict_result[torch.logical_not(valid_view_mask)] = 0
+        predict_result = torch.tile(valid_view_mask.unsqueeze(-1),[1,1,2]) * predict_result
 
         return predict_result, (weights, cross_weight),
 

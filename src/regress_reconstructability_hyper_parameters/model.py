@@ -1785,7 +1785,7 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
             predicted_recon_error_per_view,
             src_key_padding_mask=torch.logical_not(valid_mask)[:, :, 0],
         )
-        fused_view_features[torch.logical_not(valid_mask)] = 0
+        fused_view_features = fused_view_features * valid_mask
 
         fused_view_features = fused_view_features[:, 0]
         predicted_recon_error = self.features_to_recon_error(fused_view_features)

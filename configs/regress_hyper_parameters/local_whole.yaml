@@ -16,7 +16,7 @@ trainer:
   running_sanity_check: false
 
 model:
-  model_name: Uncertainty_Modeling_wo_pointnet8
+  model_name: Uncertainty_Modeling_wo_pointnet14
   involve_img: false
   open_weights: true
   num_points_per_batch: 256

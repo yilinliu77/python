@@ -124,7 +124,7 @@ def output_test_with_pc_and_views(v_data, v_num_total_points):
                     pitch / math.pi * 180, 0, yaw / math.pi * 180,
                 ))
 
-    thread_map(write_views_to_txt_file, enumerate(views),max_workers=32)
+    thread_map(write_views_to_txt_file, list(enumerate(views)),max_workers=32)
 
     vertexes_describer = PlyElement.describe(np.array(
         [(item[0], item[1], item[2], item[3], item[4], item[5], item[6]) for item in
@@ -323,7 +323,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         pass
 
     def on_test_epoch_start(self) -> None:
-        self.data_mean_std = np.load(os.path.join(self.test_dataset.datasets[0].data_root,"../data_centralize.npz"))["arr_0"]
+        self.data_mean_std = np.load(os.path.join(self.test_dataset.datasets[0].data_root,"data_centralize.npz"))["arr_0"]
         if os.path.exists("temp/test_scene_output"):
             shutil.rmtree("temp/test_scene_output")
         os.mkdir("temp/test_scene_output")

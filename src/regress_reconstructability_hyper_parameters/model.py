@@ -1789,7 +1789,7 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
 
         # ========================================Phase 1========================================
         predicted_gt_error = torch.zeros_like(predicted_recon_error)
-        cross_weight = None
+        cross_weight: Optional[Tensor] = None
         if self.is_involve_img:
             fused_view_features
             point_features_from_imgs = v_data["point_features"]
@@ -2113,6 +2113,7 @@ class Uncertainty_Modeling_wo_pointnet13(Uncertainty_Modeling_wo_pointnet8):
             self.view_feature_fusioner1.requires_grad_(False)
             self.features_to_recon_error.requires_grad_(False)
             self.magic_class_token.requires_grad_(False)
+
 
 class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):

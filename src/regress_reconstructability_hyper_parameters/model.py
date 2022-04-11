@@ -788,11 +788,13 @@ def loss_l2_gt_error(v_point_attribute, v_prediction, v_l2_weights=100):
 
     smith_reconstructability = v_point_attribute[:, 0]
     gt_recon_error = v_point_attribute[:, :, 1:2]
-    scaled_gt_recon_error = gt_recon_error / 0.2
-    scaled_gt_recon_error = torch.clamp(scaled_gt_recon_error, 0, 1)
+    # scaled_gt_recon_error = gt_recon_error / 0.2
+    # scaled_gt_recon_error = torch.clamp(scaled_gt_recon_error, 0, 1)
+    scaled_gt_recon_error = torch.clamp(gt_recon_error, 0, 0.2)
     gt_gt_error = v_point_attribute[:, :, 2:3]
-    scaled_gt_gt_error = gt_gt_error / 0.2
-    scaled_gt_gt_error = torch.clamp(scaled_gt_gt_error, 0, 1)
+    # scaled_gt_gt_error = gt_gt_error / 0.2
+    # scaled_gt_gt_error = torch.clamp(scaled_gt_gt_error, 0, 1)
+    scaled_gt_gt_error = torch.clamp(gt_gt_error, 0, 0.2)
 
     recon_mask = (gt_recon_error != -1).bool()
     gt_mask = (gt_gt_error != -1).bool()
@@ -809,8 +811,9 @@ def loss_l2_recon_error(v_point_attribute, v_prediction):
 
     smith_reconstructability = v_point_attribute[:, 0]
     gt_recon_error = v_point_attribute[:, :, 1:2]
-    scaled_gt_recon_error = gt_recon_error / 0.2
-    scaled_gt_recon_error = torch.clamp(scaled_gt_recon_error, 0, 1)
+    # scaled_gt_recon_error = gt_recon_error / 0.2
+    # scaled_gt_recon_error = torch.clamp(scaled_gt_recon_error, 0, 1)
+    scaled_gt_recon_error = torch.clamp(gt_recon_error, 0, 0.2)
     gt_gt_error = v_point_attribute[:, :, 2:3]
     recon_mask = (gt_recon_error != -1).bool()
     # gt_mask = (gt_gt_error != -1).bool()
@@ -2188,7 +2191,7 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
             self.features_to_recon_error.requires_grad_(False)
             self.magic_class_token.requires_grad_(False)
 
-
+# version 70; add sigmoid; not useful
 class Uncertainty_Modeling_wo_pointnet15(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):
         super(Uncertainty_Modeling_wo_pointnet15, self).__init__(hparams)

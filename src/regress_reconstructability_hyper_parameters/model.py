@@ -782,46 +782,48 @@ class ImgFeatureFuser(nn.Module):
         return img_features
 
 
-def loss_l2_gt_error(v_point_attribute, v_prediction, v_l2_weights=100):
+def loss_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False):
     predicted_recon_error = v_prediction[:, :, 0:1]
     predicted_gt_error = v_prediction[:, :, 1:2]
 
     smith_reconstructability = v_point_attribute[:, 0]
-    gt_recon_error = v_point_attribute[:, :, 1:2]
-    # scaled_gt_recon_error = gt_recon_error / 0.2
-    # scaled_gt_recon_error = torch.clamp(scaled_gt_recon_error, 0, 1)
-    scaled_gt_recon_error = torch.clamp(gt_recon_error, 0, 0.2)
-    gt_gt_error = v_point_attribute[:, :, 2:3]
-    # scaled_gt_gt_error = gt_gt_error / 0.2
-    # scaled_gt_gt_error = torch.clamp(scaled_gt_gt_error, 0, 1)
-    scaled_gt_gt_error = torch.clamp(gt_gt_error, 0, 0.2)
 
+    gt_recon_error = v_point_attribute[:, :, 1:2]
     recon_mask = (gt_recon_error != -1).bool()
+    gt_gt_error = v_point_attribute[:, :, 2:3]
     gt_mask = (gt_gt_error != -1).bool()
 
+    scaled_gt_recon_error = torch.clamp(gt_recon_error, 0, 0.2)
+    scaled_gt_gt_error = torch.clamp(gt_gt_error, 0, 0.2)
+
     recon_loss = torch.nn.functional.l1_loss(predicted_recon_error[recon_mask], scaled_gt_recon_error[recon_mask])
-    gt_loss = torch.nn.functional.l1_loss(predicted_gt_error[gt_mask], scaled_gt_gt_error[gt_mask])
+    gt_loss = torch.zeros_like(recon_loss)
+    if v_is_img_involved:
+        gt_loss = torch.nn.functional.l1_loss(predicted_gt_error[gt_mask], scaled_gt_gt_error[gt_mask])
 
-    return recon_loss, gt_loss, v_l2_weights * recon_loss + gt_loss
+    return recon_loss, gt_loss, gt_loss if v_is_img_involved else recon_loss
 
 
-def loss_l2_recon_error(v_point_attribute, v_prediction):
+def loss_normalized_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False):
     predicted_recon_error = v_prediction[:, :, 0:1]
     predicted_gt_error = v_prediction[:, :, 1:2]
 
     smith_reconstructability = v_point_attribute[:, 0]
+
     gt_recon_error = v_point_attribute[:, :, 1:2]
-    # scaled_gt_recon_error = gt_recon_error / 0.2
-    # scaled_gt_recon_error = torch.clamp(scaled_gt_recon_error, 0, 1)
-    scaled_gt_recon_error = torch.clamp(gt_recon_error, 0, 0.2)
-    gt_gt_error = v_point_attribute[:, :, 2:3]
     recon_mask = (gt_recon_error != -1).bool()
-    # gt_mask = (gt_gt_error != -1).bool()
+    gt_gt_error = v_point_attribute[:, :, 2:3]
+    gt_mask = (gt_gt_error != -1).bool()
+
+    scaled_gt_recon_error = torch.clamp(gt_recon_error/0.1, 0, 2)
+    scaled_gt_gt_error = torch.clamp(gt_gt_error/0.1, 0, 2)
 
     recon_loss = torch.nn.functional.l1_loss(predicted_recon_error[recon_mask], scaled_gt_recon_error[recon_mask])
-    # gt_loss = torch.nn.functional.l1_loss(predicted_gt_error[gt_mask], gt_gt_error[gt_mask])
+    gt_loss = torch.zeros_like(recon_loss)
+    if v_is_img_involved:
+        gt_loss = torch.nn.functional.l1_loss(predicted_gt_error[gt_mask], scaled_gt_gt_error[gt_mask])
 
-    return recon_loss, torch.tensor(0), recon_loss + 0
+    return recon_loss, gt_loss, gt_loss if v_is_img_involved else recon_loss
 
 
 def loss_truncated_entropy(v_point_attribute, v_prediction):
@@ -1820,11 +1822,10 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
         return predict_result, (weights, cross_weight),
 
     def loss(self, v_point_attribute, v_prediction):
-        if self.is_involve_img:
-            return loss_l2_gt_error(v_point_attribute, v_prediction, 5)
+        if self.hydra_conf["trainer"]["loss"] == "loss_l2_error":
+            return loss_l2_error(v_point_attribute, v_prediction, self.is_involve_img)
         else:
-            return loss_l2_recon_error(v_point_attribute, v_prediction)
-
+            return loss_normalized_l2_error(v_point_attribute, v_prediction, self.is_involve_img)
 
 # Delete dropout in the first few layer; useful; version 52
 class Uncertainty_Modeling_wo_pointnet9(Uncertainty_Modeling_wo_pointnet8):
@@ -2253,6 +2254,7 @@ class Uncertainty_Modeling_wo_pointnet15(Uncertainty_Modeling_wo_pointnet8):
             self.view_feature_fusioner1.requires_grad_(False)
             self.features_to_recon_error.requires_grad_(False)
             self.magic_class_token.requires_grad_(False)
+
 
 class Uncertainty_Modeling_w_pointnet(nn.Module):
     def __init__(self, hparams):

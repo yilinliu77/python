@@ -294,20 +294,20 @@ class Regress_hyper_parameters(pl.LightningModule):
             for scene in prediction_result["scene_name"]:
                 if scene not in scene_dict:
                     scene_dict[scene] = [[], []]
-                if scene not in smith_scene_dict:
-                    smith_scene_dict[scene] = [[], []]
+                # if scene not in smith_scene_dict:
+                #     smith_scene_dict[scene] = [[], []]
                 if not self.hparams["model"]["involve_img"]:
                     scene_dict[scene][0].append(prediction_result["predicted recon error"][valid_mask])
                     scene_dict[scene][1].append(prediction_result["gt recon error"][valid_mask])
 
-                    smith_scene_dict[scene][0].append(prediction_result["smith recon"][valid_mask])
-                    smith_scene_dict[scene][1].append(prediction_result["gt recon error"][valid_mask])
+                    # smith_scene_dict[scene][0].append(prediction_result["smith recon"][valid_mask])
+                    # smith_scene_dict[scene][1].append(prediction_result["gt recon error"][valid_mask])
 
                 else:
                     scene_dict[scene][0].append(prediction_result["predicted gt error"][valid_mask])
                     scene_dict[scene][1].append(prediction_result["gt gt error"][valid_mask])
-                    smith_scene_dict[scene][0].append(prediction_result["smith recon"][valid_mask])
-                    smith_scene_dict[scene][1].append(prediction_result["gt gt error"][valid_mask])
+                    # smith_scene_dict[scene][0].append(prediction_result["smith recon"][valid_mask])
+                    # smith_scene_dict[scene][1].append(prediction_result["gt gt error"][valid_mask])
 
 
         spearman_dict = {}
@@ -325,17 +325,7 @@ class Regress_hyper_parameters(pl.LightningModule):
             mean_spearman += spearmanr_factor
             log_str += "{:<35}: {:.2f}  ".format(scene_item, spearmanr_factor)
 
-            predicted_error = torch.cat(smith_scene_dict[scene_item][0], dim=0).cpu().numpy()
-            gt_error = torch.cat(smith_scene_dict[scene_item][1], dim=0).cpu().numpy()
-            smith_spearmanr_factor = stats.spearmanr(
-                predicted_error,
-                gt_error
-            )[0]
-            log_str += "Smith_{:<35}: {:.2f}  \n".format(scene_item, smith_spearmanr_factor)
-            smith_mean_spearman += smith_spearmanr_factor
-
         mean_spearman = mean_spearman / len(scene_dict)
-        smith_mean_spearman = smith_mean_spearman / len(scene_dict)
         self.trainer.logger.experiment.add_text("Validation spearman", log_str, global_step=self.trainer.global_step)
 
         self.log("Validation mean spearman", mean_spearman, prog_bar=True, logger=True, on_step=False, on_epoch=True)

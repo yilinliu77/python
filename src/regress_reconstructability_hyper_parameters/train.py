@@ -328,7 +328,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                 log_str += "{:<35}: {:.2f}  \n".format(scene_item, spearmanr_factor)
 
             mean_spearman = mean_spearman / len(scene_dict)
-            self.trainer.logger.experiment.add_text("Validation spearman", log_str, global_step=self.trainer.global_step)
+            # self.trainer.logger.experiment.add_text("Validation spearman", log_str, global_step=self.trainer.global_step)
 
             self.log("Validation mean spearman", mean_spearman, prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True)
 

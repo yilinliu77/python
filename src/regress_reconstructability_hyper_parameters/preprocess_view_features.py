@@ -9,6 +9,7 @@ import hydra
 import torch
 import torchvision
 import numpy as np
+import numba as nb
 from PIL import Image
 from typing import List, Tuple
 
@@ -20,20 +21,20 @@ import open3d as o3d
 from scipy import stats
 from tqdm.contrib.concurrent import thread_map, process_map
 
-
-def compute_view_features(max_num_view, valid_views_flag, reconstructabilities,
-                          views, views_pair, point_feature_paths, point_feature_root_dir, error_list,
-                          v_file):
-    real_index = int(v_file.split("\\")[-1][:-4])
-
-    raw_data = [item.strip() for item in open(v_file).readlines()]
-    num_views = int(raw_data[0])
+def compute_view_features(max_num_view: int, valid_views_flag: List[bool], reconstructabilities: List[float],
+                          views: np.ndarray, views_pair: None, point_feature_paths: List[str], point_feature_root_dir: str,
+                          error_list: np.ndarray,
+                          v_file_content: Tuple[int,int,List[str]]
+                          ):
+    num_view,real_index,raw_data=v_file_content
+    # raw_data = [item.strip() for item in open(v_file).readlines()]
+    num_views = int(num_view)
     if num_views > max_num_view - 1:
         raise
     reconstructability = float(raw_data[1])
     if num_views >= 2:  # Unstable change!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         # if reconstructability != 0:
-        point_feature_paths.append(os.path.join(point_feature_root_dir, str(real_index) + ".npz"))
+        point_feature_paths[real_index] = (os.path.join(point_feature_root_dir, str(real_index) + ".npz"))
         valid_views_flag[real_index] = True
     else:
         print(0)
@@ -57,7 +58,7 @@ def compute_view_features(max_num_view, valid_views_flag, reconstructabilities,
         point_to_view_phi = math.atan2(point_to_view_normalized[1], point_to_view_normalized[0])
 
         normal_normalized = error_list[real_index][6:9]
-        assert np.linalg.norm(normal_normalized)==1
+        assert abs(np.linalg.norm(normal_normalized)-1) < 1e-3
         normal_theta = math.acos(normal_normalized[2])
         normal_phi = math.atan2(normal_normalized[1], normal_normalized[0])
 
@@ -136,23 +137,24 @@ def preprocess_data(v_root: str, v_error_point_cloud: str) -> (np.ndarray, np.nd
     def compute_max_view_number(v_file):
         raw_data = [item.strip() for item in open(v_file).readlines()]
         num_views = int(raw_data[0])
-        return num_views
+        real_index = int(v_file.split("\\")[-1][:-4])
+        return num_views, real_index , raw_data
 
-    num_view_list = thread_map(compute_max_view_number, files, max_workers=8)
-    max_num_view = max(num_view_list) + 1
+    file_contents = thread_map(compute_max_view_number, files, max_workers=32)
+    max_num_view = max(file_contents,key=lambda x:x[0])[0] + 1
     # max_num_view = 200
     print("Read attribute with max view: ", max_num_view)
-    point_features_path = []
-    views = np.zeros((num_points, max_num_view, 8), dtype=np.float16)
+    point_features_path = [""] * num_points
+    views = np.zeros((num_points, max_num_view, 8), dtype=np.float32)
     # views_pair = np.zeros((num_points, max_num_view, max_num_view, 3), dtype=np.float16)
     views_pair = None
     valid_views_flag = [False for _ in range(num_points)]
-    reconstructabilities = [0 for _ in range(num_points)]
+    reconstructabilities = [0. for _ in range(num_points)]
 
     thread_map(partial(compute_view_features,
                        max_num_view, valid_views_flag, reconstructabilities, views, views_pair,
                        point_features_path, point_feature_root_dir, error_list),
-               files, max_workers=32)
+               file_contents, max_workers=1)
 
     # valid_flag = np.logical_and(np.array(valid_views_flag), error_list[:, 2] != 0)
     valid_flag = np.array(valid_views_flag)
@@ -165,7 +167,7 @@ def preprocess_data(v_root: str, v_error_point_cloud: str) -> (np.ndarray, np.nd
     # views_pair = views_pair[:, usable_indices[0], usable_indices[1]]
 
     error_list = error_list[valid_flag]
-    point_attribute = np.concatenate([reconstructabilities[:, np.newaxis], error_list], axis=1).astype(np.float16)
+    point_attribute = np.concatenate([reconstructabilities[:, np.newaxis], error_list], axis=1).astype(np.float32)
     print(
         "Totally {} points; {} points has error 0; {} points has 0 reconstructability, {} in it is not visible; Output {} points".format(
             num_points,

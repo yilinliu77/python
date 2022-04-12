@@ -249,7 +249,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
                     accept_sample = True
                 self.num_seeds += 1024
                 # self.num_seeds += 5
-        if True:
+        if False:
             pcl = o3d.geometry.PointCloud()
             pcl.points = o3d.utility.Vector3dVector(new_xyz.numpy()[0, :, :3])
             o3d.io.write_point_cloud("temp/seed_point.ply", pcl)

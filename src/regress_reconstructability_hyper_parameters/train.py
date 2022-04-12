@@ -269,9 +269,9 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
-        self.log("Validation Loss", total_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
-        self.log("Validation Recon Loss", recon_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
-        self.log("Validation Gt Loss", gt_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True)
+        self.log("Validation Loss", total_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,sync_dist=True)
+        self.log("Validation Recon Loss", recon_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,sync_dist=True)
+        self.log("Validation Gt Loss", gt_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,sync_dist=True)
 
         return {
             "predicted recon error": results[:, :, 0],
@@ -284,57 +284,59 @@ class Regress_hyper_parameters(pl.LightningModule):
         }
 
     def validation_epoch_end(self, outputs) -> None:
-        scene_dict = {}
-        smith_scene_dict = {}
-        for prediction_result in outputs:
-            if not self.hparams["model"]["involve_img"]:
-                valid_mask = (prediction_result["gt recon error"] != -1).bool()
-            else:
-                valid_mask = (prediction_result["gt gt error"] != -1).bool()
-            for scene in prediction_result["scene_name"]:
-                if scene not in scene_dict:
-                    scene_dict[scene] = [[], []]
-                # if scene not in smith_scene_dict:
-                #     smith_scene_dict[scene] = [[], []]
+        outputs = self.all_gather(outputs)
+        if self.trainer.is_global_zero:
+            scene_dict = {}
+            smith_scene_dict = {}
+            for prediction_result in outputs:
                 if not self.hparams["model"]["involve_img"]:
-                    scene_dict[scene][0].append(prediction_result["predicted recon error"][valid_mask])
-                    scene_dict[scene][1].append(prediction_result["gt recon error"][valid_mask])
-
-                    # smith_scene_dict[scene][0].append(prediction_result["smith recon"][valid_mask])
-                    # smith_scene_dict[scene][1].append(prediction_result["gt recon error"][valid_mask])
-
+                    valid_mask = (prediction_result["gt recon error"] != -1).bool()
                 else:
-                    scene_dict[scene][0].append(prediction_result["predicted gt error"][valid_mask])
-                    scene_dict[scene][1].append(prediction_result["gt gt error"][valid_mask])
-                    # smith_scene_dict[scene][0].append(prediction_result["smith recon"][valid_mask])
-                    # smith_scene_dict[scene][1].append(prediction_result["gt gt error"][valid_mask])
+                    valid_mask = (prediction_result["gt gt error"] != -1).bool()
+                for scene in prediction_result["scene_name"]:
+                    if scene not in scene_dict:
+                        scene_dict[scene] = [[], []]
+                    # if scene not in smith_scene_dict:
+                    #     smith_scene_dict[scene] = [[], []]
+                    if not self.hparams["model"]["involve_img"]:
+                        scene_dict[scene][0].append(prediction_result["predicted recon error"][valid_mask])
+                        scene_dict[scene][1].append(prediction_result["gt recon error"][valid_mask])
+
+                        # smith_scene_dict[scene][0].append(prediction_result["smith recon"][valid_mask])
+                        # smith_scene_dict[scene][1].append(prediction_result["gt recon error"][valid_mask])
+
+                    else:
+                        scene_dict[scene][0].append(prediction_result["predicted gt error"][valid_mask])
+                        scene_dict[scene][1].append(prediction_result["gt gt error"][valid_mask])
+                        # smith_scene_dict[scene][0].append(prediction_result["smith recon"][valid_mask])
+                        # smith_scene_dict[scene][1].append(prediction_result["gt gt error"][valid_mask])
 
 
-        spearman_dict = {}
+            spearman_dict = {}
 
-        log_str = ""
-        mean_spearman,smith_mean_spearman = 0, 0
-        for scene_item in scene_dict:
-            predicted_error = torch.cat(scene_dict[scene_item][0], dim=0).cpu().numpy()
-            gt_error = torch.cat(scene_dict[scene_item][1], dim=0).cpu().numpy()
-            spearmanr_factor = stats.spearmanr(
-                predicted_error,
-                gt_error
-            )[0]
-            spearman_dict[scene_item] = spearmanr_factor
-            mean_spearman += spearmanr_factor
-            log_str += "{:<35}: {:.2f}  \n".format(scene_item, spearmanr_factor)
+            log_str = ""
+            mean_spearman,smith_mean_spearman = 0, 0
+            for scene_item in scene_dict:
+                predicted_error = torch.cat(scene_dict[scene_item][0], dim=0).cpu().numpy()
+                gt_error = torch.cat(scene_dict[scene_item][1], dim=0).cpu().numpy()
+                spearmanr_factor = stats.spearmanr(
+                    predicted_error,
+                    gt_error
+                )[0]
+                spearman_dict[scene_item] = spearmanr_factor
+                mean_spearman += spearmanr_factor
+                log_str += "{:<35}: {:.2f}  \n".format(scene_item, spearmanr_factor)
 
-        mean_spearman = mean_spearman / len(scene_dict)
-        self.trainer.logger.experiment.add_text("Validation spearman", log_str, global_step=self.trainer.global_step)
+            mean_spearman = mean_spearman / len(scene_dict)
+            self.trainer.logger.experiment.add_text("Validation spearman", log_str, global_step=self.trainer.global_step, rank_zero_only=True)
 
-        self.log("Validation mean spearman", mean_spearman, prog_bar=True, logger=True, on_step=False, on_epoch=True)
+            self.log("Validation mean spearman", mean_spearman, prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True)
 
-        # if not self.trainer.sanity_checking:
-        #     for dataset in self.train_dataset.datasets:
-        #         dataset.sample_points_to_different_patches()
+            # if not self.trainer.sanity_checking:
+            #     for dataset in self.train_dataset.datasets:
+            #         dataset.sample_points_to_different_patches()
 
-        pass
+            pass
 
     def on_test_epoch_start(self) -> None:
         self.data_mean_std = np.load(os.path.join(self.test_dataset.datasets[0].data_root, "data_centralize.npz"))[

@@ -185,7 +185,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.trainer_mode = v_mode
         self.params = v_params
         self.data_root = v_path
-        self.views = np.load(os.path.join(v_path, "views.npz"))["arr_0"]
+        self.views = np.load(os.path.join(v_path, "views.npz"))["arr_0"].copy()
         # img_dataset_path = open(os.path.join(v_path, "../img_dataset_path.txt")).readline().strip()
         img_dataset_path = os.path.join(v_path, "../")
         assert os.path.exists(img_dataset_path)
@@ -195,14 +195,17 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.scene_name = self.scene_name if len(self.scene_name) != 1 else self.scene_name[0].split("/")
         self.scene_name = self.scene_name[-1] if self.scene_name[-1]!="" else self.scene_name[-2]
 
-        self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npz"))["arr_0"]
-        self.view_mean_std = self.params["model"]["view_mean_std"]
-        self.error_mean_std = self.params["model"]["error_mean_std"]
+        self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npz"))["arr_0"].copy()
+        self.view_mean_std = np.array(self.params["model"]["view_mean_std"])
+        self.error_mean_std = np.array(self.params["model"]["error_mean_std"])
 
         valid_mask = self.views[:,:,0] == 1
-        self.views[valid_mask][:,1:6] = (self.views[valid_mask][:,1:6] - self.view_mean_std[:5]) / self.view_mean_std[5:]
-        self.views = (self.point_attribute[:,[1,2]]-self.error_mean_std[:2])/self.error_mean_std[2:]
-        self.point_attribute[:,[1,2]] = (self.point_attribute[:,[1,2]]-self.error_mean_std[:2])/self.error_mean_std[2:]
+        self.views[valid_mask,1:6] = (self.views[valid_mask,1:6]-self.view_mean_std[:5]) / self.view_mean_std[5:]
+        acc_point_mask = self.point_attribute[:,1]!=-1
+        com_point_mask = self.point_attribute[:,2]!=-1
+
+        self.point_attribute[acc_point_mask,1] = (self.point_attribute[acc_point_mask,1]-self.error_mean_std[0])/self.error_mean_std[2]
+        self.point_attribute[com_point_mask,2] = (self.point_attribute[com_point_mask,2]-self.error_mean_std[1])/self.error_mean_std[3]
 
         assert self.point_attribute.shape[1] == 10
         self.view_paths = np.load(os.path.join(v_path, "view_paths.npz"), allow_pickle=True)[

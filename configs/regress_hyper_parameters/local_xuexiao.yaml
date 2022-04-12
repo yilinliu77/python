@@ -20,6 +20,8 @@ model:
   involve_img: false
   open_weights: true
   num_points_per_batch: 256
+  view_mean_std: [0.2396,0.0206,1.3202,0.6542,0.4880,0.8267,1.4230,0.6673,0.2400,0.4130]
+  error_mean_std: [0.0170,0.0383,0.0638,0.2221]
 
 hydra:
   run:

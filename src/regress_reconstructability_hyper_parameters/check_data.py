@@ -59,11 +59,18 @@ if __name__ == '__main__':
     }
 
     for item in os.listdir(v_root):
+        # if "chengbao" not in item:
+        #     continue
+        # if "fine" not in item and "preview" not in item:
+        #     continue
+
         if item[-1] != "0":
             continue
         params = {
             "model": {
-                "involve_img": False
+                "involve_img": False,
+                "view_mean_std":[0,0,0,0,0,1,1,1,1,1],
+                "error_mean_std":[0,0,1,1],
             }
         }
 
@@ -133,8 +140,8 @@ if __name__ == '__main__':
         pass
 
     for proxy in summary_spearman:
-        summary_spearman[proxy]["acc"] /=summary_spearman[proxy]["num"]
-        summary_spearman[proxy]["com"] /=summary_spearman[proxy]["num"]
+        summary_spearman[proxy]["acc"] /=summary_spearman[proxy]["num"] + 1e-6
+        summary_spearman[proxy]["com"] /=summary_spearman[proxy]["num"] + 1e-6
     print(summary_spearman)
 
     for item in summary_variable:

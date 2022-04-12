@@ -793,13 +793,13 @@ def loss_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False):
     gt_gt_error = v_point_attribute[:, :, 2:3]
     gt_mask = (gt_gt_error != -1).bool()
 
-    scaled_gt_recon_error = torch.clamp(gt_recon_error, 0, 0.2)
-    scaled_gt_gt_error = torch.clamp(gt_gt_error, 0, 0.2)
+    # scaled_gt_recon_error = torch.clamp(gt_recon_error, 0, 0.2)
+    # scaled_gt_gt_error = torch.clamp(gt_gt_error, 0, 0.2)
 
-    recon_loss = torch.nn.functional.l1_loss(predicted_recon_error[recon_mask], scaled_gt_recon_error[recon_mask])
+    recon_loss = torch.nn.functional.l1_loss(predicted_recon_error[recon_mask], gt_recon_error[recon_mask])
     gt_loss = torch.zeros_like(recon_loss)
     if v_is_img_involved:
-        gt_loss = torch.nn.functional.l1_loss(predicted_gt_error[gt_mask], scaled_gt_gt_error[gt_mask])
+        gt_loss = torch.nn.functional.l1_loss(predicted_gt_error[gt_mask], gt_gt_error[gt_mask])
 
     return recon_loss, gt_loss, gt_loss if v_is_img_involved else recon_loss
 

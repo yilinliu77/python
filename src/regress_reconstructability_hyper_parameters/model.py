@@ -11,7 +11,6 @@ import torch.nn.functional as F
 from torch.nn import TransformerEncoderLayer, init, MultiheadAttention, TransformerDecoderLayer
 from torch.nn.init import xavier_uniform_
 
-from fast_soft_sort.pytorch_ops import soft_rank
 from torchvision.models import resnet18
 
 import sys

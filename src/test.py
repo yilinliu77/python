@@ -1,12 +1,15 @@
+import math
 import os
 import shutil
 from functools import partial
 
 import numpy as np
+import numba as nb
 import matplotlib.pyplot as plt
 import pandas as pd
 
 import pymap3d as pm
+import time
 from plyfile import PlyData
 from pyproj import Transformer, CRS
 from tqdm import tqdm
@@ -90,32 +93,21 @@ def bak():
 #
 #     pass
 
-if __name__ == '__main__':
-    dirs = os.listdir(r"D:\Projects\Reconstructability\training_data\v4")
-    dirs.remove("raw")
-    info_matrix = np.zeros((len(dirs),8)).astype(np.object)
-    for id, dir in enumerate(tqdm(dirs)):
-        views = np.load(os.path.join(r"D:\Projects\Reconstructability\training_data\v4",dir,"training_data/views.npz"))["arr_0"].astype(np.float32)
-        points = np.load(os.path.join(r"D:\Projects\Reconstructability\training_data\v4",dir,"training_data/point_attribute.npz"))["arr_0"].astype(np.float32)
-        valid_error = points[points[:,5]==0,1]
-        # print(dir)
-        # print(views.shape[0])
-        # print(views.shape[1])
-        # print(views[:,1,0].sum())
-        # print(points.shape[0]-points[:,5].sum())
-        # print(valid_error.mean())
-        # print(np.percentile(valid_error,50))
-        # print(np.percentile(valid_error,90))
-        # print("====================================================")
-        # print("====================================================")
-        info_matrix[id,0] = dir
-        info_matrix[id,1] = views.shape[0]
-        info_matrix[id,2] = views.shape[1]
-        info_matrix[id,3] = views[:,1,0].sum()
-        info_matrix[id,4] = points.shape[0]-points[:,5].sum()
-        info_matrix[id,5] = valid_error.mean()
-        info_matrix[id,6] = np.percentile(valid_error,50)
-        info_matrix[id,7] = np.percentile(valid_error,90)
-        # break
+@nb.jit(nopython=False, parallel=True)
+def test_numba_func1():
+    for i in range(int(135e3)):
+        for j in range(int(100e2)):
+            math.log(math.sqrt(i) ** 2 + 5)
+            math.log(math.sqrt(j) ** 2 + 5)
+            math.log(math.sqrt(i) ** 2 + 5)
+            math.log(math.sqrt(j) ** 2 + 5)
+            math.log(math.sqrt(i) ** 2 + 5)
+            math.log(math.sqrt(j) ** 2 + 5)
 
-    np.savetxt("temp/info.csv",info_matrix, fmt="%s", delimiter=',')
+if __name__ == '__main__':
+    cur=time.time()
+    test_numba_func1()
+    print(time.time()-cur)
+    cur=time.time()
+    test_numba_func1()
+    print(time.time()-cur)

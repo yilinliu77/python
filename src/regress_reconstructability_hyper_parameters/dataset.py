@@ -187,7 +187,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.data_root = v_path
         self.views = np.load(os.path.join(v_path, "views.npz"))["arr_0"]
         # img_dataset_path = open(os.path.join(v_path, "../img_dataset_path.txt")).readline().strip()
-        img_dataset_path = os.path.join(v_path, "../../")
+        img_dataset_path = os.path.join(v_path, "../")
         assert os.path.exists(img_dataset_path)
         self.is_involve_img = self.params["model"]["involve_img"]
 
@@ -196,6 +196,14 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.scene_name = self.scene_name[-1] if self.scene_name[-1]!="" else self.scene_name[-2]
 
         self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npz"))["arr_0"]
+        self.view_mean_std = self.params["model"]["view_mean_std"]
+        self.error_mean_std = self.params["model"]["error_mean_std"]
+
+        valid_mask = self.views[:,:,0] == 1
+        self.views[valid_mask][:,1:6] = (self.views[valid_mask][:,1:6] - self.view_mean_std[:5]) / self.view_mean_std[5:]
+        self.views = (self.point_attribute[:,[1,2]]-self.error_mean_std[:2])/self.error_mean_std[2:]
+        self.point_attribute[:,[1,2]] = (self.point_attribute[:,[1,2]]-self.error_mean_std[:2])/self.error_mean_std[2:]
+
         assert self.point_attribute.shape[1] == 10
         self.view_paths = np.load(os.path.join(v_path, "view_paths.npz"), allow_pickle=True)[
             "arr_0"]

@@ -56,7 +56,8 @@ def compute_view_features(max_num_view, valid_views_flag, reconstructabilities,
         point_to_view_theta = math.acos(point_to_view_normalized[2])
         point_to_view_phi = math.atan2(point_to_view_normalized[1], point_to_view_normalized[0])
 
-        normal_normalized = error_list[real_index][5:8]
+        normal_normalized = error_list[real_index][6:9]
+        assert np.linalg.norm(normal_normalized)==1
         normal_theta = math.acos(normal_normalized[2])
         normal_phi = math.atan2(normal_normalized[1], normal_normalized[0])
 
@@ -151,7 +152,7 @@ def preprocess_data(v_root: str, v_error_point_cloud: str) -> (np.ndarray, np.nd
     thread_map(partial(compute_view_features,
                        max_num_view, valid_views_flag, reconstructabilities, views, views_pair,
                        point_features_path, point_feature_root_dir, error_list),
-               files, max_workers=10)
+               files, max_workers=32)
 
     # valid_flag = np.logical_and(np.array(valid_views_flag), error_list[:, 2] != 0)
     valid_flag = np.array(valid_views_flag)

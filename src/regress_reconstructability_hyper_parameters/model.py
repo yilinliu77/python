@@ -2073,6 +2073,8 @@ class Uncertainty_Modeling_wo_pointnet12(Uncertainty_Modeling_wo_pointnet8):
 
 # version 55; version 56
 # 128 dimension with dropout in transformer
+# version 83 with normalized_l2_loss: not good
+# version 85 with l2_loss: better than net14
 class Uncertainty_Modeling_wo_pointnet13(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):
         super(Uncertainty_Modeling_wo_pointnet13, self).__init__(hparams)
@@ -2131,7 +2133,8 @@ class Uncertainty_Modeling_wo_pointnet13(Uncertainty_Modeling_wo_pointnet8):
             self.features_to_recon_error.requires_grad_(False)
             self.magic_class_token.requires_grad_(False)
 
-
+# version 83 with normalized_l2_loss: not good
+# version 85 with l2_loss: better than net14
 class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):
         super(Uncertainty_Modeling_wo_pointnet14, self).__init__(hparams)
@@ -2193,6 +2196,8 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
             self.magic_class_token.requires_grad_(False)
 
 # version 70; add sigmoid; not useful
+# version 84 with normalized_l2_loss: better than version 83 and 85
+# version 85 with l2_loss: better than version 84
 class Uncertainty_Modeling_wo_pointnet15(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):
         super(Uncertainty_Modeling_wo_pointnet15, self).__init__(hparams)

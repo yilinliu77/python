@@ -252,6 +252,9 @@ class Regress_hyper_parameters(pl.LightningModule):
     def validation_epoch_end(self, outputs) -> None:
         if self.trainer.is_global_zero:
             if self.hparams["trainer"].gpu > 1:
+                print(len(outputs))
+                print(len(outputs[0]))
+                print(len(outputs[0][0]))
                 outputs_world = self.all_gather(outputs)
                 outputs = [torch.flatten(item,start_dim=0,end_dim=1) for item in outputs_world]
             # outputs = outputs.reshape()

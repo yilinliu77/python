@@ -249,8 +249,8 @@ class Regress_hyper_parameters(pl.LightningModule):
     def validation_epoch_end(self, outputs) -> None:
         outputs = self.all_gather(outputs)
         if self.trainer.is_global_zero:
-            prediction = torch.cat(list(map(lambda x: x[0], outputs))).cpu().numpy()
-            point_attribute = torch.cat(list(map(lambda x: x[1], outputs))).cpu().numpy()
+            prediction = torch.cat(list(map(lambda x: x[0], outputs)),dim=0).cpu().numpy()
+            point_attribute = torch.cat(list(map(lambda x: x[1], outputs)),dim=0).cpu().numpy()
             names = torch.cat(list(map(lambda x: x[2], outputs))).cpu().numpy()
 
             log_str = ""

@@ -118,6 +118,11 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.dataset_builder = getattr(dataset_module, self.hydra_conf["trainer"]["dataset_name"])
         self.model = f(hparams)
 
+        self.dataset_name_dict = {
+
+        }
+
+
     def forward(self, v_data):
         data = self.model(v_data)
         return data
@@ -152,6 +157,8 @@ class Regress_hyper_parameters(pl.LightningModule):
         for dataset_path in dataset_paths:
             datasets.append(self.dataset_builder(dataset_path, self.hydra_conf,
                                                  "validation" if use_part_dataset_to_validate else "testing", ))
+            self.dataset_name_dict[datasets[-1].scene_name] = len(self.dataset_name_dict)
+
         self.valid_dataset = torch.utils.data.ConcatDataset(datasets)
         return DataLoader(self.valid_dataset,
                           batch_size=self.batch_size,
@@ -167,11 +174,6 @@ class Regress_hyper_parameters(pl.LightningModule):
     def test_dataloader(self):
         dataset_paths = self.hydra_conf["trainer"]["test_dataset"].split("*")
         datasets = []
-
-        self.dataset_name_dict = {
-
-        }
-
         for dataset_path in dataset_paths:
             datasets.append(
                 self.dataset_builder(dataset_path, self.hydra_conf, "testing"))

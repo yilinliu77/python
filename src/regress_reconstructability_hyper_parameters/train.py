@@ -249,26 +249,10 @@ class Regress_hyper_parameters(pl.LightningModule):
                 ]
 
     def validation_epoch_end(self, outputs) -> None:
-        if self.trainer.global_rank == 0:
-            if self.hparams["trainer"].gpu > 1:
-                outputs_world = self.all_gather(outputs)
-                prediction=[]
-                point_attribute=[]
-                names=[]
-                for batch_item in tqdm(outputs_world):
-                    for item in batch_item[0]:
-                        prediction.append(item)
-                    for item in batch_item[1]:
-                        point_attribute.append(item)
-                    for item in batch_item[2]:
-                        names.append(item)
-                prediction=torch.cat(prediction).cpu().numpy()
-                point_attribute=torch.cat(point_attribute).cpu().numpy()
-                names=torch.cat(names).cpu().numpy()
-            else:
-                prediction = torch.cat(list(map(lambda x: x[0], outputs)),dim=0).cpu().numpy()
-                point_attribute = torch.cat(list(map(lambda x: x[1], outputs)),dim=0).cpu().numpy()
-                names = torch.cat(list(map(lambda x: x[2], outputs))).cpu().numpy()
+        if self.hparams["trainer"].gpu == 1:
+            prediction = torch.cat(list(map(lambda x: x[0], outputs)),dim=0).cpu().numpy()
+            point_attribute = torch.cat(list(map(lambda x: x[1], outputs)),dim=0).cpu().numpy()
+            names = torch.cat(list(map(lambda x: x[2], outputs))).cpu().numpy()
             log_str = ""
             mean_spearman = 0
             spearman_dict = {}

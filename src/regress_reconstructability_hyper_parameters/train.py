@@ -243,48 +243,28 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.log("Validation Gt Loss", gt_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=1)
 
-        return [results,
-                data["point_attribute"],
-                data["point_attribute"].new(list(map(lambda x: self.dataset_name_dict[x], data["scene_name"]))),
-                ]
+        return torch.cat([results[:,0],data["point_attribute"][:,0,1:3]],dim=1)
 
     def validation_epoch_end(self, outputs) -> None:
-        if self.hparams["trainer"].gpu == 1:
-            prediction = torch.cat(list(map(lambda x: x[0], outputs)),dim=0).cpu().numpy()
-            point_attribute = torch.cat(list(map(lambda x: x[1], outputs)),dim=0).cpu().numpy()
-            names = torch.cat(list(map(lambda x: x[2], outputs))).cpu().numpy()
-            log_str = ""
-            mean_spearman = 0
-            spearman_dict = {}
-            min_num_points = 9999999.
-            for scene_item in self.dataset_name_dict:
-                predicted_acc = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 0]
-                predicted_com = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 1]
-                gt_acc = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
-                gt_com = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
-                if not self.hparams["model"]["involve_img"]:
-                    spearmanr_factor = stats.spearmanr(
-                        predicted_acc[gt_acc != -1],
-                        gt_acc[gt_acc != -1]
-                    )[0]
+        result = torch.cat(outputs,dim=0)
+        predict_acc = result[:,0]
+        predict_com = result[:,1]
+        gt_acc = result[:,2]
+        gt_com = result[:,3]
+        if not self.hparams["model"]["involve_img"]:
+            spearmanr_factor = stats.spearmanr(
+                predict_acc[gt_acc != -1].cpu().numpy(),
+                gt_acc[gt_acc != -1].cpu().numpy()
+            )[0]
 
-                else:
-                    spearmanr_factor = stats.spearmanr(
-                        predicted_com[gt_com != -1],
-                        gt_com[gt_com != -1]
-                    )[0]
+        else:
+            spearmanr_factor = stats.spearmanr(
+                predict_com[gt_com != -1].cpu().numpy(),
+                gt_com[gt_com != -1].cpu().numpy()
+            )[0]
+        self.log("Validation mean spearman", spearmanr_factor,
+                 prog_bar=True, logger=True, on_step=False, on_epoch=True, batch_size=1)
 
-                spearman_dict[scene_item] = spearmanr_factor
-                mean_spearman += spearmanr_factor
-                log_str += "{:<35}: {:.2f}  \n".format(scene_item, spearmanr_factor)
-                min_num_points = min(min_num_points, predicted_acc[gt_acc != -1].shape[0])
-
-            mean_spearman = mean_spearman / len(self.dataset_name_dict)
-            self.log("Validation mean spearman", mean_spearman,
-                     prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
-            self.log("Validation min num points",torch.tensor(float(min_num_points)),
-                     prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
-            pass
         return
 
     def on_test_epoch_start(self) -> None:

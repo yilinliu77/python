@@ -295,6 +295,7 @@ class Regress_hyper_parameters(pl.LightningModule):
             # self.log("Validation min num points",min_num_points,
             #          prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
             # pass
+        return
 
     def on_test_epoch_start(self) -> None:
         self.data_mean_std = np.load(os.path.join(self.test_dataset.datasets[0].data_root, "data_centralize.npz"))[

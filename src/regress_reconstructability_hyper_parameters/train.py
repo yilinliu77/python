@@ -260,7 +260,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                 prediction = torch.cat(list(map(lambda x: x[0], outputs)),dim=0).cpu().numpy()
                 point_attribute = torch.cat(list(map(lambda x: x[1], outputs)),dim=0).cpu().numpy()
                 names = torch.cat(list(map(lambda x: x[2], outputs))).cpu().numpy()
-
+            print("1")
             log_str = ""
             mean_spearman = 0
             spearman_dict = {}
@@ -288,10 +288,10 @@ class Regress_hyper_parameters(pl.LightningModule):
                 min_num_points = min(min_num_points, predicted_acc[gt_acc != -1].shape[0])
 
             mean_spearman = mean_spearman / len(self.dataset_name_dict)
-            self.log("Validation mean spearman", mean_spearman,
-                     prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
-            self.log("Validation min num points",min_num_points,
-                     prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
+            # self.log("Validation mean spearman", mean_spearman,
+            #          prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
+            # self.log("Validation min num points",min_num_points,
+            #          prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
             pass
         return
 

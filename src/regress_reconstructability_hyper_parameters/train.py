@@ -253,41 +253,51 @@ class Regress_hyper_parameters(pl.LightningModule):
         if self.trainer.global_rank == 0:
             if self.hparams["trainer"].gpu > 1:
                 outputs_world = self.all_gather(outputs)
-                prediction = torch.flatten(torch.cat(list(map(lambda x: x[0], outputs_world)), dim=1),start_dim=0,end_dim=1).cpu().numpy()
-                point_attribute = torch.flatten(torch.cat(list(map(lambda x: x[1], outputs_world)), dim=1),start_dim=0,end_dim=1).cpu().numpy()
-                names = torch.flatten(torch.cat(list(map(lambda x: x[2], outputs_world)),dim=1),start_dim=0,end_dim=1).cpu().numpy()
+                prediction=[]
+                point_attribute=[]
+                names=[]
+                for batch_item in tqdm(outputs_world):
+                    for item in batch_item[0]:
+                        prediction.append(item.cpu().numpy())
+                    for item in batch_item[1]:
+                        point_attribute.append(item.cpu().numpy())
+                    for item in batch_item[2]:
+                        names.append(item.cpu().numpy())
+                prediction=np.concatenate(prediction)
+                point_attribute=np.concatenate(point_attribute)
+                names=np.concatenate(names)
             else:
                 prediction = torch.cat(list(map(lambda x: x[0], outputs)),dim=0).cpu().numpy()
                 point_attribute = torch.cat(list(map(lambda x: x[1], outputs)),dim=0).cpu().numpy()
                 names = torch.cat(list(map(lambda x: x[2], outputs))).cpu().numpy()
             print("1")
-            log_str = ""
-            mean_spearman = 0
-            spearman_dict = {}
-            min_num_points = 9999999
-            for scene_item in self.dataset_name_dict:
-                predicted_acc = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 0]
-                predicted_com = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 1]
-                gt_acc = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
-                gt_com = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
-                if not self.hparams["model"]["involve_img"]:
-                    spearmanr_factor = stats.spearmanr(
-                        predicted_acc[gt_acc != -1],
-                        gt_acc[gt_acc != -1]
-                    )[0]
-
-                else:
-                    spearmanr_factor = stats.spearmanr(
-                        predicted_com[gt_com != -1],
-                        gt_com[gt_com != -1]
-                    )[0]
-
-                spearman_dict[scene_item] = spearmanr_factor
-                mean_spearman += spearmanr_factor
-                log_str += "{:<35}: {:.2f}  \n".format(scene_item, spearmanr_factor)
-                min_num_points = min(min_num_points, predicted_acc[gt_acc != -1].shape[0])
-
-            mean_spearman = mean_spearman / len(self.dataset_name_dict)
+            # log_str = ""
+            # mean_spearman = 0
+            # spearman_dict = {}
+            # min_num_points = 9999999
+            # for scene_item in self.dataset_name_dict:
+            #     predicted_acc = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 0]
+            #     predicted_com = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 1]
+            #     gt_acc = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
+            #     gt_com = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
+            #     if not self.hparams["model"]["involve_img"]:
+            #         spearmanr_factor = stats.spearmanr(
+            #             predicted_acc[gt_acc != -1],
+            #             gt_acc[gt_acc != -1]
+            #         )[0]
+            #
+            #     else:
+            #         spearmanr_factor = stats.spearmanr(
+            #             predicted_com[gt_com != -1],
+            #             gt_com[gt_com != -1]
+            #         )[0]
+            #
+            #     spearman_dict[scene_item] = spearmanr_factor
+            #     mean_spearman += spearmanr_factor
+            #     log_str += "{:<35}: {:.2f}  \n".format(scene_item, spearmanr_factor)
+            #     min_num_points = min(min_num_points, predicted_acc[gt_acc != -1].shape[0])
+            #
+            # mean_spearman = mean_spearman / len(self.dataset_name_dict)
             # self.log("Validation mean spearman", mean_spearman,
             #          prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
             # self.log("Validation min num points",min_num_points,

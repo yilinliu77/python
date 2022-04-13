@@ -251,50 +251,48 @@ class Regress_hyper_parameters(pl.LightningModule):
 
     def validation_epoch_end(self, outputs) -> None:
         if self.trainer.global_rank == 0:
-            print(self.trainer.global_rank)
-            print(self.trainer.local_rank)
-            # if self.hparams["trainer"].gpu > 1:
-            #     outputs_world = self.all_gather(outputs)
-            #     prediction = torch.flatten(torch.cat(list(map(lambda x: x[0], outputs_world)), dim=1),start_dim=0,end_dim=1).cpu().numpy()
-            #     point_attribute = torch.flatten(torch.cat(list(map(lambda x: x[1], outputs_world)), dim=1),start_dim=0,end_dim=1).cpu().numpy()
-            #     names = torch.flatten(torch.cat(list(map(lambda x: x[2], outputs_world)),dim=1),start_dim=0,end_dim=1).cpu().numpy()
-            # else:
-            #     prediction = torch.cat(list(map(lambda x: x[0], outputs)),dim=0).cpu().numpy()
-            #     point_attribute = torch.cat(list(map(lambda x: x[1], outputs)),dim=0).cpu().numpy()
-            #     names = torch.cat(list(map(lambda x: x[2], outputs))).cpu().numpy()
-            #
-            # log_str = ""
-            # mean_spearman = 0
-            # spearman_dict = {}
-            # min_num_points = 9999999
-            # for scene_item in self.dataset_name_dict:
-            #     predicted_acc = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 0]
-            #     predicted_com = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 1]
-            #     gt_acc = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
-            #     gt_com = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
-            #     if not self.hparams["model"]["involve_img"]:
-            #         spearmanr_factor = stats.spearmanr(
-            #             predicted_acc[gt_acc != -1],
-            #             gt_acc[gt_acc != -1]
-            #         )[0]
-            #
-            #     else:
-            #         spearmanr_factor = stats.spearmanr(
-            #             predicted_com[gt_com != -1],
-            #             gt_com[gt_com != -1]
-            #         )[0]
-            #
-            #     spearman_dict[scene_item] = spearmanr_factor
-            #     mean_spearman += spearmanr_factor
-            #     log_str += "{:<35}: {:.2f}  \n".format(scene_item, spearmanr_factor)
-            #     min_num_points = min(min_num_points, predicted_acc[gt_acc != -1].shape[0])
-            #
-            # mean_spearman = mean_spearman / len(self.dataset_name_dict)
-            # self.log("Validation mean spearman", mean_spearman,
-            #          prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
-            # self.log("Validation min num points",min_num_points,
-            #          prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
-            # pass
+            if self.hparams["trainer"].gpu > 1:
+                outputs_world = self.all_gather(outputs)
+                prediction = torch.flatten(torch.cat(list(map(lambda x: x[0], outputs_world)), dim=1),start_dim=0,end_dim=1).cpu().numpy()
+                point_attribute = torch.flatten(torch.cat(list(map(lambda x: x[1], outputs_world)), dim=1),start_dim=0,end_dim=1).cpu().numpy()
+                names = torch.flatten(torch.cat(list(map(lambda x: x[2], outputs_world)),dim=1),start_dim=0,end_dim=1).cpu().numpy()
+            else:
+                prediction = torch.cat(list(map(lambda x: x[0], outputs)),dim=0).cpu().numpy()
+                point_attribute = torch.cat(list(map(lambda x: x[1], outputs)),dim=0).cpu().numpy()
+                names = torch.cat(list(map(lambda x: x[2], outputs))).cpu().numpy()
+
+            log_str = ""
+            mean_spearman = 0
+            spearman_dict = {}
+            min_num_points = 9999999
+            for scene_item in self.dataset_name_dict:
+                predicted_acc = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 0]
+                predicted_com = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 1]
+                gt_acc = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
+                gt_com = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
+                if not self.hparams["model"]["involve_img"]:
+                    spearmanr_factor = stats.spearmanr(
+                        predicted_acc[gt_acc != -1],
+                        gt_acc[gt_acc != -1]
+                    )[0]
+
+                else:
+                    spearmanr_factor = stats.spearmanr(
+                        predicted_com[gt_com != -1],
+                        gt_com[gt_com != -1]
+                    )[0]
+
+                spearman_dict[scene_item] = spearmanr_factor
+                mean_spearman += spearmanr_factor
+                log_str += "{:<35}: {:.2f}  \n".format(scene_item, spearmanr_factor)
+                min_num_points = min(min_num_points, predicted_acc[gt_acc != -1].shape[0])
+
+            mean_spearman = mean_spearman / len(self.dataset_name_dict)
+            self.log("Validation mean spearman", mean_spearman,
+                     prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
+            self.log("Validation min num points",min_num_points,
+                     prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
+            pass
         return
 
     def on_test_epoch_start(self) -> None:
@@ -452,7 +450,7 @@ def main(v_cfg: DictConfig):
     )
 
     trainer = Trainer(gpus=v_cfg["trainer"].gpu, enable_model_summary=False,
-                      strategy=DDPStrategy(find_unused_parameters=False) if v_cfg["trainer"].gpu > 1 else None,
+                      strategy=DDPStrategy() if v_cfg["trainer"].gpu > 1 else None,
                       accelerator="gpu" if v_cfg["trainer"].gpu > 0 else "cpu",
                       # early_stop_callback=early_stop_callback,
                       callbacks=[model_check_point],

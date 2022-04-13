@@ -252,7 +252,7 @@ class Regress_hyper_parameters(pl.LightningModule):
             # outputs = outputs.reshape()
             prediction = torch.cat(list(map(lambda x: x[0], outputs)),dim=0).cpu().numpy()
             point_attribute = torch.cat(list(map(lambda x: x[1], outputs)),dim=0).cpu().numpy()
-            names = torch.cat(list(map(lambda x: x[2], outputs))).cpu().numpy()
+            names = np.concatenate(list(map(lambda x: x[2], outputs)))
 
             log_str = ""
             mean_spearman = 0

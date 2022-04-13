@@ -61,6 +61,7 @@ def write_views_to_txt_file(v_args):
                 pitch / math.pi * 180, 0, yaw / math.pi * 180,
             ))
 
+
 # v_data: Predict recon error, Predict gt error, smith 18 recon, avg recon error, avg gt error, inconsistency (0 is consistent), Point index, x, y, z
 def output_test_with_pc_and_views(
         v_predict_acc,
@@ -74,7 +75,7 @@ def output_test_with_pc_and_views(
 ):
     # Write views
     vertexes = np.zeros((v_num_total_points, 3), dtype=np.float32)  # x, y, z
-    vertexes[v_points[:,3].astype(np.int32)] = v_points[:,:3]
+    vertexes[v_points[:, 3].astype(np.int32)] = v_points[:, :3]
 
     vertexes_describer = PlyElement.describe(np.array(
         [(item[0], item[1], item[2], item[3], item[4], item[5], item[6], item[7]) for item in
@@ -94,9 +95,31 @@ def output_test_with_pc_and_views(
     PlyData([vertexes_describer]).write('temp/test_scene_output/whole_point.ply')
 
     # thread_map(write_views_to_txt_file, zip(v_views, v_points[:,3]), max_workers=16)
-    process_map(write_views_to_txt_file, zip(v_views, v_points[:,3]), max_workers=8, chunksize = 4096)
+    process_map(write_views_to_txt_file, zip(v_views, v_points[:, 3]), max_workers=8, chunksize=4096)
 
     return
+
+
+def _get_ranks(x: torch.Tensor) -> torch.Tensor:
+    tmp = x.argsort()
+    ranks = torch.zeros_like(tmp)
+    ranks[tmp] = torch.arange(len(x),device=x.device)
+    return ranks
+
+
+def spearman_correlation(x: torch.Tensor, y: torch.Tensor):
+    """Compute correlation between 2 1-D vectors
+    Args:
+        x: Shape (N, )
+        y: Shape (N, )
+    """
+    x_rank = _get_ranks(x)
+    y_rank = _get_ranks(y)
+
+    n = x.size(0)
+    upper = 6 * torch.sum((x_rank - y_rank).pow(2))
+    down = n * (n ** 2 - 1.0)
+    return 1.0 - (upper / down)
 
 
 class Regress_hyper_parameters(pl.LightningModule):
@@ -121,7 +144,6 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.dataset_name_dict = {
 
         }
-
 
     def forward(self, v_data):
         data = self.model(v_data)
@@ -209,9 +231,12 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
-        self.log("Training Recon Loss", recon_loss.detach(), prog_bar=False, logger=True, on_step=False, on_epoch=True, batch_size=1)
-        self.log("Training Gt Loss", gt_loss.detach(), prog_bar=True, logger=True, on_step=False, on_epoch=True, batch_size=1)
-        self.log("Training Loss", total_loss.detach(), prog_bar=True, logger=True, on_step=False, on_epoch=True, batch_size=1)
+        self.log("Training Recon Loss", recon_loss.detach(), prog_bar=False, logger=True, on_step=False, on_epoch=True,
+                 batch_size=1)
+        self.log("Training Gt Loss", gt_loss.detach(), prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                 batch_size=1)
+        self.log("Training Loss", total_loss.detach(), prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                 batch_size=1)
 
         if torch.isnan(total_loss).any() or torch.isinf(total_loss).any():
             pass
@@ -243,25 +268,24 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.log("Validation Gt Loss", gt_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=1)
 
-        return torch.cat([results[:,0],data["point_attribute"][:,0,1:3]],dim=1)
+        return torch.cat([results[:, 0], data["point_attribute"][:, 0, 1:3]], dim=1)
 
     def validation_epoch_end(self, outputs) -> None:
-        result = torch.cat(outputs,dim=0)
-        predict_acc = result[:,0]
-        predict_com = result[:,1]
-        gt_acc = result[:,2]
-        gt_com = result[:,3]
+        result = torch.cat(outputs, dim=0)
+        predict_acc = result[:, 0]
+        predict_com = result[:, 1]
+        gt_acc = result[:, 2]
+        gt_com = result[:, 3]
         if not self.hparams["model"]["involve_img"]:
-            spearmanr_factor = stats.spearmanr(
-                predict_acc[gt_acc != -1].cpu().numpy(),
-                gt_acc[gt_acc != -1].cpu().numpy()
-            )[0]
+            spearmanr_factor = spearman_correlation(
+                predict_acc[gt_acc != -1],
+                gt_acc[gt_acc != -1])
 
         else:
-            spearmanr_factor = stats.spearmanr(
-                predict_com[gt_com != -1].cpu().numpy(),
-                gt_com[gt_com != -1].cpu().numpy()
-            )[0]
+            spearmanr_factor = spearman_correlation(
+                predict_com[gt_com != -1],
+                gt_com[gt_com != -1])
+
         self.log("Validation mean spearman", spearmanr_factor,
                  prog_bar=True, logger=True, on_step=False, on_epoch=True, batch_size=1)
 
@@ -288,14 +312,17 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         view_mean_std = np.array(self.hydra_conf["model"]["view_mean_std"])
 
-        theta = (data["views"][:, :, :, 1].cpu().numpy() + view_mean_std[0]) * view_mean_std[5] + normal_theta[:, :, np.newaxis]
-        phi = (data["views"][:, :, :, 2].cpu().numpy() + view_mean_std[1]) * view_mean_std[6] + normal_phi[:, :, np.newaxis]
+        theta = (data["views"][:, :, :, 1].cpu().numpy() + view_mean_std[0]) * view_mean_std[5] + normal_theta[:, :,
+                                                                                                  np.newaxis]
+        phi = (data["views"][:, :, :, 2].cpu().numpy() + view_mean_std[1]) * view_mean_std[6] + normal_phi[:, :,
+                                                                                                np.newaxis]
 
         dz = np.cos(theta)
         dx = np.sin(theta) * np.cos(phi)
         dy = np.sin(theta) * np.sin(phi)
 
-        view_dir = np.stack([dx, dy, dz], axis=3) * (data["views"][:, :, :, 3:4].cpu().numpy() + view_mean_std[3]) * view_mean_std[7] * 60
+        view_dir = np.stack([dx, dy, dz], axis=3) * (data["views"][:, :, :, 3:4].cpu().numpy() + view_mean_std[3]) * \
+                   view_mean_std[7] * 60
         centre_point_index = data["points"][:, :, 3].cpu().numpy()
         points = data["points"][:, :, :3].cpu().numpy()
         points = points + self.test_dataset.datasets[0].original_points[
@@ -318,7 +345,8 @@ class Regress_hyper_parameters(pl.LightningModule):
     def test_epoch_end(self, outputs) -> None:
         error_mean_std = np.array(self.hydra_conf["model"]["error_mean_std"])
 
-        prediction = (torch.cat(list(map(lambda x: x[0], outputs))).cpu().numpy() + error_mean_std[:2])*error_mean_std[2:]
+        prediction = (torch.cat(list(map(lambda x: x[0], outputs))).cpu().numpy() + error_mean_std[
+                                                                                    :2]) * error_mean_std[2:]
         point_attribute = torch.cat(list(map(lambda x: x[1], outputs))).cpu().numpy()
         names = np.concatenate(list(map(lambda x: x[2], outputs)))
         if len(self.dataset_name_dict) == 1:
@@ -423,7 +451,7 @@ def main(v_cfg: DictConfig):
 
     trainer = Trainer(gpus=v_cfg["trainer"].gpu, enable_model_summary=False,
                       # strategy=DDPStrategy() if v_cfg["trainer"].gpu > 1 else None,
-                      strategy="dp" if v_cfg["trainer"].gpu > 1 else None,
+                      strategy="ddp" if v_cfg["trainer"].gpu > 1 else None,
                       # early_stop_callback=early_stop_callback,
                       callbacks=[model_check_point],
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,

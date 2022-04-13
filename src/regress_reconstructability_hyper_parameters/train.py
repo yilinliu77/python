@@ -49,7 +49,7 @@ def write_views_to_txt_file(v_args):
     # Write views
     with open(filename, "w") as f:
         for item in views:
-            if item[6] == 0:
+            if item[6] <= 1e-3:
                 break
             item[3:6] /= np.linalg.norm(item[3:6])
 
@@ -103,7 +103,7 @@ def output_test_with_pc_and_views(
 def _get_ranks(x: torch.Tensor) -> torch.Tensor:
     tmp = x.argsort()
     ranks = torch.zeros_like(tmp)
-    ranks[tmp] = torch.arange(len(x),device=x.device)
+    ranks[tmp] = torch.arange(len(x), device=x.device)
     return ranks
 
 
@@ -312,42 +312,43 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         view_mean_std = np.array(self.hydra_conf["model"]["view_mean_std"])
 
-        theta = (data["views"][:, :, :, 1].cpu().numpy() + view_mean_std[0]) * view_mean_std[5] + normal_theta[:, :,
-                                                                                                  np.newaxis]
-        phi = (data["views"][:, :, :, 2].cpu().numpy() + view_mean_std[1]) * view_mean_std[6] + normal_phi[:, :,
-                                                                                                np.newaxis]
+        views = data["views"][:,0].cpu().numpy()
+        view_mask = views[:, :, 0] > 0
+        views[view_mask,1] = views[view_mask, 1] * view_mean_std[5] + view_mean_std[0]
+        views[view_mask,2] = views[view_mask, 2] * view_mean_std[6] + view_mean_std[1]
+        views[:, :, 1] = views[:, :, 1] + normal_theta
+        views[:, :, 2] = views[:, :, 2] + normal_phi
 
-        dz = np.cos(theta)
-        dx = np.sin(theta) * np.cos(phi)
-        dy = np.sin(theta) * np.sin(phi)
+        dz = np.cos(views[:, :, 1])
+        dx = np.sin(views[:, :, 1]) * np.cos(views[:, :, 2])
+        dy = np.sin(views[:, :, 1]) * np.sin(views[:, :, 2])
 
-        view_dir = np.stack([dx, dy, dz], axis=3) * (data["views"][:, :, :, 3:4].cpu().numpy() + view_mean_std[3]) * \
-                   view_mean_std[7] * 60
+        view_dir = np.stack([dx, dy, dz], axis=2) * (data["views"][:, 0, :, 3:4].cpu().numpy() * view_mean_std[7] + view_mean_std[2]) * 60
         centre_point_index = data["points"][:, :, 3].cpu().numpy()
         points = data["points"][:, :, :3].cpu().numpy()
         points = points + self.test_dataset.datasets[0].original_points[
             centre_point_index.reshape(-1).astype(np.int32)].reshape(points.shape)
         points = points * self.data_mean_std[3] + self.data_mean_std[:3]
-        views = points[:, :, np.newaxis] + view_dir
-        views = np.concatenate([views, -view_dir, data["views"][:, :, :, 0:1].cpu().numpy()], axis=-1)
+        views = points + view_dir
+        views = np.concatenate([views, -view_dir, data["views"][:, 0, :, 0:1].cpu().numpy()], axis=-1)
 
-        self.log("Test Loss", total_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
-        self.log("Test Recon Loss", recon_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
-        self.log("Test Gt Loss", gt_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True)
+        self.log("Test Loss", total_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True,batch_size=1)
+        self.log("Test Recon Loss", recon_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True,batch_size=1)
+        self.log("Test Gt Loss", gt_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True,batch_size=1)
 
         return [results,
                 data["point_attribute"],
                 np.array(list(map(lambda x: self.dataset_name_dict[x], data["scene_name"]))),
-                views[:, 0],  # num_points, num_views, 7
+                views,  # num_points, num_views, 7
                 np.concatenate([points, data["points"][:, :, 3:4].cpu().numpy()], axis=2)[:, 0, :]  # (x,y,z,idx)
                 ]
 
     def test_epoch_end(self, outputs) -> None:
         error_mean_std = np.array(self.hydra_conf["model"]["error_mean_std"])
 
-        prediction = (torch.cat(list(map(lambda x: x[0], outputs))).cpu().numpy() + error_mean_std[
-                                                                                    :2]) * error_mean_std[2:]
+        prediction = torch.cat(list(map(lambda x: x[0], outputs))).cpu().numpy() * error_mean_std[2:] + error_mean_std[:2]
         point_attribute = torch.cat(list(map(lambda x: x[1], outputs))).cpu().numpy()
+        point_attribute[:,0,1:3] = point_attribute[:,0,1:3] * error_mean_std[2:] + error_mean_std[:2]
         names = np.concatenate(list(map(lambda x: x[2], outputs)))
         if len(self.dataset_name_dict) == 1:
             views = np.concatenate(list(map(lambda x: x[3], outputs)))
@@ -361,8 +362,8 @@ class Regress_hyper_parameters(pl.LightningModule):
             predicted_acc = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 0]
             predicted_com = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 1]
             smith_error = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 0]
-            gt_acc = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 0]
-            gt_com = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
+            gt_acc = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
+            gt_com = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 2]
             if not self.hparams["model"]["involve_img"]:
                 spearmanr_factor = stats.spearmanr(
                     predicted_acc[gt_acc != -1],
@@ -404,9 +405,9 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         mean_spearman = mean_spearman / len(self.dataset_name_dict)
         mean_smith_spearmanr_factor = mean_smith_spearmanr_factor / len(self.dataset_name_dict)
-        self.log("Test mean spearman", mean_spearman, prog_bar=True, logger=True, on_step=False, on_epoch=True)
+        self.log("Test mean spearman", mean_spearman, prog_bar=True, logger=True, on_step=False, on_epoch=True,batch_size=1)
         self.log("Test smith mean spearman", mean_smith_spearmanr_factor, prog_bar=True, logger=True, on_step=False,
-                 on_epoch=True)
+                 on_epoch=True,batch_size=1)
         print(log_str)
 
         pass

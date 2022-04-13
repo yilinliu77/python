@@ -13,6 +13,7 @@ from argparse import ArgumentParser
 import torch
 import torch.distributed as dist
 import pytorch_lightning as pl
+from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from torch.optim import Adam
 from torch.utils.data import DataLoader
@@ -204,13 +205,14 @@ class Regress_hyper_parameters(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         data = batch
+        batch_size = data["point_attribute"]
         results, weights = self.forward(data)
 
         recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
-        self.log("Training Recon Loss", recon_loss.detach(), prog_bar=False, logger=True, on_step=False, on_epoch=True)
-        self.log("Training Gt Loss", gt_loss.detach(), prog_bar=True, logger=True, on_step=False, on_epoch=True)
-        self.log("Training Loss", total_loss.detach(), prog_bar=True, logger=True, on_step=False, on_epoch=True)
+        self.log("Training Recon Loss", recon_loss.detach(), prog_bar=False, logger=True, on_step=False, on_epoch=True, batch_size=batch_size)
+        self.log("Training Gt Loss", gt_loss.detach(), prog_bar=True, logger=True, on_step=False, on_epoch=True, batch_size=batch_size)
+        self.log("Training Loss", total_loss.detach(), prog_bar=True, logger=True, on_step=False, on_epoch=True, batch_size=batch_size)
 
         if torch.isnan(total_loss).any() or torch.isinf(total_loss).any():
             pass
@@ -230,29 +232,32 @@ class Regress_hyper_parameters(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         data = batch
+        batch_size = data["point_attribute"]
         results, weights = self.forward(data)
 
         recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
         self.log("Validation Loss", total_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True)
+                 sync_dist=True, batch_size=batch_size)
         self.log("Validation Recon Loss", recon_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True)
+                 sync_dist=True, batch_size=batch_size)
         self.log("Validation Gt Loss", gt_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True)
+                 sync_dist=True, batch_size=batch_size)
 
         return [results,
                 data["point_attribute"],
-                np.array(list(map(lambda x: self.dataset_name_dict[x], data["scene_name"]))),
+                data["point_attribute"].new(list(map(lambda x: self.dataset_name_dict[x], data["scene_name"]))),
                 ]
 
     def validation_epoch_end(self, outputs) -> None:
-        # outputs = self.all_gather(outputs)
         if self.trainer.is_global_zero:
+            if self.trainer.world_size!=1:
+                outputs_world = self.all_gather(outputs)
+                outputs = [item for outputs_1_gpu in outputs_world for item in outputs_1_gpu]
             # outputs = outputs.reshape()
             prediction = torch.cat(list(map(lambda x: x[0], outputs)),dim=0).cpu().numpy()
             point_attribute = torch.cat(list(map(lambda x: x[1], outputs)),dim=0).cpu().numpy()
-            names = np.concatenate(list(map(lambda x: x[2], outputs)))
+            names = torch.cat(list(map(lambda x: x[2], outputs)))
 
             log_str = ""
             mean_spearman = 0
@@ -282,9 +287,9 @@ class Regress_hyper_parameters(pl.LightningModule):
 
             mean_spearman = mean_spearman / len(self.dataset_name_dict)
             self.log("Validation mean spearman", mean_spearman,
-                     prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True)
+                     prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
             self.log("Validation min num points",min_num_points,
-                     prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True)
+                     prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
             pass
 
     def on_test_epoch_start(self) -> None:
@@ -442,7 +447,8 @@ def main(v_cfg: DictConfig):
     )
 
     trainer = Trainer(gpus=v_cfg["trainer"].gpu, enable_model_summary=False,
-                      accelerator="ddp" if v_cfg["trainer"].gpu > 1 else None,
+                      strategy=DDPStrategy(find_unused_parameters=False) if v_cfg["trainer"].gpu > 1 else None,
+                      accelerator="gpu" if v_cfg["trainer"].gpu > 0 else "cpu",
                       # early_stop_callback=early_stop_callback,
                       callbacks=[model_check_point],
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,
@@ -470,4 +476,6 @@ def main(v_cfg: DictConfig):
 
 
 if __name__ == '__main__':
+    # import os
+    # os.environ["PL_TORCH_DISTRIBUTED_BACKEND"] = "gloo"
     main()

@@ -253,7 +253,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         if self.trainer.is_global_zero:
             if self.hparams["trainer"].gpu > 1:
                 outputs_world = self.all_gather(outputs)
-                outputs = [item for outputs_1_gpu in outputs_world for item in outputs_1_gpu]
+                outputs = [torch.flatten(item,start_dim=0,end_dim=1) for item in outputs_world]
             # outputs = outputs.reshape()
             prediction = torch.cat(list(map(lambda x: x[0], outputs)),dim=0).cpu().numpy()
             point_attribute = torch.cat(list(map(lambda x: x[1], outputs)),dim=0).cpu().numpy()

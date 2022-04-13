@@ -252,30 +252,14 @@ class Regress_hyper_parameters(pl.LightningModule):
     def validation_epoch_end(self, outputs) -> None:
         if self.trainer.is_global_zero:
             if self.hparams["trainer"].gpu > 1:
-                print(type(outputs))
-                print(len(outputs))
-                print(type(outputs[0]))
-                print(len(outputs[0]))
-                print(type(outputs[0][0]))
-                print(len(outputs[0][0]))
                 outputs_world = self.all_gather(outputs)
-                print(type(outputs_world))
-                print(len(outputs_world))
-                print(type(outputs_world[0]))
-                print(len(outputs_world[0]))
-                print(type(outputs_world[0][0]))
-                print(len(outputs_world[0][0]))
-                outputs = [item for outputs_local in outputs_world for item in outputs_local]
-                print(type(outputs))
-                print(len(outputs))
-                print(type(outputs[0]))
-                print(len(outputs[0]))
-                print(type(outputs[0][0]))
-                print(len(outputs[0][0]))
-            # outputs = outputs.reshape()
-            prediction = torch.cat(list(map(lambda x: x[0], outputs)),dim=0).cpu().numpy()
-            point_attribute = torch.cat(list(map(lambda x: x[1], outputs)),dim=0).cpu().numpy()
-            names = torch.cat(list(map(lambda x: x[2], outputs)))
+                prediction = torch.flatten(torch.cat(list(map(lambda x: x[0], outputs_world)), dim=1),start_dim=0,end_dim=1).cpu().numpy()
+                point_attribute = torch.flatten(torch.cat(list(map(lambda x: x[1], outputs_world)), dim=1),start_dim=0,end_dim=1).cpu().numpy()
+                names = torch.flatten(torch.cat(list(map(lambda x: x[2], outputs_world)),dim=1),start_dim=0,end_dim=1)
+            else:
+                prediction = torch.cat(list(map(lambda x: x[0], outputs)),dim=0).cpu().numpy()
+                point_attribute = torch.cat(list(map(lambda x: x[1], outputs)),dim=0).cpu().numpy()
+                names = torch.cat(list(map(lambda x: x[2], outputs)))
 
             log_str = ""
             mean_spearman = 0

@@ -250,7 +250,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                 ]
 
     def validation_epoch_end(self, outputs) -> None:
-        if self.trainer.is_global_zero:
+        if self.trainer.global_rank == 0:
             if self.hparams["trainer"].gpu > 1:
                 outputs_world = self.all_gather(outputs)
                 prediction = torch.flatten(torch.cat(list(map(lambda x: x[0], outputs_world)), dim=1),start_dim=0,end_dim=1).cpu().numpy()

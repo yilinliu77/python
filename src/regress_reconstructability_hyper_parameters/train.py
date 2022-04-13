@@ -251,6 +251,7 @@ class Regress_hyper_parameters(pl.LightningModule):
 
     def validation_epoch_end(self, outputs) -> None:
         if self.trainer.global_rank == 0:
+            print("0")
             if self.hparams["trainer"].gpu > 1:
                 outputs_world = self.all_gather(outputs)
                 prediction=[]

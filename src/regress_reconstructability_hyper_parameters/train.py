@@ -251,7 +251,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         if self.trainer.is_global_zero:
             prediction = torch.cat(list(map(lambda x: x[0], outputs))).cpu().numpy()
             point_attribute = torch.cat(list(map(lambda x: x[1], outputs))).cpu().numpy()
-            names = np.concatenate(list(map(lambda x: x[2], outputs)))
+            names = torch.cat(list(map(lambda x: x[2], outputs))).cpu().numpy()
 
             log_str = ""
             mean_spearman = 0

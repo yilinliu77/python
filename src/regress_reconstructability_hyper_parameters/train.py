@@ -259,6 +259,12 @@ class Regress_hyper_parameters(pl.LightningModule):
                 print(type(outputs[0][0]))
                 print(len(outputs[0][0]))
                 outputs_world = self.all_gather(outputs)
+                print(type(outputs_world))
+                print(len(outputs_world))
+                print(type(outputs_world[0]))
+                print(len(outputs_world[0]))
+                print(type(outputs_world[0][0]))
+                print(len(outputs_world[0][0]))
                 outputs = [item for outputs_local in outputs_world for item in outputs_local]
                 print(type(outputs))
                 print(len(outputs))

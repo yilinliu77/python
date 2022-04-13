@@ -209,9 +209,9 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
-        self.log("Training Recon Loss", recon_loss.detach(), prog_bar=False, logger=True, on_step=False, on_epoch=True, batch_size=batch_size)
-        self.log("Training Gt Loss", gt_loss.detach(), prog_bar=True, logger=True, on_step=False, on_epoch=True, batch_size=batch_size)
-        self.log("Training Loss", total_loss.detach(), prog_bar=True, logger=True, on_step=False, on_epoch=True, batch_size=batch_size)
+        self.log("Training Recon Loss", recon_loss.detach(), prog_bar=False, logger=True, on_step=False, on_epoch=True, batch_size=1)
+        self.log("Training Gt Loss", gt_loss.detach(), prog_bar=True, logger=True, on_step=False, on_epoch=True, batch_size=1)
+        self.log("Training Loss", total_loss.detach(), prog_bar=True, logger=True, on_step=False, on_epoch=True, batch_size=1)
 
         if torch.isnan(total_loss).any() or torch.isinf(total_loss).any():
             pass
@@ -237,11 +237,11 @@ class Regress_hyper_parameters(pl.LightningModule):
         recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)
 
         self.log("Validation Loss", total_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True, batch_size=batch_size)
+                 sync_dist=True, batch_size=1)
         self.log("Validation Recon Loss", recon_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True, batch_size=batch_size)
+                 sync_dist=True, batch_size=1)
         self.log("Validation Gt Loss", gt_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True, batch_size=batch_size)
+                 sync_dist=True, batch_size=1)
 
         return [results,
                 data["point_attribute"],
@@ -256,7 +256,7 @@ class Regress_hyper_parameters(pl.LightningModule):
             log_str = ""
             mean_spearman = 0
             spearman_dict = {}
-            min_num_points = 9999999
+            min_num_points = 9999999.
             for scene_item in self.dataset_name_dict:
                 predicted_acc = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 0]
                 predicted_com = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 1]
@@ -282,7 +282,7 @@ class Regress_hyper_parameters(pl.LightningModule):
             mean_spearman = mean_spearman / len(self.dataset_name_dict)
             self.log("Validation mean spearman", mean_spearman,
                      prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
-            self.log("Validation min num points",min_num_points,
+            self.log("Validation min num points",torch.tensor(float(min_num_points)),
                      prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
             pass
         return

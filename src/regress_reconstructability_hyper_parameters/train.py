@@ -13,7 +13,6 @@ from argparse import ArgumentParser
 import torch
 import torch.distributed as dist
 import pytorch_lightning as pl
-from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from torch.optim import Adam
 from torch.utils.data import DataLoader
@@ -251,7 +250,6 @@ class Regress_hyper_parameters(pl.LightningModule):
 
     def validation_epoch_end(self, outputs) -> None:
         if self.trainer.global_rank == 0:
-            print("0")
             if self.hparams["trainer"].gpu > 1:
                 outputs_world = self.all_gather(outputs)
                 prediction=[]
@@ -259,50 +257,49 @@ class Regress_hyper_parameters(pl.LightningModule):
                 names=[]
                 for batch_item in tqdm(outputs_world):
                     for item in batch_item[0]:
-                        prediction.append(item.cpu().numpy())
+                        prediction.append(item)
                     for item in batch_item[1]:
-                        point_attribute.append(item.cpu().numpy())
+                        point_attribute.append(item)
                     for item in batch_item[2]:
-                        names.append(item.cpu().numpy())
-                prediction=np.concatenate(prediction)
-                point_attribute=np.concatenate(point_attribute)
-                names=np.concatenate(names)
+                        names.append(item)
+                prediction=torch.cat(prediction).cpu().numpy()
+                point_attribute=torch.cat(point_attribute).cpu().numpy()
+                names=torch.cat(names).cpu().numpy()
             else:
                 prediction = torch.cat(list(map(lambda x: x[0], outputs)),dim=0).cpu().numpy()
                 point_attribute = torch.cat(list(map(lambda x: x[1], outputs)),dim=0).cpu().numpy()
                 names = torch.cat(list(map(lambda x: x[2], outputs))).cpu().numpy()
-            print("1")
-            # log_str = ""
-            # mean_spearman = 0
-            # spearman_dict = {}
-            # min_num_points = 9999999
-            # for scene_item in self.dataset_name_dict:
-            #     predicted_acc = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 0]
-            #     predicted_com = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 1]
-            #     gt_acc = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
-            #     gt_com = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
-            #     if not self.hparams["model"]["involve_img"]:
-            #         spearmanr_factor = stats.spearmanr(
-            #             predicted_acc[gt_acc != -1],
-            #             gt_acc[gt_acc != -1]
-            #         )[0]
-            #
-            #     else:
-            #         spearmanr_factor = stats.spearmanr(
-            #             predicted_com[gt_com != -1],
-            #             gt_com[gt_com != -1]
-            #         )[0]
-            #
-            #     spearman_dict[scene_item] = spearmanr_factor
-            #     mean_spearman += spearmanr_factor
-            #     log_str += "{:<35}: {:.2f}  \n".format(scene_item, spearmanr_factor)
-            #     min_num_points = min(min_num_points, predicted_acc[gt_acc != -1].shape[0])
-            #
-            # mean_spearman = mean_spearman / len(self.dataset_name_dict)
-            # self.log("Validation mean spearman", mean_spearman,
-            #          prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
-            # self.log("Validation min num points",min_num_points,
-            #          prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
+            log_str = ""
+            mean_spearman = 0
+            spearman_dict = {}
+            min_num_points = 9999999
+            for scene_item in self.dataset_name_dict:
+                predicted_acc = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 0]
+                predicted_com = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 1]
+                gt_acc = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
+                gt_com = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
+                if not self.hparams["model"]["involve_img"]:
+                    spearmanr_factor = stats.spearmanr(
+                        predicted_acc[gt_acc != -1],
+                        gt_acc[gt_acc != -1]
+                    )[0]
+
+                else:
+                    spearmanr_factor = stats.spearmanr(
+                        predicted_com[gt_com != -1],
+                        gt_com[gt_com != -1]
+                    )[0]
+
+                spearman_dict[scene_item] = spearmanr_factor
+                mean_spearman += spearmanr_factor
+                log_str += "{:<35}: {:.2f}  \n".format(scene_item, spearmanr_factor)
+                min_num_points = min(min_num_points, predicted_acc[gt_acc != -1].shape[0])
+
+            mean_spearman = mean_spearman / len(self.dataset_name_dict)
+            self.log("Validation mean spearman", mean_spearman,
+                     prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
+            self.log("Validation min num points",min_num_points,
+                     prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True, batch_size=1)
             pass
         return
 
@@ -461,8 +458,8 @@ def main(v_cfg: DictConfig):
     )
 
     trainer = Trainer(gpus=v_cfg["trainer"].gpu, enable_model_summary=False,
-                      strategy=DDPStrategy() if v_cfg["trainer"].gpu > 1 else None,
-                      accelerator="gpu" if v_cfg["trainer"].gpu > 0 else "cpu",
+                      # strategy=DDPStrategy() if v_cfg["trainer"].gpu > 1 else None,
+                      strategy="ddp" if v_cfg["trainer"].gpu > 1 else "cpu",
                       # early_stop_callback=early_stop_callback,
                       callbacks=[model_check_point],
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,

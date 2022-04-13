@@ -247,8 +247,9 @@ class Regress_hyper_parameters(pl.LightningModule):
                 ]
 
     def validation_epoch_end(self, outputs) -> None:
-        outputs = self.all_gather(outputs)
+        # outputs = self.all_gather(outputs)
         if self.trainer.is_global_zero:
+            # outputs = outputs.reshape()
             prediction = torch.cat(list(map(lambda x: x[0], outputs)),dim=0).cpu().numpy()
             point_attribute = torch.cat(list(map(lambda x: x[1], outputs)),dim=0).cpu().numpy()
             names = torch.cat(list(map(lambda x: x[2], outputs))).cpu().numpy()
@@ -256,6 +257,7 @@ class Regress_hyper_parameters(pl.LightningModule):
             log_str = ""
             mean_spearman = 0
             spearman_dict = {}
+            min_num_points = 9999999
             for scene_item in self.dataset_name_dict:
                 predicted_acc = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 0]
                 predicted_com = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 1]
@@ -276,11 +278,13 @@ class Regress_hyper_parameters(pl.LightningModule):
                 spearman_dict[scene_item] = spearmanr_factor
                 mean_spearman += spearmanr_factor
                 log_str += "{:<35}: {:.2f}  \n".format(scene_item, spearmanr_factor)
+                min_num_points = min(min_num_points, predicted_acc[gt_acc != -1].shape[0])
 
             mean_spearman = mean_spearman / len(self.dataset_name_dict)
             self.log("Validation mean spearman", mean_spearman,
                      prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True)
-
+            self.log("Validation min num points",min_num_points,
+                     prog_bar=True, logger=True, on_step=False, on_epoch=True, rank_zero_only=True)
             pass
 
     def on_test_epoch_start(self) -> None:

@@ -251,7 +251,7 @@ class Regress_hyper_parameters(pl.LightningModule):
 
     def validation_epoch_end(self, outputs) -> None:
         if self.trainer.is_global_zero:
-            if self.trainer.world_size!=1:
+            if self.hparams["trainer"].gpu > 1:
                 outputs_world = self.all_gather(outputs)
                 outputs = [item for outputs_1_gpu in outputs_world for item in outputs_1_gpu]
             # outputs = outputs.reshape()

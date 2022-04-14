@@ -127,23 +127,27 @@ def preprocess_data(v_root: str, v_error_point_cloud: str) -> (np.ndarray, np.nd
     point_feature_root_dir = open(os.path.join(v_root, "../img_dataset_path.txt")).readline()
     # point_feature_root_dir = None
 
-    files = [os.path.join(v_root, item) for item in os.listdir(v_root)]
-    files = list(filter(lambda item: ".txt" in item, files))
-    files = sorted(files, key=lambda item: int(item.split("\\")[-1][:-4]))
-
     num_points = error_list.shape[0] # This is the number of the total sample points
 
-    # Find max view numbers
-    def compute_max_view_number(v_file):
-        raw_data = [item.strip() for item in open(v_file).readlines()]
+    # Read the reconstructability file
+    # The total number might not be equal to the $num_points$, because some points can not be seen by the given views
+    def read_reconstructability_file(v_root:str ,v_id: int) -> Tuple[int, List[str]]:
+        file_name = "{}.txt".format(v_id)
+        file_name = os.path.join(v_root, file_name)
+        if not os.path.exists(file_name):
+            return (-1, [""])
+        raw_data = [item.strip() for item in open(file_name).readlines()]
         num_views = int(raw_data[0])
-        real_index = int(v_file.split("\\")[-1][:-4])
-        return num_views, real_index , raw_data
-
-    file_contents = thread_map(compute_max_view_number, files, max_workers=32)
-    max_num_view = max(file_contents,key=lambda x:x[0])[0] + 1
-    # max_num_view = 200
+        return (num_views, raw_data)
+    data_content = thread_map(partial(read_reconstructability_file,v_root) ,range(num_points), max_workers=4)
+    max_num_view = max(data_content,key=lambda x:x[0])[0] + 1
     print("Read attribute with max view: ", max_num_view)
+
+    thread_map(partial(compute_view_features,
+                       max_num_view, valid_views_flag, reconstructabilities, views, views_pair,
+                       point_features_path, point_feature_root_dir, error_list),
+               file_contents, max_workers=1)
+
     point_features_path = [""] * num_points
     views = np.zeros((num_points, max_num_view, 8), dtype=np.float32)
     # views_pair = np.zeros((num_points, max_num_view, max_num_view, 3), dtype=np.float16)

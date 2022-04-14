@@ -305,43 +305,50 @@ class Regress_hyper_parameters(pl.LightningModule):
         results, weights = self.forward(data)
 
         recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)
-
-        normals = data["point_attribute"][:, :, 7:10].cpu().numpy()
-        normal_theta = np.arccos(normals[:, :, 2])
-        normal_phi = np.arctan2(normals[:, :, 1], normals[:, :, 0])
-
-        view_mean_std = np.array(self.hydra_conf["model"]["view_mean_std"])
-
-        views = data["views"][:,0].cpu().numpy()
-        view_mask = views[:, :, 0] > 0
-        views[view_mask,1] = views[view_mask, 1] * view_mean_std[5] + view_mean_std[0]
-        views[view_mask,2] = views[view_mask, 2] * view_mean_std[6] + view_mean_std[1]
-        views[:, :, 1] = views[:, :, 1] + normal_theta
-        views[:, :, 2] = views[:, :, 2] + normal_phi
-
-        dz = np.cos(views[:, :, 1])
-        dx = np.sin(views[:, :, 1]) * np.cos(views[:, :, 2])
-        dy = np.sin(views[:, :, 1]) * np.sin(views[:, :, 2])
-
-        view_dir = np.stack([dx, dy, dz], axis=2) * (data["views"][:, 0, :, 3:4].cpu().numpy() * view_mean_std[7] + view_mean_std[2]) * 60
-        centre_point_index = data["points"][:, :, 3].cpu().numpy()
-        points = data["points"][:, :, :3].cpu().numpy()
-        points = points + self.test_dataset.datasets[0].original_points[
-            centre_point_index.reshape(-1).astype(np.int32)].reshape(points.shape)
-        points = points * self.data_mean_std[3] + self.data_mean_std[:3]
-        views = points + view_dir
-        views = np.concatenate([views, -view_dir, data["views"][:, 0, :, 0:1].cpu().numpy()], axis=-1)
-
         self.log("Test Loss", total_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True,batch_size=1)
         self.log("Test Recon Loss", recon_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True,batch_size=1)
         self.log("Test Gt Loss", gt_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True,batch_size=1)
 
-        return [results,
-                data["point_attribute"],
-                np.array(list(map(lambda x: self.dataset_name_dict[x], data["scene_name"]))),
-                views,  # num_points, num_views, 7
-                np.concatenate([points, data["points"][:, :, 3:4].cpu().numpy()], axis=2)[:, 0, :]  # (x,y,z,idx)
-                ]
+        if len(self.dataset_name_dict) == 1:
+
+            normals = data["point_attribute"][:, :, 7:10].cpu().numpy()
+            normal_theta = np.arccos(normals[:, :, 2])
+            normal_phi = np.arctan2(normals[:, :, 1], normals[:, :, 0])
+
+            view_mean_std = np.array(self.hydra_conf["model"]["view_mean_std"])
+
+            views = data["views"][:,0].cpu().numpy()
+            view_mask = views[:, :, 0] > 0
+            views[view_mask,1] = views[view_mask, 1] * view_mean_std[5] + view_mean_std[0]
+            views[view_mask,2] = views[view_mask, 2] * view_mean_std[6] + view_mean_std[1]
+            views[:, :, 1] = views[:, :, 1] + normal_theta
+            views[:, :, 2] = views[:, :, 2] + normal_phi
+
+            dz = np.cos(views[:, :, 1])
+            dx = np.sin(views[:, :, 1]) * np.cos(views[:, :, 2])
+            dy = np.sin(views[:, :, 1]) * np.sin(views[:, :, 2])
+
+            view_dir = np.stack([dx, dy, dz], axis=2) * (data["views"][:, 0, :, 3:4].cpu().numpy() * view_mean_std[7] + view_mean_std[2]) * 60
+            centre_point_index = data["points"][:, :, 3].cpu().numpy()
+            points = data["points"][:, :, :3].cpu().numpy()
+            points = points + self.test_dataset.datasets[0].original_points[
+                centre_point_index.reshape(-1).astype(np.int32)].reshape(points.shape)
+            points = points * self.data_mean_std[3] + self.data_mean_std[:3]
+            views = points + view_dir
+            views = np.concatenate([views, -view_dir, data["views"][:, 0, :, 0:1].cpu().numpy()], axis=-1)
+
+            return [results,
+                    data["point_attribute"],
+                    np.array(list(map(lambda x: self.dataset_name_dict[x], data["scene_name"]))),
+                    views,  # num_points, num_views, 7
+                    np.concatenate([points, data["points"][:, :, 3:4].cpu().numpy()], axis=2)[:, 0, :]  # (x,y,z,idx)
+                    ]
+        else:
+            return [results,
+                    data["point_attribute"],
+                    np.array(list(map(lambda x: self.dataset_name_dict[x], data["scene_name"]))),
+                    ]
+
 
     def test_epoch_end(self, outputs) -> None:
         error_mean_std = np.array(self.hydra_conf["model"]["error_mean_std"])

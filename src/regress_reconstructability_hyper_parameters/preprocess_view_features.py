@@ -1,6 +1,7 @@
 import math
 import os
 import pickle
+import time
 from functools import partial
 from multiprocessing import Pool
 
@@ -11,7 +12,7 @@ import torchvision
 import numpy as np
 import numba as nb
 from PIL import Image
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 from plyfile import PlyData, PlyElement
 from torchvision.transforms import transforms
@@ -21,44 +22,52 @@ import open3d as o3d
 from scipy import stats
 from tqdm.contrib.concurrent import thread_map, process_map
 
-def compute_view_features(max_num_view: int, valid_views_flag: List[bool], reconstructabilities: List[float],
-                          views: np.ndarray, views_pair: None, point_feature_paths: List[str], point_feature_root_dir: str,
-                          error_list: np.ndarray,
-                          v_file_content: Tuple[int,int,List[str]]
+
+def compute_view_features(v_max_num_view: int,
+                          v_point_feature_root_dir: str,
+                          v_img_dir: Optional[str] = None,
+                          v_file_content: Optional[Tuple[int, int, List[str]]] = None,
                           ):
-    num_view,real_index,raw_data=v_file_content
+    (real_index, num_view, raw_data), v_point_normal = v_file_content
     # raw_data = [item.strip() for item in open(v_file).readlines()]
     num_views = int(num_view)
-    if num_views > max_num_view - 1:
+    if num_views > v_max_num_view - 1:
         raise
+    if num_views <= 2:
+        return -1., "", False, np.zeros((v_max_num_view, 8), dtype=np.float32), []
+
     reconstructability = float(raw_data[1])
-    if num_views >= 2:  # Unstable change!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        # if reconstructability != 0:
-        point_feature_paths[real_index] = (os.path.join(point_feature_root_dir, str(real_index) + ".npz"))
-        valid_views_flag[real_index] = True
-    else:
-        print(0)
-    reconstructabilities[real_index] = reconstructability
+    point_feature_path = (os.path.join(v_point_feature_root_dir, str(real_index) + ".npz"))
+    valid_flag = True
+    img_paths = []
     # Read views
+    views = np.zeros((v_max_num_view, 8), dtype=np.float32)
     for i_view in range(num_views):
         view_data = raw_data[2 + i_view].split(",")
-        img_name = view_data[0]
-        img_name = os.path.join(point_feature_root_dir, "../../images/{}.png".format(img_name))
+        if v_img_dir is not None:
+            img_name = view_data[0]
+            img_path = os.path.join(v_img_dir, img_name + ".png")
+            if not os.path.exists(img_path):
+                img_path = os.path.join(v_img_dir, img_name + ".jpg")
+            if not os.path.exists(img_path):
+                raise
+            img_paths.append(img_path)
+
         view_to_point = np.array(view_data[1:4], dtype=np.float32)
         distance_ratio = float(view_data[4])
         angle_to_normal_ratio = float(view_data[5])
         angle_to_direction_ratio = float(view_data[6])
         pixel_pos_x = float(view_data[7])
         pixel_pos_y = float(view_data[8])
-        views[real_index][i_view][0] = 1
+        views[i_view][0] = 1
 
         assert abs(np.linalg.norm(view_to_point) - distance_ratio * 60) < 1
         point_to_view_normalized = -view_to_point / np.linalg.norm(view_to_point)
         point_to_view_theta = math.acos(point_to_view_normalized[2])
         point_to_view_phi = math.atan2(point_to_view_normalized[1], point_to_view_normalized[0])
 
-        normal_normalized = error_list[real_index][6:9]
-        assert abs(np.linalg.norm(normal_normalized)-1) < 1e-3
+        normal_normalized = v_point_normal
+        assert abs(np.linalg.norm(normal_normalized) - 1) < 1e-3
         normal_theta = math.acos(normal_normalized[2])
         normal_phi = math.atan2(normal_normalized[1], normal_normalized[0])
 
@@ -73,31 +82,37 @@ def compute_view_features(max_num_view: int, valid_views_flag: List[bool], recon
         while delta_phi > math.pi:
             delta_phi -= math.pi * 2
 
-        views[real_index][i_view][1] = delta_theta
-        views[real_index][i_view][2] = delta_phi
-        views[real_index][i_view][3] = distance_ratio
-        views[real_index][i_view][4] = angle_to_normal_ratio
-        views[real_index][i_view][5] = angle_to_direction_ratio
-        views[real_index][i_view][6] = pixel_pos_x
-        views[real_index][i_view][7] = pixel_pos_y
+        views[i_view][1] = delta_theta
+        views[i_view][2] = delta_phi
+        views[i_view][3] = distance_ratio
+        views[i_view][4] = angle_to_normal_ratio
+        views[i_view][5] = angle_to_direction_ratio
+        views[i_view][6] = pixel_pos_x
+        views[i_view][7] = pixel_pos_y
+
+        """
+        debug
+        """
+        # if cv2.getWindowProperty('1', cv2.WND_PROP_VISIBLE) < 1:
+        #     cv2.namedWindow("1", cv2.WINDOW_AUTOSIZE)
+        # img = cv2.resize(cv2.imread(img_paths[i_view]),(600,400))
+        # pt = np.array([pixel_pos_x*600,pixel_pos_y*400],dtype=np.int32)
+        # img[
+        # np.clip(pt[1]-5,0,400):np.clip(pt[1]+5,0,400),
+        # np.clip(pt[0]-5,0,600):np.clip(pt[0]+5,0,600)
+        # ]=(0,0,255)
+        # cv2.imshow("1", img)
+        # cv2.waitKey()
+        """
+        debug done
+        """
+
         continue
 
-    # Read view pair
-    # cur_iter = 0
-    # for i_view1 in range(max_num_view):
-    #     for i_view2 in range(i_view1 + 1, max_num_view):
-    #         if i_view1 >= num_views or i_view2 >= num_views:
-    #             continue
-    #         view_pair_data = raw_data[2 + num_views + cur_iter].split(",")
-    #         alpha_ratio = float(view_pair_data[0])
-    #         relative_distance_ratio = float(view_pair_data[1])
-    #         views_pair[real_index][i_view1][i_view2][0] = 1
-    #         views_pair[real_index][i_view1][i_view2][1] = alpha_ratio
-    #         views_pair[real_index][i_view1][i_view2][2] = relative_distance_ratio
-    #         cur_iter += 1
+    return reconstructability, point_feature_path, valid_flag, views, img_paths
 
 
-def preprocess_data(v_root: str, v_error_point_cloud: str) -> (np.ndarray, np.ndarray):
+def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: Optional[str] = None):
     print("Read point cloud")
     with open(v_error_point_cloud, "rb") as f:
         plydata = PlyData.read(f)
@@ -111,8 +126,12 @@ def preprocess_data(v_root: str, v_error_point_cloud: str) -> (np.ndarray, np.nd
         nx = nx / length
         ny = ny / length
         nz = nz / length
-        avg_recon_error_list = plydata['vertex']['avg_recon_error'].copy()
-        avg_gt_error_list = plydata['vertex']['avg_gt_error'].copy()
+        if v_img_dir is None:
+            avg_recon_error_list = plydata['vertex']['avg_recon_error'].copy()
+            avg_gt_error_list = plydata['vertex']['avg_gt_error'].copy()
+        else:
+            avg_recon_error_list=np.zeros_like(x)
+            avg_gt_error_list=np.zeros_like(y)
         x_dim = (np.max(x) - np.min(x)) / 2
         y_dim = (np.max(y) - np.min(y)) / 2
         z_dim = (np.max(z) - np.min(z)) / 2
@@ -123,64 +142,60 @@ def preprocess_data(v_root: str, v_error_point_cloud: str) -> (np.ndarray, np.nd
         z = (z - np.mean(z)) / max_dim
         error_list = np.stack([avg_recon_error_list, avg_gt_error_list, x, y, z, avg_recon_error_list < 0, nx, ny, nz],
                               axis=1)
+    point_feature_root_dir=""
+    if v_img_dir is None:
+        point_feature_root_dir = open(os.path.join(v_root, "../img_dataset_path.txt")).readline()
 
-    point_feature_root_dir = open(os.path.join(v_root, "../img_dataset_path.txt")).readline()
-    # point_feature_root_dir = None
-
-    num_points = error_list.shape[0] # This is the number of the total sample points
+    num_points = error_list.shape[0]  # This is the number of the total sample points
 
     # Read the reconstructability file
     # The total number might not be equal to the $num_points$, because some points can not be seen by the given views
-    def read_reconstructability_file(v_root:str ,v_id: int) -> Tuple[int, List[str]]:
+    def read_reconstructability_file(v_root: str, v_id: int) -> Tuple[int, int, List[str]]:
         file_name = "{}.txt".format(v_id)
         file_name = os.path.join(v_root, file_name)
         if not os.path.exists(file_name):
-            return (-1, [""])
+            return (v_id, -1, [""])
         raw_data = [item.strip() for item in open(file_name).readlines()]
         num_views = int(raw_data[0])
-        return (num_views, raw_data)
-    data_content = thread_map(partial(read_reconstructability_file,v_root) ,range(num_points), max_workers=4)
-    max_num_view = max(data_content,key=lambda x:x[0])[0] + 1
+        return (v_id, num_views, raw_data)
+
+    data_content = thread_map(partial(read_reconstructability_file, v_root), range(num_points), max_workers=4)
+    max_num_view = max(data_content, key=lambda x: x[1])[1] + 1
     print("Read attribute with max view: ", max_num_view)
 
-    thread_map(partial(compute_view_features,
-                       max_num_view, valid_views_flag, reconstructabilities, views, views_pair,
-                       point_features_path, point_feature_root_dir, error_list),
-               file_contents, max_workers=1)
+    # Collect views
+    cur = time.time()
+    views_result = process_map(partial(compute_view_features,
+                                      max_num_view, point_feature_root_dir, v_img_dir),
+                              zip(data_content, error_list[:, 6:9]), max_workers=8,chunksize=4096)
+    print(time.time()-cur)
+    reconstructability = np.asarray(list(map(lambda x: x[0], views_result)))
+    point_features_path = np.asarray(list(map(lambda x: x[1], views_result)))
+    valid_flag = np.asarray(list(map(lambda x: x[2], views_result)))
+    views = np.asarray(list(map(lambda x: x[3], views_result)))
+    img_paths = np.asarray(list(map(lambda x: x[4], views_result)))
 
-    point_features_path = [""] * num_points
-    views = np.zeros((num_points, max_num_view, 8), dtype=np.float32)
     # views_pair = np.zeros((num_points, max_num_view, max_num_view, 3), dtype=np.float16)
     views_pair = None
-    valid_views_flag = [False for _ in range(num_points)]
-    reconstructabilities = [0. for _ in range(num_points)]
-
-    thread_map(partial(compute_view_features,
-                       max_num_view, valid_views_flag, reconstructabilities, views, views_pair,
-                       point_features_path, point_feature_root_dir, error_list),
-               file_contents, max_workers=1)
-
-    # valid_flag = np.logical_and(np.array(valid_views_flag), error_list[:, 2] != 0)
-    valid_flag = np.array(valid_views_flag)
 
     views = views[valid_flag]
+    reconstructability = reconstructability[valid_flag]
+    point_features_path = point_features_path[valid_flag]
+    img_paths = img_paths[valid_flag]
     # views_pair = views_pair[valid_flag]
-    point_features_path = np.array(point_features_path)
-    reconstructabilities = np.asarray(reconstructabilities)[valid_flag]
-    usable_indices = np.triu_indices(max_num_view, 1)
+    # usable_indices = np.triu_indices(max_num_view, 1)
     # views_pair = views_pair[:, usable_indices[0], usable_indices[1]]
 
     error_list = error_list[valid_flag]
-    point_attribute = np.concatenate([reconstructabilities[:, np.newaxis], error_list], axis=1).astype(np.float32)
+    point_attribute = np.concatenate([reconstructability[:, np.newaxis], error_list], axis=1).astype(np.float32)
     print(
-        "Totally {} points; {} points has error 0; {} points has 0 reconstructability, {} in it is not visible; Output {} points".format(
+        "Totally {} points; {} points has error 0; {} points has 0 reconstructability; Output {} points".format(
             num_points,
-            error_list[:, -1].sum(),
+            (point_attribute[:, 1] == -1).sum(),
             num_points - valid_flag.sum(),
-            num_points - len(files),
             point_attribute.shape[0]
         ))
-    return views, views_pair, point_attribute, point_features_path
+    return views, views_pair, point_attribute, point_features_path, img_paths
 
 
 if __name__ == '__main__':
@@ -194,12 +209,13 @@ if __name__ == '__main__':
 
     if not os.path.exists(v_output_root):
         os.mkdir(v_output_root)
-    view, view_pair, point_attribute, view_paths = preprocess_data(
+    view, view_pair, point_attribute, point_features_path, img_paths = preprocess_data(
         reconstructability_file_dir,
         error_point_cloud_dir
     )
     np.savez_compressed(os.path.join(v_output_root, "views"), view)
     # np.savez_compressed(os.path.join(output_root, "training_data/view_pairs"), view_pair)
     np.savez_compressed(os.path.join(v_output_root, "point_attribute"), point_attribute)
-    np.savez_compressed(os.path.join(v_output_root, "view_paths"), view_paths)
+    np.savez_compressed(os.path.join(v_output_root, "view_paths"), point_features_path)
+    np.savez_compressed(os.path.join(v_output_root, "img_paths"), img_paths)
     print("Pre-compute data done")

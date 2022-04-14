@@ -1,6 +1,7 @@
 import math
 import os
 import pickle
+import re
 from functools import partial
 from multiprocessing import Pool
 
@@ -19,6 +20,8 @@ from copy import deepcopy
 import open3d as o3d
 from scipy import stats
 from tqdm.contrib.concurrent import thread_map, process_map
+
+from src.regress_reconstructability_hyper_parameters.preprocess_view_features import preprocess_data
 
 
 def compute_view_features(max_num_view,valid_views_flag,reconstructabilities,v_img_dir,
@@ -81,30 +84,42 @@ def compute_view_features(max_num_view,valid_views_flag,reconstructabilities,v_i
         """
         continue
 
+def get_pixel_pos(v_reconstructability_root: str, v_img_root: str, v_id: str):
+    filename = os.path.join(v_reconstructability_root, "{}.txt".format(v_id))
+    if not os.path.exists(filename):
+        return -1, [], []
+    raw_data = [item.strip() for item in open(filename).readlines()]
+    num_views = int(raw_data[0])
+    img_names = list(map(lambda x:x.split(",")[0], raw_data[2:]))
+    img_names = list(map(
+                lambda x: os.path.join(v_img_root,"{}.png".format(x[0])),
+        img_names))
+    pixel_pos = list(map(lambda x:x.split(",")[-2:], raw_data[2:]))
+    pixel_pos = list(map(
+        lambda x:[float(x[0]), float(x[1]),],
+        pixel_pos))
+    return num_views, img_names, pixel_pos
 
-def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str = None) -> (np.ndarray, np.ndarray):
+def _preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str = None) -> (np.ndarray, np.ndarray):
     print("Read point cloud")
     with open(v_error_point_cloud, "rb") as f:
         plydata = PlyData.read(f)
         num_points = plydata['vertex']['x'].shape[0]
-        nx = plydata['vertex']['nx'].copy()
-        ny = plydata['vertex']['ny'].copy()
-        nz = plydata['vertex']['nz'].copy()
-        length = np.sqrt(nx ** 2 + ny ** 2 + nz ** 2)
-        nx = nx / length
-        ny = ny / length
-        nz = nz / length
-        point_normal = np.stack([nx, ny, nz], axis=1)
+        point_normal = np.stack([
+            plydata['vertex']['nx'].copy(),
+            plydata['vertex']['ny'].copy(),
+            plydata['vertex']['nz'].copy()], axis=1)
+        length = np.power(point_normal,2).sum(-1)
+        point_normal = point_normal / length[:,np.newaxis]
+
+    data_content = process_map(partial(get_pixel_pos, v_root,v_img_dir), range(num_points), max_workers=8, chunksize=4096)
 
     files = [os.path.join(v_root, item) for item in os.listdir(v_root)]
     files = list(filter(lambda item: ".txt" in item, files))
     files = sorted(files, key=lambda item: int(item.split("\\")[-1][:-4]))
 
     # Find max view numbers
-    def compute_max_view_number(v_file):
-        raw_data = [item.strip() for item in open(v_file).readlines()]
-        num_views = int(raw_data[0])
-        return num_views
+
     num_view_list = thread_map(compute_max_view_number, files, max_workers=8)
     # num_view_list = process_map(compute_max_view_number, files, max_workers=8,chunksize=1)
     max_num_view = max(num_view_list) + 1
@@ -122,14 +137,16 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: str = None
     return views, view_paths
 
 
-def compute_features(v_root_path,v_view_paths,v_view_attribute,img_features_dict,
-                     id_point):
-    point_path = os.path.join(v_root_path, "point_features", str(id_point) + ".npz")
+def compute_features(v_root_path,img_features_dict,
+                     v_data
+                     ):
+    point_feature_path, img_paths, view = v_data
+    point_path = os.path.join(v_root_path, "point_features", point_feature_path)
 
     point_features = []
-    for id_view, view_path in enumerate(v_view_paths[id_point]):
-        pixel_position = torch.tensor(v_view_attribute[id_point, id_view, 6:8], dtype=torch.float32)
-        pixel_position = torch.cat([pixel_position - 5 / 400, pixel_position + 5 / 400], dim=-1)
+    for id_view, view_path in enumerate(img_paths):
+        pixel_position = torch.tensor(view[id_view, 6:8], dtype=torch.float32)
+        pixel_position = torch.cat([pixel_position - 10 / 400, pixel_position + 10 / 400], dim=-1)
         pixel_position[pixel_position>1]=1
         pixel_position[pixel_position<0]=0
         # Get img features
@@ -150,8 +167,8 @@ def compute_features(v_root_path,v_view_paths,v_view_attribute,img_features_dict
 
         # Get the pixel features
         pixel_position_features = torchvision.ops.ps_roi_align(
-            torch.tensor(img_features),
-            [pixel_position.unsqueeze(0)],
+            torch.tensor(img_features).cuda(),
+            [pixel_position.unsqueeze(0).cuda()],
             1).squeeze(
             -1).squeeze(-1)
         point_features.append(pixel_position_features)
@@ -159,18 +176,6 @@ def compute_features(v_root_path,v_view_paths,v_view_attribute,img_features_dict
         return
     point_features = torch.cat(point_features, dim=0)
     np.savez(point_path, point_features.cpu().numpy())
-
-
-def pre_compute_img_features(v_view_paths: List[str], img_features_dict, v_root_path, v_view_attribute):
-    if not os.path.exists(os.path.join(v_root_path, "point_features")):
-        os.mkdir(os.path.join(v_root_path, "point_features"))
-
-    with torch.no_grad():
-        r = thread_map(partial(compute_features, v_root_path, v_view_paths, v_view_attribute, img_features_dict),
-                       range(len(v_view_paths)), max_workers=10)
-        # for v_id in tqdm(range(len(v_view_paths))):
-        #     partial(compute_features, v_root_path, v_view_paths, v_view_attribute, img_features_dict)(v_id)
-    return
 
 
 if __name__ == '__main__':
@@ -188,13 +193,14 @@ if __name__ == '__main__':
     print("First, compute the geometric features from the viewpoint to sample points")
     if not os.path.exists(v_output_root):
         os.mkdir(v_output_root)
-    view, view_paths = preprocess_data(
+    view, view_pair, point_attribute, point_features_path, img_paths = preprocess_data(
         reconstructability_file_dir,
         sample_points,
         img_dir
     )
     np.savez_compressed(os.path.join(v_output_root, "views"), view)
-    np.savez_compressed(os.path.join(v_output_root, "view_paths"), view_paths)
+    np.savez_compressed(os.path.join(v_output_root, "view_paths"), point_features_path)
+    np.savez_compressed(os.path.join(v_output_root, "img_paths"), img_paths)
     print("Pre-compute data done")
 
     # debug
@@ -221,11 +227,13 @@ if __name__ == '__main__':
     img_features_dict = {}
 
     total_view_paths = set()
-    for item in view_paths:
+    for item in img_paths:
         total_view_paths = total_view_paths.union(set(item))
     total_view_paths = list(total_view_paths)
     for id_view in tqdm(range(0, len(total_view_paths))):
-        save_name = total_view_paths[id_view].split(".")[0].split("\\")[-1] + ".npz"
+        save_name = total_view_paths[id_view].split(".")[0]
+        save_name = re.sub(r"\\", r"/", save_name)
+        save_name = save_name.split("/")[-1] + ".npz"
         img_features_saved_path = os.path.join(v_data_root, "view_features", save_name)
         if os.path.exists(img_features_saved_path):
             img_features_dict[total_view_paths[id_view]]=np.load(img_features_saved_path)["arr_0"]
@@ -241,5 +249,12 @@ if __name__ == '__main__':
             np.savez(img_features_saved_path,numpy_features)
 
     print("Pre compute features")
-    pre_compute_img_features(view_paths, img_features_dict, v_output_root, view)
+    if not os.path.exists(os.path.join(v_output_root, "point_features")):
+        os.mkdir(os.path.join(v_output_root, "point_features"))
+
+    with torch.no_grad():
+        r = thread_map(partial(compute_features, v_output_root, img_features_dict),
+                       zip(point_features_path,img_paths, view), max_workers=10)
+        # for v_id in tqdm(range(len(v_view_paths))):
+        #     partial(compute_features, v_root_path, v_view_paths, v_view_attribute, img_features_dict)(v_id)
     print("Pre compute done")

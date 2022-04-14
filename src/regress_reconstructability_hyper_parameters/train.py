@@ -349,7 +349,6 @@ class Regress_hyper_parameters(pl.LightningModule):
                     np.array(list(map(lambda x: self.dataset_name_dict[x], data["scene_name"]))),
                     ]
 
-
     def test_epoch_end(self, outputs) -> None:
         error_mean_std = np.array(self.hydra_conf["model"]["error_mean_std"])
 

@@ -355,7 +355,10 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         prediction = torch.cat(list(map(lambda x: x[0], outputs))).cpu().numpy() * error_mean_std[2:] + error_mean_std[:2]
         point_attribute = torch.cat(list(map(lambda x: x[1], outputs))).cpu().numpy()
-        point_attribute[:,0,1:3] = point_attribute[:,0,1:3] * error_mean_std[2:] + error_mean_std[:2]
+        acc_mask = point_attribute[:,0,1] != -1
+        com_mask = point_attribute[:,0,2] != -1
+        point_attribute[acc_mask,:,1] = point_attribute[acc_mask,:,1] * error_mean_std[2] + error_mean_std[0]
+        point_attribute[com_mask,:,2] = point_attribute[com_mask,:,2] * error_mean_std[3] + error_mean_std[1]
         names = np.concatenate(list(map(lambda x: x[2], outputs)))
         if len(self.dataset_name_dict) == 1:
             views = np.concatenate(list(map(lambda x: x[3], outputs)))

@@ -61,8 +61,8 @@ if __name__ == '__main__':
     for item in os.listdir(v_root):
         # if "chengbao" not in item:
         #     continue
-        # if "fine" not in item and "preview" not in item:
-        #     continue
+        if "fine" not in item and "preview" not in item:
+            continue
 
         if item[-1] != "0":
             continue

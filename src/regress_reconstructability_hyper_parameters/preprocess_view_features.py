@@ -131,7 +131,7 @@ def preprocess_data(v_root: str, v_error_point_cloud: str) -> (np.ndarray, np.nd
     files = list(filter(lambda item: ".txt" in item, files))
     files = sorted(files, key=lambda item: int(item.split("\\")[-1][:-4]))
 
-    num_points = error_list.shape[0]
+    num_points = error_list.shape[0] # This is the number of the total sample points
 
     # Find max view numbers
     def compute_max_view_number(v_file):

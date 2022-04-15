@@ -150,10 +150,11 @@ class Regress_hyper_parameters(pl.LightningModule):
         return data
 
     def train_dataloader(self):
+        dataset_root = self.hydra_conf["trainer"]["dataset_root"]
         dataset_paths = self.hydra_conf["trainer"]["train_dataset"].split("*")
         datasets = []
         for dataset_path in dataset_paths:
-            datasets.append(self.dataset_builder(dataset_path, self.hydra_conf,
+            datasets.append(self.dataset_builder(os.path.join(dataset_root,dataset_path), self.hydra_conf,
                                                  "training" if len(
                                                      dataset_paths) == 1 else "testing", ))
 
@@ -172,12 +173,13 @@ class Regress_hyper_parameters(pl.LightningModule):
                                  )
 
     def val_dataloader(self):
+        dataset_root = self.hydra_conf["trainer"]["dataset_root"]
         use_part_dataset_to_validate = len(self.hydra_conf["trainer"]["train_dataset"].split("*")) == 1
 
         dataset_paths = self.hydra_conf["trainer"]["valid_dataset"].split("*")
         datasets = []
         for dataset_path in dataset_paths:
-            datasets.append(self.dataset_builder(dataset_path, self.hydra_conf,
+            datasets.append(self.dataset_builder(os.path.join(dataset_root,dataset_path), self.hydra_conf,
                                                  "validation" if use_part_dataset_to_validate else "testing", ))
             self.dataset_name_dict[datasets[-1].scene_name] = len(self.dataset_name_dict)
 
@@ -194,11 +196,12 @@ class Regress_hyper_parameters(pl.LightningModule):
                           )
 
     def test_dataloader(self):
+        dataset_root = self.hydra_conf["trainer"]["dataset_root"]
         dataset_paths = self.hydra_conf["trainer"]["test_dataset"].split("*")
         datasets = []
         for dataset_path in dataset_paths:
             datasets.append(
-                self.dataset_builder(dataset_path, self.hydra_conf, "testing"))
+                self.dataset_builder(os.path.join(dataset_root,dataset_path), self.hydra_conf, "testing"))
             self.dataset_name_dict[datasets[-1].scene_name] = len(self.dataset_name_dict)
 
         self.test_dataset = torch.utils.data.ConcatDataset(datasets)

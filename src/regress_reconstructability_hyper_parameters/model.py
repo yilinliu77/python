@@ -803,6 +803,7 @@ def loss_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False):
     return recon_loss, gt_loss, gt_loss if v_is_img_involved else recon_loss
 
 def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False):
+    v_prediction = torch.sigmoid(v_prediction) # Chou zuzu
     predicted_recon_error = v_prediction[:, :, 0:1]
     predicted_gt_error = v_prediction[:, :, 1:2]
 

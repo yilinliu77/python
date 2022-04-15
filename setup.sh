@@ -30,7 +30,7 @@ function with_backoff {
   return $exitCode
 }
 
-source ~/.bashrc
+source ~/.bashrc && ~/miniconda/bin/conda activate base
 
 conda install -y opencv pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
 

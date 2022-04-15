@@ -165,11 +165,11 @@ class Regress_hyper_parameters(pl.LightningModule):
                                  batch_size=self.batch_size,
                                  num_workers=self.hydra_conf["trainer"].num_worker,
                                  shuffle=True,
-                                 drop_last=True,
+                                 # drop_last=True,
                                  pin_memory=True,
                                  collate_fn=self.dataset_builder.collate_fn,
-                                 persistent_workers=True,
-                                 prefetch_factor=10
+                                 # persistent_workers=True,
+                                 # prefetch_factor=10
                                  )
 
     def val_dataloader(self):
@@ -187,12 +187,12 @@ class Regress_hyper_parameters(pl.LightningModule):
         return DataLoader(self.valid_dataset,
                           batch_size=self.batch_size,
                           num_workers=self.hydra_conf["trainer"].num_worker,
-                          drop_last=False,
+                          # drop_last=False,
                           shuffle=False,
                           pin_memory=True,
                           collate_fn=self.dataset_builder.collate_fn,
-                          persistent_workers=True,
-                          prefetch_factor=10
+                          # persistent_workers=True,
+                          # prefetch_factor=10
                           )
 
     def test_dataloader(self):
@@ -209,12 +209,12 @@ class Regress_hyper_parameters(pl.LightningModule):
         return DataLoader(self.test_dataset,
                           batch_size=self.hydra_conf["trainer"]["batch_size"],
                           num_workers=self.hydra_conf["trainer"].num_worker,
-                          drop_last=False,
+                          # drop_last=False,
                           shuffle=False,
                           pin_memory=True,
                           collate_fn=self.dataset_builder.collate_fn,
-                          persistent_workers=True,
-                          prefetch_factor=10
+                          # persistent_workers=True,
+                          # prefetch_factor=10
                           )
 
     def configure_optimizers(self):

@@ -447,8 +447,9 @@ class Recon_dataset_imgs_and_batch_points(torch.utils.data.Dataset):
             used_index = self.validation_index
         else:
             used_index = self.whole_index
-        index = np.random.randint(0,used_index.shape[0]-1,self.params["model"]["num_points_per_batch"])
-        point_indexes = self.points[used_index[index], :, 3].int()
+        num_points_per_batch = self.params["model"]["num_points_per_batch"]
+        index = index * num_points_per_batch
+        point_indexes = self.points[used_index[index:index+num_points_per_batch], :, 3].int()
 
         point_features, point_features_mask = None, None
         if self.is_involve_img:
@@ -471,7 +472,13 @@ class Recon_dataset_imgs_and_batch_points(torch.utils.data.Dataset):
         return output_dict
 
     def __len__(self):
-        return 100
+        if self.trainer_mode == "training":
+            used_index = self.train_index
+        elif self.trainer_mode == "validation":
+            used_index = self.validation_index
+        else:
+            used_index = self.whole_index
+        return used_index.shape[0] // self.params["model"]["num_points_per_batch"]
 
     @staticmethod
     def collate_fn(batch):

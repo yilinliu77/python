@@ -802,8 +802,9 @@ def loss_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False):
 
     return recon_loss, gt_loss, gt_loss if v_is_img_involved else recon_loss
 
+
 def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False):
-    v_prediction = torch.sigmoid(v_prediction) # Chou zuzu
+    v_prediction = torch.sigmoid(v_prediction)  # Chou zuzu
     predicted_recon_error = v_prediction[:, :, 0:1]
     predicted_gt_error = v_prediction[:, :, 1:2]
 
@@ -817,14 +818,15 @@ def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False
     scaled_gt_recon_error = torch.clamp(gt_recon_error, -1., 1.)
     scaled_gt_gt_error = torch.clamp(gt_gt_error, -1., 1.)
 
-    recon_loss = torch.tensor(0.,device=predicted_recon_error.device)
+    recon_loss = torch.tensor(0., device=predicted_recon_error.device)
     for id_batch in range(predicted_recon_error.shape[0]):
         recon_loss = recon_loss + spearmanr(
             predicted_recon_error[id_batch][recon_mask[id_batch]].unsqueeze(0),
             gt_recon_error[id_batch][recon_mask[id_batch]].unsqueeze(0),
             regularization="l2", regularization_strength=1.0
         )
-    recon_loss = predicted_recon_error.shape[0] - recon_loss # We want to minimize the loss, which is maximizing the correlation factor
+    recon_loss = predicted_recon_error.shape[
+                     0] - recon_loss  # We want to minimize the loss, which is maximizing the correlation factor
     gt_loss = torch.zeros_like(recon_loss)
     if v_is_img_involved:
         for id_batch in range(predicted_recon_error.shape[0]):
@@ -833,10 +835,10 @@ def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False
                 gt_gt_error[id_batch][gt_mask[id_batch]].unsqueeze(0),
                 regularization="l2", regularization_strength=1.0
             )
-        gt_loss = predicted_recon_error.shape[0] - gt_loss # We want to minimize the loss, which is maximizing the correlation factor
+        gt_loss = predicted_recon_error.shape[
+                      0] - gt_loss  # We want to minimize the loss, which is maximizing the correlation factor
 
     return recon_loss, gt_loss, gt_loss if v_is_img_involved else recon_loss
-
 
 
 # class Uncertainty_Modeling_v2(torch.jit.ScriptModule):
@@ -1794,7 +1796,7 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
             predicted_recon_error = predicted_recon_error.reshape(views.shape[0], -1, 1)  # B * num_point * 1
 
         v_data["views"][torch.logical_not(valid_view_mask)] = 0
-        predicted_recon_error = valid_view_mask.unsqueeze(-1) * predicted_recon_error # Mark these features to 0
+        predicted_recon_error = valid_view_mask.unsqueeze(-1) * predicted_recon_error  # Mark these features to 0
 
         # ========================================Phase 1========================================
         predicted_gt_error = torch.zeros_like(predicted_recon_error)
@@ -1813,7 +1815,7 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
                 v_point_features_mask=point_features_mask)
             predicted_gt_error = self.features_to_gt_error(fused_point_feature)
         predict_result = torch.cat([predicted_recon_error, predicted_gt_error], dim=2)
-        predict_result = torch.tile(valid_view_mask.unsqueeze(-1),[1,1,2]) * predict_result
+        predict_result = torch.tile(valid_view_mask.unsqueeze(-1), [1, 1, 2]) * predict_result
 
         return predict_result, (weights, cross_weight),
 
@@ -1822,6 +1824,7 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
             return loss_l2_error(v_point_attribute, v_prediction, self.is_involve_img)
         else:
             return loss_spearman_error(v_point_attribute, v_prediction, self.is_involve_img)
+
 
 # Delete dropout in the first few layer; useful; version 52
 class Uncertainty_Modeling_wo_pointnet9(Uncertainty_Modeling_wo_pointnet8):
@@ -2129,6 +2132,7 @@ class Uncertainty_Modeling_wo_pointnet13(Uncertainty_Modeling_wo_pointnet8):
             self.features_to_recon_error.requires_grad_(False)
             self.magic_class_token.requires_grad_(False)
 
+
 # version 83 with normalized_l2_loss: not good
 # version 85 with l2_loss: better than net14
 class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
@@ -2190,6 +2194,7 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
             self.view_feature_fusioner1.requires_grad_(False)
             self.features_to_recon_error.requires_grad_(False)
             self.magic_class_token.requires_grad_(False)
+
 
 # version 70; add sigmoid; not useful
 # version 84 with normalized_l2_loss: better than version 83 and 85
@@ -2255,6 +2260,7 @@ class Uncertainty_Modeling_wo_pointnet15(Uncertainty_Modeling_wo_pointnet8):
             self.view_feature_fusioner1.requires_grad_(False)
             self.features_to_recon_error.requires_grad_(False)
             self.magic_class_token.requires_grad_(False)
+
 
 class Uncertainty_Modeling_wo_pointnet16(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):
@@ -2410,7 +2416,7 @@ class Uncertainty_Modeling_wo_pointnet17(Uncertainty_Modeling_wo_pointnet8):
             predicted_recon_error = predicted_recon_error.reshape(views.shape[0], -1, 1)  # B * num_point * 1
 
         v_data["views"][torch.logical_not(valid_view_mask)] = 0
-        predicted_recon_error = valid_view_mask.unsqueeze(-1) * predicted_recon_error # Mark these features to 0
+        predicted_recon_error = valid_view_mask.unsqueeze(-1) * predicted_recon_error  # Mark these features to 0
 
         # ========================================Phase 1========================================
         predicted_gt_error = torch.zeros_like(predicted_recon_error)
@@ -2429,7 +2435,7 @@ class Uncertainty_Modeling_wo_pointnet17(Uncertainty_Modeling_wo_pointnet8):
                 v_point_features_mask=point_features_mask)
             predicted_gt_error = self.features_to_gt_error(fused_point_feature)
         predict_result = torch.cat([predicted_recon_error, predicted_gt_error], dim=2)
-        predict_result = torch.tile(valid_view_mask.unsqueeze(-1),[1,1,2]) * predict_result
+        predict_result = torch.tile(valid_view_mask.unsqueeze(-1), [1, 1, 2]) * predict_result
 
         return predict_result, (weights, cross_weight),
 

@@ -830,7 +830,7 @@ def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False
     gt_loss = torch.zeros_like(recon_loss)
     if v_is_img_involved:
         for id_batch in range(predicted_recon_error.shape[0]):
-            recon_loss = recon_loss + spearmanr(
+            gt_loss = gt_loss + spearmanr(
                 predicted_gt_error[id_batch][gt_mask[id_batch]].unsqueeze(0),
                 gt_gt_error[id_batch][gt_mask[id_batch]].unsqueeze(0),
                 regularization="l2", regularization_strength=1.0

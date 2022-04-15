@@ -12,7 +12,7 @@ from torch.nn import TransformerEncoderLayer, init, MultiheadAttention, Transfor
 from torch.nn.init import xavier_uniform_
 
 from torchvision.models import resnet18
-
+import torchsort
 import sys
 
 from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet2_utils import PointNetSetAbstraction, \
@@ -21,8 +21,8 @@ from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet_utils import PointNet
 
 
 def spearmanr(pred, target, **kw):
-    pred = soft_rank(pred.cpu(), **kw).cuda()
-    target = soft_rank(target.cpu(), **kw).cuda()
+    pred = torchsort.soft_rank(pred, **kw)
+    target = torchsort.soft_rank(target, **kw)
     pred = pred - pred.mean()
     pred = pred / pred.norm()
     target = target - target.mean()
@@ -802,8 +802,7 @@ def loss_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False):
 
     return recon_loss, gt_loss, gt_loss if v_is_img_involved else recon_loss
 
-
-def loss_normalized_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False):
+def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False):
     predicted_recon_error = v_prediction[:, :, 0:1]
     predicted_gt_error = v_prediction[:, :, 1:2]
 
@@ -814,32 +813,29 @@ def loss_normalized_l2_error(v_point_attribute, v_prediction, v_is_img_involved=
     gt_gt_error = v_point_attribute[:, :, 2:3]
     gt_mask = (gt_gt_error != -1).bool()
 
-    scaled_gt_recon_error = torch.clamp(gt_recon_error/0.1, 0, 2)
-    scaled_gt_gt_error = torch.clamp(gt_gt_error/0.1, 0, 2)
+    scaled_gt_recon_error = torch.clamp(gt_recon_error, -1., 1.)
+    scaled_gt_gt_error = torch.clamp(gt_gt_error, -1., 1.)
 
-    recon_loss = torch.nn.functional.l1_loss(predicted_recon_error[recon_mask], scaled_gt_recon_error[recon_mask])
+    recon_loss = torch.tensor(0.,device=predicted_recon_error.device)
+    for id_batch in range(predicted_recon_error.shape[0]):
+        recon_loss = recon_loss + spearmanr(
+            predicted_recon_error[id_batch][recon_mask[id_batch]].unsqueeze(0),
+            gt_recon_error[id_batch][recon_mask[id_batch]].unsqueeze(0),
+            regularization="l2", regularization_strength=1.0
+        )
+    recon_loss = predicted_recon_error.shape[0] - recon_loss # We want to minimize the loss, which is maximizing the correlation factor
     gt_loss = torch.zeros_like(recon_loss)
     if v_is_img_involved:
-        gt_loss = torch.nn.functional.l1_loss(predicted_gt_error[gt_mask], scaled_gt_gt_error[gt_mask])
+        for id_batch in range(predicted_recon_error.shape[0]):
+            recon_loss = recon_loss + spearmanr(
+                predicted_gt_error[id_batch][gt_mask[id_batch]].unsqueeze(0),
+                gt_gt_error[id_batch][gt_mask[id_batch]].unsqueeze(0),
+                regularization="l2", regularization_strength=1.0
+            )
+        gt_loss = predicted_recon_error.shape[0] - gt_loss # We want to minimize the loss, which is maximizing the correlation factor
 
     return recon_loss, gt_loss, gt_loss if v_is_img_involved else recon_loss
 
-
-def loss_truncated_entropy(v_point_attribute, v_prediction):
-    predicted_error = v_prediction[:, :, 0:1]
-    predicted_inconsistency = v_prediction[:, :, 1:2]
-
-    gt_reconstructability = v_point_attribute[:, 0]
-    gt_max_error = v_point_attribute[:, :, 1:2]
-    gt_avg_error_truncated = v_point_attribute[:, :, 2:3]
-    gt_error_mask_error = (1 - v_point_attribute[:, :, 6:7]).bool()  # Good Point -> True(1)
-
-    error_loss = torch.nn.functional.binary_cross_entropy_with_logits(
-        predicted_error[gt_error_mask_error],
-        gt_avg_error_truncated[gt_error_mask_error]
-    )
-
-    return error_loss, 0, error_loss + 0
 
 
 # class Uncertainty_Modeling_v2(torch.jit.ScriptModule):
@@ -1766,7 +1762,7 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
         views = v_data["views"]
 
         if len(views.shape) == 4:
-            view_attribute = views.view(-1, views.shape[2], views.shape[3])
+            view_attribute = views.reshape(-1, views.shape[2], views.shape[3])
         else:
             view_attribute = views
         # Normalize the view direction, no longer needed since we use phi and theta now
@@ -1824,7 +1820,7 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
         if self.hydra_conf["trainer"]["loss"] == "loss_l2_error":
             return loss_l2_error(v_point_attribute, v_prediction, self.is_involve_img)
         else:
-            return loss_normalized_l2_error(v_point_attribute, v_prediction, self.is_involve_img)
+            return loss_spearman_error(v_point_attribute, v_prediction, self.is_involve_img)
 
 # Delete dropout in the first few layer; useful; version 52
 class Uncertainty_Modeling_wo_pointnet9(Uncertainty_Modeling_wo_pointnet8):

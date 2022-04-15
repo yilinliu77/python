@@ -4,21 +4,9 @@
 [submodule "thirdparty/kitti-object-eval-python"]
 	path = thirdparty/kitti-object-eval-python
 	url = https://github.com/traveller59/kitti-object-eval-python
-[submodule "thirdparty/fast_soft_sort"]
-	path = thirdparty/fast_soft_sort
-	url = https://github.com/google-research/fast-soft-sort/
-[submodule "thirdparty/Segmentation_Pytorch"]
-	path = thirdparty/Segmentation_Pytorch
-	url = https://github.com/Deeachain/Segmentation-Pytorch
-[submodule "thirdparty/Pytorch_UNet"]
-	path = thirdparty/Pytorch_UNet
-	url = https://github.com/milesial/Pytorch-UNet
 [submodule "thirdparty/Pointnet_Pointnet2_pytorch"]
 	path = thirdparty/Pointnet_Pointnet2_pytorch
 	url = https://github.com/yanx27/Pointnet_Pointnet2_pytorch
 [submodule "thirdparty/AA_RMVSNet"]
 	path = thirdparty/AA_RMVSNet
 	url = https://github.com/qt-zhu/aa-rmvsnet
-[submodule "thirdparty/pointnet_pytorch"]
-	path = thirdparty/pointnet_pytorch
-	url = https://github.com/fxia22/pointnet.pytorch

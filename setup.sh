@@ -30,8 +30,10 @@ function with_backoff {
   return $exitCode
 }
 
-conda install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
+source ~/.bashrc
 
-conda install
+conda install -y opencv pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
 
-pip install pytorch-lightning torchsort hydra-core shapely scikit-image matplotlib opencv-python airsim tensorboard   
+pip install pytorch-lightning hydra-core shapely scikit-image matplotlib msgpack-rpc-python airsim tensorboard plyfile open3d
+
+TORCH_CUDA_ARCH_LIST="Pascal;Volta;Turing;Ampere" pip install torchsort

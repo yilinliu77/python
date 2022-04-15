@@ -2322,10 +2322,77 @@ class Uncertainty_Modeling_wo_pointnet16(Uncertainty_Modeling_wo_pointnet8):
             self.features_to_recon_error.requires_grad_(False)
             self.magic_class_token.requires_grad_(False)
 
-
+# Spearman version
 class Uncertainty_Modeling_wo_pointnet17(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):
         super(Uncertainty_Modeling_wo_pointnet17, self).__init__(hparams)
+        self.hydra_conf = hparams
+        self.is_involve_img = self.hydra_conf["model"]["involve_img"]
+
+        # ========================================Phase 0========================================
+        self.view_feature_extractor = nn.Sequential(
+            nn.Linear(5, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+        )
+        self.view_feature_fusioner1 = TFEncorder(256, 2, 256, 0.2, batch_first=True)
+        self.view_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.2, batch_first=True,
+                                                                   add_bias_kv=True)
+
+        self.features_to_recon_error = nn.Sequential(
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1),
+        )
+
+        # ========================================Phase 1========================================
+        self.img_feature_expander = nn.Sequential(
+            nn.Linear(32, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+        )
+        self.img_feature_fusioner1 = TFDecorder(256, 2, 256, 0.2, batch_first=True)
+        self.img_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.2, batch_first=True,
+                                                                  add_bias_kv=True)
+
+        self.features_to_gt_error = nn.Sequential(
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1),
+        )
+        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 256))
+
+        for module in [self.view_feature_extractor, self.img_feature_expander]:
+            for m in module.modules():
+                if isinstance(m, (nn.Linear,)):
+                    nn.init.kaiming_normal_(m.weight)
+                    fan_in, _ = init._calculate_fan_in_and_fan_out(m.weight)
+                    bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+                    init.normal_(m.bias, -bound, bound)
+
+        for transformer_module in [self.view_feature_fusioner1, self.img_feature_fusioner1]:
+            nn.init.kaiming_normal_(transformer_module.self_attn.in_proj_weight)
+
+            init.normal_(transformer_module.self_attn.in_proj_bias)
+            init.normal_(transformer_module.self_attn.out_proj.bias)
+            init.xavier_normal_(transformer_module.self_attn.bias_k)
+            init.xavier_normal_(transformer_module.self_attn.bias_v)
+
+        if self.hydra_conf["model"]["open_weights"] is False:
+            self.view_feature_extractor.requires_grad_(False)
+            self.view_feature_fusioner1.requires_grad_(False)
+            self.features_to_recon_error.requires_grad_(False)
+            self.magic_class_token.requires_grad_(False)
+
+    def forward(self, v_data: Dict[str, torch.Tensor]):
+        predict_result, (weights, cross_weight) = super(Uncertainty_Modeling_wo_pointnet17, self).forward(v_data)
+        predict_result = 1 - torch.sigmoid(predict_result) * 2
+
+        return predict_result, (weights, cross_weight)
+
+class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
+    def __init__(self, hparams):
+        super(Uncertainty_Modeling_wo_pointnet18, self).__init__(hparams)
         self.hydra_conf = hparams
         self.is_involve_img = self.hydra_conf["model"]["involve_img"]
 

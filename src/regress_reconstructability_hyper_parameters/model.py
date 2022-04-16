@@ -2435,7 +2435,7 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
             self.img_feature_expander = nn.Sequential(
                 nn.Linear(32, 128),
                 nn.ReLU(),
-                nn.Linear(128, 256),
+                nn.Linear(128, 128),
             )
             self.img_feature_fusioner1 = TFDecorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=True)
 

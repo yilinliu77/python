@@ -41,7 +41,7 @@ def sigmoid(x):
 
 
 def write_views_to_txt_file(v_args):
-    views, point_idx = v_args
+    point_idx, views  = v_args
     id_point = int(point_idx)
     filename = "temp/test_scene_output/{}.txt".format(int(id_point))
     if os.path.exists(filename):
@@ -72,11 +72,10 @@ def output_test_with_pc_and_views(
         v_smith_error,
         v_num_total_points,
         v_views,
-        v_points,  # (x,y,z,idx)
+        v_points,  # (x,y,z)
 ):
     # Write views
-    vertexes = np.zeros((v_num_total_points, 3), dtype=np.float32)  # x, y, z
-    vertexes[v_points[:, 3].astype(np.int32)] = v_points[:, :3]
+    vertexes = v_points[:, 0, :3]
 
     vertexes_describer = PlyElement.describe(np.array(
         [(item[0], item[1], item[2], item[3], item[4], item[5], item[6], item[7]) for item in
@@ -96,7 +95,7 @@ def output_test_with_pc_and_views(
     PlyData([vertexes_describer]).write('temp/test_scene_output/whole_point.ply')
 
     # thread_map(write_views_to_txt_file, zip(v_views, v_points[:,3]), max_workers=16)
-    process_map(write_views_to_txt_file, zip(v_views, v_points[:, 3]), max_workers=8, chunksize=4096)
+    process_map(write_views_to_txt_file, enumerate(v_views), max_workers=8, chunksize=4096)
 
     return
 
@@ -331,10 +330,7 @@ class Regress_hyper_parameters(pl.LightningModule):
             dy = np.sin(views[:, :, 1]) * np.sin(views[:, :, 2])
 
             view_dir = np.stack([dx, dy, dz], axis=2) * (data["views"][:, 0, :, 3:4].cpu().numpy() * view_mean_std[7] + view_mean_std[2]) * 60
-            centre_point_index = data["points"][:, :, 3].cpu().numpy()
-            points = data["points"][:, :, :3].cpu().numpy()
-            points = points + self.test_dataset.datasets[0].original_points[
-                centre_point_index.reshape(-1).astype(np.int32)].reshape(points.shape)
+            points = data["point_attribute"][:, :, 3:6].cpu().numpy()
             points = points * self.data_mean_std[3] + self.data_mean_std[:3]
             views = points + view_dir
             views = np.concatenate([views, -view_dir, data["views"][:, 0, :, 0:1].cpu().numpy()], axis=-1)
@@ -343,7 +339,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                     data["point_attribute"],
                     np.array(list(map(lambda x: self.dataset_name_dict[x], data["scene_name"]))),
                     views,  # num_points, num_views, 7
-                    np.concatenate([points, data["points"][:, :, 3:4].cpu().numpy()], axis=2)[:, 0, :]  # (x,y,z,idx)
+                    points
                     ]
         else:
             return [results,

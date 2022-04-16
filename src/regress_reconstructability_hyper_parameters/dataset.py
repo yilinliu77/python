@@ -181,8 +181,6 @@ class Regress_hyper_parameters_img_dataset(torch.utils.data.Dataset):
     points: num of patches * num point per patch * 7 (x, y, z, index, id_centre)
     point_attribute: baseline recon, avg recon error, avg gt error, x, y, z, is inconsistent point, nx, ny, nz
 """
-
-
 class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
     def __init__(self, v_path, v_params, v_mode):
         super(Regress_hyper_parameters_dataset_with_imgs, self).__init__()

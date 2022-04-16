@@ -189,7 +189,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.trainer_mode = v_mode
         self.params = v_params
         self.data_root = v_path
-        self.views = np.load(os.path.join(v_path, "views.npy"),mmap_mode="r").copy()
+        self.views = np.load(os.path.join(v_path, "views.npy"),mmap_mode="r+").copy()
         # img_dataset_path = open(os.path.join(v_path, "../img_dataset_path.txt")).readline().strip()
         img_dataset_path = os.path.join(v_path, "../")
         assert os.path.exists(img_dataset_path)
@@ -212,7 +212,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.point_attribute[com_point_mask,2] = (self.point_attribute[com_point_mask,2]-self.error_mean_std[1])/self.error_mean_std[3]
 
         assert self.point_attribute.shape[1] == 10
-        self.view_paths = np.load(os.path.join(v_path, "view_paths.npy"),mmap_mode="r", allow_pickle=True)
+        self.view_paths = np.load(os.path.join(v_path, "view_paths.npy"),mmap_mode="r+", allow_pickle=True)
         self.original_points = self.point_attribute[:, 3:6]
         self.num_seeds = 4096 + 1024
         # self.num_seeds = 20
@@ -349,7 +349,7 @@ class Recon_dataset_imgs_and_batch_points(torch.utils.data.Dataset):
         self.trainer_mode = v_mode
         self.params = v_params
         self.data_root = v_path
-        self.views = np.load(os.path.join(v_path, "views.npy"),mmap_mode="r").copy()
+        self.views = np.load(os.path.join(v_path, "views.npy"),mmap_mode="r+").copy()
         # img_dataset_path = open(os.path.join(v_path, "../img_dataset_path.txt")).readline().strip()
         img_dataset_path = os.path.join(v_path, "../")
         assert os.path.exists(img_dataset_path)
@@ -372,7 +372,7 @@ class Recon_dataset_imgs_and_batch_points(torch.utils.data.Dataset):
         self.point_attribute[com_point_mask,2] = (self.point_attribute[com_point_mask,2]-self.error_mean_std[1])/self.error_mean_std[3]
 
         assert self.point_attribute.shape[1] == 10
-        self.view_paths = np.load(os.path.join(v_path, "view_paths.npy"),mmap_mode="r", allow_pickle=True)
+        self.view_paths = np.load(os.path.join(v_path, "view_paths.npy"),mmap_mode="r+", allow_pickle=True)
         self.original_points = self.point_attribute[:, 3:6]
         self.num_seeds = 4096 + 1024
         # self.num_seeds = 20

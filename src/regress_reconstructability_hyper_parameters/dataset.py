@@ -269,17 +269,15 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         point_indexes = used_index[index]
 
         views_item = self.views[point_indexes]
-        valid_mask = views_item[:, :, 0] == 1
+        valid_mask = views_item[:, 0] == 1
         views_item[valid_mask, 1:6] = (views_item[valid_mask, 1:6] - self.view_mean_std[:5]) / self.view_mean_std[5:]
 
         points_item = self.point_attribute[point_indexes]
-        acc_point_mask = points_item[:, 1] != -1
-        com_point_mask = points_item[:, 2] != -1
+        if points_item[1] != -1:
+            points_item[1] = (points_item[1] - self.error_mean_std[0]) / self.error_mean_std[2]
 
-        points_item[acc_point_mask, 1] = (points_item[acc_point_mask, 1] - self.error_mean_std[0]) / \
-                                         self.error_mean_std[2]
-        points_item[com_point_mask, 2] = (points_item[com_point_mask, 2] - self.error_mean_std[1]) / \
-                                         self.error_mean_std[3]
+        if points_item[2] != -1:
+            points_item[2] = (points_item[2] - self.error_mean_std[1]) / self.error_mean_std[3]
 
         point_features, point_features_mask = None, None
         if self.is_involve_img:
@@ -318,7 +316,6 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         # view_pairs = [torch.transpose(item["view_pairs"],0,1) for item in batch]
         # view_pairs_pad = torch.transpose(torch.transpose(pad_sequence(view_pairs),0,1),1,2)
         point_attribute = [item["point_attribute"] for item in batch]
-        points = [item["points"] for item in batch]
 
         point_features_pad, point_features_mask_pad = None, None
         if batch[0]["point_features"] is not None:
@@ -328,11 +325,9 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
             point_features_mask_pad = pad_sequence(point_features_mask, batch_first=True, padding_value=True)
         return {
             'views': views_pad,
-            # 'view_pairs': view_pairs_pad,
             'point_attribute': torch.stack(point_attribute, dim=0),
             'point_features': point_features_pad,
             'point_features_mask': point_features_mask_pad,
-            'points': torch.stack(points, dim=0),
             'scene_name': scene_name,
         }
 

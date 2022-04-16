@@ -31,13 +31,11 @@ function with_backoff {
 }
 
 # conda pacakges (Only install necessary pacakges, the majority dependencies are installed by pip)
-conda install -y pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
+with_backoff conda install -y pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
 
 # pip pacakges
-pip --proxy ${HTTP_PROXY} install pytorch-lightning hydra-core shapely scikit-image matplotlib msgpack-rpc-python tensorboard plyfile open3d opencv-python
-pip --proxy ${HTTP_PROXY} install airsim
-
-
+with_backoff pip --proxy ${HTTP_PROXY} install pytorch-lightning hydra-core shapely scikit-image matplotlib msgpack-rpc-python tensorboard plyfile open3d opencv-python
+with_backoff pip --proxy ${HTTP_PROXY} install airsim
 
 # need "TORCH_CUDA_ARCH_LIST" flag to install torchsort
 TORCH_CUDA_ARCH_LIST="Pascal;Volta;Turing;Ampere" pip install torchsort

@@ -79,9 +79,9 @@ if __name__ == '__main__':
         sample_points,
         img_dir
     )
-    np.savez_compressed(os.path.join(v_output_root, "views"), view)
-    np.savez_compressed(os.path.join(v_output_root, "view_paths"), point_features_path)
-    np.savez_compressed(os.path.join(v_output_root, "img_paths"), img_paths)
+    np.savez(os.path.join(v_output_root, "views"), view)
+    np.savez(os.path.join(v_output_root, "view_paths"), point_features_path)
+    np.savez(os.path.join(v_output_root, "img_paths"), img_paths)
     print("Pre-compute data done")
 
     # debug

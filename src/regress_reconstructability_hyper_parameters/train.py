@@ -6,6 +6,7 @@ from itertools import groupby
 
 import cv2
 from plyfile import PlyData, PlyElement
+from pytorch_lightning.strategies import DDPStrategy
 from torch.nn.utils.rnn import pad_sequence
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from scipy import stats, optimize, interpolate
@@ -434,7 +435,6 @@ class Regress_hyper_parameters(pl.LightningModule):
             print(f'detected inf or nan values in gradients. not updating model parameters')
             self.zero_grad()
 
-
     def predict_recon(self):
         pass
 
@@ -457,7 +457,7 @@ def main(v_cfg: DictConfig):
 
     trainer = Trainer(gpus=v_cfg["trainer"].gpu, enable_model_summary=False,
                       # strategy=DDPStrategy() if v_cfg["trainer"].gpu > 1 else None,
-                      strategy="ddp" if v_cfg["trainer"].gpu > 1 else None,
+                      strategy=DDPStrategy(find_unused_parameters=False) if v_cfg["trainer"].gpu > 1 else None,
                       # early_stop_callback=early_stop_callback,
                       callbacks=[model_check_point],
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,

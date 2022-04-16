@@ -213,9 +213,9 @@ if __name__ == '__main__':
         reconstructability_file_dir,
         error_point_cloud_dir
     )
-    np.savez_compressed(os.path.join(v_output_root, "views"), view)
+    np.save(os.path.join(v_output_root, "views"), view)
     # np.savez_compressed(os.path.join(output_root, "training_data/view_pairs"), view_pair)
-    np.savez_compressed(os.path.join(v_output_root, "point_attribute"), point_attribute)
-    np.savez_compressed(os.path.join(v_output_root, "view_paths"), point_features_path)
-    np.savez_compressed(os.path.join(v_output_root, "img_paths"), img_paths)
+    np.save(os.path.join(v_output_root, "point_attribute"), point_attribute)
+    np.save(os.path.join(v_output_root, "view_paths"), point_features_path)
+    np.save(os.path.join(v_output_root, "img_paths"), img_paths)
     print("Pre-compute data done")

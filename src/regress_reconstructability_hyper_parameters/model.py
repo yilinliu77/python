@@ -10,6 +10,7 @@ import numpy as np
 import torch.nn.functional as F
 from torch.nn import TransformerEncoderLayer, init, MultiheadAttention, TransformerDecoderLayer
 from torch.nn.init import xavier_uniform_
+from torch.nn.modules.transformer import _get_activation_fn
 
 from torchvision.models import resnet18
 import torchsort
@@ -1283,12 +1284,26 @@ class Uncertainty_Modeling_wo_pointnet4(nn.Module):
             return loss_l2_recon_error(v_point_attribute, v_prediction)
 
 
-class TFEncorder(TransformerEncoderLayer):
+class TFEncorder(nn.Module):
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation=F.relu,
-                 layer_norm_eps=1e-5, batch_first=False, norm_first=False,
+                 batch_first=False, add_bias_kv=False,
                  device=None, dtype=None) -> None:
-        super(TFEncorder, self).__init__(d_model, nhead, dim_feedforward, dropout=dropout, activation=activation,
-                                         batch_first=batch_first)
+        super(TFEncorder, self).__init__()
+        self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
+                                            add_bias_kv=add_bias_kv)
+        # Implementation of Feedforward model
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+
+        self.dropout = nn.Dropout(dropout)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+
+        # Legacy string support for activation function.
+        if isinstance(activation, str):
+            self.activation = _get_activation_fn(activation)
+        else:
+            self.activation = activation
 
     def forward(self, src, src_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tuple[
         Tensor, Optional[Tensor]]:
@@ -1306,6 +1321,11 @@ class TFEncorder(TransformerEncoderLayer):
                                     key_padding_mask=key_padding_mask,
                                     need_weights=True)
         return self.dropout1(x), weights
+
+    # feed forward block
+    def _ff_block(self, x: Tensor) -> Tensor:
+        x = self.linear2(self.dropout(self.activation(self.linear1(x))))
+        return self.dropout2(x)
 
 
 class Uncertainty_Modeling_wo_pointnet5(nn.Module):
@@ -1523,12 +1543,29 @@ class Uncertainty_Modeling_wo_pointnet6(nn.Module):
             return loss_l2_recon_error(v_point_attribute, v_prediction)
 
 
-class TFDecorder(TransformerDecoderLayer):
+class TFDecorder(nn.Module):
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation=F.relu,
-                 layer_norm_eps=1e-5, batch_first=False, norm_first=False,
-                 device=None, dtype=None) -> None:
-        super(TFDecorder, self).__init__(d_model, nhead, dim_feedforward, dropout=dropout, activation=activation,
-                                         batch_first=batch_first)
+                 layer_norm_eps=1e-5, batch_first=False,
+                 add_bias_kv=False) -> None:
+        super(TFDecorder, self).__init__()
+        self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
+                                            add_bias_kv=add_bias_kv)
+        self.multihead_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
+                                                 add_bias_kv=add_bias_kv)
+        # Implementation of Feedforward model
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+
+        self.dropout = nn.Dropout(dropout)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.dropout3 = nn.Dropout(dropout)
+
+        # Legacy string support for activation function.
+        if isinstance(activation, str):
+            self.activation = _get_activation_fn(activation)
+        else:
+            self.activation = activation
 
     def forward(self, v_point_features_from_img: Tensor, v_fused_view_features: Tensor,
                 v_point_features_mask: Optional[Tensor] = None):
@@ -1560,6 +1597,10 @@ class TFDecorder(TransformerDecoderLayer):
                                          need_weights=True)
         return self.dropout2(x), weights
 
+    # feed forward block
+    def _ff_block(self, x: Tensor) -> Tensor:
+        x = self.linear2(self.dropout(self.activation(self.linear1(x))))
+        return self.dropout3(x)
 
 class Uncertainty_Modeling_wo_pointnet7(nn.Module):
     def __init__(self, hparams):
@@ -1698,62 +1739,6 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
         self.hydra_conf = hparams
         self.is_involve_img = self.hydra_conf["model"]["involve_img"]
 
-        # ========================================Phase 0========================================
-        self.view_feature_extractor = nn.Sequential(
-            nn.Linear(5, 256),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(256, 256),
-        )
-        self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.1, batch_first=True)
-        self.view_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.1, batch_first=True,
-                                                                   add_bias_kv=True)
-
-        self.features_to_recon_error = nn.Sequential(
-            nn.Linear(256, 1),
-        )
-
-        # ========================================Phase 1========================================
-        self.img_feature_expander = nn.Sequential(
-            nn.Linear(32, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-        )
-        self.img_feature_fusioner1 = TFDecorder(256, 2, 256, 0.1, batch_first=True)
-        self.img_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.1, batch_first=True,
-                                                                  add_bias_kv=True)
-
-        self.features_to_gt_error = nn.Sequential(
-            nn.Linear(256, 1),
-        )
-
-        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 256))
-
-        for module in [self.view_feature_extractor, self.img_feature_expander]:
-            for m in module.modules():
-                if isinstance(m, (nn.Linear,)):
-                    nn.init.kaiming_normal_(m.weight)
-                    fan_in, _ = init._calculate_fan_in_and_fan_out(m.weight)
-                    bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
-                    init.normal_(m.bias, -bound, bound)
-
-        for transformer_module in [self.view_feature_fusioner1, self.img_feature_fusioner1]:
-            nn.init.kaiming_normal_(transformer_module.self_attn.in_proj_weight)
-
-            init.normal_(transformer_module.self_attn.in_proj_bias)
-            init.normal_(transformer_module.self_attn.out_proj.bias)
-            init.xavier_normal_(transformer_module.self_attn.bias_k)
-            init.xavier_normal_(transformer_module.self_attn.bias_v)
-
-        if self.hydra_conf["model"]["open_weights"] is False:
-            self.view_feature_extractor.requires_grad_(False)
-            self.view_feature_fusioner1.requires_grad_(False)
-            self.features_to_recon_error.requires_grad_(False)
-            self.magic_class_token.requires_grad_(False)
-
     # @torch.jit.script_method
     def forward(self, v_data: Dict[str, torch.Tensor]):
         batch_size = v_data["views"].shape[0]
@@ -1808,7 +1793,7 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
 
             point_features_from_imgs = self.img_feature_expander(point_features_from_imgs)
             point_features_from_imgs = point_features_from_imgs * (1 - point_features_mask.float()).unsqueeze(-1).tile(
-                1, 1,1, point_features_from_imgs.shape[3])
+                1, 1, 1, point_features_from_imgs.shape[3])
 
             point_features_from_imgs = point_features_from_imgs.reshape([
                 -1,
@@ -1816,7 +1801,7 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
                 point_features_from_imgs.shape[3]
             ])
             point_features_mask = point_features_mask.reshape([
-                -1,point_features_mask.shape[2]
+                -1, point_features_mask.shape[2]
             ])
 
             fused_point_feature, point_feature_weight, cross_weight = self.img_feature_fusioner1(
@@ -1824,7 +1809,7 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
                 v_point_features_mask=point_features_mask)
             predicted_gt_error = self.features_to_gt_error(fused_point_feature)
             if len(views.shape) == 4:
-                predicted_gt_error=predicted_gt_error.reshape(views.shape[0], -1, 1)
+                predicted_gt_error = predicted_gt_error.reshape(views.shape[0], -1, 1)
         predict_result = torch.cat([predicted_recon_error, predicted_gt_error], dim=2)
         predict_result = torch.tile(valid_view_mask.unsqueeze(-1), [1, 1, 2]) * predict_result
 
@@ -2333,6 +2318,7 @@ class Uncertainty_Modeling_wo_pointnet16(Uncertainty_Modeling_wo_pointnet8):
             self.features_to_recon_error.requires_grad_(False)
             self.magic_class_token.requires_grad_(False)
 
+
 # Spearman version
 class Uncertainty_Modeling_wo_pointnet17(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):
@@ -2346,9 +2332,7 @@ class Uncertainty_Modeling_wo_pointnet17(Uncertainty_Modeling_wo_pointnet8):
             nn.ReLU(),
             nn.Linear(256, 256),
         )
-        self.view_feature_fusioner1 = TFEncorder(256, 2, 256, 0.2, batch_first=True)
-        self.view_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.2, batch_first=True,
-                                                                   add_bias_kv=True)
+        self.view_feature_fusioner1 = TFEncorder(256, 2, 256, 0.2, batch_first=True,add_bias_kv=True)
 
         self.features_to_recon_error = nn.Sequential(
             nn.Linear(256, 256),
@@ -2362,9 +2346,7 @@ class Uncertainty_Modeling_wo_pointnet17(Uncertainty_Modeling_wo_pointnet8):
             nn.ReLU(),
             nn.Linear(256, 256),
         )
-        self.img_feature_fusioner1 = TFDecorder(256, 2, 256, 0.2, batch_first=True)
-        self.img_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.2, batch_first=True,
-                                                                  add_bias_kv=True)
+        self.img_feature_fusioner1 = TFDecorder(256, 2, 256, 0.2, batch_first=True,add_bias_kv=True)
 
         self.features_to_gt_error = nn.Sequential(
             nn.Linear(256, 256),
@@ -2400,6 +2382,7 @@ class Uncertainty_Modeling_wo_pointnet17(Uncertainty_Modeling_wo_pointnet8):
         predict_result = 1 - torch.sigmoid(predict_result) * 2
 
         return predict_result, (weights, cross_weight)
+
 
 # Lightweight Spearman version
 class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):

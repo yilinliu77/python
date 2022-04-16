@@ -156,11 +156,12 @@ class Regress_hyper_parameters_img_dataset(torch.utils.data.Dataset):
                 data = point_path.split("\\")
                 data = point_path.split("/") if len(data) == 1 else data
                 point_path = os.path.join(self.data_root, data[0].strip(), "point_features", data[1].strip())
+                # point_path[-1]="y"
                 real_indexes.append(int(data[-1].split(".")[0]))
                 if not os.path.exists(point_path):
                     img_features_on_point_list.append(torch.zeros((1, 32), dtype=torch.float32))
                 else:
-                    img_features_on_point_list.append(torch.tensor(np.load(point_path,mmap_mode="r"), dtype=torch.float32))
+                    img_features_on_point_list.append(torch.tensor(np.load(point_path)["arr_0"], dtype=torch.float32))
             num_features = img_features_on_point_list[-1].shape[1]
 
             num_max_points = max(num_max_points, img_features_on_point_list[-1].shape[0])
@@ -188,7 +189,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.trainer_mode = v_mode
         self.params = v_params
         self.data_root = v_path
-        self.views = np.load(os.path.join(v_path, "views.npz"),mmap_mode="r").copy()
+        self.views = np.load(os.path.join(v_path, "views.npy"),mmap_mode="r").copy()
         # img_dataset_path = open(os.path.join(v_path, "../img_dataset_path.txt")).readline().strip()
         img_dataset_path = os.path.join(v_path, "../")
         assert os.path.exists(img_dataset_path)
@@ -198,7 +199,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.scene_name = self.scene_name if len(self.scene_name) != 1 else self.scene_name[0].split("/")
         self.scene_name = self.scene_name[-1] if self.scene_name[-1]!="" else self.scene_name[-2]
 
-        self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npz"),mmap_mode="r").copy()
+        self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npy"),mmap_mode="r").copy()
         self.view_mean_std = np.array(self.params["model"]["view_mean_std"])
         self.error_mean_std = np.array(self.params["model"]["error_mean_std"])
 
@@ -211,7 +212,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.point_attribute[com_point_mask,2] = (self.point_attribute[com_point_mask,2]-self.error_mean_std[1])/self.error_mean_std[3]
 
         assert self.point_attribute.shape[1] == 10
-        self.view_paths = np.load(os.path.join(v_path, "view_paths.npz"),mmap_mode="r", allow_pickle=True)
+        self.view_paths = np.load(os.path.join(v_path, "view_paths.npy"),mmap_mode="r", allow_pickle=True)
         self.original_points = self.point_attribute[:, 3:6]
         self.num_seeds = 4096 + 1024
         # self.num_seeds = 20
@@ -348,7 +349,7 @@ class Recon_dataset_imgs_and_batch_points(torch.utils.data.Dataset):
         self.trainer_mode = v_mode
         self.params = v_params
         self.data_root = v_path
-        self.views = np.load(os.path.join(v_path, "views.npz"),mmap_mode="r").copy()
+        self.views = np.load(os.path.join(v_path, "views.npy"),mmap_mode="r").copy()
         # img_dataset_path = open(os.path.join(v_path, "../img_dataset_path.txt")).readline().strip()
         img_dataset_path = os.path.join(v_path, "../")
         assert os.path.exists(img_dataset_path)
@@ -358,7 +359,7 @@ class Recon_dataset_imgs_and_batch_points(torch.utils.data.Dataset):
         self.scene_name = self.scene_name if len(self.scene_name) != 1 else self.scene_name[0].split("/")
         self.scene_name = self.scene_name[-1] if self.scene_name[-1]!="" else self.scene_name[-2]
 
-        self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npz"),mmap_mode="r").copy()
+        self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npy"),mmap_mode="r").copy()
         self.view_mean_std = np.array(self.params["model"]["view_mean_std"])
         self.error_mean_std = np.array(self.params["model"]["error_mean_std"])
 
@@ -371,7 +372,7 @@ class Recon_dataset_imgs_and_batch_points(torch.utils.data.Dataset):
         self.point_attribute[com_point_mask,2] = (self.point_attribute[com_point_mask,2]-self.error_mean_std[1])/self.error_mean_std[3]
 
         assert self.point_attribute.shape[1] == 10
-        self.view_paths = np.load(os.path.join(v_path, "view_paths.npz"),mmap_mode="r", allow_pickle=True)
+        self.view_paths = np.load(os.path.join(v_path, "view_paths.npy"),mmap_mode="r", allow_pickle=True)
         self.original_points = self.point_attribute[:, 3:6]
         self.num_seeds = 4096 + 1024
         # self.num_seeds = 20

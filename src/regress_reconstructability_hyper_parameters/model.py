@@ -1287,7 +1287,7 @@ class Uncertainty_Modeling_wo_pointnet4(nn.Module):
 class TFEncorder(nn.Module):
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation=F.relu,
                  batch_first=False, add_bias_kv=False,
-                 device=None, dtype=None) -> None:
+                 add_norm=False) -> None:
         super(TFEncorder, self).__init__()
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
                                             add_bias_kv=add_bias_kv)
@@ -1298,6 +1298,11 @@ class TFEncorder(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.dropout1 = nn.Dropout(dropout)
         self.dropout2 = nn.Dropout(dropout)
+
+        self.add_norm = add_norm
+        if self.add_norm:
+            self.norm1 = nn.LayerNorm(d_model)
+            self.norm2 = nn.LayerNorm(d_model)
 
         # Legacy string support for activation function.
         if isinstance(activation, str):
@@ -1310,7 +1315,11 @@ class TFEncorder(nn.Module):
         x = src
         dx, weights = self._sa_block(x, src_mask, src_key_padding_mask)
         x = x + dx
+        if self.add_norm:
+            x = self.norm1(x)
         x = x + self._ff_block(x)
+        if self.add_norm:
+            x = self.norm2(x)
         return x, weights
 
     # self-attention block
@@ -1545,8 +1554,8 @@ class Uncertainty_Modeling_wo_pointnet6(nn.Module):
 
 class TFDecorder(nn.Module):
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation=F.relu,
-                 layer_norm_eps=1e-5, batch_first=False,
-                 add_bias_kv=False) -> None:
+                 batch_first=False,
+                 add_bias_kv=False,add_norm=False) -> None:
         super(TFDecorder, self).__init__()
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
                                             add_bias_kv=add_bias_kv)
@@ -1561,6 +1570,12 @@ class TFDecorder(nn.Module):
         self.dropout2 = nn.Dropout(dropout)
         self.dropout3 = nn.Dropout(dropout)
 
+        self.add_norm = add_norm
+        if self.add_norm:
+            self.norm1 = nn.LayerNorm(d_model)
+            self.norm2 = nn.LayerNorm(d_model)
+            self.norm3 = nn.LayerNorm(d_model)
+
         # Legacy string support for activation function.
         if isinstance(activation, str):
             self.activation = _get_activation_fn(activation)
@@ -1573,12 +1588,17 @@ class TFDecorder(nn.Module):
 
         dx, sa_weights = self._sa_block(x, key_padding_mask=v_point_features_mask)
         x = x + dx
+        if self.add_norm:
+            x = self.norm1(x)
         dx2, mha_weights = self.multihead_attn(v_fused_view_features, x, x,
                                                key_padding_mask=v_point_features_mask,
                                                need_weights=True)
         x = v_fused_view_features + dx2
+        if self.add_norm:
+            x = self.norm2(x)
         x = x + self._ff_block(x)
-
+        if self.add_norm:
+            x = self.norm3(x)
         return x, sa_weights, mha_weights
 
     def _sa_block(self, x,
@@ -2259,7 +2279,7 @@ class Uncertainty_Modeling_wo_pointnet15(Uncertainty_Modeling_wo_pointnet8):
                 self.features_to_recon_error.requires_grad_(False)
                 self.magic_class_token.requires_grad_(False)
 
-
+# Lightweight version 14 with norm
 class Uncertainty_Modeling_wo_pointnet16(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):
         super(Uncertainty_Modeling_wo_pointnet16, self).__init__(hparams)
@@ -2268,57 +2288,64 @@ class Uncertainty_Modeling_wo_pointnet16(Uncertainty_Modeling_wo_pointnet8):
 
         # ========================================Phase 0========================================
         self.view_feature_extractor = nn.Sequential(
-            nn.Linear(5, 512),
+            nn.Linear(5, 128),
+            nn.LayerNorm(128),
             nn.ReLU(),
-            nn.Linear(512, 512),
-            nn.ReLU(),
-            nn.Linear(512, 512),
+            nn.Linear(128, 128),
         )
-        self.view_feature_fusioner1 = TFEncorder(512, 2, 512, 0.2, batch_first=True)
-        self.view_feature_fusioner1.self_attn = MultiheadAttention(512, 2, dropout=0.2, batch_first=True,
-                                                                   add_bias_kv=True)
+        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=True,add_norm=True)
 
         self.features_to_recon_error = nn.Sequential(
-            nn.Linear(512, 1),
-        )
-
-        # ========================================Phase 1========================================
-        self.img_feature_expander = nn.Sequential(
-            nn.Linear(32, 512),
+            nn.Linear(128, 128),
+            nn.LayerNorm(128),
             nn.ReLU(),
-            nn.Linear(512, 512),
-        )
-        self.img_feature_fusioner1 = TFDecorder(512, 2, 512, 0.2, batch_first=True)
-        self.img_feature_fusioner1.self_attn = MultiheadAttention(512, 2, dropout=0.2, batch_first=True,
-                                                                  add_bias_kv=True)
-
-        self.features_to_gt_error = nn.Sequential(
-            nn.Linear(512, 1),
+            nn.Linear(128, 1),
         )
 
-        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 512))
-
-        for module in [self.view_feature_extractor, self.img_feature_expander]:
-            for m in module.modules():
+        def init_linear(item):
+            for m in item.modules():
                 if isinstance(m, (nn.Linear,)):
                     nn.init.kaiming_normal_(m.weight)
                     fan_in, _ = init._calculate_fan_in_and_fan_out(m.weight)
                     bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
                     init.normal_(m.bias, -bound, bound)
 
-        for transformer_module in [self.view_feature_fusioner1, self.img_feature_fusioner1]:
-            nn.init.kaiming_normal_(transformer_module.self_attn.in_proj_weight)
+        def init_attention(item):
+            nn.init.kaiming_normal_(item.self_attn.in_proj_weight)
 
-            init.normal_(transformer_module.self_attn.in_proj_bias)
-            init.normal_(transformer_module.self_attn.out_proj.bias)
-            init.xavier_normal_(transformer_module.self_attn.bias_k)
-            init.xavier_normal_(transformer_module.self_attn.bias_v)
+            init.normal_(item.self_attn.in_proj_bias)
+            init.normal_(item.self_attn.out_proj.bias)
+            init.xavier_normal_(item.self_attn.bias_k)
+            init.xavier_normal_(item.self_attn.bias_v)
 
-        if self.hydra_conf["model"]["open_weights"] is False:
-            self.view_feature_extractor.requires_grad_(False)
-            self.view_feature_fusioner1.requires_grad_(False)
-            self.features_to_recon_error.requires_grad_(False)
-            self.magic_class_token.requires_grad_(False)
+        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 128))
+
+        init_linear(self.view_feature_extractor)
+        init_attention(self.view_feature_fusioner1)
+
+        # ========================================Phase 1========================================
+        if self.is_involve_img:
+            self.img_feature_expander = nn.Sequential(
+                nn.Linear(32, 128),
+                nn.LayerNorm(128),
+                nn.ReLU(),
+                nn.Linear(128, 128),
+            )
+            self.img_feature_fusioner1 = TFDecorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=True)
+
+            self.features_to_gt_error = nn.Sequential(
+                nn.Linear(128, 128),
+                nn.LayerNorm(128),
+                nn.ReLU(),
+                nn.Linear(128, 1),
+            )
+            init_linear(self.img_feature_expander)
+            init_attention(self.img_feature_fusioner1)
+            if self.hydra_conf["model"]["open_weights"] is False:
+                self.view_feature_extractor.requires_grad_(False)
+                self.view_feature_fusioner1.requires_grad_(False)
+                self.features_to_recon_error.requires_grad_(False)
+                self.magic_class_token.requires_grad_(False)
 
 
 # Spearman version

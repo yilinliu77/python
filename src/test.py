@@ -1,4 +1,12 @@
+import os
+import time
+
 import numba as nb
+import torch
+import numpy as np
+
+from src.regress_reconstructability_hyper_parameters.dataset import Regress_hyper_parameters_img_dataset
+
 
 @nb.njit
 def str_to_int(s):
@@ -31,3 +39,26 @@ def str_to_float(v_str: str) -> float:
     if v_str[0] == "-":
         result = result * -1
     return result
+
+
+if __name__ == '__main__':
+    data_file = r"D:\Projects\Reconstructability\training_data\v6\xuexiao_fine_ds_0090\views.npz"
+    cur = time.time()
+    data = np.load(data_file)["arr_0"].copy()
+    print("Read file: ",time.time() - cur)
+
+    mean_time = 0
+    for i in range(10):
+        cur = time.time()
+        np.log(data[np.random.randint(0,data.shape[0])] ** 2)
+        mean_time += time.time()-cur
+    print("In memory test: {:.2f}".format(mean_time / 10))
+    mean_time = 0
+    for i in range(10):
+        cur = time.time()
+        item = np.load(data_file,mmap_mode="r")["arr_0"][np.random.randint(0,data.shape[0])]
+        np.log(item ** 2)
+        mean_time += time.time()-cur
+    print("Out memory test: {:.2f}".format(mean_time / 10))
+
+    pass

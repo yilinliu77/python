@@ -30,8 +30,11 @@ function with_backoff {
   return $exitCode
 }
 
-conda install -y opencv pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
+# conda pacakges (Only install necessary pacakges, the majority dependencies are installed by pip)
+conda install -y pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
 
-pip install pytorch-lightning hydra-core shapely scikit-image matplotlib msgpack-rpc-python airsim tensorboard plyfile open3d
+# pip pacakges
+pip install pytorch-lightning hydra-core shapely scikit-image matplotlib msgpack-rpc-python airsim tensorboard plyfile open3d opencv-python
 
+# need "TORCH_CUDA_ARCH_LIST" flag to install torchsort
 TORCH_CUDA_ARCH_LIST="Pascal;Volta;Turing;Ampere" pip install torchsort

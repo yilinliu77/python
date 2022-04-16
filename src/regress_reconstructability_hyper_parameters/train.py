@@ -358,7 +358,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         com_mask = point_attribute[:,2] != -1
         point_attribute[acc_mask,1] = point_attribute[acc_mask,1] * error_mean_std[2] + error_mean_std[0]
         point_attribute[com_mask,2] = point_attribute[com_mask,2] * error_mean_std[3] + error_mean_std[1]
-        names = np.array([self.dataset_name_dict[item] for batch in outputs for item in batch[2][0]])
+        names = np.concatenate(list(map(lambda x: [self.dataset_name_dict[item] for batch in x[2] for item in batch], outputs)))
         if len(self.dataset_name_dict) == 1:
             views = np.concatenate(list(map(lambda x: x[3], outputs)))
             views = views.reshape([-1, views.shape[2],views.shape[3]])

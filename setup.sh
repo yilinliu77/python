@@ -35,7 +35,7 @@ with_backoff conda install -y pytorch torchvision torchaudio cudatoolkit=11.3 -c
 
 # pip pacakges
 with_backoff pip --proxy ${HTTP_PROXY} install pytorch-lightning hydra-core shapely scikit-image matplotlib msgpack-rpc-python tensorboard plyfile opencv-python
-with_backoff pip --proxy ${HTTP_PROXY} open3d
+with_backoff pip --proxy ${HTTP_PROXY} install open3d
 with_backoff pip --proxy ${HTTP_PROXY} install airsim
 
 # need "TORCH_CUDA_ARCH_LIST" flag to install torchsort

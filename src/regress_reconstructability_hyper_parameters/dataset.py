@@ -189,7 +189,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.trainer_mode = v_mode
         self.params = v_params
         self.data_root = v_path
-        self.views = np.load(os.path.join(v_path, "views.npy"),mmap_mode="r+").copy()
+        self.views = np.load(os.path.join(v_path, "views.npy"),mmap_mode="r+")
         # img_dataset_path = open(os.path.join(v_path, "../img_dataset_path.txt")).readline().strip()
         img_dataset_path = os.path.join(v_path, "../")
         assert os.path.exists(img_dataset_path)
@@ -199,7 +199,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.scene_name = self.scene_name if len(self.scene_name) != 1 else self.scene_name[0].split("/")
         self.scene_name = self.scene_name[-1] if self.scene_name[-1]!="" else self.scene_name[-2]
 
-        self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npy"),mmap_mode="r").copy()
+        self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npy"),mmap_mode="r")
         self.view_mean_std = np.array(self.params["model"]["view_mean_std"])
         self.error_mean_std = np.array(self.params["model"]["error_mean_std"])
 
@@ -349,7 +349,7 @@ class Recon_dataset_imgs_and_batch_points(torch.utils.data.Dataset):
         self.trainer_mode = v_mode
         self.params = v_params
         self.data_root = v_path
-        self.views = np.load(os.path.join(v_path, "views.npy"),mmap_mode="r+").copy()
+        self.views = np.load(os.path.join(v_path, "views.npy"),mmap_mode="r+")
         # img_dataset_path = open(os.path.join(v_path, "../img_dataset_path.txt")).readline().strip()
         img_dataset_path = os.path.join(v_path, "../")
         assert os.path.exists(img_dataset_path)
@@ -359,7 +359,7 @@ class Recon_dataset_imgs_and_batch_points(torch.utils.data.Dataset):
         self.scene_name = self.scene_name if len(self.scene_name) != 1 else self.scene_name[0].split("/")
         self.scene_name = self.scene_name[-1] if self.scene_name[-1]!="" else self.scene_name[-2]
 
-        self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npy"),mmap_mode="r").copy()
+        self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npy"),mmap_mode="r")
         self.view_mean_std = np.array(self.params["model"]["view_mean_std"])
         self.error_mean_std = np.array(self.params["model"]["error_mean_std"])
 

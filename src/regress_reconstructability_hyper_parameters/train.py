@@ -265,7 +265,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.log("Validation Gt Loss", gt_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=1)
 
-        return torch.cat([results[:, :], data["point_attribute"][:, :, 1:3]], dim=1)
+        return torch.cat([results[:, :], data["point_attribute"][:, :, 1:3]], dim=2)
 
     def validation_epoch_end(self, outputs) -> None:
         result = torch.cat(outputs, dim=0).reshape([-1,outputs[0].shape[2]])

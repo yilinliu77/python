@@ -2145,9 +2145,7 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
             nn.ReLU(),
             nn.Linear(256, 256),
         )
-        self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.1, batch_first=True)
-        self.view_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.1, batch_first=True,
-                                                                   add_bias_kv=True)
+        self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.1, batch_first=True,add_bias_kv=True)
 
         self.features_to_recon_error = nn.Sequential(
             nn.Linear(256, 1),
@@ -2159,9 +2157,7 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
             nn.ReLU(),
             nn.Linear(256, 256),
         )
-        self.img_feature_fusioner1 = TFDecorder(256, 2, 612, 0.1, batch_first=True)
-        self.img_feature_fusioner1.self_attn = MultiheadAttention(256, 1, dropout=0.1, batch_first=True,
-                                                                  add_bias_kv=True)
+        self.img_feature_fusioner1 = TFDecorder(256, 2, 612, 0.1, batch_first=True, add_bias_kv=True)
 
         self.features_to_gt_error = nn.Sequential(
             nn.Linear(256, 1),
@@ -2395,9 +2391,7 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
         self.view_feature_extractor = nn.Sequential(
             nn.Linear(5, 128),
         )
-        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.2, batch_first=True)
-        self.view_feature_fusioner1.self_attn = MultiheadAttention(128, 1, dropout=0.2, batch_first=True,
-                                                                   add_bias_kv=True)
+        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.2, batch_first=True,add_bias_kv=True)
 
         self.features_to_recon_error = nn.Sequential(
             nn.Linear(128, 1),
@@ -2407,9 +2401,7 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
         self.img_feature_expander = nn.Sequential(
             nn.Linear(32, 128),
         )
-        self.img_feature_fusioner1 = TFDecorder(128, 1, 128, 0.2, batch_first=True)
-        self.img_feature_fusioner1.self_attn = MultiheadAttention(128, 1, dropout=0.2, batch_first=True,
-                                                                  add_bias_kv=True)
+        self.img_feature_fusioner1 = TFDecorder(128, 1, 128, 0.2, batch_first=True,add_bias_kv=True)
 
         self.features_to_gt_error = nn.Sequential(
             nn.Linear(128, 128),

@@ -317,10 +317,10 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
 
         point_features_pad, point_features_mask_pad = None, None
         if batch[0]["point_features"] is not None:
-            point_features = [item["point_features"] for item in batch]
-            point_features_pad = pad_sequence(point_features, batch_first=True)
-            point_features_mask = [item["point_features_mask"] for item in batch]
-            point_features_mask_pad = pad_sequence(point_features_mask, batch_first=True, padding_value=True)
+            point_features = [torch.swapaxes(item["point_features"],0,1) for item in batch]
+            point_features_pad = torch.swapaxes(pad_sequence(point_features, batch_first=True),1,2)
+            point_features_mask = [torch.swapaxes(item["point_features_mask"],0,1) for item in batch]
+            point_features_mask_pad = torch.swapaxes(pad_sequence(point_features_mask, batch_first=True, padding_value=True),1,2)
         return {
             'views': views_pad,
             'point_attribute': torch.stack(point_attribute, dim=0),

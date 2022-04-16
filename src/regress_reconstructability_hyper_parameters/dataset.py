@@ -281,7 +281,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
 
         point_features, point_features_mask = None, None
         if self.is_involve_img:
-            point_features, point_features_mask = self.img_dataset[point_indexes]
+            point_features, point_features_mask = self.img_dataset[torch.tensor([point_indexes]).int()]
 
         output_dict = {
             # "views": torch.tensor(np.load(self.views_path,mmap_mode="r")["arr_0"][point_indexes], dtype=torch.float32),

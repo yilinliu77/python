@@ -2168,6 +2168,8 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
             init.xavier_normal_(item.self_attn.bias_k)
             init.xavier_normal_(item.self_attn.bias_v)
 
+        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 256))
+
         # ========================================Phase 1========================================
         if self.is_involve_img:
             self.img_feature_expander = nn.Sequential(
@@ -2190,12 +2192,8 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
                 self.features_to_recon_error.requires_grad_(False)
                 self.magic_class_token.requires_grad_(False)
 
-        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 256))
-
         init_linear(self.view_feature_extractor)
         init_attention(self.view_feature_fusioner1)
-
-
 
 # version 70; add sigmoid; not useful
 # version 84 with normalized_l2_loss: better than version 83 and 85
@@ -2360,6 +2358,8 @@ class Uncertainty_Modeling_wo_pointnet17(Uncertainty_Modeling_wo_pointnet8):
             init.xavier_normal_(item.self_attn.bias_k)
             init.xavier_normal_(item.self_attn.bias_v)
 
+        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 256))
+
         # ========================================Phase 1========================================
         if self.is_involve_img:
             self.img_feature_expander = nn.Sequential(
@@ -2383,7 +2383,6 @@ class Uncertainty_Modeling_wo_pointnet17(Uncertainty_Modeling_wo_pointnet8):
                 self.features_to_recon_error.requires_grad_(False)
                 self.magic_class_token.requires_grad_(False)
 
-        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 256))
 
         init_linear(self.view_feature_extractor)
         init_attention(self.view_feature_fusioner1)
@@ -2429,6 +2428,8 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
             init.xavier_normal_(item.self_attn.bias_k)
             init.xavier_normal_(item.self_attn.bias_v)
 
+        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 128))
+
         # ========================================Phase 1========================================
         if self.is_involve_img:
             self.img_feature_expander = nn.Sequential(
@@ -2452,7 +2453,6 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
                 self.features_to_recon_error.requires_grad_(False)
                 self.magic_class_token.requires_grad_(False)
 
-        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 128))
 
         init_linear(self.view_feature_extractor)
         init_attention(self.view_feature_fusioner1)

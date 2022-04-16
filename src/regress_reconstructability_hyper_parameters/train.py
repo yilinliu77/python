@@ -472,7 +472,7 @@ def main(v_cfg: DictConfig):
         # for item in list(state_dict.keys()):
         #     if "point_feature_extractor" in item:
         #         state_dict.pop(item)
-        model.load_state_dict(state_dict, strict=True)
+        model.load_state_dict(state_dict, strict=False)
 
     if v_cfg["trainer"].auto_lr_find:
         trainer.tune(model)

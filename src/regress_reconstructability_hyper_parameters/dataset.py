@@ -153,9 +153,13 @@ class Regress_hyper_parameters_img_dataset(torch.utils.data.Dataset):
             if point_path=="":
                 img_features_on_point_list.append(torch.zeros((1, 32), dtype=torch.float32))
             else:
-                point_path = point_path.replace("\\\\","/") 
+                point_path = point_path.replace("\\\\","/")
                 point_path = point_path.replace("\\","/")
                 data = point_path.split("/")
+                if len(data)<=2:
+                    print(self.points_feature_path[point_index])
+                    print(point_path)
+                    print(data)
                 point_path = os.path.join(self.data_root, data[0].strip(), "point_features", data[1].strip())
                 # point_path[-1]="y"
                 real_indexes.append(int(data[-1].split(".")[0]))

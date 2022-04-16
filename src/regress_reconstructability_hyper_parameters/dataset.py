@@ -371,7 +371,7 @@ class Recon_dataset_imgs_and_batch_points(Regress_hyper_parameters_dataset_with_
             # "points": self.points[used_index[index]],
             "point_features": point_features,
             "point_features_mask": point_features_mask,
-            "scene_name": self.scene_name,
+            "scene_name": [self.scene_name] * num_points_per_batch,
         }
         return output_dict
 

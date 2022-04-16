@@ -75,7 +75,7 @@ def output_test_with_pc_and_views(
         v_points,  # (x,y,z)
 ):
     # Write views
-    vertexes = v_points[:, 0, :3]
+    vertexes = v_points[:, :3]
 
     vertexes_describer = PlyElement.describe(np.array(
         [(item[0], item[1], item[2], item[3], item[4], item[5], item[6], item[7]) for item in
@@ -265,10 +265,10 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.log("Validation Gt Loss", gt_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=1)
 
-        return torch.cat([results[:, 0], data["point_attribute"][:, 0, 1:3]], dim=1)
+        return torch.cat([results[:, :], data["point_attribute"][:, :, 1:3]], dim=1)
 
     def validation_epoch_end(self, outputs) -> None:
-        result = torch.cat(outputs, dim=0)
+        result = torch.cat(outputs, dim=0).reshape([-1,outputs[0].shape[2]])
         predict_acc = result[:, 0]
         predict_com = result[:, 1]
         gt_acc = result[:, 2]
@@ -318,59 +318,63 @@ class Regress_hyper_parameters(pl.LightningModule):
 
             view_mean_std = np.array(self.hydra_conf["model"]["view_mean_std"])
 
-            views = data["views"][:,0].cpu().numpy()
-            view_mask = views[:, :, 0] > 0
+            views = data["views"].cpu().numpy()
+            view_mask = views[:, :, :, 0] > 0
             views[view_mask,1] = views[view_mask, 1] * view_mean_std[5] + view_mean_std[0]
             views[view_mask,2] = views[view_mask, 2] * view_mean_std[6] + view_mean_std[1]
-            views[:, :, 1] = views[:, :, 1] + normal_theta
-            views[:, :, 2] = views[:, :, 2] + normal_phi
+            views[:, :, :, 1] = views[:, :, :, 1] + normal_theta[:,:,np.newaxis]
+            views[:, :, :,  2] = views[:, :, :,  2] + normal_phi[:,:,np.newaxis]
 
-            dz = np.cos(views[:, :, 1])
-            dx = np.sin(views[:, :, 1]) * np.cos(views[:, :, 2])
-            dy = np.sin(views[:, :, 1]) * np.sin(views[:, :, 2])
+            dz = np.cos(views[:, :, :,  1])
+            dx = np.sin(views[:, :, :,  1]) * np.cos(views[:, :, :,  2])
+            dy = np.sin(views[:, :, :,  1]) * np.sin(views[:, :, :,  2])
 
-            view_dir = np.stack([dx, dy, dz], axis=2) * (data["views"][:, 0, :, 3:4].cpu().numpy() * view_mean_std[7] + view_mean_std[2]) * 60
+            view_dir = np.stack([dx, dy, dz], axis=-1) * (data["views"][:, :, :, 3:4].cpu().numpy() * view_mean_std[7] + view_mean_std[2]) * 60
             points = data["point_attribute"][:, :, 3:6].cpu().numpy()
             points = points * self.data_mean_std[3] + self.data_mean_std[:3]
-            views = points + view_dir
-            views = np.concatenate([views, -view_dir, data["views"][:, 0, :, 0:1].cpu().numpy()], axis=-1)
+            views = points[:,:,np.newaxis] + view_dir
+            views = np.concatenate([views, -view_dir, data["views"][:, :, :, 0:1].cpu().numpy()], axis=-1)
 
             return [results,
                     data["point_attribute"],
-                    np.array(list(map(lambda x: self.dataset_name_dict[x], data["scene_name"]))),
+                    data["scene_name"],
                     views,  # num_points, num_views, 7
                     points
                     ]
         else:
             return [results,
                     data["point_attribute"],
-                    np.array(list(map(lambda x: self.dataset_name_dict[x], data["scene_name"]))),
+                    data["scene_name"],
                     ]
 
     def test_epoch_end(self, outputs) -> None:
         error_mean_std = np.array(self.hydra_conf["model"]["error_mean_std"])
 
         prediction = torch.cat(list(map(lambda x: x[0], outputs))).cpu().numpy() * error_mean_std[2:] + error_mean_std[:2]
+        prediction=prediction.reshape([-1,prediction.shape[2]])
         point_attribute = torch.cat(list(map(lambda x: x[1], outputs))).cpu().numpy()
-        acc_mask = point_attribute[:,0,1] != -1
-        com_mask = point_attribute[:,0,2] != -1
-        point_attribute[acc_mask,:,1] = point_attribute[acc_mask,:,1] * error_mean_std[2] + error_mean_std[0]
-        point_attribute[com_mask,:,2] = point_attribute[com_mask,:,2] * error_mean_std[3] + error_mean_std[1]
-        names = np.concatenate(list(map(lambda x: x[2], outputs)))
+        point_attribute=point_attribute.reshape([-1,point_attribute.shape[2]])
+        acc_mask = point_attribute[:,1] != -1
+        com_mask = point_attribute[:,2] != -1
+        point_attribute[acc_mask,1] = point_attribute[acc_mask,1] * error_mean_std[2] + error_mean_std[0]
+        point_attribute[com_mask,2] = point_attribute[com_mask,2] * error_mean_std[3] + error_mean_std[1]
+        names = np.array([self.dataset_name_dict[item] for batch in outputs for item in batch[2][0]])
         if len(self.dataset_name_dict) == 1:
             views = np.concatenate(list(map(lambda x: x[3], outputs)))
+            views = views.reshape([-1, views.shape[2],views.shape[3]])
             points = np.concatenate(list(map(lambda x: x[4], outputs)))
+            points = points.reshape([-1, points.shape[2]])
 
         log_str = ""
         mean_spearman = 0
         mean_smith_spearmanr_factor = 0
         spearman_dict = {}
         for scene_item in self.dataset_name_dict:
-            predicted_acc = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 0]
-            predicted_com = prediction[names == self.dataset_name_dict[scene_item]][:, 0, 1]
-            smith_error = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 0]
-            gt_acc = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 1]
-            gt_com = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0, 2]
+            predicted_acc = prediction[names == self.dataset_name_dict[scene_item]][:, 0]
+            predicted_com = prediction[names == self.dataset_name_dict[scene_item]][:, 1]
+            smith_error = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0]
+            gt_acc = point_attribute[names == self.dataset_name_dict[scene_item]][:, 1]
+            gt_com = point_attribute[names == self.dataset_name_dict[scene_item]][:, 2]
             if not self.hparams["model"]["involve_img"]:
                 spearmanr_factor = stats.spearmanr(
                     predicted_acc[gt_acc != -1],

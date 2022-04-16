@@ -2195,9 +2195,7 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
         init_linear(self.view_feature_extractor)
         init_attention(self.view_feature_fusioner1)
 
-# version 70; add sigmoid; not useful
-# version 84 with normalized_l2_loss: better than version 83 and 85
-# version 85 with l2_loss: better than version 84
+# Lightweight version 14
 class Uncertainty_Modeling_wo_pointnet15(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):
         super(Uncertainty_Modeling_wo_pointnet15, self).__init__(hparams)
@@ -2206,59 +2204,60 @@ class Uncertainty_Modeling_wo_pointnet15(Uncertainty_Modeling_wo_pointnet8):
 
         # ========================================Phase 0========================================
         self.view_feature_extractor = nn.Sequential(
-            nn.Linear(5, 256),
+            nn.Linear(5, 128),
             nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
+            nn.Linear(128, 128),
         )
-        self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.1, batch_first=True)
-        self.view_feature_fusioner1.self_attn = MultiheadAttention(256, 2, dropout=0.1, batch_first=True,
-                                                                   add_bias_kv=True)
+        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=True)
 
         self.features_to_recon_error = nn.Sequential(
-            nn.Linear(256, 1),
-            nn.Sigmoid()
-        )
-
-        # ========================================Phase 1========================================
-        self.img_feature_expander = nn.Sequential(
-            nn.Linear(32, 256),
+            nn.Linear(128, 128),
             nn.ReLU(),
-            nn.Linear(256, 256),
-        )
-        self.img_feature_fusioner1 = TFDecorder(256, 2, 612, 0.1, batch_first=True)
-        self.img_feature_fusioner1.self_attn = MultiheadAttention(256, 1, dropout=0.1, batch_first=True,
-                                                                  add_bias_kv=True)
-
-        self.features_to_gt_error = nn.Sequential(
-            nn.Linear(256, 1),
-            nn.Sigmoid()
+            nn.Linear(128, 1),
         )
 
-        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 256))
-
-        for module in [self.view_feature_extractor, self.img_feature_expander]:
-            for m in module.modules():
+        def init_linear(item):
+            for m in item.modules():
                 if isinstance(m, (nn.Linear,)):
                     nn.init.kaiming_normal_(m.weight)
                     fan_in, _ = init._calculate_fan_in_and_fan_out(m.weight)
                     bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
                     init.normal_(m.bias, -bound, bound)
 
-        for transformer_module in [self.view_feature_fusioner1, self.img_feature_fusioner1]:
-            nn.init.kaiming_normal_(transformer_module.self_attn.in_proj_weight)
+        def init_attention(item):
+            nn.init.kaiming_normal_(item.self_attn.in_proj_weight)
 
-            init.normal_(transformer_module.self_attn.in_proj_bias)
-            init.normal_(transformer_module.self_attn.out_proj.bias)
-            init.xavier_normal_(transformer_module.self_attn.bias_k)
-            init.xavier_normal_(transformer_module.self_attn.bias_v)
+            init.normal_(item.self_attn.in_proj_bias)
+            init.normal_(item.self_attn.out_proj.bias)
+            init.xavier_normal_(item.self_attn.bias_k)
+            init.xavier_normal_(item.self_attn.bias_v)
 
-        if self.hydra_conf["model"]["open_weights"] is False:
-            self.view_feature_extractor.requires_grad_(False)
-            self.view_feature_fusioner1.requires_grad_(False)
-            self.features_to_recon_error.requires_grad_(False)
-            self.magic_class_token.requires_grad_(False)
+        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 128))
+
+        init_linear(self.view_feature_extractor)
+        init_attention(self.view_feature_fusioner1)
+
+        # ========================================Phase 1========================================
+        if self.is_involve_img:
+            self.img_feature_expander = nn.Sequential(
+                nn.Linear(32, 128),
+                nn.ReLU(),
+                nn.Linear(128, 128),
+            )
+            self.img_feature_fusioner1 = TFDecorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=True)
+
+            self.features_to_gt_error = nn.Sequential(
+                nn.Linear(128, 128),
+                nn.ReLU(),
+                nn.Linear(128, 1),
+            )
+            init_linear(self.img_feature_expander)
+            init_attention(self.img_feature_fusioner1)
+            if self.hydra_conf["model"]["open_weights"] is False:
+                self.view_feature_extractor.requires_grad_(False)
+                self.view_feature_fusioner1.requires_grad_(False)
+                self.features_to_recon_error.requires_grad_(False)
+                self.magic_class_token.requires_grad_(False)
 
 
 class Uncertainty_Modeling_wo_pointnet16(Uncertainty_Modeling_wo_pointnet8):

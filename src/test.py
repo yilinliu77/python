@@ -40,23 +40,22 @@ def str_to_float(v_str: str) -> float:
         result = result * -1
     return result
 
-
 if __name__ == '__main__':
-    data_file = r"D:\Projects\Reconstructability\training_data\v6\xuexiao_fine_ds_0090\views.npz"
+    data_file = r"temp/test.npy"
     cur = time.time()
-    data = np.load(data_file)["arr_0"].copy()
+    data = np.load(data_file).copy()
     print("Read file: ",time.time() - cur)
 
     mean_time = 0
-    for i in range(10):
+    for i in range(10000):
         cur = time.time()
         np.log(data[np.random.randint(0,data.shape[0])] ** 2)
         mean_time += time.time()-cur
     print("In memory test: {:.2f}".format(mean_time / 10))
     mean_time = 0
-    for i in range(10):
+    for i in range(10000):
         cur = time.time()
-        item = np.load(data_file,mmap_mode="r")["arr_0"][np.random.randint(0,data.shape[0])]
+        item = np.load(data_file,mmap_mode="r")[np.random.randint(0,data.shape[0])]
         np.log(item ** 2)
         mean_time += time.time()-cur
     print("Out memory test: {:.2f}".format(mean_time / 10))

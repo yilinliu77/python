@@ -153,8 +153,8 @@ class Regress_hyper_parameters_img_dataset(torch.utils.data.Dataset):
             if point_path=="":
                 img_features_on_point_list.append(torch.zeros((1, 32), dtype=torch.float32))
             else:
-                data = point_path.split("\\")
-                data = point_path.split("/") if len(data) == 1 else data
+                point_path = point_path.replace("\\","/")
+                data = point_path.split("/")
                 point_path = os.path.join(self.data_root, data[0].strip(), "point_features", data[1].strip())
                 # point_path[-1]="y"
                 real_indexes.append(int(data[-1].split(".")[0]))
@@ -190,6 +190,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.views = np.load(os.path.join(v_path, "views.npy"), mmap_mode="r+")
         self.point_attribute = np.load(os.path.join(v_path, "point_attribute.npy"), mmap_mode="r+")
         self.view_paths = np.load(os.path.join(v_path, "view_paths.npy"), mmap_mode="r+", allow_pickle=True)
+        assert self.views.shape[0] == self.point_attribute.shape[0] == self.view_paths.shape[0]
         img_dataset_path = os.path.join(v_path, "../")
         assert os.path.exists(img_dataset_path)
         self.is_involve_img = self.params["model"]["involve_img"]
@@ -384,33 +385,33 @@ class Recon_dataset_imgs_and_batch_points(Regress_hyper_parameters_dataset_with_
             used_index = self.whole_index
         return used_index.shape[0] // self.params["model"]["num_points_per_batch"]
 
-    @staticmethod
-    def collate_fn(batch):
-        scene_name = [item["scene_name"] for item in batch]
-        views = [torch.transpose(item["views"], 0, 1) for item in batch]
-        from torch.nn.utils.rnn import pad_sequence
-        views_pad = pad_sequence(views, batch_first=True)
-        views_pad = torch.transpose(views_pad, 1, 2)
-
-        # view_pairs = [torch.transpose(item["view_pairs"],0,1) for item in batch]
-        # view_pairs_pad = torch.transpose(torch.transpose(pad_sequence(view_pairs),0,1),1,2)
-        point_attribute = [item["point_attribute"] for item in batch]
-
-        point_features_pad,point_features_mask_pad = None, None
-        if batch[0]["point_features"] is not None:
-            point_features = [item["point_features"] for item in batch]
-            point_features_pad = pad_sequence(point_features, batch_first=True)
-            point_features_mask = [item["point_features_mask"] for item in batch]
-            point_features_mask_pad = pad_sequence(point_features_mask, batch_first=True, padding_value=True)
-
-        return {
-            'views': views_pad,
-            # 'view_pairs': view_pairs_pad,
-            'point_attribute': torch.stack(point_attribute, dim=0),
-            'point_features': point_features_pad,
-            'point_features_mask': point_features_mask_pad,
-            'scene_name': scene_name,
-        }
+    # @staticmethod
+    # def collate_fn(batch):
+    #     scene_name = [item["scene_name"] for item in batch]
+    #     views = [torch.transpose(item["views"], 0, 1) for item in batch]
+    #     from torch.nn.utils.rnn import pad_sequence
+    #     views_pad = pad_sequence(views, batch_first=True)
+    #     views_pad = torch.transpose(views_pad, 1, 2)
+    #
+    #     # view_pairs = [torch.transpose(item["view_pairs"],0,1) for item in batch]
+    #     # view_pairs_pad = torch.transpose(torch.transpose(pad_sequence(view_pairs),0,1),1,2)
+    #     point_attribute = [item["point_attribute"] for item in batch]
+    #
+    #     point_features_pad,point_features_mask_pad = None, None
+    #     if batch[0]["point_features"] is not None:
+    #         point_features = [item["point_features"] for item in batch]
+    #         point_features_pad = pad_sequence(point_features, batch_first=True)
+    #         point_features_mask = [item["point_features_mask"] for item in batch]
+    #         point_features_mask_pad = pad_sequence(point_features_mask, batch_first=True, padding_value=True)
+    #
+    #     return {
+    #         'views': views_pad,
+    #         # 'view_pairs': view_pairs_pad,
+    #         'point_attribute': torch.stack(point_attribute, dim=0),
+    #         'point_features': point_features_pad,
+    #         'point_features_mask': point_features_mask_pad,
+    #         'scene_name': scene_name,
+    #     }
 
 
 class Regress_hyper_parameters_dataset_with_imgs_with_truncated_error(torch.utils.data.Dataset):

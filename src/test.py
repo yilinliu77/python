@@ -60,4 +60,13 @@ if __name__ == '__main__':
         mean_time += time.time()-cur
     print("Out memory test: {:.2f}".format(mean_time / 10))
 
+    aa = np.load(data_file,mmap_mode="r")
+    mean_time = 0
+    for i in range(10000):
+        cur = time.time()
+        item = aa[np.random.randint(0,data.shape[0])]
+        np.log(item ** 2)
+        mean_time += time.time()-cur
+    print("Out memory test: {:.2f}".format(mean_time / 10))
+
     pass

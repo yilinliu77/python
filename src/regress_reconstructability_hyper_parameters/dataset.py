@@ -268,11 +268,11 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
             used_index = self.whole_index
         point_indexes = used_index[index]
 
-        views_item = self.views[point_indexes]
+        views_item = self.views[point_indexes].copy()
         valid_mask = views_item[:, 0] == 1
         views_item[valid_mask, 1:6] = (views_item[valid_mask, 1:6] - self.view_mean_std[:5]) / self.view_mean_std[5:]
 
-        points_item = self.point_attribute[point_indexes]
+        points_item = self.point_attribute[point_indexes].copy()
         if points_item[1] != -1:
             points_item[1] = (points_item[1] - self.error_mean_std[0]) / self.error_mean_std[2]
 

@@ -290,7 +290,7 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
                 points_item.reshape([-1, self.point_attribute.shape[1]]), dtype=torch.float32),
             "point_features": point_features,
             "point_features_mask": point_features_mask,
-            "scene_name": self.scene_name,
+            "scene_name": [self.scene_name] * 1,
         }
         return output_dict
 
@@ -411,6 +411,7 @@ class Recon_dataset_imgs_and_batch_points(Regress_hyper_parameters_dataset_with_
             'point_features_mask': point_features_mask_pad,
             'scene_name': scene_name,
         }
+
 
 class Regress_hyper_parameters_dataset_with_imgs_with_truncated_error(torch.utils.data.Dataset):
     def __init__(self, v_path, v_params, v_mode):

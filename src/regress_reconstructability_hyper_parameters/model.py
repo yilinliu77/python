@@ -804,7 +804,7 @@ def loss_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False):
     return recon_loss, gt_loss, gt_loss if v_is_img_involved else recon_loss
 
 
-def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False):
+def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False,method="l2", normalized_factor=1.):
     v_prediction = torch.sigmoid(v_prediction)  # Chou zuzu
     predicted_recon_error = v_prediction[:, :, 0:1]
     predicted_gt_error = v_prediction[:, :, 1:2]
@@ -824,7 +824,7 @@ def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False
         recon_loss = recon_loss + spearmanr(
             predicted_recon_error[id_batch][recon_mask[id_batch]].unsqueeze(0),
             gt_recon_error[id_batch][recon_mask[id_batch]].unsqueeze(0),
-            regularization="l2", regularization_strength=1.0
+            regularization=method, regularization_strength=normalized_factor
         )
     recon_loss = predicted_recon_error.shape[
                      0] - recon_loss  # We want to minimize the loss, which is maximizing the correlation factor
@@ -834,7 +834,7 @@ def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False
             gt_loss = gt_loss + spearmanr(
                 predicted_gt_error[id_batch][gt_mask[id_batch]].unsqueeze(0),
                 gt_gt_error[id_batch][gt_mask[id_batch]].unsqueeze(0),
-                regularization="l2", regularization_strength=1.0
+                regularization=method, regularization_strength=normalized_factor
             )
         gt_loss = predicted_recon_error.shape[
                       0] - gt_loss  # We want to minimize the loss, which is maximizing the correlation factor
@@ -1555,7 +1555,7 @@ class Uncertainty_Modeling_wo_pointnet6(nn.Module):
 class TFDecorder(nn.Module):
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation=F.relu,
                  batch_first=False,
-                 add_bias_kv=False,add_norm=False) -> None:
+                 add_bias_kv=False, add_norm=False) -> None:
         super(TFDecorder, self).__init__()
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
                                             add_bias_kv=add_bias_kv)
@@ -1621,6 +1621,7 @@ class TFDecorder(nn.Module):
     def _ff_block(self, x: Tensor) -> Tensor:
         x = self.linear2(self.dropout(self.activation(self.linear1(x))))
         return self.dropout3(x)
+
 
 class Uncertainty_Modeling_wo_pointnet7(nn.Module):
     def __init__(self, hparams):
@@ -2165,7 +2166,7 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
             nn.ReLU(),
             nn.Linear(256, 256),
         )
-        self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.2, batch_first=True,add_bias_kv=True)
+        self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.2, batch_first=True, add_bias_kv=True)
 
         self.features_to_recon_error = nn.Sequential(
             nn.Linear(256, 256),
@@ -2180,6 +2181,7 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
                     fan_in, _ = init._calculate_fan_in_and_fan_out(m.weight)
                     bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
                     init.normal_(m.bias, -bound, bound)
+
         def init_attention(item):
             nn.init.kaiming_normal_(item.self_attn.in_proj_weight)
 
@@ -2214,6 +2216,7 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
 
         init_linear(self.view_feature_extractor)
         init_attention(self.view_feature_fusioner1)
+
 
 # Lightweight version 14
 class Uncertainty_Modeling_wo_pointnet15(Uncertainty_Modeling_wo_pointnet8):
@@ -2279,6 +2282,7 @@ class Uncertainty_Modeling_wo_pointnet15(Uncertainty_Modeling_wo_pointnet8):
                 self.features_to_recon_error.requires_grad_(False)
                 self.magic_class_token.requires_grad_(False)
 
+
 # Lightweight version 14 with norm
 class Uncertainty_Modeling_wo_pointnet16(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):
@@ -2293,7 +2297,7 @@ class Uncertainty_Modeling_wo_pointnet16(Uncertainty_Modeling_wo_pointnet8):
             nn.ReLU(),
             nn.Linear(128, 128),
         )
-        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=True,add_norm=True)
+        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=True, add_norm=True)
 
         self.features_to_recon_error = nn.Sequential(
             nn.Linear(128, 128),
@@ -2361,7 +2365,7 @@ class Uncertainty_Modeling_wo_pointnet17(Uncertainty_Modeling_wo_pointnet8):
             nn.ReLU(),
             nn.Linear(256, 256),
         )
-        self.view_feature_fusioner1 = TFEncorder(256, 2, 256, 0.2, batch_first=True,add_bias_kv=True)
+        self.view_feature_fusioner1 = TFEncorder(256, 2, 256, 0.2, batch_first=True, add_bias_kv=True)
 
         self.features_to_recon_error = nn.Sequential(
             nn.Linear(256, 256),
@@ -2376,6 +2380,7 @@ class Uncertainty_Modeling_wo_pointnet17(Uncertainty_Modeling_wo_pointnet8):
                     fan_in, _ = init._calculate_fan_in_and_fan_out(m.weight)
                     bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
                     init.normal_(m.bias, -bound, bound)
+
         def init_attention(item):
             nn.init.kaiming_normal_(item.self_attn.in_proj_weight)
 
@@ -2393,7 +2398,7 @@ class Uncertainty_Modeling_wo_pointnet17(Uncertainty_Modeling_wo_pointnet8):
                 nn.ReLU(),
                 nn.Linear(256, 256),
             )
-            self.img_feature_fusioner1 = TFDecorder(256, 2, 256, 0.2, batch_first=True,add_bias_kv=True)
+            self.img_feature_fusioner1 = TFDecorder(256, 2, 256, 0.2, batch_first=True, add_bias_kv=True)
 
             self.features_to_gt_error = nn.Sequential(
                 nn.Linear(256, 256),
@@ -2409,10 +2414,8 @@ class Uncertainty_Modeling_wo_pointnet17(Uncertainty_Modeling_wo_pointnet8):
                 self.features_to_recon_error.requires_grad_(False)
                 self.magic_class_token.requires_grad_(False)
 
-
         init_linear(self.view_feature_extractor)
         init_attention(self.view_feature_fusioner1)
-
 
     def forward(self, v_data: Dict[str, torch.Tensor]):
         predict_result, (weights, cross_weight) = super(Uncertainty_Modeling_wo_pointnet17, self).forward(v_data)
@@ -2432,7 +2435,7 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
         self.view_feature_extractor = nn.Sequential(
             nn.Linear(5, 128),
         )
-        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.2, batch_first=True,add_bias_kv=True)
+        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=True)
 
         self.features_to_recon_error = nn.Sequential(
             nn.Linear(128, 1),
@@ -2479,7 +2482,6 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
                 self.features_to_recon_error.requires_grad_(False)
                 self.magic_class_token.requires_grad_(False)
 
-
         init_linear(self.view_feature_extractor)
         init_attention(self.view_feature_fusioner1)
 
@@ -2488,6 +2490,160 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
         predict_result = 1 - torch.sigmoid(predict_result) * 2
 
         return predict_result, (weights, cross_weight)
+
+    def loss(self, v_point_attribute, v_prediction):
+        if self.hydra_conf["trainer"]["loss"] == "loss_l2_error":
+            return loss_l2_error(v_point_attribute, v_prediction, self.is_involve_img)
+        else:
+            return loss_spearman_error(v_point_attribute, v_prediction, self.is_involve_img,
+                                       method=self.hydra_conf["model"]["spearman_method"],
+                                       normalized_factor=self.hydra_conf["model"]["spearman_factor"])
+
+class Uncertainty_Modeling_wo_pointnet19(Uncertainty_Modeling_wo_pointnet8):
+    def __init__(self, hparams):
+        super(Uncertainty_Modeling_wo_pointnet19, self).__init__(hparams)
+        self.hydra_conf = hparams
+        self.is_involve_img = self.hydra_conf["model"]["involve_img"]
+
+        # ========================================Phase 0========================================
+        self.view_feature_extractor = nn.Sequential(
+            nn.Linear(5, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+        )
+        self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.2, batch_first=True, add_bias_kv=True)
+        self.view_feature_fusioner2 = TFEncorder(256, 2, 512, 0.2, batch_first=True, add_bias_kv=True)
+
+        self.features_to_recon_error = nn.Sequential(
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1),
+        )
+
+        def init_linear(item):
+            for m in item.modules():
+                if isinstance(m, (nn.Linear,)):
+                    nn.init.kaiming_normal_(m.weight)
+                    fan_in, _ = init._calculate_fan_in_and_fan_out(m.weight)
+                    bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+                    init.normal_(m.bias, -bound, bound)
+
+        def init_attention(item):
+            nn.init.kaiming_normal_(item.self_attn.in_proj_weight)
+
+            init.normal_(item.self_attn.in_proj_bias)
+            init.normal_(item.self_attn.out_proj.bias)
+            init.xavier_normal_(item.self_attn.bias_k)
+            init.xavier_normal_(item.self_attn.bias_v)
+
+        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 256))
+
+        # ========================================Phase 1========================================
+        if self.is_involve_img:
+            self.img_feature_expander = nn.Sequential(
+                nn.Linear(32, 256),
+                nn.ReLU(),
+                nn.Linear(256, 256),
+            )
+            self.img_feature_fusioner1 = TFDecorder(256, 2, 512, 0.1, batch_first=True, add_bias_kv=True)
+
+            self.features_to_gt_error = nn.Sequential(
+                nn.Linear(256, 256),
+                nn.ReLU(),
+                nn.Linear(256, 1),
+            )
+            init_linear(self.img_feature_expander)
+            init_attention(self.img_feature_fusioner1)
+            if self.hydra_conf["model"]["open_weights"] is False:
+                self.view_feature_extractor.requires_grad_(False)
+                self.view_feature_fusioner1.requires_grad_(False)
+                self.features_to_recon_error.requires_grad_(False)
+                self.magic_class_token.requires_grad_(False)
+
+        init_linear(self.view_feature_extractor)
+        init_attention(self.view_feature_fusioner1)
+
+    def forward(self, v_data: Dict[str, torch.Tensor]):
+        batch_size = v_data["views"].shape[0]
+
+        valid_view_mask = v_data["views"][:, :, 1, 0] > 1e-3
+        v_data["views"][torch.logical_not(valid_view_mask)] = 1
+
+        # ========================================Phase 0========================================
+        views = v_data["views"]
+
+        if len(views.shape) == 4:
+            view_attribute = views.reshape(-1, views.shape[2], views.shape[3])
+        else:
+            view_attribute = views
+        # Normalize the view direction, no longer needed since we use phi and theta now
+        predicted_recon_error_per_view = self.view_feature_extractor(
+            view_attribute[:, :, 1:6])  # Compute the reconstructabilty of every single view
+        predicted_recon_error_per_view = torch.cat([
+            torch.tile(self.magic_class_token, [predicted_recon_error_per_view.shape[0], 1, 1]),
+            predicted_recon_error_per_view
+        ], dim=1)
+
+        valid_mask = torch.zeros_like(predicted_recon_error_per_view)  # Filter out the unusable view
+        valid_mask[
+            torch.cat(
+                [torch.tensor([True], device=view_attribute.device).reshape(-1, 1).tile([view_attribute.shape[0], 1]),
+                 view_attribute[:, :, 0].type(torch.bool)], dim=1)
+        ] = 1
+        predicted_recon_error_per_view = predicted_recon_error_per_view * valid_mask
+
+        fused_view_features, weights = self.view_feature_fusioner1(
+            predicted_recon_error_per_view,
+            src_key_padding_mask=torch.logical_not(valid_mask)[:, :, 0],
+        )
+        fused_view_features = fused_view_features * valid_mask
+        fused_view_features, weights = self.view_feature_fusioner2(
+            fused_view_features,
+            src_key_padding_mask=torch.logical_not(valid_mask)[:, :, 0],
+        )
+        fused_view_features = fused_view_features * valid_mask
+
+        fused_view_features = fused_view_features[:, 0]
+        predicted_recon_error = self.features_to_recon_error(fused_view_features)
+        if len(views.shape) == 4:
+            predicted_recon_error = predicted_recon_error.reshape(views.shape[0], -1, 1)  # B * num_point * 1
+
+        v_data["views"][torch.logical_not(valid_view_mask)] = 0
+        predicted_recon_error = valid_view_mask.unsqueeze(-1) * predicted_recon_error  # Mark these features to 0
+
+        # ========================================Phase 1========================================
+        predicted_gt_error = torch.zeros_like(predicted_recon_error)
+        cross_weight: Optional[Tensor] = None
+        if self.is_involve_img:
+            fused_view_features
+            point_features_from_imgs = v_data["point_features"]
+            point_features_mask = v_data["point_features_mask"]
+
+            point_features_from_imgs = self.img_feature_expander(point_features_from_imgs)
+            point_features_from_imgs = point_features_from_imgs * (1 - point_features_mask.float()).unsqueeze(-1).tile(
+                1, 1, 1, point_features_from_imgs.shape[3])
+
+            point_features_from_imgs = point_features_from_imgs.reshape([
+                -1,
+                point_features_from_imgs.shape[2],
+                point_features_from_imgs.shape[3]
+            ])
+            point_features_mask = point_features_mask.reshape([
+                -1, point_features_mask.shape[2]
+            ])
+
+            fused_point_feature, point_feature_weight, cross_weight = self.img_feature_fusioner1(
+                point_features_from_imgs, fused_view_features.unsqueeze(1),
+                v_point_features_mask=point_features_mask)
+            predicted_gt_error = self.features_to_gt_error(fused_point_feature)
+            if len(views.shape) == 4:
+                predicted_gt_error = predicted_gt_error.reshape(views.shape[0], -1, 1)
+        predict_result = torch.cat([predicted_recon_error, predicted_gt_error], dim=2)
+        predict_result = torch.tile(valid_view_mask.unsqueeze(-1), [1, 1, 2]) * predict_result
+
+        return predict_result, (weights, cross_weight),
 
 
 class Uncertainty_Modeling_w_pointnet(nn.Module):

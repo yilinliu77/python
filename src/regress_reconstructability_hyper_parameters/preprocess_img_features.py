@@ -112,16 +112,16 @@ if __name__ == '__main__':
     img_rescale_size = (400, 600)
 
     print("First, compute the geometric features from the viewpoint to sample points")
-    # if not os.path.exists(v_output_root):
-    #     os.mkdir(v_output_root)
-    # view, view_pair, point_attribute, point_features_path, img_paths = preprocess_data(
-    #     reconstructability_file_dir,
-    #     sample_points,
-    #     img_dir
-    # )
-    # np.save(os.path.join(v_output_root, "views"), view)
-    # np.save(os.path.join(v_output_root, "view_paths"), point_features_path)
-    # np.save(os.path.join(v_output_root, "img_paths"), img_paths)
+    if not os.path.exists(v_output_root):
+        os.mkdir(v_output_root)
+    view, view_pair, point_attribute, point_features_path, img_paths = preprocess_data(
+        reconstructability_file_dir,
+        sample_points,
+        img_dir
+    )
+    np.save(os.path.join(v_output_root, "views"), view)
+    np.save(os.path.join(v_output_root, "view_paths"), point_features_path)
+    np.save(os.path.join(v_output_root, "img_paths"), img_paths)
     print("Pre-compute data done")
 
     # debug

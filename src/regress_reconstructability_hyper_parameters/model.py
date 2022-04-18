@@ -786,7 +786,7 @@ def loss_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False):
     predicted_recon_error = v_prediction[:, :, 0:1]
     predicted_gt_error = v_prediction[:, :, 1:2]
 
-    smith_reconstructability = v_point_attribute[:, 0]
+    smith_reconstructability = v_point_attribute[:,:, 0]
 
     gt_recon_error = v_point_attribute[:, :, 1:2]
     recon_mask = (gt_recon_error != -1).bool()

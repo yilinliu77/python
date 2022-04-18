@@ -335,8 +335,8 @@ class Regress_hyper_parameters(pl.LightningModule):
             mean_spearman += spearmanr_factor - abs(smith_spearmanr_factor)
 
             if len(self.dataset_name_dict) == 1:
-                views_item = views[names == self.dataset_name_dict[scene_item]]
-                points_item = points[names == self.dataset_name_dict[scene_item]]
+                views_item = views[(names == self.dataset_name_dict[scene_item]).cpu().numpy()]
+                points_item = points[(names == self.dataset_name_dict[scene_item]).cpu().numpy()]
                 output_test_with_pc_and_views(predicted_acc.cpu().numpy(),
                                               predicted_com.cpu().numpy(),
                                               gt_acc.cpu().numpy(),

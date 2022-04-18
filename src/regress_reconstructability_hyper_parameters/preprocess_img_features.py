@@ -15,6 +15,9 @@ from PIL import Image
 from typing import List, Tuple
 
 from plyfile import PlyData, PlyElement
+from ternausnet.models import UNet16, UNet11
+from torch import nn
+from torchvision.models import resnet, resnet50, resnet101, resnet34
 from torchvision.transforms import transforms
 from tqdm import tqdm
 from copy import deepcopy
@@ -22,6 +25,7 @@ import open3d as o3d
 from scipy import stats
 from tqdm.contrib.concurrent import thread_map, process_map
 
+from shared.common_utils import debug_imgs
 from src.regress_reconstructability_hyper_parameters.preprocess_view_features import preprocess_data
 
 
@@ -59,6 +63,41 @@ def compute_features(v_root_path,
         return
     return point_features
 
+def compute_view_features(v_model, v_view_path: str):
+    save_name = v_view_path.split(".")[0]
+    save_name = re.sub(r"\\", r"/", save_name)
+    save_name = save_name.split("/")[-1] + ".npy"
+    img_features_saved_path = os.path.join(v_data_root, "view_features", save_name)
+    if os.path.exists(img_features_saved_path):
+        img_features_dict[v_view_path] = img_features_saved_path
+    else:
+        img = np.asarray(Image.open(v_view_path)).copy()[:, :, :3]
+        img_tensor = pre_transform(img)
+        with torch.no_grad():
+            img_features = v_model(
+                img_tensor.unsqueeze(0).to(device))
+        numpy_features = img_features.cpu().numpy()
+        # original_img = np.asarray(Image.open(total_view_paths[id_view])).copy()[:,:,:3]
+        # resized_img = img.astype(np.uint8)
+        # transformed_img = img_tensor
+        # featured_img = np.zeros([240,360,1],dtype=np.float32)
+        #
+        # for y in range(6):
+        #     for x in range(6):
+        #         c = y*6+x
+        #         if c>=32:
+        #             break
+        #         start_y = y * 40
+        #         start_x = x * 60
+        #         featured_img[start_y:start_y+40,start_x:start_x+60,0] = cv2.resize(numpy_features[0,c][:,:,np.newaxis],(60,40))
+        #
+        # debug_imgs([original_img])
+        # debug_imgs([resized_img])
+        # debug_imgs([transformed_img])
+        # debug_imgs([featured_img])
+        img_features_dict[v_view_path] = img_features_saved_path
+        np.save(img_features_saved_path, numpy_features)
+
 if __name__ == '__main__':
     import sys
 
@@ -79,32 +118,57 @@ if __name__ == '__main__':
         sample_points,
         img_dir
     )
-    np.savez(os.path.join(v_output_root, "views"), view)
-    np.savez(os.path.join(v_output_root, "view_paths"), point_features_path)
-    np.savez(os.path.join(v_output_root, "img_paths"), img_paths)
+    np.save(os.path.join(v_output_root, "views"), view)
+    np.save(os.path.join(v_output_root, "view_paths"), point_features_path)
+    np.save(os.path.join(v_output_root, "img_paths"), img_paths)
     print("Pre-compute data done")
 
     # debug
-    # view = np.load(os.path.join(output_root, "training_data/views.npz"))["arr_0"]
-    # view_paths = np.load(os.path.join(output_root, "training_data/view_paths.npz"), allow_pickle=True)[
-    #     "arr_0"]
+    # view = np.load(os.path.join(v_output_root, "views.npy"))
+    # point_features_path = np.load(os.path.join(v_output_root, "view_paths.npy"), allow_pickle=True)
+    # img_paths = np.load(os.path.join(v_output_root, "img_paths.npy"), allow_pickle=True)
     # debug
 
     # Compute view features
     print("Compute view features")
     if not os.path.exists(os.path.join(v_data_root, "view_features")):
         os.mkdir(os.path.join(v_data_root, "view_features"))
-    transform = transforms.Compose([
-        transforms.Resize(img_rescale_size),
-        transforms.ToTensor(),
-    ])
-    from thirdparty.AA_RMVSNet.models.drmvsnet import AARMVSNet
-    img_feature_extractor = AARMVSNet()
-    state_dict = torch.load("thirdparty/AA_RMVSNet/model_release.ckpt")
-    img_feature_extractor.load_state_dict(state_dict['model'], True)
-    img_feature_extractor.requires_grad_(False)
+
+    device = "cpu"
+    device = "cuda"
+
+    if True:
+        transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize(img_rescale_size),
+        ])
+        def pre_transform(v_img):
+            img = np.asarray(transform(v_img), dtype=np.float32)
+            var = np.var(img, axis=(0, 1), keepdims=True)
+            mean = np.mean(img, axis=(0, 1), keepdims=True)
+            img_tensor = (img - mean) / (np.sqrt(var))
+            return torch.tensor(img_tensor.transpose([2,0,1]))
+
+        from thirdparty.AA_RMVSNet.models.drmvsnet import AARMVSNet
+        img_feature_extractor = AARMVSNet()
+        state_dict = torch.load("thirdparty/AA_RMVSNet/model_release.ckpt")
+        img_feature_extractor.load_state_dict(state_dict['model'], True)
+        img_feature_extractor.requires_grad_(False)
+        img_feature_extractor = img_feature_extractor.feature
+    else:
+        transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize((480,640)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ])
+        def pre_transform(v_img):
+            img = transform(v_img)
+            return img
+        img_feature_extractor = UNet16(pretrained=True, num_classes=256)
+
     img_feature_extractor.eval()
-    img_feature_extractor
+    img_feature_extractor = img_feature_extractor.to(device)
 
     # All the image names
     total_view_paths = set()
@@ -122,27 +186,23 @@ if __name__ == '__main__':
             img_name = item
             pixel_pos = view[id_point][id_view][6:8]
             img_features_task[img_name].append((pixel_pos,(id_point, id_view)))
-        output_feature[id_point] = np.zeros((len(point_task),32))
+            # img = np.asarray(Image.open(img_name))
+            # x1 = max(0,pixel_pos[0]-0.025)*6000
+            # x2 = min(1,pixel_pos[0]+0.025)*6000
+            # y1 = max(0,pixel_pos[1]-0.025)*4000
+            # y2 = min(1,pixel_pos[1]+0.025)*4000
+            # cv2.rectangle(img,
+            #               (int(x1),int(y1)),
+            #               (int(x2),int(y2)),
+            #               (255,0,0),int(10))
+            # debug_imgs([img[:,:,:3]])
+        output_feature[id_point] = np.zeros((len(point_task),256))
 
     img_features_dict = {}
     total_view_paths = list(total_view_paths)
-    for id_view in tqdm(range(0, len(total_view_paths))):
-        save_name = total_view_paths[id_view].split(".")[0]
-        save_name = re.sub(r"\\", r"/", save_name)
-        save_name = save_name.split("/")[-1] + ".npz"
-        img_features_saved_path = os.path.join(v_data_root, "view_features", save_name)
-        if os.path.exists(img_features_saved_path):
-            img_features_dict[total_view_paths[id_view]]=np.load(img_features_saved_path)["arr_0"]
-        else:
-            img = Image.open(total_view_paths[id_view])
-            img = transform(img)
-            var = torch.var(img, dim=(1, 2), keepdim=True)
-            mean = torch.mean(img, dim=(1, 2), keepdim=True)
-            img_tensor = (img - mean) / (np.sqrt(var) + 0.00000001)
-            img_features = img_feature_extractor.feature(img_tensor.unsqueeze(0)[:, :3])
-            numpy_features = img_features.cpu().numpy()
-            img_features_dict[total_view_paths[id_view]] = numpy_features
-            np.savez(img_features_saved_path,numpy_features)
+
+    with torch.no_grad():
+        thread_map(partial(compute_view_features,img_feature_extractor),total_view_paths,max_workers=8)
 
     print("Pre compute features")
     if not os.path.exists(os.path.join(v_output_root, "point_features")):
@@ -150,7 +210,7 @@ if __name__ == '__main__':
 
     batch_size = 2560
     for img_name in tqdm(img_features_task):
-        img_feature = img_features_dict[img_name]
+        img_feature = np.load(img_features_dict[img_name])
         positions = list(map(lambda x:x[0],img_features_task[img_name]))
         output_positions = list(map(lambda x:x[1],img_features_task[img_name]))
         for i in range(0,len(positions),batch_size):
@@ -158,8 +218,8 @@ if __name__ == '__main__':
             output_positions_item = np.array(output_positions[i:min(len(positions),i+batch_size)])
             positions_item=np.concatenate([positions_item - 10 / 400, positions_item + 10 / 400],axis=1)
             positions_item = np.clip(positions_item,0,1)
-            positions_item[:,[0,2]] = positions_item[:,[0,2]] * 600
-            positions_item[:,[1,3]] = positions_item[:,[1,3]] * 400
+            positions_item[:,[0,2]] = positions_item[:,[0,2]] * img_feature.shape[3]
+            positions_item[:,[1,3]] = positions_item[:,[1,3]] * img_feature.shape[2]
             pixel_position_features = torchvision.ops.roi_align(
                 torch.tensor(img_feature),
                 [torch.tensor(positions_item)],

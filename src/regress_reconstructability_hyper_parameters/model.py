@@ -2454,8 +2454,9 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
 
             init.normal_(item.self_attn.in_proj_bias)
             init.normal_(item.self_attn.out_proj.bias)
-            init.xavier_normal_(item.self_attn.bias_k)
-            init.xavier_normal_(item.self_attn.bias_v)
+            if self.hydra_conf["model"]["add_bias_kv"]:
+                init.xavier_normal_(item.self_attn.bias_k)
+                init.xavier_normal_(item.self_attn.bias_v)
 
         self.magic_class_token = nn.Parameter(torch.randn(1, 1, 128))
 

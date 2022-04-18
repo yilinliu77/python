@@ -2193,8 +2193,8 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
 
         self.magic_class_token = nn.Parameter(torch.randn(1, 1, 256))
 
-        self.init_linear(self.view_feature_extractor)
-        self.init_attention(self.view_feature_fusioner1)
+        # self.init_linear(self.view_feature_extractor)
+        # self.init_attention(self.view_feature_fusioner1)
 
         # ========================================Phase 1========================================
         if self.is_involve_img:

@@ -41,6 +41,9 @@ def str_to_float(v_str: str) -> float:
     return result
 
 if __name__ == '__main__':
+    a = torch.tensor()
+
+
     data_file = r"D:\Projects\Reconstructability\training_data\v7\chengbao_coarse_ds_0090\views.npy"
     cur = time.time()
     data = np.load(data_file).copy()

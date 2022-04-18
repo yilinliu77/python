@@ -306,9 +306,9 @@ class Regress_hyper_parameters(pl.LightningModule):
         results, weights = self.forward(data)
 
         recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)
-        self.log("Test Loss", total_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True,batch_size=1)
-        self.log("Test Recon Loss", recon_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True,batch_size=1)
-        self.log("Test Gt Loss", gt_loss, prog_bar=True, logger=False, on_step=True, on_epoch=True,batch_size=1)
+        self.log("Test Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,batch_size=1)
+        self.log("Test Recon Loss", recon_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,batch_size=1)
+        self.log("Test Gt Loss", gt_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,batch_size=1)
 
         if len(self.dataset_name_dict) == 1:
 

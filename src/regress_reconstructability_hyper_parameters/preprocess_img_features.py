@@ -112,22 +112,22 @@ if __name__ == '__main__':
     img_rescale_size = (400, 600)
 
     print("First, compute the geometric features from the viewpoint to sample points")
-    if not os.path.exists(v_output_root):
-        os.mkdir(v_output_root)
-    view, view_pair, point_attribute, point_features_path, img_paths = preprocess_data(
-        reconstructability_file_dir,
-        sample_points,
-        img_dir
-    )
-    np.save(os.path.join(v_output_root, "views"), view)
-    np.save(os.path.join(v_output_root, "view_paths"), point_features_path)
-    np.save(os.path.join(v_output_root, "img_paths"), img_paths)
+    # if not os.path.exists(v_output_root):
+    #     os.mkdir(v_output_root)
+    # view, view_pair, point_attribute, point_features_path, img_paths = preprocess_data(
+    #     reconstructability_file_dir,
+    #     sample_points,
+    #     img_dir
+    # )
+    # np.save(os.path.join(v_output_root, "views"), view)
+    # np.save(os.path.join(v_output_root, "view_paths"), point_features_path)
+    # np.save(os.path.join(v_output_root, "img_paths"), img_paths)
     print("Pre-compute data done")
 
     # debug
-    # view = np.load(os.path.join(v_output_root, "views.npy"))
-    # point_features_path = np.load(os.path.join(v_output_root, "view_paths.npy"), allow_pickle=True)
-    # img_paths = np.load(os.path.join(v_output_root, "img_paths.npy"), allow_pickle=True)
+    view = np.load(os.path.join(v_output_root, "views.npy"))
+    point_features_path = np.load(os.path.join(v_output_root, "view_paths.npy"), allow_pickle=True)
+    img_paths = np.load(os.path.join(v_output_root, "img_paths.npy"), allow_pickle=True)
     # debug
 
     # Compute view features
@@ -208,7 +208,7 @@ if __name__ == '__main__':
             #               (int(x2),int(y2)),
             #               (255,0,0),int(10))
             # debug_imgs([img[:,:,:3]])
-        output_feature[id_point] = np.zeros((len(point_task),256))
+        output_feature[id_point] = np.zeros((len(point_task),32))
 
     img_features_dict = {}
     total_view_paths = list(total_view_paths)
@@ -237,7 +237,20 @@ if __name__ == '__main__':
                 [torch.tensor(positions_item)],
                 1).squeeze(
                 -1).squeeze(-1).cpu().numpy()
-
+            # img = np.asarray(Image.open(img_paths[output_positions_item[0][0]][output_positions_item[0][1]])).copy()
+            # img=cv2.resize(img,(img_feature.shape[3],img_feature.shape[2]))
+            # cv2.rectangle(img,
+            #               (int(positions_item[0,0]),int(positions_item[0,1])),
+            #               (int(positions_item[0,2]),int(positions_item[0,3])),
+            #               (255,0,0),10
+            #               )
+            # cv2.rectangle(img,
+            #               (int(positions_item[-1,0]),int(positions_item[-1,1])),
+            #               (int(positions_item[-1,2]),int(positions_item[-1,3])),
+            #               (255,0,0),10
+            #               )
+            # img=img[:,:,:3]
+            # debug_imgs([img])
             for id_batch, out_pos in enumerate(output_positions_item):
                 output_feature[out_pos[0]][out_pos[1]] = pixel_position_features[id_batch]
 

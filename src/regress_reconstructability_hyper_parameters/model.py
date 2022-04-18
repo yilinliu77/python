@@ -786,7 +786,7 @@ def loss_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False):
     predicted_recon_error = v_prediction[:, :, 0:1]
     predicted_gt_error = v_prediction[:, :, 1:2]
 
-    smith_reconstructability = v_point_attribute[:,:, 0]
+    smith_reconstructability = v_point_attribute[:, :, 0]
 
     gt_recon_error = v_point_attribute[:, :, 1:2]
     recon_mask = (gt_recon_error != -1).bool()
@@ -804,7 +804,7 @@ def loss_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False):
     return recon_loss, gt_loss, gt_loss if v_is_img_involved else recon_loss
 
 
-def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False,method="l2", normalized_factor=1.):
+def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False, method="l2", normalized_factor=1.):
     v_prediction = torch.sigmoid(v_prediction)  # Chou zuzu
     predicted_recon_error = v_prediction[:, :, 0:1]
     predicted_gt_error = v_prediction[:, :, 1:2]
@@ -2166,7 +2166,7 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
             nn.ReLU(),
             nn.Linear(256, 256),
         )
-        self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.2, batch_first=True, add_bias_kv=True)
+        self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.2, batch_first=True, add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
 
         self.features_to_recon_error = nn.Sequential(
             nn.Linear(256, 256),
@@ -2199,7 +2199,7 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
                 nn.ReLU(),
                 nn.Linear(256, 256),
             )
-            self.img_feature_fusioner1 = TFDecorder(256, 2, 512, 0.1, batch_first=True, add_bias_kv=True)
+            self.img_feature_fusioner1 = TFDecorder(256, 2, 512, 0.1, batch_first=True, add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
 
             self.features_to_gt_error = nn.Sequential(
                 nn.Linear(256, 256),
@@ -2365,7 +2365,7 @@ class Uncertainty_Modeling_wo_pointnet17(Uncertainty_Modeling_wo_pointnet8):
             nn.ReLU(),
             nn.Linear(256, 256),
         )
-        self.view_feature_fusioner1 = TFEncorder(256, 2, 256, 0.2, batch_first=True, add_bias_kv=True)
+        self.view_feature_fusioner1 = TFEncorder(256, 2, 256, 0.2, batch_first=True, add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
 
         self.features_to_recon_error = nn.Sequential(
             nn.Linear(256, 256),
@@ -2398,7 +2398,7 @@ class Uncertainty_Modeling_wo_pointnet17(Uncertainty_Modeling_wo_pointnet8):
                 nn.ReLU(),
                 nn.Linear(256, 256),
             )
-            self.img_feature_fusioner1 = TFDecorder(256, 2, 256, 0.2, batch_first=True, add_bias_kv=True)
+            self.img_feature_fusioner1 = TFDecorder(256, 2, 256, 0.2, batch_first=True, add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
 
             self.features_to_gt_error = nn.Sequential(
                 nn.Linear(256, 256),
@@ -2435,7 +2435,7 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
         self.view_feature_extractor = nn.Sequential(
             nn.Linear(5, 128),
         )
-        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=True)
+        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
 
         self.features_to_recon_error = nn.Sequential(
             nn.Linear(128, 1),
@@ -2466,7 +2466,7 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
                 nn.ReLU(),
                 nn.Linear(128, 128),
             )
-            self.img_feature_fusioner1 = TFDecorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=True)
+            self.img_feature_fusioner1 = TFDecorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
 
             self.features_to_gt_error = nn.Sequential(
                 nn.Linear(128, 128),
@@ -2499,6 +2499,8 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
                                        method=self.hydra_conf["model"]["spearman_method"],
                                        normalized_factor=self.hydra_conf["model"]["spearman_factor"])
 
+
+# Lightweight L2 version
 class Uncertainty_Modeling_wo_pointnet19(Uncertainty_Modeling_wo_pointnet8):
     def __init__(self, hparams):
         super(Uncertainty_Modeling_wo_pointnet19, self).__init__(hparams)
@@ -2507,19 +2509,12 @@ class Uncertainty_Modeling_wo_pointnet19(Uncertainty_Modeling_wo_pointnet8):
 
         # ========================================Phase 0========================================
         self.view_feature_extractor = nn.Sequential(
-            nn.Linear(5, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
+            nn.Linear(5, 128),
         )
-        self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.2, batch_first=True, add_bias_kv=True)
-        self.view_feature_fusioner2 = TFEncorder(256, 2, 512, 0.2, batch_first=True, add_bias_kv=True)
+        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
 
         self.features_to_recon_error = nn.Sequential(
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 1),
+            nn.Linear(128, 1),
         )
 
         def init_linear(item):
@@ -2538,21 +2533,17 @@ class Uncertainty_Modeling_wo_pointnet19(Uncertainty_Modeling_wo_pointnet8):
             init.xavier_normal_(item.self_attn.bias_k)
             init.xavier_normal_(item.self_attn.bias_v)
 
-        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 256))
+        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 128))
 
         # ========================================Phase 1========================================
         if self.is_involve_img:
             self.img_feature_expander = nn.Sequential(
-                nn.Linear(32, 256),
-                nn.ReLU(),
-                nn.Linear(256, 256),
+                nn.Linear(32, 128),
             )
-            self.img_feature_fusioner1 = TFDecorder(256, 2, 512, 0.1, batch_first=True, add_bias_kv=True)
+            self.img_feature_fusioner1 = TFDecorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
 
             self.features_to_gt_error = nn.Sequential(
-                nn.Linear(256, 256),
-                nn.ReLU(),
-                nn.Linear(256, 1),
+                nn.Linear(128, 1),
             )
             init_linear(self.img_feature_expander)
             init_attention(self.img_feature_fusioner1)

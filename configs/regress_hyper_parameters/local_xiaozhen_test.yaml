@@ -27,6 +27,8 @@ model:
   error_mean_std: [0.01,0.01,0.015,0.015]
   spearman_method: l2
   spearman_factor: 1.0
+  add_bias_kv: true
+
 hydra:
   run:
     dir: .

@@ -3,6 +3,7 @@ import shutil
 import sys, os
 import time
 from itertools import groupby
+from typing import Tuple
 
 import cv2
 from plyfile import PlyData, PlyElement
@@ -41,7 +42,7 @@ def sigmoid(x):
 
 
 def write_views_to_txt_file(v_args):
-    point_idx, views  = v_args
+    point_idx, views = v_args
     id_point = int(point_idx)
     filename = "temp/test_scene_output/{}.txt".format(int(id_point))
     if os.path.exists(filename):
@@ -154,7 +155,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         dataset_paths = self.hydra_conf["trainer"]["train_dataset"].split("*")
         datasets = []
         for dataset_path in dataset_paths:
-            datasets.append(self.dataset_builder(os.path.join(dataset_root,dataset_path), self.hydra_conf,
+            datasets.append(self.dataset_builder(os.path.join(dataset_root, dataset_path), self.hydra_conf,
                                                  "training" if len(
                                                      dataset_paths) == 1 else "testing", ))
 
@@ -179,7 +180,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         dataset_paths = self.hydra_conf["trainer"]["valid_dataset"].split("*")
         datasets = []
         for dataset_path in dataset_paths:
-            datasets.append(self.dataset_builder(os.path.join(dataset_root,dataset_path), self.hydra_conf,
+            datasets.append(self.dataset_builder(os.path.join(dataset_root, dataset_path), self.hydra_conf,
                                                  "validation" if use_part_dataset_to_validate else "testing", ))
             self.dataset_name_dict[datasets[-1].scene_name] = len(self.dataset_name_dict)
 
@@ -201,7 +202,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         datasets = []
         for dataset_path in dataset_paths:
             datasets.append(
-                self.dataset_builder(os.path.join(dataset_root,dataset_path), self.hydra_conf, "testing"))
+                self.dataset_builder(os.path.join(dataset_root, dataset_path), self.hydra_conf, "testing"))
             self.dataset_name_dict[datasets[-1].scene_name] = len(self.dataset_name_dict)
 
         self.test_dataset = torch.utils.data.ConcatDataset(datasets)
@@ -265,26 +266,98 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.log("Validation Gt Loss", gt_loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=1)
 
-        return torch.cat([results[:, :], data["point_attribute"][:, :, 1:3]], dim=2)
+        return [results,
+                data["point_attribute"],
+                data["scene_name"],
+                ]
+
+    def _calculate_spearman(self, outputs: Tuple):
+        error_mean_std = outputs[0][0].new(self.hydra_conf["model"]["error_mean_std"])
+
+        prediction = torch.cat(list(map(lambda x: x[0], outputs))) * error_mean_std[2:] + error_mean_std[:2]
+        prediction = prediction.reshape([-1, prediction.shape[2]])
+        point_attribute = torch.cat(list(map(lambda x: x[1], outputs)))
+        point_attribute = point_attribute.reshape([-1, point_attribute.shape[2]])
+        acc_mask = point_attribute[:, 1] != -1
+        com_mask = point_attribute[:, 2] != -1
+        point_attribute[acc_mask, 1] = point_attribute[acc_mask, 1] * error_mean_std[2] + error_mean_std[0]
+        point_attribute[com_mask, 2] = point_attribute[com_mask, 2] * error_mean_std[3] + error_mean_std[1]
+        names = np.concatenate(
+            list(map(lambda x: [self.dataset_name_dict[item] for batch in x[2] for item in batch], outputs)))
+        names = error_mean_std.new(names)
+        if len(self.dataset_name_dict) == 1:
+            views = np.concatenate(list(map(lambda x: x[3], outputs)))
+            views = views.reshape([-1, views.shape[2], views.shape[3]])
+            points = np.concatenate(list(map(lambda x: x[4], outputs)))
+            points = points.reshape([-1, points.shape[2]])
+
+        log_str = ""
+        mean_spearman = 0
+        spearman_dict = {}
+        for scene_item in self.dataset_name_dict:
+            predicted_acc = prediction[names == self.dataset_name_dict[scene_item]][:, 0]
+            predicted_com = prediction[names == self.dataset_name_dict[scene_item]][:, 1]
+            smith_error = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0]
+            gt_acc = point_attribute[names == self.dataset_name_dict[scene_item]][:, 1]
+            gt_com = point_attribute[names == self.dataset_name_dict[scene_item]][:, 2]
+            if not self.hparams["model"]["involve_img"]:
+                # spearmanr_factor = stats.spearmanr(
+                #     predicted_acc[gt_acc != -1],
+                #     gt_acc[gt_acc != -1]
+                # )[0]
+                # smith_spearmanr_factor = stats.spearmanr(
+                #     smith_error[gt_acc != -1],
+                #     gt_acc[gt_acc != -1]
+                # )[0]
+
+                spearmanr_factor = spearman_correlation(predicted_acc[gt_acc != -1],
+                                                        gt_acc[gt_acc != -1])
+                smith_spearmanr_factor = spearman_correlation(smith_error[gt_acc != -1],
+                                                              gt_acc[gt_acc != -1])
+            else:
+                spearmanr_factor = spearman_correlation(predicted_com[gt_com != -1],
+                                    gt_com[gt_com != -1])
+                smith_spearmanr_factor = spearman_correlation(smith_error[gt_com != -1],
+                                    gt_com[gt_com != -1])
+                # spearmanr_factor = stats.spearmanr(
+                #     predicted_com[gt_com != -1],
+                #     gt_com[gt_com != -1]
+                # )[0]
+                # smith_spearmanr_factor = stats.spearmanr(
+                #     smith_error[gt_com != -1],
+                #     gt_com[gt_com != -1]
+                # )[0]
+
+            spearman_dict[scene_item] = spearmanr_factor
+            log_str += "{:<35}: {:.2f}    ".format(scene_item, spearmanr_factor.cpu().numpy())
+            log_str += "Smith_{:<35}: {:.2f}    ".format(scene_item, smith_spearmanr_factor.cpu().numpy())
+            log_str += "Boost: {:.2f}  \n".format((spearmanr_factor - abs(smith_spearmanr_factor)).cpu().numpy())
+            mean_spearman += spearmanr_factor - abs(smith_spearmanr_factor)
+
+            if len(self.dataset_name_dict) == 1:
+                views_item = views[names == self.dataset_name_dict[scene_item]]
+                points_item = points[names == self.dataset_name_dict[scene_item]]
+                output_test_with_pc_and_views(predicted_acc.cpu().numpy(),
+                                              predicted_com.cpu().numpy(),
+                                              gt_acc.cpu().numpy(),
+                                              gt_com.cpu().numpy(),
+                                              smith_error.cpu().numpy(),
+                                              self.test_dataset.datasets[
+                                                  self.dataset_name_dict[scene_item]].point_attribute.shape[0],
+                                              views_item,
+                                              points_item
+                                              )
+
+        mean_spearman = mean_spearman / len(self.dataset_name_dict)
+
+        return mean_spearman, log_str
 
     def validation_epoch_end(self, outputs) -> None:
-        result = torch.cat(outputs, dim=0).reshape([-1,outputs[0].shape[2]])
-        predict_acc = result[:, 0]
-        predict_com = result[:, 1]
-        gt_acc = result[:, 2]
-        gt_com = result[:, 3]
-        if not self.hparams["model"]["involve_img"]:
-            spearmanr_factor = spearman_correlation(
-                predict_acc[gt_acc != -1],
-                gt_acc[gt_acc != -1])
+        mean_spearman, log_str = self._calculate_spearman(outputs)
 
-        else:
-            spearmanr_factor = spearman_correlation(
-                predict_com[gt_com != -1],
-                gt_com[gt_com != -1])
-
-        self.log("Validation mean spearman", spearmanr_factor,
-                 prog_bar=True, logger=True, on_step=False, on_epoch=True, batch_size=1)
+        self.log("Valid mean spearman boost", mean_spearman, prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                 batch_size=1)
+        self.trainer.logger.experiment.add_text("Validation spearman", log_str, global_step=self.trainer.current_epoch)
 
         if not self.trainer.sanity_checking:
             for dataset in self.train_dataset.datasets:
@@ -306,9 +379,9 @@ class Regress_hyper_parameters(pl.LightningModule):
         results, weights = self.forward(data)
 
         recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)
-        self.log("Test Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,batch_size=1)
-        self.log("Test Recon Loss", recon_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,batch_size=1)
-        self.log("Test Gt Loss", gt_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,batch_size=1)
+        self.log("Test Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True, batch_size=1)
+        self.log("Test Recon Loss", recon_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True, batch_size=1)
+        self.log("Test Gt Loss", gt_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True, batch_size=1)
 
         if len(self.dataset_name_dict) == 1:
 
@@ -320,19 +393,20 @@ class Regress_hyper_parameters(pl.LightningModule):
 
             views = data["views"].cpu().numpy()
             view_mask = views[:, :, :, 0] > 0
-            views[view_mask,1] = views[view_mask, 1] * view_mean_std[5] + view_mean_std[0]
-            views[view_mask,2] = views[view_mask, 2] * view_mean_std[6] + view_mean_std[1]
-            views[:, :, :, 1] = views[:, :, :, 1] + normal_theta[:,:,np.newaxis]
-            views[:, :, :,  2] = views[:, :, :,  2] + normal_phi[:,:,np.newaxis]
+            views[view_mask, 1] = views[view_mask, 1] * view_mean_std[5] + view_mean_std[0]
+            views[view_mask, 2] = views[view_mask, 2] * view_mean_std[6] + view_mean_std[1]
+            views[:, :, :, 1] = views[:, :, :, 1] + normal_theta[:, :, np.newaxis]
+            views[:, :, :, 2] = views[:, :, :, 2] + normal_phi[:, :, np.newaxis]
 
-            dz = np.cos(views[:, :, :,  1])
-            dx = np.sin(views[:, :, :,  1]) * np.cos(views[:, :, :,  2])
-            dy = np.sin(views[:, :, :,  1]) * np.sin(views[:, :, :,  2])
+            dz = np.cos(views[:, :, :, 1])
+            dx = np.sin(views[:, :, :, 1]) * np.cos(views[:, :, :, 2])
+            dy = np.sin(views[:, :, :, 1]) * np.sin(views[:, :, :, 2])
 
-            view_dir = np.stack([dx, dy, dz], axis=-1) * (data["views"][:, :, :, 3:4].cpu().numpy() * view_mean_std[7] + view_mean_std[2]) * 60
+            view_dir = np.stack([dx, dy, dz], axis=-1) * (
+                        data["views"][:, :, :, 3:4].cpu().numpy() * view_mean_std[7] + view_mean_std[2]) * 60
             points = data["point_attribute"][:, :, 3:6].cpu().numpy()
             points = points * self.data_mean_std[3] + self.data_mean_std[:3]
-            views = points[:,:,np.newaxis] + view_dir
+            views = points[:, :, np.newaxis] + view_dir
             views = np.concatenate([views, -view_dir, data["views"][:, :, :, 0:1].cpu().numpy()], axis=-1)
 
             return [results,
@@ -348,77 +422,10 @@ class Regress_hyper_parameters(pl.LightningModule):
                     ]
 
     def test_epoch_end(self, outputs) -> None:
-        error_mean_std = np.array(self.hydra_conf["model"]["error_mean_std"])
+        mean_spearman, log_str = self._calculate_spearman(outputs)
 
-        prediction = torch.cat(list(map(lambda x: x[0], outputs))).cpu().numpy() * error_mean_std[2:] + error_mean_std[:2]
-        prediction=prediction.reshape([-1,prediction.shape[2]])
-        point_attribute = torch.cat(list(map(lambda x: x[1], outputs))).cpu().numpy()
-        point_attribute=point_attribute.reshape([-1,point_attribute.shape[2]])
-        acc_mask = point_attribute[:,1] != -1
-        com_mask = point_attribute[:,2] != -1
-        point_attribute[acc_mask,1] = point_attribute[acc_mask,1] * error_mean_std[2] + error_mean_std[0]
-        point_attribute[com_mask,2] = point_attribute[com_mask,2] * error_mean_std[3] + error_mean_std[1]
-        names = np.concatenate(list(map(lambda x: [self.dataset_name_dict[item] for batch in x[2] for item in batch], outputs)))
-        if len(self.dataset_name_dict) == 1:
-            views = np.concatenate(list(map(lambda x: x[3], outputs)))
-            views = views.reshape([-1, views.shape[2],views.shape[3]])
-            points = np.concatenate(list(map(lambda x: x[4], outputs)))
-            points = points.reshape([-1, points.shape[2]])
-
-        log_str = ""
-        mean_spearman = 0
-        mean_smith_spearmanr_factor = 0
-        spearman_dict = {}
-        for scene_item in self.dataset_name_dict:
-            predicted_acc = prediction[names == self.dataset_name_dict[scene_item]][:, 0]
-            predicted_com = prediction[names == self.dataset_name_dict[scene_item]][:, 1]
-            smith_error = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0]
-            gt_acc = point_attribute[names == self.dataset_name_dict[scene_item]][:, 1]
-            gt_com = point_attribute[names == self.dataset_name_dict[scene_item]][:, 2]
-            if not self.hparams["model"]["involve_img"]:
-                spearmanr_factor = stats.spearmanr(
-                    predicted_acc[gt_acc != -1],
-                    gt_acc[gt_acc != -1]
-                )[0]
-                smith_spearmanr_factor = stats.spearmanr(
-                    smith_error[gt_acc != -1],
-                    gt_acc[gt_acc != -1]
-                )[0]
-            else:
-                spearmanr_factor = stats.spearmanr(
-                    predicted_com[gt_com != -1],
-                    gt_com[gt_com != -1]
-                )[0]
-                smith_spearmanr_factor = stats.spearmanr(
-                    smith_error[gt_com != -1],
-                    gt_com[gt_com != -1]
-                )[0]
-
-            spearman_dict[scene_item] = spearmanr_factor
-            mean_spearman += spearmanr_factor
-            mean_smith_spearmanr_factor += smith_spearmanr_factor
-            log_str += "{:<35}: {:.2f}  ".format(scene_item, spearmanr_factor)
-            log_str += "Smith_{:<35}: {:.2f}  \n".format(scene_item, smith_spearmanr_factor)
-
-            if len(self.dataset_name_dict) == 1:
-                views_item = views[names == self.dataset_name_dict[scene_item]]
-                points_item = points[names == self.dataset_name_dict[scene_item]]
-                output_test_with_pc_and_views(predicted_acc,
-                                              predicted_com,
-                                              gt_acc,
-                                              gt_com,
-                                              smith_error,
-                                              self.test_dataset.datasets[
-                                                  self.dataset_name_dict[scene_item]].point_attribute.shape[0],
-                                              views_item,
-                                              points_item
-                                              )
-
-        mean_spearman = mean_spearman / len(self.dataset_name_dict)
-        mean_smith_spearmanr_factor = mean_smith_spearmanr_factor / len(self.dataset_name_dict)
-        self.log("Test mean spearman", mean_spearman, prog_bar=True, logger=True, on_step=False, on_epoch=True,batch_size=1)
-        self.log("Test smith mean spearman", mean_smith_spearmanr_factor, prog_bar=True, logger=True, on_step=False,
-                 on_epoch=True,batch_size=1)
+        self.log("Test mean spearman", mean_spearman, prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                 batch_size=1)
         print(log_str)
 
         pass

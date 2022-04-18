@@ -2556,6 +2556,62 @@ class Uncertainty_Modeling_wo_pointnet19(Uncertainty_Modeling_wo_pointnet8):
         init_linear(self.view_feature_extractor)
         init_attention(self.view_feature_fusioner1)
 
+# Lightweight L2 version with whole view features
+class Uncertainty_Modeling_wo_pointnet20(Uncertainty_Modeling_wo_pointnet8):
+    def __init__(self, hparams):
+        super(Uncertainty_Modeling_wo_pointnet20, self).__init__(hparams)
+        self.hydra_conf = hparams
+        self.is_involve_img = self.hydra_conf["model"]["involve_img"]
+
+        # ========================================Phase 0========================================
+        self.view_feature_extractor = nn.Sequential(
+            nn.Linear(5, 128),
+        )
+        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
+
+        self.features_to_recon_error = nn.Sequential(
+            nn.Linear(128, 1),
+        )
+
+        def init_linear(item):
+            for m in item.modules():
+                if isinstance(m, (nn.Linear,)):
+                    nn.init.kaiming_normal_(m.weight)
+                    fan_in, _ = init._calculate_fan_in_and_fan_out(m.weight)
+                    bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+                    init.normal_(m.bias, -bound, bound)
+
+        def init_attention(item):
+            nn.init.kaiming_normal_(item.self_attn.in_proj_weight)
+
+            init.normal_(item.self_attn.in_proj_bias)
+            init.normal_(item.self_attn.out_proj.bias)
+            init.xavier_normal_(item.self_attn.bias_k)
+            init.xavier_normal_(item.self_attn.bias_v)
+
+        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 128))
+
+        # ========================================Phase 1========================================
+        if self.is_involve_img:
+            self.img_feature_expander = nn.Sequential(
+                nn.Linear(32, 128),
+            )
+            self.img_feature_fusioner1 = TFDecorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
+
+            self.features_to_gt_error = nn.Sequential(
+                nn.Linear(128, 1),
+            )
+            init_linear(self.img_feature_expander)
+            init_attention(self.img_feature_fusioner1)
+            if self.hydra_conf["model"]["open_weights"] is False:
+                self.view_feature_extractor.requires_grad_(False)
+                self.view_feature_fusioner1.requires_grad_(False)
+                self.features_to_recon_error.requires_grad_(False)
+                self.magic_class_token.requires_grad_(False)
+
+        init_linear(self.view_feature_extractor)
+        init_attention(self.view_feature_fusioner1)
+
     def forward(self, v_data: Dict[str, torch.Tensor]):
         batch_size = v_data["views"].shape[0]
 

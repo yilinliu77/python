@@ -27,6 +27,7 @@ from tqdm.contrib.concurrent import thread_map, process_map
 
 from shared.common_utils import debug_imgs
 from src.regress_reconstructability_hyper_parameters.preprocess_view_features import preprocess_data
+from thirdparty.CasMVSNet_pl.models.mvsnet import CascadeMVSNet
 
 
 def compute_features(v_root_path,
@@ -76,7 +77,7 @@ def compute_view_features(v_model, v_view_path: str):
         with torch.no_grad():
             img_features = v_model(
                 img_tensor.unsqueeze(0).to(device))
-        numpy_features = img_features.cpu().numpy()
+        numpy_features = img_features["level_2"].cpu().numpy()
         # original_img = np.asarray(Image.open(total_view_paths[id_view])).copy()[:,:,:3]
         # resized_img = img.astype(np.uint8)
         # transformed_img = img_tensor
@@ -137,7 +138,7 @@ if __name__ == '__main__':
     device = "cpu"
     device = "cuda"
 
-    if True:
+    if False:
         transform = transforms.Compose([
             transforms.ToPILImage(),
             transforms.Resize(img_rescale_size),
@@ -165,7 +166,18 @@ if __name__ == '__main__':
         def pre_transform(v_img):
             img = transform(v_img)
             return img
-        img_feature_extractor = UNet16(pretrained=True, num_classes=256)
+
+
+        from inplace_abn import InPlaceABN
+
+        img_feature_extractor = CascadeMVSNet(n_depths=[8,32,48],
+                                           interval_ratios=[1.0,2.0,4.0],
+                                           num_groups=1,
+                                           norm_act=InPlaceABN)
+        checkpoint = torch.load(r"thirdparty\CasMVSNet_pl\epoch.15.ckpt")["state_dict"]
+        checkpoint = dict((key.split("model.feature.")[1], value) for (key, value) in checkpoint.items() if "feature" in key)
+        img_feature_extractor.feature.load_state_dict(checkpoint)
+        img_feature_extractor = img_feature_extractor.feature
 
     img_feature_extractor.eval()
     img_feature_extractor = img_feature_extractor.to(device)
@@ -216,7 +228,7 @@ if __name__ == '__main__':
         for i in range(0,len(positions),batch_size):
             positions_item = np.array(positions[i:min(len(positions),i+batch_size)])
             output_positions_item = np.array(output_positions[i:min(len(positions),i+batch_size)])
-            positions_item=np.concatenate([positions_item - 10 / 400, positions_item + 10 / 400],axis=1)
+            positions_item=np.concatenate([positions_item - 5 / 400, positions_item + 5 / 400],axis=1)
             positions_item = np.clip(positions_item,0,1)
             positions_item[:,[0,2]] = positions_item[:,[0,2]] * img_feature.shape[3]
             positions_item[:,[1,3]] = positions_item[:,[1,3]] * img_feature.shape[2]
@@ -225,6 +237,7 @@ if __name__ == '__main__':
                 [torch.tensor(positions_item)],
                 1).squeeze(
                 -1).squeeze(-1).cpu().numpy()
+
             for id_batch, out_pos in enumerate(output_positions_item):
                 output_feature[out_pos[0]][out_pos[1]] = pixel_position_features[id_batch]
 

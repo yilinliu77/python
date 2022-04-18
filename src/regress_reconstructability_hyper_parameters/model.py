@@ -1842,6 +1842,23 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
         else:
             return loss_spearman_error(v_point_attribute, v_prediction, self.is_involve_img)
 
+    def init_linear(self, item):
+        for m in item.modules():
+            if isinstance(m, (nn.Linear,)):
+                nn.init.kaiming_normal_(m.weight)
+                fan_in, _ = init._calculate_fan_in_and_fan_out(m.weight)
+                bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+                init.normal_(m.bias, -bound, bound)
+
+    def init_attention(self, item):
+        nn.init.kaiming_normal_(item.self_attn.in_proj_weight)
+
+        init.normal_(item.self_attn.in_proj_bias)
+        init.normal_(item.self_attn.out_proj.bias)
+        if self.hydra_conf["model"]["add_bias_kv"]:
+            init.xavier_normal_(item.self_attn.bias_k)
+            init.xavier_normal_(item.self_attn.bias_v)
+
 
 # Delete dropout in the first few layer; useful; version 52
 class Uncertainty_Modeling_wo_pointnet9(Uncertainty_Modeling_wo_pointnet8):
@@ -2174,23 +2191,10 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
             nn.Linear(256, 1),
         )
 
-        def init_linear(item):
-            for m in item.modules():
-                if isinstance(m, (nn.Linear,)):
-                    nn.init.kaiming_normal_(m.weight)
-                    fan_in, _ = init._calculate_fan_in_and_fan_out(m.weight)
-                    bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
-                    init.normal_(m.bias, -bound, bound)
-
-        def init_attention(item):
-            nn.init.kaiming_normal_(item.self_attn.in_proj_weight)
-
-            init.normal_(item.self_attn.in_proj_bias)
-            init.normal_(item.self_attn.out_proj.bias)
-            init.xavier_normal_(item.self_attn.bias_k)
-            init.xavier_normal_(item.self_attn.bias_v)
-
         self.magic_class_token = nn.Parameter(torch.randn(1, 1, 256))
+
+        self.init_linear(self.view_feature_extractor)
+        self.init_attention(self.view_feature_fusioner1)
 
         # ========================================Phase 1========================================
         if self.is_involve_img:
@@ -2206,16 +2210,13 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
                 nn.ReLU(),
                 nn.Linear(256, 1),
             )
-            init_linear(self.img_feature_expander)
-            init_attention(self.img_feature_fusioner1)
+            self.init_linear(self.img_feature_expander)
+            self.init_attention(self.img_feature_fusioner1)
             if self.hydra_conf["model"]["open_weights"] is False:
                 self.view_feature_extractor.requires_grad_(False)
                 self.view_feature_fusioner1.requires_grad_(False)
                 self.features_to_recon_error.requires_grad_(False)
                 self.magic_class_token.requires_grad_(False)
-
-        init_linear(self.view_feature_extractor)
-        init_attention(self.view_feature_fusioner1)
 
 
 # Lightweight version 14
@@ -2441,24 +2442,10 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
             nn.Linear(128, 1),
         )
 
-        def init_linear(item):
-            for m in item.modules():
-                if isinstance(m, (nn.Linear,)):
-                    nn.init.kaiming_normal_(m.weight)
-                    fan_in, _ = init._calculate_fan_in_and_fan_out(m.weight)
-                    bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
-                    init.normal_(m.bias, -bound, bound)
-
-        def init_attention(item):
-            nn.init.kaiming_normal_(item.self_attn.in_proj_weight)
-
-            init.normal_(item.self_attn.in_proj_bias)
-            init.normal_(item.self_attn.out_proj.bias)
-            if self.hydra_conf["model"]["add_bias_kv"]:
-                init.xavier_normal_(item.self_attn.bias_k)
-                init.xavier_normal_(item.self_attn.bias_v)
-
         self.magic_class_token = nn.Parameter(torch.randn(1, 1, 128))
+
+        self.init_linear(self.view_feature_extractor)
+        self.init_attention(self.view_feature_fusioner1)
 
         # ========================================Phase 1========================================
         if self.is_involve_img:
@@ -2475,16 +2462,15 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
                 nn.Linear(128, 1),
             )
 
-            init_linear(self.img_feature_expander)
-            init_attention(self.img_feature_fusioner1)
+            self.init_linear(self.img_feature_expander)
+            self.init_attention(self.img_feature_fusioner1)
             if self.hydra_conf["model"]["open_weights"] is False:
                 self.view_feature_extractor.requires_grad_(False)
                 self.view_feature_fusioner1.requires_grad_(False)
                 self.features_to_recon_error.requires_grad_(False)
                 self.magic_class_token.requires_grad_(False)
 
-        init_linear(self.view_feature_extractor)
-        init_attention(self.view_feature_fusioner1)
+
 
     def forward(self, v_data: Dict[str, torch.Tensor]):
         predict_result, (weights, cross_weight) = super(Uncertainty_Modeling_wo_pointnet18, self).forward(v_data)

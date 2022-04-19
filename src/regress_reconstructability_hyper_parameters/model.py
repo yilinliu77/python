@@ -2435,7 +2435,7 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
         self.view_feature_extractor = nn.Sequential(
             nn.Linear(5, 128),
         )
-        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.0, batch_first=True, add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
+        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
 
         self.features_to_recon_error = nn.Sequential(
             nn.Linear(128, 1),

@@ -2193,8 +2193,8 @@ class Uncertainty_Modeling_wo_pointnet14(Uncertainty_Modeling_wo_pointnet8):
 
         self.magic_class_token = nn.Parameter(torch.randn(1, 1, 256))
 
-        # self.init_linear(self.view_feature_extractor)
-        # self.init_attention(self.view_feature_fusioner1)
+        self.init_linear(self.view_feature_extractor)
+        self.init_attention(self.view_feature_fusioner1)
 
         # ========================================Phase 1========================================
         if self.is_involve_img:
@@ -2436,7 +2436,7 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
         self.view_feature_extractor = nn.Sequential(
             nn.Linear(5, 128),
         )
-        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.2, batch_first=True, add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
+        self.view_feature_fusioner1 = TFEncorder(128, 1, 128, 0.0, batch_first=True, add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
 
         self.features_to_recon_error = nn.Sequential(
             nn.Linear(128, 1),
@@ -2474,7 +2474,7 @@ class Uncertainty_Modeling_wo_pointnet18(Uncertainty_Modeling_wo_pointnet8):
 
     def forward(self, v_data: Dict[str, torch.Tensor]):
         predict_result, (weights, cross_weight) = super(Uncertainty_Modeling_wo_pointnet18, self).forward(v_data)
-        predict_result = 1 - torch.sigmoid(predict_result) * 2
+        predict_result = torch.sigmoid(predict_result)
 
         return predict_result, (weights, cross_weight)
 

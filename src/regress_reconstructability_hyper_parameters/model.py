@@ -1312,6 +1312,7 @@ class TFEncorder(nn.Module):
     def forward(self, src, src_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tuple[
         Tensor, Optional[Tensor]]:
         x = src
+
         dx, weights = self._sa_block(x, src_mask, src_key_padding_mask)
         x = x + dx
         if self.add_norm:
@@ -1789,9 +1790,13 @@ class Uncertainty_Modeling_wo_pointnet8(nn.Module):
         ] = 1
         predicted_recon_error_per_view = predicted_recon_error_per_view * valid_mask
 
+        value_mask = torch.logical_not(valid_mask)[:, :, 0].unsqueeze(-1).tile([1,1,valid_mask.shape[1]])
+        value_mask = torch.logical_or(value_mask,torch.transpose(value_mask,1,2))
+
         fused_view_features, weights = self.view_feature_fusioner1(
             predicted_recon_error_per_view,
             src_key_padding_mask=torch.logical_not(valid_mask)[:, :, 0],
+            src_mask = value_mask
         )
         fused_view_features = fused_view_features * valid_mask
 

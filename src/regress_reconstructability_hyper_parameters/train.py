@@ -267,14 +267,16 @@ class Regress_hyper_parameters(pl.LightningModule):
                  sync_dist=True, batch_size=1)
 
         return [results,
-                data["point_attribute"],
+                torch.cat([data["point_attribute"], data["views"][:, :, :, 0].sum(dim=-1, keepdim=True)], dim=-1),
                 data["scene_name"],
                 ]
 
     def _calculate_spearman(self, outputs: Tuple):
         error_mean_std = outputs[0][0].new(self.hydra_conf["model"]["error_mean_std"])
 
-        prediction = torch.cat(list(map(lambda x: x[0], outputs))) * error_mean_std[2:] + error_mean_std[:2]
+        prediction = torch.cat(list(map(lambda x: x[0], outputs)))
+        if self.hparams["trainer"]["loss"] == "loss_l2_error":
+            prediction = prediction * error_mean_std[2:] + error_mean_std[:2]
         prediction = prediction.reshape([-1, prediction.shape[2]])
         point_attribute = torch.cat(list(map(lambda x: x[1], outputs)))
         point_attribute = point_attribute.reshape([-1, point_attribute.shape[2]])
@@ -300,6 +302,7 @@ class Regress_hyper_parameters(pl.LightningModule):
             smith_error = point_attribute[names == self.dataset_name_dict[scene_item]][:, 0]
             gt_acc = point_attribute[names == self.dataset_name_dict[scene_item]][:, 1]
             gt_com = point_attribute[names == self.dataset_name_dict[scene_item]][:, 2]
+            baseline_number = point_attribute[names == self.dataset_name_dict[scene_item]][:, -1]
             if not self.hparams["model"]["involve_img"]:
                 # spearmanr_factor = stats.spearmanr(
                 #     predicted_acc[gt_acc != -1],
@@ -314,11 +317,15 @@ class Regress_hyper_parameters(pl.LightningModule):
                                                         gt_acc[gt_acc != -1])
                 smith_spearmanr_factor = spearman_correlation(smith_error[gt_acc != -1],
                                                               gt_acc[gt_acc != -1])
+                baseline_number_spearmanr_factor = spearman_correlation(baseline_number[gt_acc != -1],
+                                                                        gt_acc[gt_acc != -1])
             else:
                 spearmanr_factor = spearman_correlation(predicted_com[gt_com != -1],
-                                    gt_com[gt_com != -1])
+                                                        gt_com[gt_com != -1])
                 smith_spearmanr_factor = spearman_correlation(smith_error[gt_com != -1],
-                                    gt_com[gt_com != -1])
+                                                              gt_com[gt_com != -1])
+                baseline_number_spearmanr_factor = spearman_correlation(baseline_number[gt_com != -1],
+                                                                        gt_com[gt_com != -1])
                 # spearmanr_factor = stats.spearmanr(
                 #     predicted_com[gt_com != -1],
                 #     gt_com[gt_com != -1]
@@ -331,6 +338,7 @@ class Regress_hyper_parameters(pl.LightningModule):
             spearman_dict[scene_item] = spearmanr_factor
             log_str += "{:<35}: {:.2f}    ".format(scene_item, spearmanr_factor.cpu().numpy())
             log_str += "Smith_{:<35}: {:.2f}    ".format(scene_item, smith_spearmanr_factor.cpu().numpy())
+            log_str += "Baseline_{:<35}: {:.2f}    ".format(scene_item, baseline_number_spearmanr_factor.cpu().numpy())
             log_str += "Boost: {:.2f}  \n".format((spearmanr_factor - abs(smith_spearmanr_factor)).cpu().numpy())
             mean_spearman += spearmanr_factor - abs(smith_spearmanr_factor)
 
@@ -403,21 +411,21 @@ class Regress_hyper_parameters(pl.LightningModule):
             dy = np.sin(views[:, :, :, 1]) * np.sin(views[:, :, :, 2])
 
             view_dir = np.stack([dx, dy, dz], axis=-1) * (
-                        data["views"][:, :, :, 3:4].cpu().numpy() * view_mean_std[7] + view_mean_std[2]) * 60
+                    data["views"][:, :, :, 3:4].cpu().numpy() * view_mean_std[7] + view_mean_std[2]) * 60
             points = data["point_attribute"][:, :, 3:6].cpu().numpy()
             points = points * self.data_mean_std[3] + self.data_mean_std[:3]
             views = points[:, :, np.newaxis] + view_dir
             views = np.concatenate([views, -view_dir, data["views"][:, :, :, 0:1].cpu().numpy()], axis=-1)
 
             return [results,
-                    data["point_attribute"],
+                    torch.cat([data["point_attribute"], data["views"][:, :, :, 0].sum(dim=-1, keepdim=True)], dim=-1),
                     data["scene_name"],
                     views,  # num_points, num_views, 7
                     points
                     ]
         else:
             return [results,
-                    data["point_attribute"],
+                    torch.cat([data["point_attribute"], data["views"][:, :, :, 0].sum(dim=-1, keepdim=True)], dim=-1),
                     data["scene_name"],
                     ]
 

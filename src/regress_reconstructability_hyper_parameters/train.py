@@ -392,7 +392,6 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.log("Test Gt Loss", gt_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True, batch_size=1)
 
         if len(self.dataset_name_dict) == 1:
-
             normals = data["point_attribute"][:, :, 7:10].cpu().numpy()
             normal_theta = np.arccos(normals[:, :, 2])
             normal_phi = np.arctan2(normals[:, :, 1], normals[:, :, 0])

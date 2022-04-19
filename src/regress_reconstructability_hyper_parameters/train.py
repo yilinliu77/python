@@ -285,7 +285,7 @@ class Regress_hyper_parameters(pl.LightningModule):
         names = np.concatenate(
             list(map(lambda x: [self.dataset_name_dict[item] for batch in x[2] for item in batch], outputs)))
         names = error_mean_std.new(names)
-        if len(self.dataset_name_dict) == 1:
+        if len(self.dataset_name_dict) == 1 and self.hparams["trainer"]["evaluate"]:
             views = np.concatenate(list(map(lambda x: x[3], outputs)))
             views = views.reshape([-1, views.shape[2], views.shape[3]])
             points = np.concatenate(list(map(lambda x: x[4], outputs)))
@@ -334,7 +334,7 @@ class Regress_hyper_parameters(pl.LightningModule):
             log_str += "Boost: {:.2f}  \n".format((spearmanr_factor - abs(smith_spearmanr_factor)).cpu().numpy())
             mean_spearman += spearmanr_factor - abs(smith_spearmanr_factor)
 
-            if len(self.dataset_name_dict) == 1:
+            if len(self.dataset_name_dict) == 1 and self.hparams["trainer"]["evaluate"]:
                 views_item = views[(names == self.dataset_name_dict[scene_item]).cpu().numpy()]
                 points_item = points[(names == self.dataset_name_dict[scene_item]).cpu().numpy()]
                 output_test_with_pc_and_views(predicted_acc.cpu().numpy(),

@@ -10,7 +10,6 @@ import hydra
 import torch
 import torchvision
 import numpy as np
-from sklearn.preprocessing import normalize
 import numba as nb
 from PIL import Image
 from typing import List, Tuple, Optional

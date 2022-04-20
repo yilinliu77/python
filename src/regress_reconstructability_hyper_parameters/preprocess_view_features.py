@@ -10,6 +10,7 @@ import hydra
 import torch
 import torchvision
 import numpy as np
+from sklearn.preprocessing import normalize
 import numba as nb
 from PIL import Image
 from typing import List, Tuple, Optional
@@ -63,27 +64,22 @@ def compute_view_features(v_max_num_view: int,
 
         assert abs(np.linalg.norm(view_to_point) - distance_ratio * 60) < 1
         point_to_view_normalized = -view_to_point / np.linalg.norm(view_to_point)
-        point_to_view_theta = math.acos(point_to_view_normalized[2])
-        point_to_view_phi = math.atan2(point_to_view_normalized[1], point_to_view_normalized[0])
 
-        normal_normalized = v_point_normal
-        assert abs(np.linalg.norm(normal_normalized) - 1) < 1e-3
-        normal_theta = math.acos(normal_normalized[2])
-        normal_phi = math.atan2(normal_normalized[1], normal_normalized[0])
+        up = np.array([0,0,1])
+        assert abs(np.linalg.norm(v_point_normal) - 1) < 1e-3
+        v_point_normal
+        stable_normal = v_point_normal+1e-6
+        stable_normal = stable_normal / np.linalg.norm(stable_normal)
+        cross_normal = np.cross(stable_normal, up)
+        cross_normal2 = np.cross(v_point_normal, cross_normal)
+        magic_matrix = np.linalg.inv(np.stack([cross_normal,cross_normal2,v_point_normal],axis=1))
+        local_view = np.matmul(magic_matrix, point_to_view_normalized)
+        local_view = local_view / np.linalg.norm(local_view)
+        theta = math.acos(local_view[2])
+        phi = math.atan2(local_view[1], local_view[0])
 
-        delta_theta: float = point_to_view_theta - normal_theta
-        delta_phi: float = point_to_view_phi - normal_phi
-        while delta_theta < -math.pi:
-            delta_theta += math.pi * 2
-        while delta_theta > math.pi:
-            delta_theta -= math.pi * 2
-        while delta_phi < -math.pi:
-            delta_phi += math.pi * 2
-        while delta_phi > math.pi:
-            delta_phi -= math.pi * 2
-
-        views[i_view][1] = delta_theta
-        views[i_view][2] = delta_phi
+        views[i_view][1] = theta
+        views[i_view][2] = phi
         views[i_view][3] = distance_ratio
         views[i_view][4] = angle_to_normal_ratio
         views[i_view][5] = angle_to_direction_ratio
@@ -167,7 +163,7 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: Optional[s
     cur = time.time()
     views_result = process_map(partial(compute_view_features,
                                       max_num_view, point_feature_root_dir, v_img_dir),
-                              zip(data_content, error_list[:, 6:9]), max_workers=8,chunksize=4096)
+                              zip(data_content, error_list[:, 6:9]), max_workers=4,chunksize=4096)
     print(time.time()-cur)
     reconstructability = np.asarray(list(map(lambda x: x[0], views_result)))
     point_features_path = np.asarray(list(map(lambda x: x[1], views_result)))

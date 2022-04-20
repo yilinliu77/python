@@ -336,10 +336,10 @@ class Regress_hyper_parameters(pl.LightningModule):
                 # )[0]
 
             spearman_dict[scene_item] = spearmanr_factor
-            log_str += "{:<35}: {:.2f}    ".format(scene_item, spearmanr_factor.cpu().numpy())
-            log_str += "Smith_{:<35}: {:.2f}    ".format(scene_item, smith_spearmanr_factor.cpu().numpy())
-            log_str += "Baseline_{:<35}: {:.2f}    ".format(scene_item, baseline_number_spearmanr_factor.cpu().numpy())
-            log_str += "Boost: {:.2f}  \n".format((spearmanr_factor - abs(smith_spearmanr_factor)).cpu().numpy())
+            log_str += "{:<35}: {:.4f}    ".format(scene_item, spearmanr_factor.cpu().numpy())
+            log_str += "Smith_{:<35}: {:.4f}    ".format(scene_item, smith_spearmanr_factor.cpu().numpy())
+            log_str += "Baseline_{:<35}: {:.4f}    ".format(scene_item, baseline_number_spearmanr_factor.cpu().numpy())
+            log_str += "Boost: {:.4f}  \n".format((spearmanr_factor - abs(smith_spearmanr_factor)).cpu().numpy())
             mean_spearman += spearmanr_factor - abs(smith_spearmanr_factor)
 
             if len(self.dataset_name_dict) == 1 and self.hparams["trainer"]["evaluate"]:

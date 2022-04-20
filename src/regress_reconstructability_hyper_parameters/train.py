@@ -170,7 +170,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                                  pin_memory=True,
                                  collate_fn=self.dataset_builder.collate_fn,
                                  persistent_workers=True,
-                                 prefetch_factor=4
+                                 # prefetch_factor=4
                                  )
 
     def val_dataloader(self):

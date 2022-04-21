@@ -61,11 +61,11 @@ def compute_view_features(v_max_num_view: int,
         pixel_pos_y = float(view_data[8])
         views[i_view][0] = 1
 
-        assert np.isclose(np.linalg.norm(view_to_point)/60, distance_ratio)
+        assert np.isclose(np.linalg.norm(view_to_point)/60, distance_ratio, 1e-2)
         point_to_view_normalized = -view_to_point / np.linalg.norm(view_to_point)
 
         up = np.array([0,0,1])
-        assert np.isclose(np.linalg.norm(v_point_normal), 1)
+        assert np.isclose(np.linalg.norm(v_point_normal), 1, 1e-2)
         v_point_normal
         z_unit = v_point_normal+1e-6
         z_unit = z_unit / np.linalg.norm(z_unit)
@@ -74,13 +74,13 @@ def compute_view_features(v_max_num_view: int,
         y_unit = np.cross(z_unit, x_unit)
         y_unit = y_unit / np.linalg.norm(y_unit)
         magic_matrix = np.stack([x_unit,y_unit,z_unit],axis=1)
-        assert np.isclose(np.linalg.det(magic_matrix), 1)
+        assert np.isclose(np.linalg.det(magic_matrix), 1, 1e-2)
         magic_matrix = magic_matrix.T
         local_view = np.matmul(magic_matrix, point_to_view_normalized)
         local_view = local_view / np.linalg.norm(local_view)
         theta = math.acos(local_view[2])
         phi = math.atan2(local_view[1], local_view[0])
-        assert np.abs(np.dot(point_to_view_normalized, v_point_normal) - np.dot(local_view, up)) < 1e-3
+        assert np.isclose(np.dot(point_to_view_normalized, v_point_normal), np.dot(local_view, up), 1e-2)
 
         views[i_view][1] = theta
         views[i_view][2] = phi

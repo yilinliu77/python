@@ -61,7 +61,7 @@ def compute_view_features(v_max_num_view: int,
         pixel_pos_y = float(view_data[8])
         views[i_view][0] = 1
 
-        assert np.isclose(np.linalg.norm(view_to_point), distance_ratio * 60)
+        assert np.isclose(np.linalg.norm(view_to_point)/60, distance_ratio)
         point_to_view_normalized = -view_to_point / np.linalg.norm(view_to_point)
 
         up = np.array([0,0,1])

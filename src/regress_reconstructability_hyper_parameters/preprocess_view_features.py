@@ -80,7 +80,7 @@ def compute_view_features(v_max_num_view: int,
         local_view = local_view / np.linalg.norm(local_view)
         theta = math.acos(local_view[2])
         phi = math.atan2(local_view[1], local_view[0])
-        assert np.isclose(np.dot(point_to_view_normalized, v_point_normal), np.dot(local_view, up))
+        assert np.abs(np.dot(point_to_view_normalized, v_point_normal) - np.dot(local_view, up)) < 1e-3
 
         views[i_view][1] = theta
         views[i_view][2] = phi

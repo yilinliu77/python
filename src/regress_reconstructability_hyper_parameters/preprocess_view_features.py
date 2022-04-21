@@ -61,21 +61,26 @@ def compute_view_features(v_max_num_view: int,
         pixel_pos_y = float(view_data[8])
         views[i_view][0] = 1
 
-        assert abs(np.linalg.norm(view_to_point) - distance_ratio * 60) < 1
+        assert np.isclose(np.linalg.norm(view_to_point), distance_ratio * 60)
         point_to_view_normalized = -view_to_point / np.linalg.norm(view_to_point)
 
         up = np.array([0,0,1])
-        assert abs(np.linalg.norm(v_point_normal) - 1) < 1e-3
+        assert np.isclose(np.linalg.norm(v_point_normal), 1)
         v_point_normal
-        stable_normal = v_point_normal+1e-6
-        stable_normal = stable_normal / np.linalg.norm(stable_normal)
-        cross_normal = np.cross(stable_normal, up)
-        cross_normal2 = np.cross(v_point_normal, cross_normal)
-        magic_matrix = np.linalg.inv(np.stack([cross_normal,cross_normal2,v_point_normal],axis=1))
+        z_unit = v_point_normal+1e-6
+        z_unit = z_unit / np.linalg.norm(z_unit)
+        x_unit = np.cross(z_unit, up)
+        x_unit = x_unit / np.linalg.norm(x_unit)
+        y_unit = np.cross(z_unit, x_unit)
+        y_unit = y_unit / np.linalg.norm(y_unit)
+        magic_matrix = np.stack([x_unit,y_unit,z_unit],axis=1)
+        assert np.isclose(np.linalg.det(magic_matrix), 1)
+        magic_matrix = magic_matrix.T
         local_view = np.matmul(magic_matrix, point_to_view_normalized)
         local_view = local_view / np.linalg.norm(local_view)
         theta = math.acos(local_view[2])
         phi = math.atan2(local_view[1], local_view[0])
+        assert np.isclose(np.dot(point_to_view_normalized, v_point_normal), np.dot(local_view, up))
 
         views[i_view][1] = theta
         views[i_view][2] = phi
@@ -162,7 +167,7 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: Optional[s
     cur = time.time()
     views_result = process_map(partial(compute_view_features,
                                       max_num_view, point_feature_root_dir, v_img_dir),
-                              zip(data_content, error_list[:, 6:9]), max_workers=8,chunksize=4096)
+                              zip(data_content, error_list[:, 6:9]), max_workers=4,chunksize=4096)
     print(time.time()-cur)
     reconstructability = np.asarray(list(map(lambda x: x[0], views_result)))
     point_features_path = np.asarray(list(map(lambda x: x[1], views_result)))

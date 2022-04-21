@@ -41,8 +41,12 @@ def str_to_float(v_str: str) -> float:
     return result
 
 if __name__ == '__main__':
-    a = torch.tensor()
+    data_file = r"D:\Projects\Reconstructability\training_data\test\chengbao_fine\views.npy"
+    views = np.load(data_file)
+    a=views[views[:,:,0]>0]
+    dz = np.cos(a[:, 1])
 
+    np.abs(dz) > np.cos(5 * np.pi / 180.)
 
     data_file = r"D:\Projects\Reconstructability\training_data\v7\chengbao_coarse_ds_0090\views.npy"
     cur = time.time()

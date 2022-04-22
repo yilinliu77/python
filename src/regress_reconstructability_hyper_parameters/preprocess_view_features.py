@@ -36,6 +36,19 @@ def compute_view_features(v_max_num_view: int,
     if num_views <= 2:
         return -1., "", False, np.zeros((v_max_num_view, 8), dtype=np.float32), []
 
+    up = np.array([0, 0, 1])
+    assert np.isclose(np.linalg.norm(v_point_normal), 1, atol=1e-2)
+    v_point_normal
+    z_unit = v_point_normal + 1e-6
+    z_unit = z_unit / np.linalg.norm(z_unit)
+    x_unit = np.cross(z_unit, up)
+    x_unit = x_unit / np.linalg.norm(x_unit)
+    y_unit = np.cross(z_unit, x_unit)
+    y_unit = y_unit / np.linalg.norm(y_unit)
+    magic_matrix = np.stack([x_unit, y_unit, z_unit], axis=1)
+    assert np.isclose(np.linalg.det(magic_matrix), 1, atol=1e-2)
+    magic_matrix = magic_matrix.T
+
     reconstructability = float(raw_data[1])
     point_feature_path = (os.path.join(v_point_feature_root_dir, str(real_index) + ".npz"))
     valid_flag = True
@@ -64,18 +77,6 @@ def compute_view_features(v_max_num_view: int,
         assert np.isclose(np.linalg.norm(view_to_point)/60, distance_ratio, atol = 1e-2)
         point_to_view_normalized = -view_to_point / np.linalg.norm(view_to_point)
 
-        up = np.array([0,0,1])
-        assert np.isclose(np.linalg.norm(v_point_normal), 1, atol = 1e-2)
-        v_point_normal
-        z_unit = v_point_normal+1e-6
-        z_unit = z_unit / np.linalg.norm(z_unit)
-        x_unit = np.cross(z_unit, up)
-        x_unit = x_unit / np.linalg.norm(x_unit)
-        y_unit = np.cross(z_unit, x_unit)
-        y_unit = y_unit / np.linalg.norm(y_unit)
-        magic_matrix = np.stack([x_unit,y_unit,z_unit],axis=1)
-        assert np.isclose(np.linalg.det(magic_matrix), 1, atol = 1e-2)
-        magic_matrix = magic_matrix.T
         local_view = np.matmul(magic_matrix, point_to_view_normalized)
         local_view = local_view / np.linalg.norm(local_view)
         theta = math.acos(local_view[2])

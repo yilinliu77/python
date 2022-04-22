@@ -40,8 +40,14 @@ def str_to_float(v_str: str) -> float:
         result = result * -1
     return result
 
+@nb.jit(nopython=True)
+def str_test():
+    str(0)
+
 if __name__ == '__main__':
-    data_file = r"D:\Projects\Reconstructability\training_data\test\chengbao_fine\views.npy"
+    str_test()
+
+    data_file = r"D:\Projects\Reconstructability\training_data\v8\chengbao_coarse_dp_0070\views.npy"
     views = np.load(data_file)
     a=views[views[:,:,0]>0]
     dz = np.cos(a[:, 1])

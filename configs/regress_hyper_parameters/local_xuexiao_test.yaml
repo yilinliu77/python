@@ -21,7 +21,7 @@ model:
   involve_img: false
   open_weights: true
   num_points_per_batch: 256
-  view_mean_std: [0.2396,0.0206,1.3202,0.6542,0.4880,0.8267,1.4230,0.6673,0.2400,0.4130]
+  view_mean_std: [1.0275,-0.7300,1.3202,0.6542,0.4880,0.3769,1.7259,0.6673,0.2400,0.4130]
   error_mean_std: [0.015,0.015,0.015,0.015]
   spearman_method: l2
   spearman_factor: 1.0

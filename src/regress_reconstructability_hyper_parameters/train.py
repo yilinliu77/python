@@ -486,11 +486,23 @@ class Regress_hyper_parameters(pl.LightningModule):
         return mean_spearman, log_str
 
     def validation_epoch_end(self, outputs) -> None:
-        mean_spearman, log_str = self._calculate_spearman(outputs)
+        # mean_spearman, log_str = self._calculate_spearman(outputs)
 
-        self.log("Valid mean spearman boost", mean_spearman, prog_bar=True, logger=True, on_step=False, on_epoch=True,
+        prediction = torch.cat(list(map(lambda x: x[0].reshape((-1, x[0].shape[2])), outputs)), dim=0)
+        point_attribute = torch.cat(list(map(lambda x: x[1].reshape((-1, x[1].shape[2])), outputs)), dim=0)
+        acc_mask = point_attribute[:, 1] != -1
+        com_mask = point_attribute[:, 2] != -1
+
+        if not self.involved_imgs:
+            our_spearman = spearman_correlation(prediction[acc_mask][:,0], point_attribute[acc_mask][:,1])
+            smith_spearman = spearman_correlation(point_attribute[acc_mask][:,0], point_attribute[acc_mask][:,1])
+        else:
+            our_spearman = spearman_correlation(prediction[com_mask][:, 1], point_attribute[com_mask][:, 2])
+            smith_spearman = spearman_correlation(point_attribute[com_mask][:, 0], point_attribute[com_mask][:, 2])
+        spearman_boost = our_spearman + smith_spearman
+        self.log("Valid mean spearman boost", spearman_boost, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  batch_size=1)
-        self.trainer.logger.experiment.add_text("Validation spearman", log_str, global_step=self.trainer.current_epoch)
+        # self.trainer.logger.experiment.add_text("Validation spearman", log_str, global_step=self.trainer.current_epoch)
 
         # if not self.trainer.sanity_checking:
         #     for dataset in self.train_dataset.datasets:
@@ -614,7 +626,7 @@ def main(v_cfg: DictConfig):
 
     trainer = Trainer(gpus=v_cfg["trainer"].gpu, enable_model_summary=False,
                       # strategy=DDPStrategy() if v_cfg["trainer"].gpu > 1 else None,
-                      strategy=DDPStrategy(find_unused_parameters=False),
+                      strategy=DDPStrategy(find_unused_parameters=False) if not v_cfg["trainer"]["evaluate"] else None,
                       # early_stop_callback=early_stop_callback,
                       callbacks=[model_check_point],
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,

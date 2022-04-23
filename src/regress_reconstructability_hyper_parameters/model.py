@@ -818,25 +818,20 @@ def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False
     scaled_gt_recon_error = torch.clamp(gt_recon_error, -1., 1.)
     scaled_gt_gt_error = torch.clamp(gt_gt_error, -1., 1.)
 
-    recon_loss = torch.tensor(0., device=predicted_recon_error.device)
-    for id_batch in range(predicted_recon_error.shape[0]):
-        recon_loss = recon_loss + spearmanr(
-            predicted_recon_error[id_batch][recon_mask[id_batch]].unsqueeze(0),
-            gt_recon_error[id_batch][recon_mask[id_batch]].unsqueeze(0),
-            regularization=method, regularization_strength=normalized_factor
-        )
-    recon_loss = predicted_recon_error.shape[
-                     0] - recon_loss  # We want to minimize the loss, which is maximizing the correlation factor
-    gt_loss = torch.zeros_like(recon_loss)
-    if v_is_img_involved:
-        for id_batch in range(predicted_recon_error.shape[0]):
-            gt_loss = gt_loss + spearmanr(
-                predicted_gt_error[id_batch][gt_mask[id_batch]].unsqueeze(0),
-                gt_gt_error[id_batch][gt_mask[id_batch]].unsqueeze(0),
+    recon_loss = spearmanr(
+                predicted_recon_error[recon_mask].unsqueeze(0),
+                gt_recon_error[recon_mask].unsqueeze(0),
                 regularization=method, regularization_strength=normalized_factor
             )
-        gt_loss = predicted_recon_error.shape[
-                      0] - gt_loss  # We want to minimize the loss, which is maximizing the correlation factor
+    recon_loss = 1 - recon_loss  # We want to minimize the loss, which is maximizing the correlation factor
+    gt_loss = torch.zeros_like(recon_loss)
+    if v_is_img_involved:
+        gt_loss = spearmanr(
+            predicted_gt_error[gt_mask].unsqueeze(0),
+            gt_gt_error[gt_mask].unsqueeze(0),
+            regularization=method, regularization_strength=normalized_factor
+        )
+        gt_loss = 1 - gt_loss  # We want to minimize the loss, which is maximizing the correlation factor
 
     return recon_loss, gt_loss, gt_loss if v_is_img_involved else recon_loss
 

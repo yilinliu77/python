@@ -8,15 +8,18 @@ import torch
 import torchvision
 import numpy as np
 from PIL import Image
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 from plyfile import PlyData, PlyElement
+from torch.utils.data import Dataset
 from torchvision.transforms import transforms
 from tqdm import tqdm
 from copy import deepcopy
 import open3d as o3d
 from scipy import stats
 import multiprocessing as mp
+from torch.nn.utils.rnn import pad_sequence
+
 import ctypes
 from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet2_utils import farthest_point_sample, \
     index_points, square_distance
@@ -138,40 +141,37 @@ class Regress_hyper_parameters_dataset(torch.utils.data.Dataset):
 
 
 class Regress_hyper_parameters_img_dataset(torch.utils.data.Dataset):
-    def __init__(self, v_path, v_paths):
+    def __init__(self, v_path, v_paths, v_indexes):
         super(Regress_hyper_parameters_img_dataset, self).__init__()
         self.data_root = v_path
         self.data_dirs = os.listdir(self.data_root)
         self.points_feature_path = v_paths
+        self.points_indices = v_indexes
 
     def __getitem__(self, point_indexes):
-        img_features_on_point_list = []
-        num_max_points = 0
+        stacked_img_features = torch.zeros((1, 32), dtype=torch.float32)
         real_indexes = []
-        for point_index in point_indexes:
-            point_path = self.points_feature_path[point_index]
-            if point_path=="":
-                img_features_on_point_list.append(torch.zeros((1, 32), dtype=torch.float32))
+        point_index = self.points_indices[point_indexes]
+        point_path = self.points_feature_path[point_index]
+        if point_path != "":
+            point_path = point_path.replace("\\\\", "/")
+            point_path = point_path.replace("\\", "/")
+            data = point_path.split("/")
+            if len(data) < 2:
+                print(self.data_root)
+                print(point_index)
+                print(self.points_feature_path[point_index])
+                print(point_path)
+                print(data)
+            point_path = os.path.join(self.data_root, data[0].strip(), "point_features", data[1].strip())
+            real_indexes.append(int(data[-1].split(".")[0]))
+            if not os.path.exists(point_path):
+                stacked_img_features = torch.zeros((1, 32), dtype=torch.float32)
             else:
-                point_path = point_path.replace("\\\\","/")
-                point_path = point_path.replace("\\","/")
-                data = point_path.split("/")
-                if len(data)<2:
-                    print(self.data_root)
-                    print(point_index)
-                    print(self.points_feature_path[point_index])
-                    print(point_path)
-                    print(data)
-                point_path = os.path.join(self.data_root, data[0].strip(), "point_features", data[1].strip())
-                # point_path[-1]="y"
-                real_indexes.append(int(data[-1].split(".")[0]))
-                if not os.path.exists(point_path):
-                    img_features_on_point_list.append(torch.zeros((1, 32), dtype=torch.float32))
-                else:
-                    img_features_on_point_list.append(torch.tensor(np.load(point_path)["arr_0"], dtype=torch.float32))
-            num_features = img_features_on_point_list[-1].shape[1]
-
-            num_max_points = max(num_max_points, img_features_on_point_list[-1].shape[0])
+                stacked_img_features = torch.tensor(np.load(point_path)["arr_0"], dtype=torch.float32)
+        return {
+            "point_features": stacked_img_features,
+        }
 
         # Align the features
         point_features = torch.zeros((point_indexes.shape[0], num_max_points, num_features), dtype=torch.float32)
@@ -180,8 +180,61 @@ class Regress_hyper_parameters_img_dataset(torch.utils.data.Dataset):
             point_features[id_item, :item.shape[0]] = item
             point_features_mask[id_item, :item.shape[0]] = False
 
-        return point_features, point_features_mask
+        return
 
+    def __len__(self):
+        return self.points_indices.shape[0]
+        # return 32
+
+class My_ddp_sampler(torch.utils.data.distributed.DistributedSampler):
+    def __init__(self,dataset: Dataset, v_batch_size, v_sample_mode = "internal" , num_replicas: Optional[int] = None,
+                     rank: Optional[int] = None, shuffle: bool = True,
+                     seed: int = 0, drop_last: bool = False):
+        super(My_ddp_sampler, self).__init__(dataset, num_replicas,
+                         rank, shuffle,
+                         seed, drop_last)
+        self.sample_mode = v_sample_mode
+        self.batch_size = v_batch_size
+
+    def __iter__(self):
+        if self.shuffle:
+            # deterministically shuffle based on epoch and seed
+            g = torch.Generator()
+            g.manual_seed(self.seed + self.epoch)
+
+            if self.sample_mode == "internal":
+                range_indices = []
+                cur_range = 0
+                for dataset in self.dataset.datasets:
+                    num_items = len(dataset)
+                    range_indices += (torch.randperm(num_items, generator=g) + cur_range).tolist()
+                    cur_range+=num_items
+                indices = range_indices
+            else:
+                indices = torch.randperm(len(self.dataset), generator=g).tolist()
+        else:
+            indices = list(range(len(self.dataset)))
+
+        if not self.drop_last:
+            # add extra samples to make it evenly divisible
+            padding_size = self.total_size - len(indices)
+            if padding_size <= len(indices):
+                indices += indices[:padding_size]
+            else:
+                indices += (indices * math.ceil(padding_size / len(indices)))[:padding_size]
+        else:
+            # remove tail of data to make it evenly divisible.
+            indices = indices[:self.total_size]
+        assert len(indices) == self.total_size
+
+        # subsample
+        assert self.total_size%self.num_replicas==0
+        assert self.total_size//self.num_replicas==self.num_samples
+        start_index = self.rank*self.num_samples
+        indices = indices[start_index:start_index+self.num_samples]
+        assert len(indices) == self.num_samples
+
+        return iter(indices)
 
 """
     views: num of patches * max views * 8 (valid_flag, delta_theta, delta_phi, distance, angle to normal, angle to direction, px, py)
@@ -214,8 +267,8 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.num_seeds = 4096 + 1024
         # self.num_seeds = 20
         self.sample_points_to_different_patches()
-        if self.is_involve_img:
-            self.img_dataset = Regress_hyper_parameters_img_dataset(img_dataset_path, self.view_paths)
+        # if self.is_involve_img:
+        #     self.img_dataset = Regress_hyper_parameters_img_dataset(img_dataset_path, self.view_paths)
 
     def sample_points_to_different_patches(self):
         # if True:
@@ -265,14 +318,15 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         self.train_index = self.whole_index[:self.whole_index.shape[0] // 4 * 3]
         self.validation_index = self.whole_index[self.whole_index.shape[0] // 4 * 3:]
 
-    def __getitem__(self, index):
         if self.trainer_mode == "training":
-            used_index = self.train_index
+            self.used_index = self.train_index
         elif self.trainer_mode == "validation":
-            used_index = self.validation_index
+            self.used_index = self.validation_index
         else:
-            used_index = self.whole_index
-        point_indexes = used_index[index]
+            self.used_index = self.whole_index
+
+    def __getitem__(self, index):
+        point_indexes = self.used_index[index]
 
         views_item = self.views[point_indexes].copy()
         valid_mask = views_item[:, 0] == 1
@@ -285,53 +339,46 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
         if points_item[2] != -1:
             points_item[2] = (points_item[2] - self.error_mean_std[1]) / self.error_mean_std[3]
 
-        point_features, point_features_mask = None, None
-        if self.is_involve_img:
-            point_features, point_features_mask = self.img_dataset[torch.tensor([point_indexes]).int()]
+        # point_features, point_features_mask = None, None
+        # if self.is_involve_img:
+        #     point_features, point_features_mask = self.img_dataset[torch.tensor([point_indexes]).int()]
 
         output_dict = {
-            # "views": torch.tensor(np.load(self.views_path,mmap_mode="r")["arr_0"][point_indexes], dtype=torch.float32),
-            # "view_pairs": torch.tensor(np.load(self.view_pairs_path,mmap_mode="r")["arr_0"][point_indexes], dtype=torch.float32),
             "views": torch.tensor(views_item, dtype=torch.float32).reshape(
                 [-1, self.views.shape[1], self.views.shape[2]]),
             "point_attribute": torch.tensor(
                 points_item.reshape([-1, self.point_attribute.shape[1]]), dtype=torch.float32),
-            "point_features": point_features,
-            "point_features_mask": point_features_mask,
+            # "point_features": point_features,
+            # "point_features_mask": point_features_mask,
             "scene_name": [self.scene_name] * 1,
         }
         return output_dict
 
     def __len__(self):
-        if self.trainer_mode == "training":
-            return self.train_index.shape[0]
-        elif self.trainer_mode == "validation":
-            return self.validation_index.shape[0]
-        else:
-            return self.whole_index.shape[0]
-            # return 32
+        return self.used_index.shape[0]
+        # return 32
 
     @staticmethod
     def collate_fn(batch):
-        scene_name = [item["scene_name"] for item in batch]
-        views = [torch.transpose(item["views"], 0, 1) for item in batch]
-        from torch.nn.utils.rnn import pad_sequence
-        views_pad = pad_sequence(views, batch_first=True)
-        views_pad = torch.transpose(views_pad, 1, 2)
+        scene_name, views_pad, point_attribute, point_features_pad, point_features_mask_pad = None, None, None, None, None
 
-        # view_pairs = [torch.transpose(item["view_pairs"],0,1) for item in batch]
-        # view_pairs_pad = torch.transpose(torch.transpose(pad_sequence(view_pairs),0,1),1,2)
-        point_attribute = [item["point_attribute"] for item in batch]
+        if "scene_name" in batch[0]:
+            scene_name = [item["scene_name"] for item in batch]
+        if "views" in batch[0]:
+            views = [torch.transpose(item["views"], 0, 1) for item in batch]
+            views_pad = pad_sequence(views, batch_first=True)
+            views_pad = torch.transpose(views_pad, 1, 2)
+        if "point_attribute" in batch[0]:
+            point_attribute = [item["point_attribute"] for item in batch]
+            point_attribute = torch.stack(point_attribute, dim=0)
 
-        point_features_pad, point_features_mask_pad = None, None
-        if batch[0]["point_features"] is not None:
-            point_features = [torch.swapaxes(item["point_features"],0,1) for item in batch]
-            point_features_pad = torch.swapaxes(pad_sequence(point_features, batch_first=True),1,2)
-            point_features_mask = [torch.swapaxes(item["point_features_mask"],0,1) for item in batch]
-            point_features_mask_pad = torch.swapaxes(pad_sequence(point_features_mask, batch_first=True, padding_value=True),1,2)
+        if "point_features" in batch[0]:
+            point_features_mask = [torch.zeros(item["point_features"].shape[0]).bool() for item in batch]
+            point_features_mask_pad = pad_sequence(point_features_mask, batch_first=True, padding_value=True)
+            point_features_pad = pad_sequence([item["point_features"] for item in batch], batch_first=True)
         return {
             'views': views_pad,
-            'point_attribute': torch.stack(point_attribute, dim=0),
+            'point_attribute': point_attribute,
             'point_features': point_features_pad,
             'point_features_mask': point_features_mask_pad,
             'scene_name': scene_name,
@@ -341,23 +388,12 @@ class Regress_hyper_parameters_dataset_with_imgs(torch.utils.data.Dataset):
 class Recon_dataset_imgs_and_batch_points(Regress_hyper_parameters_dataset_with_imgs):
     def __init__(self, v_path, v_params, v_mode):
         super(Recon_dataset_imgs_and_batch_points, self).__init__(v_path, v_params, v_mode)
-
+        self.num_point_per_item = self.params["model"]["num_points_per_batch"]
         pass
 
     def __getitem__(self, index):
-        if self.trainer_mode == "training":
-            used_index = self.train_index
-        elif self.trainer_mode == "validation":
-            used_index = self.validation_index
-        else:
-            used_index = self.whole_index
-        num_points_per_batch = self.params["model"]["num_points_per_batch"]
-        index = index * num_points_per_batch
-        point_indexes = used_index[index:min(self.num_item,index+num_points_per_batch)]
-
-        point_features, point_features_mask = None, None
-        if self.is_involve_img:
-            point_features, point_features_mask = self.img_dataset[point_indexes]
+        index = index * self.num_point_per_item
+        point_indexes = self.used_index[index:min(self.used_index.shape[0], index + self.num_point_per_item)]
 
         views_item = self.views[point_indexes]
         valid_mask = views_item[:, :, 0] == 1
@@ -368,29 +404,21 @@ class Recon_dataset_imgs_and_batch_points(Regress_hyper_parameters_dataset_with_
         com_point_mask = points_item[:, 2] != -1
 
         points_item[acc_point_mask, 1] = (points_item[acc_point_mask, 1] - self.error_mean_std[0]) / \
-                                                  self.error_mean_std[2]
+                                         self.error_mean_std[2]
         points_item[com_point_mask, 2] = (points_item[com_point_mask, 2] - self.error_mean_std[1]) / \
-                                                  self.error_mean_std[3]
+                                         self.error_mean_std[3]
 
         output_dict = {
             "views": torch.tensor(views_item, dtype=torch.float32).reshape(
                 [-1, self.views.shape[1], self.views.shape[2]]),
-            "point_attribute": torch.tensor(points_item.reshape([-1, self.point_attribute.shape[1]]), dtype=torch.float32),
-            # "points": self.points[used_index[index]],
-            "point_features": point_features,
-            "point_features_mask": point_features_mask,
-            "scene_name": [self.scene_name] * num_points_per_batch,
+            "point_attribute": torch.tensor(points_item.reshape([-1, self.point_attribute.shape[1]]),
+                                            dtype=torch.float32),
+            "scene_name": [self.scene_name] * point_indexes.shape[0],
         }
         return output_dict
 
     def __len__(self):
-        if self.trainer_mode == "training":
-            used_index = self.train_index
-        elif self.trainer_mode == "validation":
-            used_index = self.validation_index
-        else:
-            used_index = self.whole_index
-        return used_index.shape[0] // self.params["model"]["num_points_per_batch"]
+        return math.ceil(self.used_index.shape[0] / self.num_point_per_item)
 
     # @staticmethod
     # def collate_fn(batch):

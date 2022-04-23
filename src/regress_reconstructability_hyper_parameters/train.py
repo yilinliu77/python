@@ -1,4 +1,5 @@
 import math
+import platform
 import shutil
 import sys, os
 import time
@@ -8,6 +9,7 @@ from typing import Tuple
 import cv2
 from plyfile import PlyData, PlyElement
 from pytorch_lightning.strategies import DDPStrategy
+from pytorch_lightning.trainer.supporters import CombinedLoader
 from torch.nn.utils.rnn import pad_sequence
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from scipy import stats, optimize, interpolate
@@ -27,7 +29,8 @@ from tqdm.contrib.concurrent import thread_map, process_map
 
 from shared.fast_dataloader import FastDataLoader
 from src.regress_reconstructability_hyper_parameters.dataset import Regress_hyper_parameters_dataset, \
-    Regress_hyper_parameters_dataset_with_imgs, Regress_hyper_parameters_dataset_with_imgs_with_truncated_error
+    Regress_hyper_parameters_dataset_with_imgs, Regress_hyper_parameters_dataset_with_imgs_with_truncated_error, \
+    Regress_hyper_parameters_img_dataset, My_ddp_sampler
 from src.regress_reconstructability_hyper_parameters.model import Regress_hyper_parameters_Model, Brute_force_nn, \
     Correlation_nn
 
@@ -35,6 +38,8 @@ from src.regress_reconstructability_hyper_parameters.model import Regress_hyper_
 # from torchsort import soft_rank
 
 from scipy import stats
+
+from src.regress_reconstructability_hyper_parameters.preprocess_view_features import calculate_transformation_matrix
 
 
 def sigmoid(x):
@@ -142,6 +147,13 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.dataset_builder = getattr(dataset_module, self.hydra_conf["trainer"]["dataset_name"])
         self.model = f(hparams)
 
+        self.img_worker = max(self.hydra_conf["trainer"]["num_worker"] // 4 * 3, 1)
+        self.scene_worker = max(self.hydra_conf["trainer"]["num_worker"] // 4 * 1, 1)
+
+        assert (self.hydra_conf["trainer"]["batch_size"] <= 1 or self.hydra_conf["model"]["num_points_per_batch"] <= 1)
+
+        self.involved_imgs = self.hydra_conf["model"]["involve_img"]
+        self.is_ddp = self.hydra_conf["trainer"]["gpu"] > 0
         self.dataset_name_dict = {
 
         }
@@ -150,73 +162,158 @@ class Regress_hyper_parameters(pl.LightningModule):
         data = self.model(v_data)
         return data
 
+    def setup_dataset(self, v_dataset_root, v_dataset_strs, v_mode="testing"):
+        train_dataset = self.hydra_conf["trainer"]["train_dataset"].split("*")
+        if len(train_dataset) > 1:
+            v_mode = "testing"
+        scene_datasets = []
+        img_datasets = []
+        for dataset_path in v_dataset_strs:
+            scene_root = os.path.join(v_dataset_root, dataset_path)
+            scene_datasets.append(self.dataset_builder(scene_root, self.hydra_conf, v_mode))
+            self.dataset_name_dict[scene_datasets[-1].scene_name] = len(self.dataset_name_dict)
+            img_datasets.append(Regress_hyper_parameters_img_dataset(
+                os.path.join(scene_root, "../"),
+                scene_datasets[-1].view_paths,
+                scene_datasets[-1].used_index
+            ))
+
+        return scene_datasets, img_datasets
+
     def train_dataloader(self):
         dataset_root = self.hydra_conf["trainer"]["dataset_root"]
         dataset_paths = self.hydra_conf["trainer"]["train_dataset"].split("*")
-        datasets = []
-        for dataset_path in dataset_paths:
-            datasets.append(self.dataset_builder(os.path.join(dataset_root, dataset_path), self.hydra_conf,
-                                                 "training" if len(
-                                                     dataset_paths) == 1 else "testing", ))
 
-        self.train_dataset = torch.utils.data.ConcatDataset(datasets)
+        scene_dataset, img_dataset = self.setup_dataset(dataset_root, dataset_paths)
+        self.train_scene_dataset = torch.utils.data.ConcatDataset(scene_dataset)
+        self.train_img_dataset = torch.utils.data.ConcatDataset(img_dataset)
 
-        DataLoader_chosed = DataLoader if self.hydra_conf["trainer"]["gpu"] > 0 else FastDataLoader
-        return DataLoader_chosed(self.train_dataset,
-                                 batch_size=self.batch_size,
-                                 num_workers=self.hydra_conf["trainer"].num_worker,
-                                 shuffle=True,
-                                 # drop_last=True,
-                                 pin_memory=True,
-                                 collate_fn=self.dataset_builder.collate_fn,
-                                 persistent_workers=True,
-                                 # prefetch_factor=4
-                                 )
+        train_scene_sampler = My_ddp_sampler(self.train_scene_dataset, self.batch_size,
+                                             v_sample_mode="internal", shuffle=True)
+        train_img_sampler = My_ddp_sampler(self.train_img_dataset, self.batch_size,
+                                           v_sample_mode="internal", shuffle=True)
+        if self.involved_imgs:
+            combined_dataset = {
+                "scene": DataLoader(self.train_scene_dataset,
+                                    batch_size=self.batch_size,
+                                    num_workers=self.scene_worker,
+                                    shuffle=False,
+                                    pin_memory=True,
+                                    collate_fn=self.dataset_builder.collate_fn,
+                                    sampler=train_scene_sampler,
+                                    persistent_workers=True
+                                    ),
+                "img": DataLoader(self.train_img_dataset,
+                                  batch_size=self.batch_size,
+                                  num_workers=self.img_worker,
+                                  shuffle=False,
+                                  pin_memory=True,
+                                  collate_fn=self.dataset_builder.collate_fn,
+                                  sampler=train_img_sampler,
+                                  persistent_workers=True
+                                  )}
+            assert len(combined_dataset["scene"]) == len(combined_dataset["img"])
+        else:
+            combined_dataset = {
+                "scene": DataLoader(self.train_scene_dataset,
+                                    batch_size=self.batch_size,
+                                    num_workers=self.scene_worker,
+                                    shuffle=False,
+                                    pin_memory=True,
+                                    collate_fn=self.dataset_builder.collate_fn,
+                                    sampler=train_scene_sampler,
+                                    persistent_workers=True
+                                    )
+                }
+
+        return CombinedLoader(combined_dataset, mode="min_size")
 
     def val_dataloader(self):
         dataset_root = self.hydra_conf["trainer"]["dataset_root"]
-        use_part_dataset_to_validate = len(self.hydra_conf["trainer"]["train_dataset"].split("*")) == 1
-
         dataset_paths = self.hydra_conf["trainer"]["valid_dataset"].split("*")
-        datasets = []
-        for dataset_path in dataset_paths:
-            datasets.append(self.dataset_builder(os.path.join(dataset_root, dataset_path), self.hydra_conf,
-                                                 "validation" if use_part_dataset_to_validate else "testing", ))
-            self.dataset_name_dict[datasets[-1].scene_name] = len(self.dataset_name_dict)
 
-        self.valid_dataset = torch.utils.data.ConcatDataset(datasets)
-        return DataLoader(self.valid_dataset,
-                          batch_size=self.batch_size,
-                          num_workers=self.hydra_conf["trainer"].num_worker,
-                          # drop_last=False,
-                          shuffle=False,
-                          pin_memory=True,
-                          collate_fn=self.dataset_builder.collate_fn,
-                          persistent_workers=True,
-                          # prefetch_factor=10
-                          )
+        scene_dataset, img_dataset = self.setup_dataset(dataset_root, dataset_paths)
+        self.valid_scene_dataset = torch.utils.data.ConcatDataset(scene_dataset)
+        self.valid_img_dataset = torch.utils.data.ConcatDataset(img_dataset)
+
+        valid_scene_sampler = My_ddp_sampler(self.valid_scene_dataset, self.batch_size,
+                                             v_sample_mode="internal", shuffle=False)
+        valid_img_sampler = My_ddp_sampler(self.valid_img_dataset, self.batch_size,
+                                           v_sample_mode="internal", shuffle=False)
+        if self.involved_imgs:
+            combined_dataset = {
+                "scene": DataLoader(self.valid_scene_dataset,
+                                    batch_size=self.batch_size,
+                                    num_workers=self.scene_worker,
+                                    shuffle=False,
+                                    pin_memory=True,
+                                    collate_fn=self.dataset_builder.collate_fn,
+                                    sampler=valid_scene_sampler,
+                                    persistent_workers=True
+
+                                    ),
+                "img": DataLoader(self.valid_img_dataset,
+                                  batch_size=self.batch_size,
+                                  num_workers=self.img_worker,
+                                  shuffle=False,
+                                  pin_memory=True,
+                                  collate_fn=self.dataset_builder.collate_fn,
+                                  sampler=valid_img_sampler,
+                                  persistent_workers=True
+                                  )}
+            assert len(combined_dataset["scene"]) == len(combined_dataset["img"])
+        else:
+            combined_dataset = {
+                "scene": DataLoader(self.valid_scene_dataset,
+                                    batch_size=self.batch_size,
+                                    num_workers=self.scene_worker,
+                                    shuffle=False,
+                                    pin_memory=True,
+                                    collate_fn=self.dataset_builder.collate_fn,
+                                    sampler=valid_scene_sampler,
+                                    persistent_workers=True
+                                    )
+                }
+
+        return CombinedLoader(combined_dataset, mode="min_size")
 
     def test_dataloader(self):
         dataset_root = self.hydra_conf["trainer"]["dataset_root"]
         dataset_paths = self.hydra_conf["trainer"]["test_dataset"].split("*")
-        datasets = []
-        for dataset_path in dataset_paths:
-            datasets.append(
-                self.dataset_builder(os.path.join(dataset_root, dataset_path), self.hydra_conf, "testing"))
-            self.dataset_name_dict[datasets[-1].scene_name] = len(self.dataset_name_dict)
 
-        self.test_dataset = torch.utils.data.ConcatDataset(datasets)
+        scene_dataset, img_dataset = self.setup_dataset(dataset_root, dataset_paths)
 
-        return DataLoader(self.test_dataset,
-                          batch_size=self.hydra_conf["trainer"]["batch_size"],
-                          num_workers=self.hydra_conf["trainer"].num_worker,
-                          # drop_last=False,
-                          shuffle=False,
-                          pin_memory=True,
-                          collate_fn=self.dataset_builder.collate_fn,
-                          # persistent_workers=True,
-                          # prefetch_factor=10
-                          )
+        self.test_scene_dataset = torch.utils.data.ConcatDataset(scene_dataset)
+        self.test_img_dataset = torch.utils.data.ConcatDataset(img_dataset)
+        if self.involved_imgs:
+            combined_dataset = {
+                "scene": DataLoader(self.test_scene_dataset,
+                                    batch_size=self.batch_size,
+                                    num_workers=self.scene_worker,
+                                    shuffle=False,
+                                    pin_memory=True,
+                                    collate_fn=self.dataset_builder.collate_fn,
+                                    ),
+                "img": DataLoader(self.test_img_dataset,
+                                  batch_size=self.batch_size,
+                                  num_workers=self.img_worker,
+                                  shuffle=False,
+                                  pin_memory=True,
+                                  collate_fn=self.dataset_builder.collate_fn,
+                                  )}
+            assert len(combined_dataset["scene"]) == len(combined_dataset["img"])
+        else:
+            combined_dataset = {
+                "scene": DataLoader(self.test_scene_dataset,
+                                    batch_size=self.batch_size,
+                                    num_workers=self.scene_worker,
+                                    shuffle=False,
+                                    pin_memory=True,
+                                    collate_fn=self.dataset_builder.collate_fn,
+                                    ),
+               }
+
+        return CombinedLoader(combined_dataset, mode="min_size")
 
     def configure_optimizers(self):
         optimizer = Adam(filter(lambda p: p.requires_grad, self.parameters()), lr=self.learning_rate, )
@@ -230,7 +327,23 @@ class Regress_hyper_parameters(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         data = batch
-        batch_size = data["point_attribute"]
+        batch_size = data["scene"]["views"].shape[0]
+        num_points_per_item = data["scene"]["views"].shape[1]
+        data["total"] = {}
+        data["total"].update(data["scene"])
+        if self.hparams["model"]["involve_img"]:
+            data["total"]["point_features"] = data["img"]["point_features"].reshape((
+                                                                                        batch_size,
+                                                                                        num_points_per_item) +
+                                                                                    data["img"]["point_features"].shape[
+                                                                                    -2:])
+            data["total"]["point_features_mask"] = data["img"]["point_features_mask"].reshape((
+                                                                                                  batch_size,
+                                                                                                  num_points_per_item) +
+                                                                                              data["img"][
+                                                                                                  "point_features_mask"].shape[
+                                                                                              -1:])
+        data = data["total"]
         results, weights = self.forward(data)
 
         recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)
@@ -254,7 +367,23 @@ class Regress_hyper_parameters(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         data = batch
-        batch_size = data["point_attribute"]
+        batch_size = data["scene"]["views"].shape[0]
+        num_points_per_item = data["scene"]["views"].shape[1]
+        data["total"] = {}
+        data["total"].update(data["scene"])
+        if self.hparams["model"]["involve_img"]:
+            data["total"]["point_features"] = data["img"]["point_features"].reshape((
+                                                                                        batch_size,
+                                                                                        num_points_per_item) +
+                                                                                    data["img"]["point_features"].shape[
+                                                                                    -2:])
+            data["total"]["point_features_mask"] = data["img"]["point_features_mask"].reshape((
+                                                                                                  batch_size,
+                                                                                                  num_points_per_item) +
+                                                                                              data["img"][
+                                                                                                  "point_features_mask"].shape[
+                                                                                              -1:])
+        data = data["total"]
         results, weights = self.forward(data)
 
         recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)
@@ -274,12 +403,10 @@ class Regress_hyper_parameters(pl.LightningModule):
     def _calculate_spearman(self, outputs: Tuple):
         error_mean_std = outputs[0][0].new(self.hydra_conf["model"]["error_mean_std"])
 
-        prediction = torch.cat(list(map(lambda x: x[0], outputs)))
+        prediction = torch.cat(list(map(lambda x: x[0].reshape((-1, x[0].shape[2])), outputs)), dim=0)
         if self.hparams["trainer"]["loss"] == "loss_l2_error":
             prediction = prediction * error_mean_std[2:] + error_mean_std[:2]
-        prediction = prediction.reshape([-1, prediction.shape[2]])
-        point_attribute = torch.cat(list(map(lambda x: x[1], outputs)))
-        point_attribute = point_attribute.reshape([-1, point_attribute.shape[2]])
+        point_attribute = torch.cat(list(map(lambda x: x[1].reshape((-1, x[1].shape[2])), outputs)), dim=0)
         acc_mask = point_attribute[:, 1] != -1
         com_mask = point_attribute[:, 2] != -1
         point_attribute[acc_mask, 1] = point_attribute[acc_mask, 1] * error_mean_std[2] + error_mean_std[0]
@@ -288,10 +415,8 @@ class Regress_hyper_parameters(pl.LightningModule):
             list(map(lambda x: [self.dataset_name_dict[item] for batch in x[2] for item in batch], outputs)))
         names = error_mean_std.new(names)
         if len(self.dataset_name_dict) == 1 and self.hparams["trainer"]["evaluate"]:
-            views = np.concatenate(list(map(lambda x: x[3], outputs)))
-            views = views.reshape([-1, views.shape[2], views.shape[3]])
-            points = np.concatenate(list(map(lambda x: x[4], outputs)))
-            points = points.reshape([-1, points.shape[2]])
+            views = np.concatenate(list(map(lambda x: x[3].reshape((-1,) + (x[3].shape[2:])), outputs)), axis=0)
+            points = np.concatenate(list(map(lambda x: x[4].reshape((-1,) + (x[4].shape[2:])), outputs)), axis=0)
 
         log_str = ""
         mean_spearman = 0
@@ -350,7 +475,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                                               gt_acc.cpu().numpy(),
                                               gt_com.cpu().numpy(),
                                               smith_error.cpu().numpy(),
-                                              self.test_dataset.datasets[
+                                              self.test_scene_dataset.datasets[
                                                   self.dataset_name_dict[scene_item]].point_attribute.shape[0],
                                               views_item,
                                               points_item
@@ -367,15 +492,16 @@ class Regress_hyper_parameters(pl.LightningModule):
                  batch_size=1)
         self.trainer.logger.experiment.add_text("Validation spearman", log_str, global_step=self.trainer.current_epoch)
 
-        if not self.trainer.sanity_checking:
-            for dataset in self.train_dataset.datasets:
-                dataset.sample_points_to_different_patches()
+        # if not self.trainer.sanity_checking:
+        #     for dataset in self.train_dataset.datasets:
+        #         dataset.sample_points_to_different_patches()
 
         return
 
     def on_test_epoch_start(self) -> None:
-        self.data_mean_std = np.load(os.path.join(self.test_dataset.datasets[0].data_root, "data_centralize.npz"))[
-            "arr_0"]
+        self.data_mean_std = \
+            np.load(os.path.join(self.test_scene_dataset.datasets[0].data_root, "data_centralize.npz"))[
+                "arr_0"]
         if os.path.exists("temp/test_scene_output"):
             shutil.rmtree("temp/test_scene_output")
         os.mkdir("temp/test_scene_output")
@@ -383,7 +509,23 @@ class Regress_hyper_parameters(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         data = batch
-
+        batch_size = data["scene"]["views"].shape[0]
+        num_points_per_item = data["scene"]["views"].shape[1]
+        data["total"] = {}
+        data["total"].update(data["scene"])
+        if self.hparams["model"]["involve_img"]:
+            data["total"]["point_features"] = data["img"]["point_features"].reshape((
+                                                                                        batch_size,
+                                                                                        num_points_per_item) +
+                                                                                    data["img"]["point_features"].shape[
+                                                                                    -2:])
+            data["total"]["point_features_mask"] = data["img"]["point_features_mask"].reshape((
+                                                                                                  batch_size,
+                                                                                                  num_points_per_item) +
+                                                                                              data["img"][
+                                                                                                  "point_features_mask"].shape[
+                                                                                              -1:])
+        data = data["total"]
         results, weights = self.forward(data)
 
         recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)
@@ -393,8 +535,8 @@ class Regress_hyper_parameters(pl.LightningModule):
 
         if len(self.dataset_name_dict) == 1:
             normals = data["point_attribute"][:, :, 7:10].cpu().numpy()
-            normal_theta = np.arccos(normals[:, :, 2])
-            normal_phi = np.arctan2(normals[:, :, 1], normals[:, :, 0])
+            magic_matrix = calculate_transformation_matrix(normals)
+            magic_matrix = np.transpose(magic_matrix, (0, 1, 3, 2))
 
             view_mean_std = np.array(self.hydra_conf["model"]["view_mean_std"])
 
@@ -402,14 +544,15 @@ class Regress_hyper_parameters(pl.LightningModule):
             view_mask = views[:, :, :, 0] > 0
             views[view_mask, 1] = views[view_mask, 1] * view_mean_std[5] + view_mean_std[0]
             views[view_mask, 2] = views[view_mask, 2] * view_mean_std[6] + view_mean_std[1]
-            views[:, :, :, 1] = views[:, :, :, 1] + normal_theta[:, :, np.newaxis]
-            views[:, :, :, 2] = views[:, :, :, 2] + normal_phi[:, :, np.newaxis]
 
             dz = np.cos(views[:, :, :, 1])
             dx = np.sin(views[:, :, :, 1]) * np.cos(views[:, :, :, 2])
             dy = np.sin(views[:, :, :, 1]) * np.sin(views[:, :, :, 2])
+            local_point_to_view = np.stack([dx, dy, dz], axis=-1)
+            global_point_to_view = np.matmul(magic_matrix, local_point_to_view.transpose((0, 1, 3, 2))).transpose(
+                (0, 1, 3, 2))
 
-            view_dir = np.stack([dx, dy, dz], axis=-1) * (
+            view_dir = global_point_to_view * (
                     data["views"][:, :, :, 3:4].cpu().numpy() * view_mean_std[7] + view_mean_std[2]) * 60
             points = data["point_attribute"][:, :, 3:6].cpu().numpy()
             points = points * self.data_mean_std[3] + self.data_mean_std[:3]
@@ -471,13 +614,14 @@ def main(v_cfg: DictConfig):
 
     trainer = Trainer(gpus=v_cfg["trainer"].gpu, enable_model_summary=False,
                       # strategy=DDPStrategy() if v_cfg["trainer"].gpu > 1 else None,
-                      strategy=DDPStrategy(find_unused_parameters=False) if v_cfg["trainer"].gpu > 1 else None,
+                      strategy=DDPStrategy(find_unused_parameters=False),
                       # early_stop_callback=early_stop_callback,
                       callbacks=[model_check_point],
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,
                       max_epochs=3000,
                       gradient_clip_val=0.1,
                       check_val_every_n_epoch=1,
+                      replace_sampler_ddp=False
                       )
 
     model = Regress_hyper_parameters(v_cfg)
@@ -499,6 +643,6 @@ def main(v_cfg: DictConfig):
 
 
 if __name__ == '__main__':
-    # import os
-    # os.environ["PL_TORCH_DISTRIBUTED_BACKEND"] = "gloo"
+    if platform.system() == "Windows":
+        os.environ["PL_TORCH_DISTRIBUTED_BACKEND"] = "gloo"
     main()

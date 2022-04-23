@@ -22,6 +22,28 @@ import open3d as o3d
 from scipy import stats
 from tqdm.contrib.concurrent import thread_map, process_map
 
+# Output matrix that transform a vector to the local coordinate of the point normal
+def calculate_transformation_matrix(v_normal: np.ndarray):
+    if len(v_normal.shape)!=2:
+        normals = v_normal.reshape((-1,3))
+    else:
+        normals = v_normal
+    up = np.array([0, 0, 1])
+    assert np.all(np.abs(np.linalg.norm(normals,axis=1) - 1) < 1e-2)
+    z_unit = normals + 1e-6
+    z_unit = z_unit / np.linalg.norm(z_unit,axis=1,keepdims=True)
+    x_unit = np.cross(z_unit, up)
+    x_unit = x_unit / np.linalg.norm(x_unit,axis=1,keepdims=True)
+    y_unit = np.cross(z_unit, x_unit)
+    y_unit = y_unit / np.linalg.norm(y_unit,axis=1,keepdims=True)
+    magic_matrix = np.stack([x_unit, y_unit, z_unit], axis=2)
+    assert np.all(np.abs(np.linalg.det(magic_matrix) - 1) < 1e-2)
+    magic_matrix = np.transpose(magic_matrix,axes=(0,2,1))
+
+    if len(v_normal.shape)!=2:
+        magic_matrix = magic_matrix.reshape(v_normal.shape[:-1]+(3,3))
+
+    return magic_matrix
 
 def compute_view_features(v_max_num_view: int,
                           v_point_feature_root_dir: str,
@@ -36,18 +58,7 @@ def compute_view_features(v_max_num_view: int,
     if num_views <= 2:
         return -1., "", False, np.zeros((v_max_num_view, 8), dtype=np.float32), []
 
-    up = np.array([0, 0, 1])
-    assert np.isclose(np.linalg.norm(v_point_normal), 1, atol=1e-2)
-    v_point_normal
-    z_unit = v_point_normal + 1e-6
-    z_unit = z_unit / np.linalg.norm(z_unit)
-    x_unit = np.cross(z_unit, up)
-    x_unit = x_unit / np.linalg.norm(x_unit)
-    y_unit = np.cross(z_unit, x_unit)
-    y_unit = y_unit / np.linalg.norm(y_unit)
-    magic_matrix = np.stack([x_unit, y_unit, z_unit], axis=1)
-    assert np.isclose(np.linalg.det(magic_matrix), 1, atol=1e-2)
-    magic_matrix = magic_matrix.T
+    magic_matrix = calculate_transformation_matrix(v_point_normal)
 
     reconstructability = float(raw_data[1])
     point_feature_path = (os.path.join(v_point_feature_root_dir, str(real_index) + ".npz"))
@@ -81,7 +92,7 @@ def compute_view_features(v_max_num_view: int,
         local_view = local_view / np.linalg.norm(local_view)
         theta = math.acos(local_view[2])
         phi = math.atan2(local_view[1], local_view[0])
-        assert np.isclose(np.dot(point_to_view_normalized, v_point_normal), np.dot(local_view, up), atol = 1e-2)
+        assert np.isclose(np.dot(point_to_view_normalized, v_point_normal), np.dot(local_view, np.array([0,0,1])), atol = 1e-2)
 
         views[i_view][1] = theta
         views[i_view][2] = phi

@@ -2897,6 +2897,8 @@ class Spearman_net(Correlation_net):
 
     def forward(self, v_data: Dict[str, torch.Tensor]):
         predict_result, (weights, cross_weight) = super(Spearman_net, self).forward(v_data)
+        if self.hydra_conf["model"]["sigmoid"]:
+            predict_result = torch.sigmoid(predict_result)
         predict_result = predict_result
 
         return predict_result, (weights, cross_weight)

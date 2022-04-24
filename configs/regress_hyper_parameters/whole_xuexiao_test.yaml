@@ -27,6 +27,7 @@ model:
   spearman_factor: 1.0
   add_bias_kv: false
   use_scaled_loss: 1.
+  sigmoid: true
 
 hydra:
   run:

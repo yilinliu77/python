@@ -28,7 +28,7 @@ model:
   spearman_method: l2
   spearman_factor: 1.0
   add_bias_kv: false
-  use_scaled_loss: true
+  use_scaled_loss: 1.
 
 hydra:
   run:

@@ -12,7 +12,7 @@ def spearmanr(pred, target, **kw):
     return (pred * target).sum()
 
 
-def loss_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False, v_use_scaled_loss=True):
+def loss_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False, v_use_scaled_loss=1.):
     predicted_recon_error = v_prediction[:, :, 0:1]
     predicted_gt_error = v_prediction[:, :, 1:2]
 
@@ -23,12 +23,8 @@ def loss_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False, v_us
     gt_gt_error = v_point_attribute[:, :, 2:3]
     gt_mask = (gt_gt_error != -1).bool()
 
-    if v_use_scaled_loss:
-        scaled_gt_recon_error = torch.clamp(gt_recon_error, -1., 1.)
-        scaled_gt_gt_error = torch.clamp(gt_gt_error, -1., 1.)
-    else:
-        scaled_gt_recon_error = gt_recon_error
-        scaled_gt_gt_error = gt_gt_error
+    scaled_gt_recon_error = torch.clamp(gt_recon_error, -v_use_scaled_loss, v_use_scaled_loss)
+    scaled_gt_gt_error = torch.clamp(gt_gt_error, -v_use_scaled_loss, v_use_scaled_loss)
 
     recon_loss = torch.nn.functional.l1_loss(predicted_recon_error[recon_mask], scaled_gt_recon_error[recon_mask])
     gt_loss = torch.zeros_like(recon_loss)

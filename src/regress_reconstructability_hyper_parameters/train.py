@@ -383,7 +383,6 @@ class Regress_hyper_parameters(pl.LightningModule):
                                                                                                   "point_features_mask"].shape[
                                                                                               -1:])
         data = data["total"]
-        print(data["scene_name"])
         results, weights = self.forward(data)
 
         recon_loss, gt_loss, total_loss = self.model.loss(data["point_attribute"], results)

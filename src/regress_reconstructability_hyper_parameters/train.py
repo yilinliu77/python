@@ -3,6 +3,7 @@ import platform
 import shutil
 import sys, os
 import time
+from datetime import timedelta
 from itertools import groupby
 from typing import Tuple
 
@@ -224,7 +225,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                                     sampler=train_scene_sampler,
                                     persistent_workers=True
                                     )
-                }
+            }
 
         return CombinedLoader(combined_dataset, mode="min_size")
 
@@ -272,7 +273,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                                     sampler=valid_scene_sampler,
                                     persistent_workers=True
                                     )
-                }
+            }
 
         return CombinedLoader(combined_dataset, mode="min_size")
 
@@ -310,7 +311,7 @@ class Regress_hyper_parameters(pl.LightningModule):
                                     pin_memory=True,
                                     collate_fn=self.dataset_builder.collate_fn,
                                     ),
-               }
+            }
 
         return CombinedLoader(combined_dataset, mode="min_size")
 
@@ -493,8 +494,8 @@ class Regress_hyper_parameters(pl.LightningModule):
         com_mask = point_attribute[:, 2] != -1
 
         if not self.involved_imgs:
-            our_spearman = spearman_correlation(prediction[acc_mask][:,0], point_attribute[acc_mask][:,1])
-            smith_spearman = spearman_correlation(point_attribute[acc_mask][:,0], point_attribute[acc_mask][:,1])
+            our_spearman = spearman_correlation(prediction[acc_mask][:, 0], point_attribute[acc_mask][:, 1])
+            smith_spearman = spearman_correlation(point_attribute[acc_mask][:, 0], point_attribute[acc_mask][:, 1])
         else:
             our_spearman = spearman_correlation(prediction[com_mask][:, 1], point_attribute[com_mask][:, 2])
             smith_spearman = spearman_correlation(point_attribute[com_mask][:, 0], point_attribute[com_mask][:, 2])
@@ -618,9 +619,12 @@ def main(v_cfg: DictConfig):
     )
 
     model_check_point = ModelCheckpoint(
-        monitor='Validation Loss',
-        save_top_k=3,
-        save_last=True
+        monitor='Valid mean spearman boost',
+        save_top_k=1,
+        save_last=True,
+        mode="max",
+        auto_insert_metric_name=True,
+        train_time_interval=timedelta(seconds=60 * 60)
     )
 
     trainer = Trainer(gpus=v_cfg["trainer"].gpu, enable_model_summary=False,

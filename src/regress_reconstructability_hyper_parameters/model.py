@@ -1248,11 +1248,11 @@ class TFEncorder(nn.Module):
         dx, weights = self._sa_block(x, src_mask, src_key_padding_mask)
         dx = torch.nan_to_num(dx)
         x = x + dx
-        if self.add_norm:
-            x = self.norm1(x)
+        # if self.add_norm:
+        #     x = self.norm1(x)
         x = x + self._ff_block(x)
-        if self.add_norm:
-            x = self.norm2(x)
+        # if self.add_norm:
+        #     x = self.norm2(x)
         return x, weights
 
     # self-attention block
@@ -2732,7 +2732,7 @@ class Correlation_net(nn.Module):
             src_key_padding_mask=torch.logical_not(valid_mask)[:, :, 0],
             # src_mask = value_mask
         )
-        weights = weights[:, 0]
+        # weights = weights[:, 0]
         fused_view_features = fused_view_features * valid_mask
 
         fused_view_features = fused_view_features[:, 0]

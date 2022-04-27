@@ -61,7 +61,7 @@ def compute_view_features(v_max_num_view: int,
     magic_matrix = calculate_transformation_matrix(v_point_normal)
 
     reconstructability = float(raw_data[1])
-    point_feature_path = (os.path.join(v_point_feature_root_dir, str(real_index) + ".npz"))
+    point_feature_path = (os.path.join(v_point_feature_root_dir, str(real_index) + ".npy"))
     valid_flag = True
     img_paths = []
     # Read views

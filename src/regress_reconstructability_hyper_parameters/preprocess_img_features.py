@@ -254,5 +254,5 @@ if __name__ == '__main__':
             for id_batch, out_pos in enumerate(output_positions_item):
                 output_feature[out_pos[0]][out_pos[1]] = pixel_position_features[id_batch]
 
-    thread_map(lambda x: np.savez(os.path.join(v_output_root, "point_features",x[0]),x[1]),zip(point_features_path,output_feature))
+    thread_map(lambda x: np.save(os.path.join(v_output_root, "point_features",x[0]),x[1]),zip(point_features_path,output_feature))
     print("Pre compute done")

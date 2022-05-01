@@ -255,11 +255,10 @@ class My_ddp_sampler2(torch.utils.data.distributed.DistributedSampler):
         self.num_samples = self.total_size // self.num_replicas
         assert self.total_size % self.num_replicas == 0
 
-        self.non_repeated_index = []
-
     def __iter__(self):
         np.random.seed(self.seed + self.epoch)
 
+        self.non_repeated_index = []
         # reorder the index inside each dataset
         range_indices = []
         cur_range = 0

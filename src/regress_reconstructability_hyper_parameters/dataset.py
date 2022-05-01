@@ -251,6 +251,8 @@ class My_ddp_sampler2(torch.utils.data.distributed.DistributedSampler):
         self.max_length = max([len(item) for item in self.dataset.datasets])
         self.num_dataset = len(self.dataset.datasets)
         self.num_pad_dataset = self.num_dataset % self.num_replicas
+        self.num_dataset_per_replica = (self.num_dataset + self.num_pad_dataset) // self.num_replicas
+        assert (self.num_dataset + self.num_pad_dataset) % self.num_replicas == 0
         self.total_size = self.max_length * (self.num_dataset + self.num_pad_dataset)
         self.num_samples = self.total_size // self.num_replicas
         assert self.total_size % self.num_replicas == 0
@@ -288,7 +290,10 @@ class My_ddp_sampler2(torch.utils.data.distributed.DistributedSampler):
         else:
             shuffled_range_indices = range_indices
         range_indices = [item for index in shuffled_range_indices for item in index]
-
+        assert len(self.non_repeated_index) == len(shuffled_range_indices)
+        self.non_repeated_index = self.non_repeated_index[
+                                  self.rank*self.num_dataset_per_replica:(self.rank + 1) * self.num_dataset_per_replica
+                                  ]
 
         # subsample
         start_index = self.rank * self.num_samples

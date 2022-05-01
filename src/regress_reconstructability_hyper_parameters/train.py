@@ -490,13 +490,16 @@ class Regress_hyper_parameters(pl.LightningModule):
         if self.trainer.sanity_checking:
             return
         spearman_boost = []
+        predictions = torch.cat(list(map(lambda x: x[0].reshape((-1, x[0].shape[2])), outputs)), dim=0)
+        point_attributes = torch.cat(list(map(lambda x: x[1].reshape((-1, x[1].shape[2])), outputs)), dim=0)
+        acc_masks = point_attributes[:, 1] != -1
+        com_masks = point_attributes[:, 2] != -1
         for item_index in self.trainer.val_dataloaders[0].sampler["scene"].non_repeated_index:
-            item = outputs[item_index]
-            prediction = torch.cat(list(map(lambda x: x[0].reshape((-1, x[0].shape[2])), item)), dim=0)
-            point_attribute = torch.cat(list(map(lambda x: x[1].reshape((-1, x[1].shape[2])), item)), dim=0)
-            acc_mask = point_attribute[:, 1] != -1
-            com_mask = point_attribute[:, 2] != -1
-            
+            prediction = predictions[item_index]
+            point_attribute = point_attributes[item_index]
+            acc_mask = acc_masks[item_index]
+            com_mask = com_masks[item_index]
+
             if not self.involved_imgs:
                 our_spearman = spearman_correlation(prediction[acc_mask][:, 0], point_attribute[acc_mask][:, 1])
                 smith_spearman = spearman_correlation(point_attribute[acc_mask][:, 0], point_attribute[acc_mask][:, 1])

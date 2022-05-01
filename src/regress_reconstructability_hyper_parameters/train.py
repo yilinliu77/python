@@ -624,7 +624,7 @@ def main(v_cfg: DictConfig):
         save_last=True,
         mode="max",
         auto_insert_metric_name=True,
-        train_time_interval=timedelta(seconds=60 * 60)
+        # train_time_interval=timedelta(seconds=60 * 60)
     )
 
     trainer = Trainer(gpus=v_cfg["trainer"].gpu, enable_model_summary=False,

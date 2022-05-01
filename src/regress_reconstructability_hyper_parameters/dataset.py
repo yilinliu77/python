@@ -237,6 +237,62 @@ class My_ddp_sampler(torch.utils.data.distributed.DistributedSampler):
 
         return iter(indices)
 
+
+class My_ddp_sampler2(torch.utils.data.distributed.DistributedSampler):
+    def __init__(self,dataset: Dataset, v_batch_size, v_sample_mode = "internal" , num_replicas: Optional[int] = None,
+                     rank: Optional[int] = None, shuffle: bool = True,
+                     seed: int = 0, drop_last: bool = False):
+        super(My_ddp_sampler2, self).__init__(dataset, num_replicas,
+                         rank, shuffle,
+                         seed, drop_last)
+        self.sample_mode = v_sample_mode
+        self.batch_size = v_batch_size
+
+    def __iter__(self):
+        np.random.seed(self.seed + self.epoch)
+
+        # reorder the index inside each dataset
+        max_length = max([len(item) for item in self.dataset.datasets])
+        range_indices = []
+        cur_range = 0
+        for dataset in self.dataset.datasets:
+            num_items = len(dataset)
+            local_indices = np.arange(num_items)
+            num_remain = max_length - num_items
+            if num_remain > 0:
+                pad_indices = np.random.choice(np.arange(num_items), num_remain, replace=True)
+                local_indices = np.concatenate([local_indices, pad_indices])
+            range_indices.append((local_indices + cur_range).tolist())
+            cur_range += len(local_indices)
+
+        # pad the dataset
+        num_dataset = len(self.dataset.datasets)
+        num_pad_dataset = num_dataset % self.num_replicas
+        for i in range(num_pad_dataset):
+            range_indices.append(range_indices[np.random.randint(0, num_dataset)])
+
+        # shuffle
+        dataset_id = np.arange(len(range_indices))
+        np.random.shuffle(dataset_id)
+        shuffled_range_indices = []
+        if self.shuffle:
+            for i in range(len(range_indices)):
+                np.random.shuffle(range_indices[dataset_id[i]])
+                shuffled_range_indices.append(range_indices[dataset_id[i]])
+        else:
+            shuffled_range_indices = range_indices
+        range_indices = [item for index in shuffled_range_indices for item in index]
+        self.total_size = len(range_indices)
+        self.num_samples = self.total_size // self.num_replicas
+        assert self.total_size % self.num_replicas == 0
+
+        # subsample
+        start_index = self.rank * self.num_samples
+        indices = range_indices[start_index:start_index+self.num_samples]
+
+        return iter(indices)
+
+
 """
     views: num of patches * max views * 8 (valid_flag, delta_theta, delta_phi, distance, angle to normal, angle to direction, px, py)
     points: num of patches * num point per patch * 7 (x, y, z, index, id_centre)

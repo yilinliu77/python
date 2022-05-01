@@ -1521,17 +1521,17 @@ class TFDecorder(nn.Module):
 
         dx, sa_weights = self._sa_block(x, key_padding_mask=v_point_features_mask)
         x = x + dx
-        if self.add_norm:
-            x = self.norm1(x)
+        # if self.add_norm:
+            # x = self.norm1(x)
         dx2, mha_weights = self.multihead_attn(v_fused_view_features, x, x,
                                                key_padding_mask=v_point_features_mask,
                                                need_weights=True)
         x = v_fused_view_features + dx2
-        if self.add_norm:
-            x = self.norm2(x)
+        # if self.add_norm:
+        #     x = self.norm2(x)
         x = x + self._ff_block(x)
-        if self.add_norm:
-            x = self.norm3(x)
+        # if self.add_norm:
+        #     x = self.norm3(x)
         return x, sa_weights, mha_weights
 
     def _sa_block(self, x,

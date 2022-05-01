@@ -31,9 +31,9 @@ from tqdm.contrib.concurrent import thread_map, process_map
 from shared.fast_dataloader import FastDataLoader
 from src.regress_reconstructability_hyper_parameters.dataset import Regress_hyper_parameters_dataset, \
     Regress_hyper_parameters_dataset_with_imgs, Regress_hyper_parameters_dataset_with_imgs_with_truncated_error, \
-    Regress_hyper_parameters_img_dataset, My_ddp_sampler
-from src.regress_reconstructability_hyper_parameters.model import Regress_hyper_parameters_Model, Brute_force_nn, \
-    Correlation_nn
+    Regress_hyper_parameters_img_dataset, My_ddp_sampler, My_ddp_sampler2
+from src.regress_reconstructability_hyper_parameters.model import Regress_hyper_parameters_Model, Brute_force_nn, Correlation_nn
+from src.regress_reconstructability_hyper_parameters.model_train import Correlation_net
 
 # import torchsort
 # from torchsort import soft_rank
@@ -189,9 +189,9 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.train_scene_dataset = torch.utils.data.ConcatDataset(scene_dataset)
         self.train_img_dataset = torch.utils.data.ConcatDataset(img_dataset)
 
-        train_scene_sampler = My_ddp_sampler(self.train_scene_dataset, self.batch_size,
+        train_scene_sampler = My_ddp_sampler2(self.train_scene_dataset, self.batch_size,
                                              v_sample_mode="internal", shuffle=True)
-        train_img_sampler = My_ddp_sampler(self.train_img_dataset, self.batch_size,
+        train_img_sampler = My_ddp_sampler2(self.train_img_dataset, self.batch_size,
                                            v_sample_mode="internal", shuffle=True)
         if self.involved_imgs:
             combined_dataset = {
@@ -237,9 +237,9 @@ class Regress_hyper_parameters(pl.LightningModule):
         self.valid_scene_dataset = torch.utils.data.ConcatDataset(scene_dataset)
         self.valid_img_dataset = torch.utils.data.ConcatDataset(img_dataset)
 
-        valid_scene_sampler = My_ddp_sampler(self.valid_scene_dataset, self.batch_size,
+        valid_scene_sampler = My_ddp_sampler2(self.valid_scene_dataset, self.batch_size,
                                              v_sample_mode="internal", shuffle=False)
-        valid_img_sampler = My_ddp_sampler(self.valid_img_dataset, self.batch_size,
+        valid_img_sampler = My_ddp_sampler2(self.valid_img_dataset, self.batch_size,
                                            v_sample_mode="internal", shuffle=False)
         if self.involved_imgs:
             combined_dataset = {
@@ -628,8 +628,10 @@ def main(v_cfg: DictConfig):
     )
 
     trainer = Trainer(gpus=v_cfg["trainer"].gpu, enable_model_summary=False,
-                      # strategy=DDPStrategy() if v_cfg["trainer"].gpu > 1 else None,
-                      strategy=DDPStrategy(find_unused_parameters=False) if not v_cfg["trainer"]["evaluate"] else None,
+                      strategy=DDPStrategy(
+                          process_group_backend="gloo" if platform.system() == "Windows" else "nccl",
+                          find_unused_parameters=False
+                      ) if not v_cfg["trainer"]["evaluate"] else None,
                       # early_stop_callback=early_stop_callback,
                       callbacks=[model_check_point],
                       auto_lr_find="learning_rate" if v_cfg["trainer"].auto_lr_find else False,

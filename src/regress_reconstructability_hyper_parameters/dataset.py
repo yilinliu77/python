@@ -277,7 +277,9 @@ class My_ddp_sampler2(torch.utils.data.distributed.DistributedSampler):
 
         # pad the dataset
         for i in range(self.num_pad_dataset):
-            range_indices.append(range_indices[np.random.randint(0, self.num_dataset)])
+            index = np.random.randint(0, self.num_dataset)
+            range_indices.append(range_indices[index])
+            self.non_repeated_index.append(self.non_repeated_index[index])
 
         # shuffle
         dataset_id = np.arange(len(range_indices))

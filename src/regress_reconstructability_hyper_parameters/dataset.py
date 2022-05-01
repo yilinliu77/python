@@ -269,7 +269,7 @@ class My_ddp_sampler2(torch.utils.data.distributed.DistributedSampler):
                 pad_indices = np.random.choice(np.arange(num_items), num_remain, replace=True)
                 local_indices = np.concatenate([local_indices, pad_indices])
             range_indices.append((local_indices + cur_range).tolist())
-            cur_range += len(local_indices)
+            cur_range += num_items
 
         # pad the dataset
         for i in range(self.num_pad_dataset):

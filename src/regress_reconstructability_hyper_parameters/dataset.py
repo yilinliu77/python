@@ -267,7 +267,7 @@ class My_ddp_sampler2(torch.utils.data.distributed.DistributedSampler):
         for dataset in self.dataset.datasets:
             num_items = len(dataset)
             local_indices = np.arange(num_items)
-            self.non_repeated_index.append(local_indices + cur_range)
+            self.non_repeated_index.append(local_indices)
             num_remain = self.max_length - num_items
             if num_remain > 0:
                 pad_indices = np.random.choice(np.arange(num_items), num_remain, replace=True)
@@ -293,9 +293,14 @@ class My_ddp_sampler2(torch.utils.data.distributed.DistributedSampler):
             shuffled_range_indices = range_indices
         range_indices = [item for index in shuffled_range_indices for item in index]
         assert len(self.non_repeated_index) == len(shuffled_range_indices)
-        self.non_repeated_index = self.non_repeated_index[
-                                  self.rank*self.num_dataset_per_replica:(self.rank + 1) * self.num_dataset_per_replica
-                                  ]
+
+        cur_range = 0
+        non_repeated_index = []
+        for i in range(self.num_dataset_per_replica):
+            item_index = self.rank*self.num_dataset_per_replica + i
+            non_repeated_index.append(shuffled_range_indices[item_index]+cur_range)
+            cur_range+=len(self.non_repeated_index[item_index])
+        self.non_repeated_index=non_repeated_index
 
         # subsample
         start_index = self.rank * self.num_samples

@@ -255,6 +255,8 @@ class My_ddp_sampler2(torch.utils.data.distributed.DistributedSampler):
         self.num_samples = self.total_size // self.num_replicas
         assert self.total_size % self.num_replicas == 0
 
+        self.non_repeated_index = []
+
     def __iter__(self):
         np.random.seed(self.seed + self.epoch)
 
@@ -264,6 +266,7 @@ class My_ddp_sampler2(torch.utils.data.distributed.DistributedSampler):
         for dataset in self.dataset.datasets:
             num_items = len(dataset)
             local_indices = np.arange(num_items)
+            self.non_repeated_index.append(local_indices + cur_range)
             num_remain = self.max_length - num_items
             if num_remain > 0:
                 pad_indices = np.random.choice(np.arange(num_items), num_remain, replace=True)

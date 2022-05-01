@@ -487,21 +487,25 @@ class Regress_hyper_parameters(pl.LightningModule):
 
     def validation_epoch_end(self, outputs) -> None:
         # mean_spearman, log_str = self._calculate_spearman(outputs)
-
-        prediction = torch.cat(list(map(lambda x: x[0].reshape((-1, x[0].shape[2])), outputs)), dim=0)
-        point_attribute = torch.cat(list(map(lambda x: x[1].reshape((-1, x[1].shape[2])), outputs)), dim=0)
-        acc_mask = point_attribute[:, 1] != -1
-        com_mask = point_attribute[:, 2] != -1
-
-        if not self.involved_imgs:
-            our_spearman = spearman_correlation(prediction[acc_mask][:, 0], point_attribute[acc_mask][:, 1])
-            smith_spearman = spearman_correlation(point_attribute[acc_mask][:, 0], point_attribute[acc_mask][:, 1])
-        else:
-            our_spearman = spearman_correlation(prediction[com_mask][:, 1], point_attribute[com_mask][:, 2])
-            smith_spearman = spearman_correlation(point_attribute[com_mask][:, 0], point_attribute[com_mask][:, 2])
-        spearman_boost = our_spearman + smith_spearman
-        self.log("Valid mean spearman boost", spearman_boost, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                 batch_size=1)
+        if self.trainer.sanity_checking:
+            return
+        spearman_boost = []
+        for item_index in self.trainer.val_dataloaders[0].sampler["scene"].non_repeated_index:
+            item = outputs[item_index]
+            prediction = torch.cat(list(map(lambda x: x[0].reshape((-1, x[0].shape[2])), item)), dim=0)
+            point_attribute = torch.cat(list(map(lambda x: x[1].reshape((-1, x[1].shape[2])), item)), dim=0)
+            acc_mask = point_attribute[:, 1] != -1
+            com_mask = point_attribute[:, 2] != -1
+            
+            if not self.involved_imgs:
+                our_spearman = spearman_correlation(prediction[acc_mask][:, 0], point_attribute[acc_mask][:, 1])
+                smith_spearman = spearman_correlation(point_attribute[acc_mask][:, 0], point_attribute[acc_mask][:, 1])
+            else:
+                our_spearman = spearman_correlation(prediction[com_mask][:, 1], point_attribute[com_mask][:, 2])
+                smith_spearman = spearman_correlation(point_attribute[com_mask][:, 0], point_attribute[com_mask][:, 2])
+            spearman_boost.append(our_spearman + smith_spearman)
+        self.log("Valid mean spearman boost", torch.mean(torch.stack(spearman_boost)),
+                 prog_bar=True, logger=True, on_step=False, on_epoch=True, batch_size=1)
         # self.trainer.logger.experiment.add_text("Validation spearman", log_str, global_step=self.trainer.current_epoch)
 
         # if not self.trainer.sanity_checking:

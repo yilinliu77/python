@@ -304,7 +304,7 @@ class My_ddp_sampler2(torch.utils.data.distributed.DistributedSampler):
         # subsample
         start_index = self.rank * self.num_samples
         indices = range_indices[start_index:start_index+self.num_samples]
-        assert len(indices) >= max(self.non_repeated_index)
+        assert len(indices) > max([max(item) for item in self.non_repeated_index])
         return iter(indices)
 
 

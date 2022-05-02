@@ -297,6 +297,8 @@ class My_ddp_sampler2(torch.utils.data.distributed.DistributedSampler):
         non_repeated_index = []
         for i in range(self.num_dataset_per_replica):
             item_index = self.rank * self.num_dataset_per_replica + i
+            if item_index >= len(self.non_repeated_index):
+                continue
             non_repeated_index.append(np.asarray(self.non_repeated_index[item_index])+cur_range)
             cur_range+=len(shuffled_range_indices[item_index])
         self.non_repeated_index=non_repeated_index

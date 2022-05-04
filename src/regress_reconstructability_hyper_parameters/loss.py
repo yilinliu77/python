@@ -64,7 +64,7 @@ def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False
 
     gt_recon_error = v_point_attribute[:, :, 1:2]
     recon_mask = (gt_recon_error != -1).bool()
-    gt_gt_error = v_point_attribute[:, :, 2:3]
+    gt_gt_error = v_point_attribute[:, :, 2:3].clone()
     gt_mask = (gt_gt_error != -1).bool()
 
     scaled_gt_recon_error = torch.clamp(gt_recon_error, -1., 1.)
@@ -78,9 +78,11 @@ def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False
     recon_loss = 1 - recon_loss  # We want to minimize the loss, which is maximizing the correlation factor
     gt_loss = torch.zeros_like(recon_loss)
     if v_is_img_involved:
+        gt_gt_error[torch.logical_not(gt_mask)] = 1
+
         gt_loss = spearmanr(
-            predicted_gt_error[gt_mask].unsqueeze(0),
-            gt_gt_error[gt_mask].unsqueeze(0),
+            predicted_gt_error.unsqueeze(0),
+            gt_gt_error.unsqueeze(0),
             regularization=method, regularization_strength=normalized_factor
         )
         gt_loss = 1 - gt_loss  # We want to minimize the loss, which is maximizing the correlation factor

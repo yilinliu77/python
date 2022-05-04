@@ -33,13 +33,13 @@ def main(v_cfg: DictConfig):
     # v_cfg["model"]["model_name"] = "Spearman_net"
     v_cfg["model"]["sigmoid"] = False
     v_cfg["model"]["spearman_method"] = "kl"
-    v_cfg["model"]["error_mean_std"] = [0.05, 0.05, 0.05, 0.05]
-    v_cfg["model"]["involve_img"] = True
+    v_cfg["model"]["error_mean_std"] = [0.025, 0.025, 0.025, 0.025]
+    v_cfg["model"]["involve_img"] = False
 
     global model
     # model = Uncertainty_Modeling_w_pointnet(v_cfg)
     model = Correlation_l2_error_net(v_cfg)
-    best_model = torch.load(r"temp/recon_model/Correlation_l2_error_net_p1.ckpt")
+    best_model = torch.load(r"temp/recon_model/l2_net_25_p0.ckpt")
     model.load_state_dict(
         {item.split("model.")[1]: best_model["state_dict"][item] for item in best_model["state_dict"]})
     model.eval()

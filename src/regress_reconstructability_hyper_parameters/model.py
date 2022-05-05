@@ -3003,30 +3003,30 @@ class Correlation_net(nn.Module):
         # ========================================Phase 1========================================
         predicted_gt_error = torch.zeros_like(predicted_recon_error)
         cross_weight: Optional[Tensor] = None
-        # if self.is_involve_img:
-        #     fused_view_features
-        #     point_features_from_imgs = v_data["point_features"]
-        #     point_features_mask = v_data["point_features_mask"]
-        #
-        #     point_features_from_imgs = self.img_feature_expander(point_features_from_imgs)
-        #     point_features_from_imgs = point_features_from_imgs * (1 - point_features_mask.float()).unsqueeze(-1).tile(
-        #         1, 1, 1, point_features_from_imgs.shape[3])
-        #
-        #     point_features_from_imgs = point_features_from_imgs.reshape([
-        #         -1,
-        #         point_features_from_imgs.shape[2],
-        #         point_features_from_imgs.shape[3]
-        #     ])
-        #     point_features_mask = point_features_mask.reshape([
-        #         -1, point_features_mask.shape[2]
-        #     ])
-        #
-        #     fused_point_feature, point_feature_weight, cross_weight = self.img_feature_fusioner1(
-        #         point_features_from_imgs, fused_view_features.unsqueeze(1),
-        #         v_point_features_mask=point_features_mask)
-        #     predicted_gt_error = self.features_to_gt_error(fused_point_feature)
-        #     if len(views.shape) == 4:
-        #         predicted_gt_error = predicted_gt_error.reshape(views.shape[0], -1, 1)
+        if self.is_involve_img:
+            fused_view_features
+            point_features_from_imgs = v_data["point_features"]
+            point_features_mask = v_data["point_features_mask"]
+
+            point_features_from_imgs = self.img_feature_expander(point_features_from_imgs)
+            point_features_from_imgs = point_features_from_imgs * (1 - point_features_mask.float()).unsqueeze(-1).tile(
+                1, 1, 1, point_features_from_imgs.shape[3])
+
+            point_features_from_imgs = point_features_from_imgs.reshape([
+                -1,
+                point_features_from_imgs.shape[2],
+                point_features_from_imgs.shape[3]
+            ])
+            point_features_mask = point_features_mask.reshape([
+                -1, point_features_mask.shape[2]
+            ])
+
+            fused_point_feature, point_feature_weight, cross_weight = self.img_feature_fusioner1(
+                point_features_from_imgs, fused_view_features.unsqueeze(1),
+                v_point_features_mask=point_features_mask)
+            predicted_gt_error = self.features_to_gt_error(fused_point_feature)
+            if len(views.shape) == 4:
+                predicted_gt_error = predicted_gt_error.reshape(views.shape[0], -1, 1)
         predict_result = torch.cat([predicted_recon_error, predicted_gt_error], dim=2)
         predict_result = torch.tile(valid_view_mask.unsqueeze(-1), [1, 1, 2]) * predict_result
 

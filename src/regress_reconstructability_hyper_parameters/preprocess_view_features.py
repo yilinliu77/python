@@ -179,7 +179,7 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: Optional[s
     cur = time.time()
     views_result = process_map(partial(compute_view_features,
                                       max_num_view, point_feature_root_dir, v_img_dir),
-                              zip(data_content, error_list[:, 6:9]), max_workers=4,chunksize=4096)
+                              zip(data_content, error_list[:, 6:9]), max_workers=10,chunksize=4096)
     print(time.time()-cur)
     reconstructability = np.asarray(list(map(lambda x: x[0], views_result)))
     point_features_path = np.asarray(list(map(lambda x: x[1], views_result)))

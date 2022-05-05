@@ -81,8 +81,8 @@ def loss_spearman_error(v_point_attribute, v_prediction, v_is_img_involved=False
         gt_gt_error[torch.logical_not(gt_mask)] = 1
 
         gt_loss = spearmanr(
-            predicted_gt_error.reshape((-1,1)),
-            gt_gt_error.reshape((-1,1)),
+            predicted_gt_error.reshape((1,-1)),
+            gt_gt_error.reshape((1,-1)),
             regularization=method, regularization_strength=normalized_factor
         )
         gt_loss = 1 - gt_loss  # We want to minimize the loss, which is maximizing the correlation factor

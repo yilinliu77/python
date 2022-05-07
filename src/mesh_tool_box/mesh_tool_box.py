@@ -378,7 +378,7 @@ if __name__ == '__main__':
         filter_points_according_to_boundary()
     elif selected_tool == 3:  # Convert coordinate
         source_coor: int = int(sys.argv[2])
-        source_coor_shift: np.ndarray = np.array([1.26826e7,2.57652e6,0])
+        source_coor_shift: np.ndarray = np.array([0,0,0])
         target_coor: int = int(sys.argv[4])
         input_mesh: str = str(sys.argv[5])
         output_mesh: str = str(sys.argv[6])

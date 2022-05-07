@@ -72,6 +72,8 @@ def compute_view_features(v_max_num_view: int,
             img_name = view_data[0]
             img_path = os.path.join(v_img_dir, img_name + ".png")
             if not os.path.exists(img_path):
+                img_path = os.path.join(v_img_dir, img_name + ".JPG")
+            if not os.path.exists(img_path):
                 img_path = os.path.join(v_img_dir, img_name + ".jpg")
             if not os.path.exists(img_path):
                 raise
@@ -107,7 +109,7 @@ def compute_view_features(v_max_num_view: int,
         """
         # if cv2.getWindowProperty('1', cv2.WND_PROP_VISIBLE) < 1:
         #     cv2.namedWindow("1", cv2.WINDOW_AUTOSIZE)
-        # img = cv2.resize(cv2.imread(img_paths[i_view]),(600,400))
+        # img = cv2.resize(cv2.imread(img_paths[i_view],cv2.IMREAD_UNCHANGED),(600,400))
         # pt = np.array([pixel_pos_x*600,pixel_pos_y*400],dtype=np.int32)
         # img[
         # np.clip(pt[1]-5,0,400):np.clip(pt[1]+5,0,400),
@@ -179,7 +181,9 @@ def preprocess_data(v_root: str, v_error_point_cloud: str, v_img_dir: Optional[s
     cur = time.time()
     views_result = process_map(partial(compute_view_features,
                                       max_num_view, point_feature_root_dir, v_img_dir),
-                              zip(data_content, error_list[:, 6:9]), max_workers=10,chunksize=4096)
+                              list(zip(data_content, error_list[:, 6:9])), max_workers=10
+                              ,chunksize=1
+                              )
     print(time.time()-cur)
     reconstructability = np.asarray(list(map(lambda x: x[0], views_result)))
     point_features_path = np.asarray(list(map(lambda x: x[1], views_result)))

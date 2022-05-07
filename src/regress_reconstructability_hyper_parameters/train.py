@@ -102,7 +102,7 @@ def output_test_with_pc_and_views(
     PlyData([vertexes_describer]).write('temp/test_scene_output/whole_point.ply')
 
     # thread_map(write_views_to_txt_file, zip(v_views, v_points[:,3]), max_workers=16)
-    process_map(write_views_to_txt_file, enumerate(v_views), max_workers=8, chunksize=4096)
+    process_map(write_views_to_txt_file, list(enumerate(v_views)), max_workers=10, chunksize=1)
 
     return
 

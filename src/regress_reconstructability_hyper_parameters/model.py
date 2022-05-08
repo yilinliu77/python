@@ -3192,7 +3192,7 @@ class Correlation_l2_error_net2(Correlation_net):
 
         valid_mask = torch.cat([torch.ones_like(valid_mask[:,0:1]).type(torch.bool), valid_mask],dim=1)
 
-        fused_view_features, weights = self.view_feature_fusioner1(
+        fused_view_features, weights = self.view_feature_fusioner2(
             fused_features_with_token_per_view,
             src_key_padding_mask=torch.logical_not(valid_mask),
             # src_mask = value_mask

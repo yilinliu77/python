@@ -3108,6 +3108,138 @@ class Correlation_l2_error_net(Correlation_net):
                 self.features_to_recon_error.requires_grad_(False)
                 self.magic_class_token.requires_grad_(False)
 
+class Correlation_l2_error_net2(Correlation_net):
+    def __init__(self, hparams):
+        super(Correlation_l2_error_net2, self).__init__(hparams)
+
+        # ========================================Phase 0========================================
+        self.view_feature_extractor = nn.Sequential(
+            nn.Linear(5, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+        )
+        self.view_feature_fusioner1 = TFEncorder(256, 2, 512, 0.2, batch_first=True,
+                                                 add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
+
+        self.view_feature_fusioner2 = TFEncorder(256, 2, 512, 0.2, batch_first=True,
+                                                 add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
+
+        self.features_to_recon_error = nn.Sequential(
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1),
+        )
+
+        self.magic_class_token = nn.Parameter(torch.randn(1, 1, 256))
+
+        self.init_linear(self.view_feature_extractor)
+        self.init_attention(self.view_feature_fusioner1)
+
+        # ========================================Phase 1========================================
+        if self.is_involve_img:
+            self.img_feature_expander = nn.Sequential(
+                nn.Linear(32, 256),
+                nn.ReLU(),
+                nn.Linear(256, 256),
+            )
+            self.img_feature_fusioner1 = TFDecorder(256, 2, 512, 0.2, batch_first=True,
+                                                    add_bias_kv=self.hydra_conf["model"]["add_bias_kv"])
+
+            self.features_to_gt_error = nn.Sequential(
+                nn.Linear(256, 256),
+                nn.ReLU(),
+                nn.Linear(256, 1),
+            )
+            self.init_linear(self.img_feature_expander)
+            self.init_attention(self.img_feature_fusioner1)
+            if self.hydra_conf["model"]["open_weights"] is False:
+                self.view_feature_extractor.requires_grad_(False)
+                self.view_feature_fusioner1.requires_grad_(False)
+                self.features_to_recon_error.requires_grad_(False)
+                self.magic_class_token.requires_grad_(False)
+
+    def forward(self, v_data: Dict[str, torch.Tensor]):
+        batch_size = v_data["views"].shape[0]
+
+        valid_view_mask = v_data["views"][:, :, 1, 0] > 1e-3
+        v_data["views"][torch.logical_not(valid_view_mask)] = 1
+
+        # ========================================Phase 0========================================
+        views = v_data["views"]
+
+        if len(views.shape) == 4:
+            view_attribute = views.reshape(-1, views.shape[2], views.shape[3])
+        else:
+            view_attribute = views
+        # Normalize the view direction, no longer needed since we use phi and theta now
+        predicted_recon_error_per_view = self.view_feature_extractor(
+            view_attribute[:, :, 1:6])  # Compute the reconstructabilty of every single view
+
+        valid_mask = view_attribute[:, :, 0].type(torch.bool)  # Filter out the unusable view
+
+        fused_features_per_view, fused_weights = self.view_feature_fusioner1(
+            predicted_recon_error_per_view,
+            src_key_padding_mask = torch.logical_not(valid_mask)
+        )
+        fused_features_per_view = fused_features_per_view * valid_mask[:,:,None]
+
+        fused_features_with_token_per_view = torch.cat([
+            torch.tile(self.magic_class_token, [fused_features_per_view.shape[0], 1, 1]),
+            fused_features_per_view
+        ], dim=1)
+
+        valid_mask = torch.cat([torch.ones_like(valid_mask[:,0:1]).type(torch.bool), valid_mask],dim=1)
+
+        fused_view_features, weights = self.view_feature_fusioner1(
+            fused_features_with_token_per_view,
+            src_key_padding_mask=torch.logical_not(valid_mask),
+            # src_mask = value_mask
+        )
+        # weights = weights[:, 0]
+        fused_view_features = fused_view_features * valid_mask[:,:,None]
+
+        fused_view_features = fused_view_features[:, 0]
+        predicted_recon_error = self.features_to_recon_error(fused_view_features)
+        if len(views.shape) == 4:
+            predicted_recon_error = predicted_recon_error.reshape(views.shape[0], -1, 1)  # B * num_point * 1
+
+        v_data["views"][torch.logical_not(valid_view_mask)] = 0
+        predicted_recon_error = valid_view_mask.unsqueeze(-1) * predicted_recon_error  # Mark these features to 0
+
+        # ========================================Phase 1========================================
+        predicted_gt_error = torch.zeros_like(predicted_recon_error)
+        cross_weight: Optional[Tensor] = None
+        if self.is_involve_img:
+            fused_view_features
+            point_features_from_imgs = v_data["point_features"]
+            point_features_mask = v_data["point_features_mask"]
+
+            point_features_from_imgs = self.img_feature_expander(point_features_from_imgs)
+            point_features_from_imgs = point_features_from_imgs * (1 - point_features_mask.float()).unsqueeze(-1).tile(
+                1, 1, 1, point_features_from_imgs.shape[3])
+
+            point_features_from_imgs = point_features_from_imgs.reshape([
+                -1,
+                point_features_from_imgs.shape[2],
+                point_features_from_imgs.shape[3]
+            ])
+            point_features_mask = point_features_mask.reshape([
+                -1, point_features_mask.shape[2]
+            ])
+
+            fused_point_feature, point_feature_weight, cross_weight = self.img_feature_fusioner1(
+                point_features_from_imgs, fused_view_features.unsqueeze(1),
+                v_point_features_mask=point_features_mask)
+            predicted_gt_error = self.features_to_gt_error(fused_point_feature)
+            if len(views.shape) == 4:
+                predicted_gt_error = predicted_gt_error.reshape(views.shape[0], -1, 1)
+        predict_result = torch.cat([predicted_recon_error, predicted_gt_error], dim=2)
+        predict_result = torch.tile(valid_view_mask.unsqueeze(-1), [1, 1, 2]) * predict_result
+
+        return predict_result, (weights, cross_weight),
+
 
 class Spearman_net(Correlation_net):
     def __init__(self, hparams):

@@ -66,7 +66,7 @@ def write_views_to_txt_file(v_args):
 
             f.write("xxx.png,{},{},{},{},{},{}\n".format(
                 item[0], item[1], item[2],
-                pitch / math.pi * 180, 0, yaw / math.pi * 180,
+                pitch / math.pi * 180, item[7], yaw / math.pi * 180,
             ))
 
 
@@ -576,7 +576,8 @@ class Regress_hyper_parameters(pl.LightningModule):
             points = data["point_attribute"][:, :, 3:6].cpu().numpy()
             points = points * self.data_mean_std[3] + self.data_mean_std[:3]
             views = points[:, :, np.newaxis] + view_dir
-            views = np.concatenate([views, -view_dir, data["views"][:, :, :, 0:1].cpu().numpy()], axis=-1)
+            view_weights = weights[0][:,0,1:][:,None,:,None].cpu().numpy()
+            views = np.concatenate([views, -view_dir, data["views"][:, :, :, 0:1].cpu().numpy(), view_weights], axis=-1)
 
             return [results,
                     torch.cat([data["point_attribute"], data["views"][:, :, :, 0].sum(dim=-1, keepdim=True)], dim=-1),

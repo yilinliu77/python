@@ -12,7 +12,7 @@ def spearmanr(pred, target, **kw):
     return (pred * target).sum()
 
 
-def loss_l2_error2(v_point_attribute, v_prediction, v_is_img_involved=False, v_use_scaled_loss=1.):
+def loss_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False, v_use_scaled_loss=1.):
     predicted_recon_error = v_prediction[:, :, 0:1]
     predicted_gt_error = v_prediction[:, :, 1:2]
 
@@ -33,7 +33,7 @@ def loss_l2_error2(v_point_attribute, v_prediction, v_is_img_involved=False, v_u
 
     return recon_loss, gt_loss, gt_loss if v_is_img_involved else recon_loss
 
-def loss_l2_error(v_point_attribute, v_prediction, v_is_img_involved=False, v_use_scaled_loss=1.):
+def loss_l2_error2(v_point_attribute, v_prediction, v_is_img_involved=False, v_use_scaled_loss=1.):
     predicted_recon_error = v_prediction[:, :, 0:1]
     predicted_gt_error = v_prediction[:, :, 1:2]
 

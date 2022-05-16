@@ -3108,6 +3108,7 @@ class Correlation_l2_error_net(Correlation_net):
                 self.features_to_recon_error.requires_grad_(False)
                 self.magic_class_token.requires_grad_(False)
 
+
 class Correlation_l2_error_net2(Correlation_net):
     def __init__(self, hparams):
         super(Correlation_l2_error_net2, self).__init__(hparams)

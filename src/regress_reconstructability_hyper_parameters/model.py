@@ -3158,6 +3158,7 @@ class Correlation_l2_error_net2(Correlation_net):
             if self.hydra_conf["model"]["open_weights"] is False:
                 self.view_feature_extractor.requires_grad_(False)
                 self.view_feature_fusioner1.requires_grad_(False)
+                self.view_feature_fusioner2.requires_grad_(False)
                 self.features_to_recon_error.requires_grad_(False)
                 self.magic_class_token.requires_grad_(False)
 

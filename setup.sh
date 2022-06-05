@@ -34,7 +34,7 @@ function with_backoff {
 with_backoff conda install -y pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
 
 # pip pacakges
-with_backoff pip --proxy ${HTTP_PROXY} install pytorch-lightning hydra-core shapely scikit-image matplotlib tensorboard plyfile opencv-python
+with_backoff pip --proxy ${HTTP_PROXY} install pytorch-lightning hydra-core shapely scikit-image matplotlib tensorboard plyfile opencv-python ternausnet inplace_abn einops
 with_backoff pip --proxy ${HTTP_PROXY} install open3d
 # with_backoff pip --proxy ${HTTP_PROXY} install msgpack-rpc-python  airsim
 

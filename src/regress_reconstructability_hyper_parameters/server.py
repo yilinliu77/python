@@ -9,7 +9,8 @@ from pytorch_lightning import seed_everything
 
 from src.regress_reconstructability_hyper_parameters.model import Uncertainty_Modeling_v2, \
     Uncertainty_Modeling_w_pointnet, Uncertainty_Modeling_wo_pointnet, Uncertainty_Modeling_wo_pointnet5, \
-    Uncertainty_Modeling_wo_pointnet7, Uncertainty_Modeling_wo_pointnet14, Correlation_l2_error_net
+    Uncertainty_Modeling_wo_pointnet7, Uncertainty_Modeling_wo_pointnet14, Correlation_l2_error_net, \
+    Correlation_l2_error_net2
 from src.regress_reconstructability_hyper_parameters.train import Regress_hyper_parameters
 import numpy as np
 
@@ -29,7 +30,7 @@ def main(v_cfg: DictConfig):
     print(OmegaConf.to_yaml(v_cfg))
     seed_everything(0)
 
-    v_cfg["model"]["model_name"] = "Correlation_l2_error_net"
+    v_cfg["model"]["model_name"] = "Correlation_l2_error_net2"
     # v_cfg["model"]["model_name"] = "Spearman_net"
     v_cfg["model"]["sigmoid"] = False
     v_cfg["model"]["spearman_method"] = "kl"
@@ -38,8 +39,8 @@ def main(v_cfg: DictConfig):
 
     global model
     # model = Uncertainty_Modeling_w_pointnet(v_cfg)
-    model = Correlation_l2_error_net(v_cfg)
-    best_model = torch.load(r"temp/recon_model/l2_net_25_p0.ckpt")
+    model = Correlation_l2_error_net2(v_cfg)
+    best_model = torch.load(r"temp/recon_model/l2_final_p0.ckpt")
     model.load_state_dict(
         {item.split("model.")[1]: best_model["state_dict"][item] for item in best_model["state_dict"]})
     model.eval()

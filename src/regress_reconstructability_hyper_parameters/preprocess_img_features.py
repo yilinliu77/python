@@ -174,7 +174,7 @@ if __name__ == '__main__':
                                            interval_ratios=[1.0,2.0,4.0],
                                            num_groups=1,
                                            norm_act=InPlaceABN)
-        checkpoint = torch.load(r"thirdparty\CasMVSNet_pl\epoch.15.ckpt")["state_dict"]
+        checkpoint = torch.load(r"thirdparty/CasMVSNet_pl/epoch.15.ckpt")["state_dict"]
         checkpoint = dict((key.split("model.feature.")[1], value) for (key, value) in checkpoint.items() if "feature" in key)
         img_feature_extractor.feature.load_state_dict(checkpoint)
         img_feature_extractor = img_feature_extractor.feature

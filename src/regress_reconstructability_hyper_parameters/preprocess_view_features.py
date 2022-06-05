@@ -109,12 +109,9 @@ def compute_view_features(v_max_num_view: int,
         """
         # if cv2.getWindowProperty('1', cv2.WND_PROP_VISIBLE) < 1:
         #     cv2.namedWindow("1", cv2.WINDOW_AUTOSIZE)
-        # img = cv2.resize(cv2.imread(img_paths[i_view],cv2.IMREAD_UNCHANGED),(600,400))
+        # img = cv2.resize(cv2.imread(img_paths[i_view],cv2.IMREAD_UNCHANGED),(600,400))[:,:,:3]
         # pt = np.array([pixel_pos_x*600,pixel_pos_y*400],dtype=np.int32)
-        # img[
-        # np.clip(pt[1]-5,0,400):np.clip(pt[1]+5,0,400),
-        # np.clip(pt[0]-5,0,600):np.clip(pt[0]+5,0,600)
-        # ]=(0,0,255)
+        # img[np.clip(pt[1]-5,0,400):np.clip(pt[1]+5,0,400),np.clip(pt[0]-5,0,600):np.clip(pt[0]+5,0,600)]=(0,0,255)
         # cv2.imshow("1", img)
         # cv2.waitKey()
         """

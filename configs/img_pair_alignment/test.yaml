@@ -1,0 +1,28 @@
+dataset:
+  img_path: D:/CODE/3d_recon/bundle-adjusting-NeRF/data/cat.jpg
+  img_height: 360
+  img_width: 480
+  img_crop_size: 180
+  num_sample: 5
+
+trainer:
+  learning_rate: 1e-3
+  gpu: 1
+  num_worker: 0
+
+  batch_size: 1
+  resume_from_checkpoint:
+  evaluate: false
+
+  output: output/img_pair_alignment
+
+model:
+  model_name: Uncertainty_Modeling
+  pos_encoding: 8
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+#  job_logging: disabled
+#  hydra_logging: disabled

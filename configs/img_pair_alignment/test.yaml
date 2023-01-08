@@ -1,8 +1,9 @@
 dataset:
-  img_path: D:/CODE/3d_recon/bundle-adjusting-NeRF/data/cat.jpg
+  img_path: D:/Projects/NeuralRecon/Test_data/OBL_L7/Test_imgs2_colmap_neural/imgs/6z00133.JPG
+#  img_path: D:/CODE/3d_recon/bundle-adjusting-NeRF/data/cat.jpg
   img_height: 360
   img_width: 480
-  img_crop_size: 180
+  img_crop_size: 320
   num_sample: 5
 
 trainer:

@@ -6,8 +6,11 @@ def to_hom(X):
     X_hom = torch.cat([X, torch.ones_like(X[..., :1])], dim=-1)
     return X_hom
 
+def get_normalized_coor(v_coor, v_size):
+    return (v_coor + 0.5) / v_size * 2 - 1
 
 def get_normalized_pixel_grid(v_img_height, v_img_width, v_num_sample):
+    raise
     y_range = ((torch.arange(v_img_height, dtype=torch.float32) + 0.5) / v_img_height * 2 - 1) * (
                 v_img_height / max(v_img_height, v_img_width))
     x_range = ((torch.arange(v_img_width, dtype=torch.float32) + 0.5) / v_img_width * 2 - 1) * (
@@ -21,11 +24,9 @@ def get_normalized_pixel_grid(v_img_height, v_img_width, v_num_sample):
 def get_normalized_pixel_grid_crop(v_img_height, v_img_width, v_img_crop_size, v_num_sample, v_device):
     y_crop = (v_img_height // 2 - v_img_crop_size // 2, v_img_height // 2 + v_img_crop_size // 2)
     x_crop = (v_img_width // 2 - v_img_crop_size // 2, v_img_width // 2 + v_img_crop_size // 2)
-    y_range = ((torch.arange(*(y_crop), dtype=torch.float32, device=v_device) + 0.5) / v_img_height * 2 - 1) * (
-                v_img_height / max(v_img_height, v_img_width))
-    x_range = ((torch.arange(*(x_crop), dtype=torch.float32, device=v_device) + 0.5) / v_img_width * 2 - 1) * (
-                v_img_width / max(v_img_height, v_img_width))
-    Y, X = torch.meshgrid(y_range, x_range)  # [H,W]
+    y_range = get_normalized_coor(torch.arange(*(y_crop), dtype=torch.float32, device=v_device),v_img_height)
+    x_range = get_normalized_coor(torch.arange(*(x_crop), dtype=torch.float32, device=v_device),v_img_width)
+    Y, X = torch.meshgrid(y_range, x_range, indexing='ij')  # [H,W]
     xy_grid = torch.stack([X, Y], dim=-1).view(-1, 2)  # [HW,2]
     xy_grid = xy_grid.repeat(v_num_sample, 1, 1)  # [B,HW,2]
     return xy_grid
@@ -42,8 +43,8 @@ def warp_grid(xy_grid, warp):
 def warp_corners(v_img_height, v_img_width, v_img_crop_size, v_num_sample, warp_param):
     y_crop = (v_img_height // 2 - v_img_crop_size // 2, v_img_height // 2 + v_img_crop_size // 2)
     x_crop = (v_img_width // 2 - v_img_crop_size // 2, v_img_width // 2 + v_img_crop_size // 2)
-    Y = [((y + 0.5) / v_img_height * 2 - 1) * (v_img_height / max(v_img_height, v_img_width)) for y in y_crop]
-    X = [((x + 0.5) / v_img_width * 2 - 1) * (v_img_width / max(v_img_height, v_img_width)) for x in x_crop]
+    Y = [get_normalized_coor(y,v_img_height) for y in y_crop]
+    X = [get_normalized_coor(x,v_img_width) for x in x_crop]
     corners = [(X[0], Y[0]), (X[0], Y[1]), (X[1], Y[1]), (X[1], Y[0])]
     corners = torch.tensor(corners, dtype=torch.float32, device=warp_param.device).repeat(v_num_sample, 1, 1)
     corners_warped = warp_grid(corners, warp_param)
@@ -52,9 +53,9 @@ def warp_corners(v_img_height, v_img_width, v_img_crop_size, v_num_sample, warp_
 
 def check_corners_in_range(v_img_height, v_img_width, v_img_crop_size, v_num_sample, warp_param):
     corners_all = warp_corners(v_img_height, v_img_width, v_img_crop_size, v_num_sample, warp_param)
-    X = (corners_all[..., 0] / v_img_width * max(v_img_height, v_img_width) + 1) / 2 * v_img_width - 0.5
-    Y = (corners_all[..., 1] / v_img_height * max(v_img_height, v_img_width) + 1) / 2 * v_img_height - 0.5
-    return (0 <= X).all() and (X < v_img_width).all() and (0 <= Y).all() and (Y < v_img_height).all()
+    X = corners_all[..., 0]
+    Y = corners_all[..., 1]
+    return (-1 <= X).all() and (X < 1).all() and (-1 <= Y).all() and (Y < 1).all()
 
 
 class Lie():

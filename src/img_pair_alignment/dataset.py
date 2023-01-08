@@ -45,8 +45,8 @@ def generate_sample_after_homography(v_img: torch.Tensor,
     xy_grid = original_warp.get_normalized_pixel_grid_crop(img_height, img_width, v_crop_size, v_num_sample, "cpu")  # [B,HW,2]
     xy_grid_warped = original_warp.warp_grid(xy_grid, warp_pert_all)
     xy_grid_warped = xy_grid_warped.view([v_num_sample, v_crop_size, v_crop_size, 2])
-    xy_grid_warped = torch.stack([xy_grid_warped[..., 0] * max(img_height, img_width) / img_width,
-                                  xy_grid_warped[..., 1] * max(img_height, img_width) / img_height], dim=-1)
+    xy_grid_warped = torch.stack([xy_grid_warped[..., 0],
+                                  xy_grid_warped[..., 1]], dim=-1)
     image_raw_batch = v_img.repeat(v_num_sample, 1, 1, 1)
     image_pert_all = grid_sample(image_raw_batch, xy_grid_warped, align_corners=False)
     return image_pert_all
@@ -63,7 +63,7 @@ class Single_img_dataset(torch.utils.data.Dataset):
         img_raw_resized.close()
         img_raw.close()
         self.img_raw = to_tensor(self.img_raw)
-        self.trained_imgs = generate_sample_after_homography(self.img_raw, 5, 8, 0.5, 0.5, v_crop_size)
+        self.trained_imgs = generate_sample_after_homography(self.img_raw, 5, 8, 0.2, 0.2, v_crop_size)
 
         # Debug
         # for i in range(5):

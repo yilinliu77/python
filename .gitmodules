@@ -13,3 +13,6 @@
 [submodule "thirdparty/CasMVSNet_pl"]
 	path = thirdparty/CasMVSNet_pl
 	url = https://github.com/kwea123/CasMVSNet_pl
+[submodule "thirdparty/faiss"]
+	path = thirdparty/faiss
+	url = https://github.com/facebookresearch/faiss

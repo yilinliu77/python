@@ -1,17 +1,19 @@
 dataset:
   scene_boundary: [-50, -50, -10, 250, 200, 60]
-  colmap_dir: "D:/Projects/NeuralRecon/Test_data/OBL_L7/Test_imgs2_colmap_neural/sparse_align"
-  superglue_dir: "D:/Projects/NeuralRecon/Test_data/OBL_L7/Test_imgs2_colmap_neural/sparse_align/superpoint"
-  segments_dir: "D:/Projects/NeuralRecon/Test_data/OBL_L7/Test_imgs2_colmap_neural/sparse_align/segments"
-  mesh_dir: "D:/Projects/NeuralRecon/Test_data/OBL_L7/Test_imgs2_colmap_neural/sparse_align/detailed_l7.ply"
+  colmap_dir: "/mnt/d/Projects/NeuralRecon/Test_data/OBL_L7/Test_imgs2_colmap_neural/sparse_align"
+  superglue_dir: "/mnt/d/Projects/NeuralRecon/Test_data/OBL_L7/Test_imgs2_colmap_neural/sparse_align/superpoint"
+  segments_dir: "/mnt/d/Projects/NeuralRecon/Test_data/OBL_L7/Test_imgs2_colmap_neural/sparse_align/segments"
+  mesh_dir: "/mnt/d/Projects/NeuralRecon/Test_data/OBL_L7/Test_imgs2_colmap_neural/sparse_align/detailed_l7.ply"
   img_size: [6000,4000]
+  num_sample: 200000
 
 trainer:
   learning_rate: 1e-4
   gpu: 1
   num_worker: 0
 
-  batch_size: 2
+  batch_size: 4096
+#  batch_size: 262144
   auto_lr_find: false
   resume_from_checkpoint:
   evaluate: false
@@ -21,7 +23,7 @@ trainer:
 
 model:
   model_name: Uncertainty_Modeling
-
+  marching_cube_resolution: 128
 
 hydra:
   run:

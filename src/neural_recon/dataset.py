@@ -1,5 +1,5 @@
 import math
-import os
+import os, sys
 import pickle
 from dataclasses import dataclass
 from typing import List
@@ -19,6 +19,10 @@ from torchvision.transforms.functional import to_tensor
 from matplotlib import pyplot as plt
 
 import open3d as o3d
+
+sys.path.append("thirdparty/sdf_computer/build/")
+
+import pysdf
 
 @dataclass
 class Image:
@@ -58,8 +62,8 @@ class Single_img_dataset(torch.utils.data.Dataset):
             keypoints_.append(torch.from_numpy(self.imgs[id_img].detected_points))
 
         projection_matrix = torch.from_numpy(projection_matrix_)
-        keypoints = pad_sequence(keypoints_, batch_first=True, padding_value = -1)
-        keypoints = torch.cat([keypoints, torch.logical_not(torch.all(keypoints==-1,dim=2,keepdim=True))], dim=2)
+        keypoints = pad_sequence(keypoints_, batch_first=True, padding_value=-1)
+        keypoints = torch.cat([keypoints, torch.logical_not(torch.all(keypoints == -1, dim=2, keepdim=True))], dim=2)
 
         data = {}
         data["id"] = torch.tensor(index, dtype=torch.long)
@@ -76,9 +80,9 @@ class Single_img_dataset(torch.utils.data.Dataset):
         keypoints_ = [item["keypoints"] for item in batch]
         projection_matrix_ = [item["projection_matrix"] for item in batch]
 
-        keypoints = pad_sequence(keypoints_,batch_first=True,padding_value=-1)
-        projection_matrix = pad_sequence(projection_matrix_,batch_first=True,padding_value=-1)
-        valid_views = torch.logical_not(torch.all(torch.flatten(projection_matrix,start_dim=2) == -1, dim=2))
+        keypoints = pad_sequence(keypoints_, batch_first=True, padding_value=-1)
+        projection_matrix = pad_sequence(projection_matrix_, batch_first=True, padding_value=-1)
+        valid_views = torch.logical_not(torch.all(torch.flatten(projection_matrix, start_dim=2) == -1, dim=2))
 
         return {
             'id_points': torch.stack(id_points, dim=0),
@@ -86,6 +90,7 @@ class Single_img_dataset(torch.utils.data.Dataset):
             'projection_matrix': projection_matrix,
             'valid_views': valid_views,
         }
+
 
 class Single_img_dataset_with_kdtree_index(torch.utils.data.Dataset):
     def __init__(self, v_imgs, v_world_points, v_mode):
@@ -97,7 +102,7 @@ class Single_img_dataset_with_kdtree_index(torch.utils.data.Dataset):
         pass
 
     def __getitem__(self, index):
-        index=1
+        index = 1
         point_3d = self.world_points[index]
         projection_matrix_ = np.zeros((len(point_3d.tracks), 4, 4), dtype=np.float32)
         id_imgs: torch.Tensor = torch.zeros(len(point_3d.tracks), dtype=torch.long)
@@ -130,9 +135,9 @@ class Single_img_dataset_with_kdtree_index(torch.utils.data.Dataset):
         projection_matrix_ = [item["projection_matrix"] for item in batch]
 
         # keypoints = pad_sequence(keypoints_,batch_first=True,padding_value=-1)
-        id_imgs = pad_sequence(id_imgs_,batch_first=True,padding_value=-1)
-        projection_matrix = pad_sequence(projection_matrix_,batch_first=True,padding_value=-1)
-        valid_views = torch.logical_not(torch.all(torch.flatten(projection_matrix,start_dim=2) == -1, dim=2))
+        id_imgs = pad_sequence(id_imgs_, batch_first=True, padding_value=-1)
+        projection_matrix = pad_sequence(projection_matrix_, batch_first=True, padding_value=-1)
+        valid_views = torch.logical_not(torch.all(torch.flatten(projection_matrix, start_dim=2) == -1, dim=2))
 
         return {
             'id_points': torch.stack(id_points, dim=0),
@@ -151,9 +156,10 @@ def sample_uniform(num_samples: int):
     """
     return torch.rand(num_samples, 3) * 2.0 - 1.0
 
+
 def per_face_normals(
-    V : torch.Tensor,
-    F : torch.Tensor):
+        V: torch.Tensor,
+        F: torch.Tensor):
     """Compute normals per face.
     """
     mesh = V[F]
@@ -162,6 +168,7 @@ def per_face_normals(
     vec_b = mesh[:, 1] - mesh[:, 2]
     normals = torch.cross(vec_a, vec_b)
     return normals
+
 
 def area_weighted_distribution(
         V: torch.Tensor,
@@ -184,12 +191,13 @@ def area_weighted_distribution(
     # Discrete PDF over triangles
     return torch.distributions.Categorical(areas.view(-1))
 
+
 def sample_near_surface(
-    V : torch.Tensor,
-    F : torch.Tensor,
-    num_samples: int,
-    variance : float = 0.01,
-    distrib=None):
+        V: torch.Tensor,
+        F: torch.Tensor,
+        num_samples: int,
+        variance: float = 0.01,
+        distrib=None):
     """Sample points near the mesh surface.
 
     Args:
@@ -204,11 +212,12 @@ def sample_near_surface(
     samples += torch.randn_like(samples) * variance
     return samples
 
+
 def random_face(
-    V : torch.Tensor,
-    F : torch.Tensor,
-    num_samples : int,
-    distrib=None):
+        V: torch.Tensor,
+        F: torch.Tensor,
+        num_samples: int,
+        distrib=None):
     """Return an area weighted random sample of faces and their normals from the mesh.
 
     Args:
@@ -225,6 +234,7 @@ def random_face(
     idx = distrib.sample([num_samples])
 
     return F[idx], normals[idx]
+
 
 def sample_surface(
         V: torch.Tensor,
@@ -265,13 +275,14 @@ class Geometric_dataset(torch.utils.data.Dataset):
         mesh = o3d.io.read_triangle_mesh(v_mesh_path)
         vertices = np.asarray(mesh.vertices)
         faces = np.asarray(mesh.triangles)
-        vertices[faces]
+        self.sdf_computer = pysdf.SDF_computer(vertices[faces])
+        self.query_points = self.sdf_computer.compute_sdf(int(1e7), int(1e7), int(1e7))
+        pass
 
-    def __len__(self,idx):
-        return
+    def __len__(self, idx):
+        return self.query_points.shape[0]
 
     def __getitem__(self, item):
-
         return
 
     @staticmethod

@@ -5,6 +5,7 @@ from multiprocessing import Pool
 from multiprocessing.pool import ThreadPool
 from typing import List
 
+import mcubes
 import tinycudann as tcnn
 
 import PIL.Image
@@ -42,12 +43,10 @@ from shared.common_utils import debug_imgs
 from shared.img_torch_tools import get_img_from_tensor
 
 import cv2
-import faiss
-import faiss.contrib.torch_utils
 
 from src.neural_recon.colmap_io import read_dataset
 from src.neural_recon.dataset import Single_img_dataset, Image, Point_3d, Single_img_dataset_with_kdtree_index, \
-    Geometric_dataset
+    Geometric_dataset, Geometric_dataset_inference
 
 
 class img_pair_alignment(pl.LightningModule):
@@ -87,8 +86,10 @@ class img_pair_alignment(pl.LightningModule):
                 "output_activation": "None",
                 "n_neurons": 64,
                 "n_hidden_layers": 2,
+
             }
         )
+        self.model.to("cuda")
 
     def forward_test(self, v_data):
         # While true:
@@ -139,40 +140,15 @@ class img_pair_alignment(pl.LightningModule):
         return torch.stack(losses).mean()
 
     def forward(self, v_data):
-        batch_size = v_data["id_points"].shape[0]
-        id_batch=0
-        candidate_points = self.candidate_points[v_data["id_points"]][id_batch:id_batch+1]
-        candidate_points = torch.cat([candidate_points, torch.ones_like(candidate_points[:, 0:1])], dim=-1)
-        losses = []
-        projected_points = torch.matmul(v_data["projection_matrix"][id_batch], candidate_points[id_batch])
-        projected_points = projected_points[:, :2] / projected_points[:, 2:3]
-        valid_projected_points = projected_points[v_data["valid_views"][id_batch]]
-        loss = []
-        for i_view in range(valid_projected_points.shape[0]):
-            query_point = valid_projected_points[i_view:i_view + 1]
-            distance, i_matched_point = self.kdtrees[v_data["id_imgs"][id_batch, i_view]].search(query_point, 1)
-            matched_point = torch.from_numpy(self.imgs[v_data["id_imgs"][id_batch, i_view]].line_field[i_matched_point][:2]).to(query_point.device).unsqueeze(0)
-            loss.append(F.mse_loss(query_point, matched_point, reduction='sum'))
+        batch_size = v_data[0].shape[0]
+        predicted_sdf = self.model(v_data[0])
 
-            # Debug
-            if True:
-                with torch.no_grad():
-                    print("{}/{}".format(i_view, valid_projected_points.shape[0]))
-                    print(query_point.detach().cpu().numpy())
-                    img = cv2.imread(self.imgs[v_data["id_imgs"][id_batch, i_view]].img_path)
-                    qp = (query_point[0].detach().cpu().numpy() * np.array([6000, 4000])).astype(np.int32)
-                    mp = (self.imgs[v_data["id_imgs"][id_batch, i_view]].line_field[i_matched_point][:2] * np.array([6000, 4000])).astype(np.int32)
-                    img = cv2.circle(img, mp, 10, (0, 255, 0), 5)
-                    img = cv2.circle(img, qp, 10, (0, 0, 255), 5)
-                    debug_imgs([img])
-            continue
-        losses.append(torch.stack(loss).mean())
-
-        return torch.stack(losses).mean()
+        return predicted_sdf
 
     def train_dataloader(self):
         self.train_dataset = Geometric_dataset(
-            self.imgs, self.world_points,
+            self.hydra_conf["dataset"]["mesh_dir"],
+            self.hydra_conf["dataset"]["num_sample"],
             "training"
         )
         return DataLoader(self.train_dataset,
@@ -180,21 +156,33 @@ class img_pair_alignment(pl.LightningModule):
                           num_workers=self.num_worker,
                           shuffle=True,
                           pin_memory=True,
-                          collate_fn=Geometric_dataset.collate_fn,
+                          # collate_fn=Geometric_dataset.collate_fn,
                           persistent_workers=True if self.num_worker > 0 else 0
                           )
 
     def val_dataloader(self):
-        self.valid_dataset = Geometric_dataset(
-            self.hydra_conf["dataset"]["mesh_dir"],
-            "validation")
+        self.valid_dataset = Geometric_dataset_inference(
+            self.hydra_conf["model"]["marching_cube_resolution"],
+            )
         return DataLoader(self.valid_dataset,
                           batch_size=self.batch_size,
                           num_workers=self.num_worker,
                           shuffle=False,
                           pin_memory=True,
-                          collate_fn=Geometric_dataset.collate_fn,
+                          # collate_fn=Geometric_dataset.collate_fn,
                           persistent_workers=True if self.num_worker > 0 else 0
+                          )
+
+    def test_dataloader(self):
+        self.test_dataset = Geometric_dataset_inference(
+            self.hydra_conf["model"]["marching_cube_resolution"],
+        )
+        return DataLoader(self.test_dataset,
+                          batch_size=self.batch_size,
+                          num_workers=self.num_worker,
+                          shuffle=False,
+                          pin_memory=True,
+                          # collate_fn=Geometric_dataset.collate_fn,
                           )
 
     def configure_optimizers(self):
@@ -207,36 +195,40 @@ class img_pair_alignment(pl.LightningModule):
         }
 
     def training_step(self, batch, batch_idx):
-        loss = self.forward(batch)
+        predicted_sdf = self.forward(batch)
+
+        loss = F.mse_loss(predicted_sdf, batch[1])
 
         self.log("Training_Loss", loss.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
-                 batch_size=batch["id_points"].shape[0])
-
-        # if batch_idx % 100 == 0 and batch_idx != 0:
+                 batch_size=batch[0].shape[0])
 
         return loss
 
-    def training_epoch_end(self, outputs: EPOCH_OUTPUT) -> None:
-        bounds_min = np.array(self.hydra_conf["dataset"]["scene_boundary"][:3], dtype=np.float32)
-        bounds_max = np.array(self.hydra_conf["dataset"]["scene_boundary"][3:], dtype=np.float32)
-        bounds_center = (bounds_max + bounds_min) / 2
-        bounds_size = bounds_max - bounds_min
-        save_pointcloud(self.candidate_points.data.detach().cpu().numpy(), self.trainer.current_epoch, bounds_center,
-                        bounds_size)
-
     def validation_step(self, batch, batch_idx):
-        loss = self.forward(batch)
+        predicted_sdf = self.forward(batch)
 
-        self.log("Validation_Loss", loss, prog_bar=True, logger=True,
-                 batch_size=batch["id_points"].shape[0])
-        return
+        return predicted_sdf
 
-    def validation_epoch_end(self, outputs) -> None:
+    def validation_epoch_end(self, result) -> None:
         if self.trainer.sanity_checking:
             return
+        predicted_sdf = -torch.cat(result,dim=0).cpu().numpy().astype(np.float32)
+        resolution = self.hydra_conf["model"]["marching_cube_resolution"]
+        predicted_sdf = predicted_sdf.reshape([resolution,resolution,resolution])
+        vertices, triangles = mcubes.marching_cubes(predicted_sdf, 0)
+        mcubes.export_obj(vertices, triangles, os.path.join("outputs", "model_of_epoch_{}.obj".format(self.trainer.current_epoch)))
 
-        return
+    def test_step(self, batch, batch_idx):
+        predicted_sdf = self.forward(batch)
+        return predicted_sdf
 
+    def test_epoch_end(self, result):
+        predicted_sdf = -torch.cat(result, dim=0).cpu().numpy().astype(np.float32)
+        resolution = self.hydra_conf["model"]["marching_cube_resolution"]
+        predicted_sdf = predicted_sdf.reshape([resolution, resolution, resolution])
+        vertices, triangles = mcubes.marching_cubes(predicted_sdf, 0)
+        mcubes.export_obj(vertices, triangles,
+                          os.path.join("outputs", "model_of_test.obj"))
 
 @hydra.main(config_name="test_3d_reconstruction.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
 def main(v_cfg: DictConfig):
@@ -247,8 +239,9 @@ def main(v_cfg: DictConfig):
         accelerator='gpu' if v_cfg["trainer"].gpu != 0 else None,
         devices=v_cfg["trainer"].gpu, enable_model_summary=False,
         max_epochs=10000,
-        num_sanity_val_steps=1,
-        check_val_every_n_epoch=99999
+        num_sanity_val_steps=2,
+        check_val_every_n_epoch=100,
+        precision=16,
     )
 
     model = img_pair_alignment(v_cfg)

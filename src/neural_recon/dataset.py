@@ -23,6 +23,7 @@ import open3d as o3d
 sys.path.append("thirdparty/sdf_computer/build/")
 
 import pysdf
+import mesh2sdf
 
 @dataclass
 class Image:
@@ -267,23 +268,48 @@ def sample_surface(
 class Geometric_dataset(torch.utils.data.Dataset):
     def __init__(self,
                  v_mesh_path,
+                 v_num_sample,
                  v_mode
                  ):
         super().__init__()
         self.trainer_mode = v_mode
-
         mesh = o3d.io.read_triangle_mesh(v_mesh_path)
         vertices = np.asarray(mesh.vertices)
         faces = np.asarray(mesh.triangles)
-        self.sdf_computer = pysdf.SDF_computer(vertices[faces])
-        self.query_points = self.sdf_computer.compute_sdf(int(1e7), int(1e7), int(1e7))
-        pass
+        if True:
+            self.sdf_computer = pysdf.SDF_computer(vertices[faces])
+            self.query_points = self.sdf_computer.compute_sdf(int(1e7), int(1e7), int(1e7))
+            self.samples_points = self.query_points[:,:3]
+            self.sdf = self.query_points[:,3:4]
+        else:
+            self.bounds_center = (np.max(vertices,axis=0) + np.min(vertices,axis=0)) / 2
+            self.bounds_size = np.max(np.max(vertices,axis=0) - np.min(vertices,axis=0))
+            vertices = (vertices - self.bounds_center) / self.bounds_size * 2
 
-    def __len__(self, idx):
-        return self.query_points.shape[0]
+            with torch.no_grad():
+                vertices = torch.tensor(vertices, dtype=torch.float32, device="cuda")
+                faces = torch.tensor(faces, dtype=torch.long, device="cuda")
 
-    def __getitem__(self, item):
+                samples = []
+                num_samples = v_num_sample
+                distrib = area_weighted_distribution(vertices, faces)
+                samples.append(sample_surface(vertices, faces, num_samples, distrib=distrib)[0])
+                samples.append(sample_surface(vertices, faces, num_samples, distrib=distrib)[0])
+                samples.append(sample_near_surface(vertices, faces, num_samples, distrib=distrib))
+                samples.append(sample_near_surface(vertices, faces, num_samples, distrib=distrib))
+                samples.append(sample_uniform(num_samples).to(vertices.device))
+                self.samples_points = torch.cat(samples, dim=0).contiguous()
+
+                self.sdf = mesh2sdf.mesh2sdf_gpu(self.samples_points, vertices[faces])[0].cpu()[...,None]
+                self.samples_points = self.samples_points.cpu()
         return
+
+    def __len__(self):
+        return self.sdf.shape[0]
+
+    def __getitem__(self, idx):
+
+        return self.samples_points[idx], self.sdf[idx]
 
     @staticmethod
     def collate_fn(batch):
@@ -304,3 +330,21 @@ class Geometric_dataset(torch.utils.data.Dataset):
             'projection_matrix': projection_matrix,
             'valid_views': valid_views,
         }
+
+
+class Geometric_dataset_inference(torch.utils.data.Dataset):
+    def __init__(self,
+                 n_resolution=128,
+                 ):
+        super().__init__()
+        X, Y, Z = np.meshgrid(np.arange(n_resolution), np.arange(n_resolution), np.arange(n_resolution), indexing="xy")
+        pts = np.stack([X, Y, Z], axis=-1).astype(np.float32)
+        pts = pts.reshape([-1, 3])
+        self.pts = torch.tensor((pts / (n_resolution - 1) - 0.5) * 2)
+
+
+    def __len__(self):
+        return self.pts.shape[0]
+
+    def __getitem__(self, idx):
+        return [self.pts[idx], torch.zeros_like(self.pts[idx])]

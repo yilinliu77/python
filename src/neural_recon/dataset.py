@@ -22,8 +22,8 @@ import open3d as o3d
 
 sys.path.append("thirdparty/sdf_computer/build/")
 
-import pysdf
 import mesh2sdf
+
 
 @dataclass
 class Image:
@@ -267,23 +267,27 @@ def sample_surface(
 
 class Geometric_dataset(torch.utils.data.Dataset):
     def __init__(self,
-                 v_mesh_path,
+                 v_sdf_computer,
                  v_num_sample,
+                 v_batch_size,
                  v_mode
                  ):
         super().__init__()
         self.trainer_mode = v_mode
-        mesh = o3d.io.read_triangle_mesh(v_mesh_path)
-        vertices = np.asarray(mesh.vertices)
-        faces = np.asarray(mesh.triangles)
+        self.batch_size = v_batch_size
+
         if True:
-            self.sdf_computer = pysdf.SDF_computer(vertices[faces])
-            self.query_points = self.sdf_computer.compute_sdf(int(1e7), int(1e7), int(1e7))
-            self.samples_points = self.query_points[:,:3]
-            self.sdf = self.query_points[:,3:4]
+            self.query_points = v_sdf_computer.compute_sdf(int(v_num_sample[0]), int(v_num_sample[1]),
+                                                              int(v_num_sample[2]), False)
+            if False:
+                pc = o3d.geometry.PointCloud()
+                pc.points = o3d.utility.Vector3dVector(self.query_points[:,:3])
+                o3d.io.write_point_cloud("/mnt/d/Projects/NeuralRecon/tmp/t.ply" ,pc)
+            self.samples_points = torch.tensor(self.query_points[:, :3], dtype=torch.half)
+            self.sdf = torch.tensor(self.query_points[:, 3:4], dtype=torch.half)
         else:
-            self.bounds_center = (np.max(vertices,axis=0) + np.min(vertices,axis=0)) / 2
-            self.bounds_size = np.max(np.max(vertices,axis=0) - np.min(vertices,axis=0))
+            self.bounds_center = (np.max(vertices, axis=0) + np.min(vertices, axis=0)) / 2
+            self.bounds_size = np.max(np.max(vertices, axis=0) - np.min(vertices, axis=0))
             vertices = (vertices - self.bounds_center) / self.bounds_size * 2
 
             with torch.no_grad():
@@ -300,16 +304,21 @@ class Geometric_dataset(torch.utils.data.Dataset):
                 samples.append(sample_uniform(num_samples).to(vertices.device))
                 self.samples_points = torch.cat(samples, dim=0).contiguous()
 
-                self.sdf = mesh2sdf.mesh2sdf_gpu(self.samples_points, vertices[faces])[0].cpu()[...,None]
+                self.sdf = mesh2sdf.mesh2sdf_gpu(self.samples_points, vertices[faces])[0].cpu()[..., None]
                 self.samples_points = self.samples_points.cpu()
+
+        shuffle_index = torch.randperm(self.samples_points.shape[0])
+        self.samples_points = self.samples_points[shuffle_index].contiguous()
+        self.sdf = self.sdf[shuffle_index].contiguous()
+        self.num_iter = self.sdf.shape[0] // self.batch_size + 1
         return
 
     def __len__(self):
-        return self.sdf.shape[0]
+        return self.num_iter
 
     def __getitem__(self, idx):
-
-        return self.samples_points[idx], self.sdf[idx]
+        return self.samples_points[idx * self.batch_size:min(self.sdf.shape[0], (idx + 1) * self.batch_size)], \
+            self.sdf[idx * self.batch_size:min(self.sdf.shape[0], (idx + 1) * self.batch_size)]
 
     @staticmethod
     def collate_fn(batch):
@@ -335,16 +344,22 @@ class Geometric_dataset(torch.utils.data.Dataset):
 class Geometric_dataset_inference(torch.utils.data.Dataset):
     def __init__(self,
                  n_resolution=128,
+                 v_batch_size=1,
                  ):
         super().__init__()
         X, Y, Z = np.meshgrid(np.arange(n_resolution), np.arange(n_resolution), np.arange(n_resolution), indexing="xy")
         pts = np.stack([X, Y, Z], axis=-1).astype(np.float32)
         pts = pts.reshape([-1, 3])
-        self.pts = torch.tensor((pts / (n_resolution - 1) - 0.5) * 2)
-
+        # self.pts = torch.tensor((pts / (n_resolution - 1) - 0.5) * 2)
+        self.pts = torch.tensor(pts / (n_resolution - 1))
+        self.batch_size = v_batch_size
+        self.num_iter = self.pts.shape[0] // self.batch_size + 1
 
     def __len__(self):
-        return self.pts.shape[0]
+        return self.num_iter
 
     def __getitem__(self, idx):
-        return [self.pts[idx], torch.zeros_like(self.pts[idx])]
+        start_index = idx * self.batch_size
+        end_index = min(self.pts.shape[0], (idx + 1) * self.batch_size)
+        query_coordinates = self.pts[start_index:end_index].half() # Half is important!!!!!!!!!!!!!!!!
+        return [query_coordinates, torch.zeros_like(query_coordinates[:,:1])]

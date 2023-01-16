@@ -178,8 +178,8 @@ if (MSVC)
 	# Copy CUDA runtime DLLs to the build directory so that Python can find them.
 	file(GLOB CUDA_DLLS "${CUDA_COMPILER_BIN}/cudart64*.dll")
 	if (CUDA_DLLS)
-		add_custom_command(TARGET instant-ngp POST_BUILD
-			COMMAND ${CMAKE_COMMAND} -E copy ${CUDA_DLLS} $<TARGET_FILE_DIR:instant-ngp>
+		add_custom_command(TARGET main_cpp POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy ${CUDA_DLLS} $<TARGET_FILE_DIR:main_cpp>
 			COMMAND_EXPAND_LISTS
 		)
 	endif()

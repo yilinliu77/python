@@ -1,6 +1,5 @@
-#/bin/bash
+#!/bin/zsh
 
-git submodule update
 ROOT_DIR=$PWD
 
 echo "======================================"

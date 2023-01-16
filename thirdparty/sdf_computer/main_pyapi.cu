@@ -51,6 +51,9 @@ py::array_t<float> compute_sdf(
 class SDF_computer
 {
 public:
+    Eigen::Vector3f m_center;
+    float m_scale;
+
     std::vector<Eigen::Vector3f> m_vertices;
     BoundingBox m_aabb = {};
 
@@ -98,6 +101,8 @@ public:
         for (size_t i = 0; i < n_vertices; ++i) {
             m_vertices[i] = (m_vertices[i] - m_raw_aabb.min - 0.5f * m_raw_aabb.diag()) / mesh_scale + Vector3f::Constant(0.5f);
         }
+        m_center = 0.5f * m_raw_aabb.diag();
+        m_scale = mesh_scale;
 
         for (size_t i = 0; i < n_vertices; ++i) {
             m_aabb.enlarge(m_vertices[i]);
@@ -135,7 +140,8 @@ public:
     py::array_t<float> compute_sdf(
         const int v_num_on_face,
         const int v_num_near_face,
-        const int v_num_uniform
+        const int v_num_uniform,
+        bool is_scale_to_aabb
     )
     {
         const uint32_t n_to_generate = (v_num_on_face + v_num_near_face + v_num_uniform);
@@ -185,16 +191,28 @@ public:
             // Otherwise, at least confine uniform samples to the AABB.
             // (For the uniform_only case, we always use the AABB, then the IoU kernel checks against the octree later)
            
-            BoundingBox sdf_aabb = m_aabb;
-            sdf_aabb.inflate(0);
-            tcnn::linear_kernel(scale_to_aabb_kernel, 0, stream,
-                n_to_generate_uniform, sdf_aabb,
-                positions + n_to_generate_surface);
+            if (is_scale_to_aabb)
+            {
+                BoundingBox sdf_aabb = m_aabb;
+                sdf_aabb.inflate(0);
+                tcnn::linear_kernel(scale_to_aabb_kernel, 0, stream,
+                    n_to_generate_uniform, sdf_aabb,
+                    positions + n_to_generate_surface);
 
-            tcnn::linear_kernel(assign_float, 0, stream,
-                n_to_generate_uniform,
-                sdf_aabb.diag().norm() * 1.001f,
-                distances + n_to_generate_surface);
+                tcnn::linear_kernel(assign_float, 0, stream,
+                    n_to_generate_uniform,
+                    sdf_aabb.diag().norm() * 1.001f,
+                    distances + n_to_generate_surface);
+            }
+            else
+            {
+                // Used for acclerate computation of SDF
+                tcnn::linear_kernel(assign_float, 0, stream,
+                    n_to_generate_uniform,
+                    std::sqrt(1+1+1) * 1.001f,
+                    distances + n_to_generate_surface);
+            }
+            
         }
 
         // *****************************************************
@@ -223,7 +241,6 @@ public:
             stream);
 
         CUDA_CHECK_THROW(cudaStreamSynchronize(stream));
-
         std::vector<Eigen::Vector3f> results_vertices(n_to_generate);
         std::vector<float> results_distances(n_to_generate);
         _positions.copy_to_host(results_vertices);
@@ -252,5 +269,7 @@ PYBIND11_MODULE(pysdf, m)
 	sdf_computer
 		.def(py::init<const py::array_t<float>&>())
 		.def("compute_sdf", &SDF_computer::compute_sdf)
+        .def_readonly("m_center", &SDF_computer::m_center)
+        .def_readonly("m_scale", &SDF_computer::m_scale)
 		;
 }

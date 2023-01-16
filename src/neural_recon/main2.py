@@ -48,6 +48,8 @@ from src.neural_recon.colmap_io import read_dataset
 from src.neural_recon.dataset import Single_img_dataset, Image, Point_3d, Single_img_dataset_with_kdtree_index, \
     Geometric_dataset, Geometric_dataset_inference
 
+import pysdf
+import open3d as o3d
 
 class img_pair_alignment(pl.LightningModule):
     def __init__(self, hparams):
@@ -89,7 +91,13 @@ class img_pair_alignment(pl.LightningModule):
 
             }
         )
-        self.model.to("cuda")
+        # self.model.to("cuda")
+
+        # SDF Computer
+        mesh = o3d.io.read_triangle_mesh(self.hydra_conf["dataset"]["mesh_dir"])
+        vertices = np.asarray(mesh.vertices)
+        faces = np.asarray(mesh.triangles)
+        self.sdf_computer = pysdf.SDF_computer(vertices[faces])
 
     def forward_test(self, v_data):
         # While true:
@@ -114,7 +122,9 @@ class img_pair_alignment(pl.LightningModule):
                 for i_view in range(valid_projected_points.shape[0]):
                     query_point = valid_projected_points[i_view:i_view + 1]
                     distance, i_matched_point = self.kdtrees[v_data["id_imgs"][id_batch, i_view]].search(query_point, 1)
-                    matched_point = torch.from_numpy(self.imgs[v_data["id_imgs"][id_batch, i_view]].line_field[i_matched_point][:2]).to(query_point.device).unsqueeze(0)
+                    matched_point = torch.from_numpy(
+                        self.imgs[v_data["id_imgs"][id_batch, i_view]].line_field[i_matched_point][:2]).to(
+                        query_point.device).unsqueeze(0)
                     loss.append(F.mse_loss(query_point, matched_point, reduction='sum'))
 
                     # Debug
@@ -147,12 +157,13 @@ class img_pair_alignment(pl.LightningModule):
 
     def train_dataloader(self):
         self.train_dataset = Geometric_dataset(
-            self.hydra_conf["dataset"]["mesh_dir"],
+            self.sdf_computer,
             self.hydra_conf["dataset"]["num_sample"],
+            self.hydra_conf["trainer"]["batch_size"],
             "training"
         )
         return DataLoader(self.train_dataset,
-                          batch_size=self.batch_size,
+                          batch_size=1,
                           num_workers=self.num_worker,
                           shuffle=True,
                           pin_memory=True,
@@ -163,9 +174,10 @@ class img_pair_alignment(pl.LightningModule):
     def val_dataloader(self):
         self.valid_dataset = Geometric_dataset_inference(
             self.hydra_conf["model"]["marching_cube_resolution"],
-            )
+            self.hydra_conf["trainer"]["batch_size"],
+        )
         return DataLoader(self.valid_dataset,
-                          batch_size=self.batch_size,
+                          batch_size=1,
                           num_workers=self.num_worker,
                           shuffle=False,
                           pin_memory=True,
@@ -176,9 +188,10 @@ class img_pair_alignment(pl.LightningModule):
     def test_dataloader(self):
         self.test_dataset = Geometric_dataset_inference(
             self.hydra_conf["model"]["marching_cube_resolution"],
+            self.hydra_conf["trainer"]["batch_size"],
         )
         return DataLoader(self.test_dataset,
-                          batch_size=self.batch_size,
+                          batch_size=1,
                           num_workers=self.num_worker,
                           shuffle=False,
                           pin_memory=True,
@@ -195,6 +208,7 @@ class img_pair_alignment(pl.LightningModule):
         }
 
     def training_step(self, batch, batch_idx):
+        batch = [batch[0][0], batch[1][0]]
         predicted_sdf = self.forward(batch)
 
         loss = F.mse_loss(predicted_sdf, batch[1])
@@ -205,6 +219,7 @@ class img_pair_alignment(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        batch = [batch[0][0], batch[1][0]]
         predicted_sdf = self.forward(batch)
 
         return predicted_sdf
@@ -212,13 +227,16 @@ class img_pair_alignment(pl.LightningModule):
     def validation_epoch_end(self, result) -> None:
         if self.trainer.sanity_checking:
             return
-        predicted_sdf = -torch.cat(result,dim=0).cpu().numpy().astype(np.float32)
+        predicted_sdf = -torch.cat(result, dim=0).cpu().numpy().astype(np.float32)
         resolution = self.hydra_conf["model"]["marching_cube_resolution"]
-        predicted_sdf = predicted_sdf.reshape([resolution,resolution,resolution])
+        predicted_sdf = predicted_sdf.reshape([resolution, resolution, resolution])
         vertices, triangles = mcubes.marching_cubes(predicted_sdf, 0)
-        mcubes.export_obj(vertices, triangles, os.path.join("outputs", "model_of_epoch_{}.obj".format(self.trainer.current_epoch)))
+        if vertices.shape[0] != 0:
+            mcubes.export_obj(vertices, triangles,
+                              os.path.join("outputs", "model_of_epoch_{}.obj".format(self.trainer.current_epoch)))
 
     def test_step(self, batch, batch_idx):
+        batch = [batch[0][0], batch[1][0]]
         predicted_sdf = self.forward(batch)
         return predicted_sdf
 
@@ -230,18 +248,23 @@ class img_pair_alignment(pl.LightningModule):
         mcubes.export_obj(vertices, triangles,
                           os.path.join("outputs", "model_of_test.obj"))
 
+
 @hydra.main(config_name="test_3d_reconstruction.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
 def main(v_cfg: DictConfig):
     print(OmegaConf.to_yaml(v_cfg))
     seed_everything(0)
+
+    from pytorch_lightning.profiler import PyTorchProfiler
 
     trainer = Trainer(
         accelerator='gpu' if v_cfg["trainer"].gpu != 0 else None,
         devices=v_cfg["trainer"].gpu, enable_model_summary=False,
         max_epochs=10000,
         num_sanity_val_steps=2,
-        check_val_every_n_epoch=100,
+        check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
         precision=16,
+        reload_dataloaders_every_n_epochs = v_cfg["dataset"]["resample_after_n_epoches"]
+        # profiler=PyTorchProfiler(),
     )
 
     model = img_pair_alignment(v_cfg)
@@ -256,6 +279,23 @@ def main(v_cfg: DictConfig):
 
 
 if __name__ == '__main__':
+    if False:
+        import open3d as o3d
+
+        sys.path.append("thirdparty/sdf_computer/build/")
+        import pysdf
+
+        mesh = o3d.io.read_triangle_mesh(
+            "/mnt/d/Projects/NeuralRecon/Test_data/OBL_L7/Test_imgs2_colmap_neural/sparse_align/detailed_l7_with_ground.ply")
+        vertices = np.asarray(mesh.vertices)
+        faces = np.asarray(mesh.triangles)
+        if True:
+            sdf_computer = pysdf.SDF_computer(vertices[faces])
+            query_points = sdf_computer.compute_sdf(int(1e6), int(1e6), int(1e6))
+            a = o3d.geometry.PointCloud()
+            selected_points = query_points[query_points[:, 3] > 0.07][:, :3]
+            a.points = o3d.utility.Vector3dVector(selected_points)
+            o3d.io.write_point_cloud("/mnt/d/Projects/NeuralRecon/tmp/sdf.ply", a)
     main()
 
     # While true:

@@ -277,14 +277,19 @@ class Geometric_dataset(torch.utils.data.Dataset):
         self.batch_size = v_batch_size
 
         if True:
-            self.query_points = v_sdf_computer.compute_sdf(int(v_num_sample[0]), int(v_num_sample[1]),
+            # print("Start to query")
+            query_points = v_sdf_computer.compute_sdf(int(v_num_sample[0]), int(v_num_sample[1]),
                                                               int(v_num_sample[2]), False)
+            # print("Done query")
+            indexes = np.random.permutation(query_points.shape[0])
+            query_points=query_points[indexes]
+            # print("Done Shuffle")
             if False:
                 pc = o3d.geometry.PointCloud()
                 pc.points = o3d.utility.Vector3dVector(self.query_points[:,:3])
                 o3d.io.write_point_cloud("/mnt/d/Projects/NeuralRecon/tmp/t.ply" ,pc)
-            self.samples_points = torch.tensor(self.query_points[:, :3], dtype=torch.half)
-            self.sdf = torch.tensor(self.query_points[:, 3:4], dtype=torch.half)
+            self.samples_points = torch.tensor(query_points[:, :3], dtype=torch.half)
+            self.sdf = torch.tensor(query_points[:, 3:4], dtype=torch.half)
         else:
             self.bounds_center = (np.max(vertices, axis=0) + np.min(vertices, axis=0)) / 2
             self.bounds_size = np.max(np.max(vertices, axis=0) - np.min(vertices, axis=0))
@@ -306,11 +311,8 @@ class Geometric_dataset(torch.utils.data.Dataset):
 
                 self.sdf = mesh2sdf.mesh2sdf_gpu(self.samples_points, vertices[faces])[0].cpu()[..., None]
                 self.samples_points = self.samples_points.cpu()
-
-        shuffle_index = torch.randperm(self.samples_points.shape[0])
-        self.samples_points = self.samples_points[shuffle_index].contiguous()
-        self.sdf = self.sdf[shuffle_index].contiguous()
         self.num_iter = self.sdf.shape[0] // self.batch_size + 1
+        # print("Done dataset construction")
         return
 
     def __len__(self):

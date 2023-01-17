@@ -233,7 +233,7 @@ class img_pair_alignment(pl.LightningModule):
         vertices, triangles = mcubes.marching_cubes(predicted_sdf, 0)
         if vertices.shape[0] != 0:
             mcubes.export_obj(vertices, triangles,
-                              os.path.join("outputs", "model_of_epoch_{}.obj".format(self.trainer.current_epoch)))
+                              os.path.join("output", "model_of_epoch_{}.obj".format(self.trainer.current_epoch)))
 
     def test_step(self, batch, batch_idx):
         batch = [batch[0][0], batch[1][0]]

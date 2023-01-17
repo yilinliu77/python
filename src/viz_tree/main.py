@@ -230,41 +230,58 @@ def read_tree(v_path, v_graph):
 
     num_states = len(data) // 2
 
-    root_graph = Graph()
-    root_vertex = root_graph.add_vertex(1)
-    root_vertex.update_attributes(v_graph.vs[0].attributes())
-    root_graph["id_current_node"] = 0
-    graphs: List[Graph] = [root_graph]
-    graph_states = [(0, 2), ]
-
-    acc_leaf_nodes = [(0, 0), ]
+    graphs = [[[0],[]], ] # # (node, id_original_node)
+    graph_states = [(0, 2), ] # (id_new_node, id_original_node)
     for i_tree in tqdm(range(num_states)):
         G = deepcopy(graphs[-1])
         id_original_node = int(data[i_tree * 2 + 0])
         graph_states.append(
             (int(i_tree * 2 + 0), int(i_tree * 2 + 1))
         )
-
-        id_current_node = -1
-        for i in range(len(acc_leaf_nodes)):
-            if acc_leaf_nodes[i][1] == id_original_node:
-                id_current_node = acc_leaf_nodes[i][0]
-                acc_leaf_nodes.pop(i)
-                break
-        assert id_current_node != -1
         for neighbor in v_graph.vs[id_original_node].neighbors():
             if neighbor["level"] > v_graph.vs[id_original_node]["level"]:
-                new_vertex = G.add_vertex(1)
-                new_vertex.update_attributes(neighbor.attributes())
-                new_edge = G.add_edge(id_current_node, new_vertex.index)
-                new_edge.update_attributes(v_graph.es[v_graph.get_eid(id_original_node, neighbor.index)].attributes())
-                acc_leaf_nodes.append((new_vertex.index, neighbor.index))
-                G["id_current_node"] = new_vertex.index
+                # new_vertex = G.add_vertex(1)
+                G[0].append(neighbor.index)
+                G[1].append((id_original_node,neighbor.index))
         graphs.append(G)
-        pass
-    with open("output/viz_bsp/intermediate1.bin", "wb") as f:
+
+    # root_graph = Graph()
+    # root_vertex = root_graph.add_vertex(1)
+    # root_vertex.update_attributes(v_graph.vs[0].attributes())
+    # root_graph["id_current_node"] = 0
+    # graphs: List[Graph] = [root_graph]
+    # graph_states = [(0, 2), ]
+    #
+    # acc_leaf_nodes = [(0, 0), ]
+    # for i_tree in tqdm(range(num_states)):
+    #     # G = deepcopy(graphs[-1])
+    #     G = graphs[-1].copy()
+    #     id_original_node = int(data[i_tree * 2 + 0])
+    #     graph_states.append(
+    #         (int(i_tree * 2 + 0), int(i_tree * 2 + 1))
+    #     )
+    #
+    #     id_current_node = -1
+    #     for i in range(len(acc_leaf_nodes)):
+    #         if acc_leaf_nodes[i][1] == id_original_node:
+    #             id_current_node = acc_leaf_nodes[i][0]
+    #             acc_leaf_nodes.pop(i)
+    #             break
+    #     assert id_current_node != -1
+    #     for neighbor in v_graph.vs[id_original_node].neighbors():
+    #         if neighbor["level"] > v_graph.vs[id_original_node]["level"]:
+    #             new_vertex = G.add_vertex(1)
+    #             new_vertex.update_attributes(neighbor.attributes())
+    #             new_edge = G.add_edge(id_current_node, new_vertex.index)
+    #             new_edge.update_attributes(v_graph.es[v_graph.get_eid(id_original_node, neighbor.index)].attributes())
+    #             acc_leaf_nodes.append((new_vertex.index, neighbor.index))
+    #             G["id_current_node"] = new_vertex.index
+    #     graphs.append(G)
+    #     pass
+
+    with open(os.path.join(root_path, "intermediate1.bin"), "wb") as f:
         f.write(dumps(graphs))
-    with open("output/viz_bsp/intermediate2.bin", "wb") as f:
+    with open(os.path.join(root_path, "intermediate2.bin"), "wb") as f:
         f.write(dumps(graph_states))
 
     return graphs, graph_states
@@ -298,11 +315,104 @@ def write_video():
     out.release()
 
 
-def viz_item(v_args, v_whole_img, v_boundary):
+def viz_item(v_args, v_graph:Graph, v_whole_img, v_boundary):
     idx, tree = v_args
-    item_img = _viz_tree(tree, v_boundary, False)
+    tree,tree_states = tree
+    vertices = tree[0]
+    edges = tree[1]
+
+    total_levels = max(v_graph.vs, key=lambda item: item["level"])["level"] + 1
+
+    pos_x = [[] for _ in range(total_levels)]
+    pos_y = [[] for _ in range(total_levels)]
+    labels = [[] for _ in range(total_levels)]
+    sizes = [-1 for _ in range(total_levels)]
+
+    for i in range(len(tree[0])):
+        cur_level = v_graph.vs[vertices[i]]["level"]
+        pos_x[cur_level].append(v_graph.vs[vertices[i]]["pos"][0])
+        pos_y[cur_level].append(v_graph.vs[vertices[i]]["pos"][1])
+        labels[cur_level].append(v_graph.vs[vertices[i]]["cut"])
+        sizes[cur_level] = v_graph.vs[vertices[i]]["size"]
+
+    edge_x = [[] for _ in range(total_levels)]
+    edge_y = [[] for _ in range(total_levels)]
+    edge_width = [1 for _ in range(total_levels)]
+
+    for edge in edges:
+        id_edge = v_graph.get_eid(edge[0], edge[1])
+        cur_level = v_graph.es[id_edge]["level"]
+        edge_x[cur_level].append(v_graph.es[id_edge]["pos1"][0])
+        edge_x[cur_level].append(v_graph.es[id_edge]["pos2"][0])
+        edge_x[cur_level].append(None)
+        edge_y[cur_level].append(v_graph.es[id_edge]["pos1"][1])
+        edge_y[cur_level].append(v_graph.es[id_edge]["pos2"][1])
+        edge_y[cur_level].append(None)
+        edge_width[cur_level] = v_graph.es[id_edge]["size"]
+
+    # Visualize
+    fig = go.Figure()
+    fig.update_layout(
+        autosize=False,
+        width=5000,
+        height=2000,
+        paper_bgcolor="#FFFFFF",
+        plot_bgcolor="#CCCCCC",
+        xaxis=dict(showgrid=False, visible=False, showticklabels=False),
+        yaxis=dict(showgrid=False, visible=False, showticklabels=False)
+    )
+
+    fig.add_trace(go.Scatter(x=v_boundary[0],
+                             y=v_boundary[1],
+                             mode='markers',
+                             marker=dict(symbol='circle-dot',
+                                         size=0,
+                                         color='rgb(255,0,0)',  # '#DB4551',
+                                         ),
+                             opacity=0,
+                             ))
+
+    for i in range(total_levels):
+        fig.add_trace(go.Scatter(x=edge_x[i],
+                                 y=edge_y[i],
+                                 mode='lines',
+                                 line=dict(color='#CCFF99', width=edge_width[i]),
+                                 hoverinfo='none',
+                                 opacity=1
+                                 ))
+    for i in range(total_levels):
+        fig.add_trace(go.Scatter(x=pos_x[i],
+                                 y=pos_y[i],
+                                 mode='markers',
+                                 name='bla',
+                                 marker=dict(symbol='circle-dot',
+                                             size=sizes[i],
+                                             color='#FFCC99',
+                                             line=dict(
+                                                 color='rgb(50,50,50)',
+                                                 width=0)
+                                             ),
+                                 text=labels[i],
+                                 hoverinfo='text',
+                                 opacity=1
+                                 ))
+
+    # min_y = min(v_graph.vs, key=lambda item: item["pos"][1])["pos"][1]
+    current_y = v_graph.vs[tree_states[0]]["pos"][1]
+    line_x = [v_boundary[0][0], v_boundary[0][1], None]
+    line_y = [current_y, current_y, None]
+    fig.add_trace(go.Scatter(x=line_x,
+                             y=line_y,
+                             mode='lines',
+                             line=dict(color='#CCFF99', width=10, dash='dot'),
+                             hoverinfo='none',
+                             opacity=1
+                             ))
+
+    fig_bytes = fig.to_image(format="png")
+    item_img = cv2.imdecode(np.frombuffer(fig_bytes, np.uint8), cv2.IMREAD_UNCHANGED)
     img = cv2.addWeighted(item_img[:, :, :3], 0.8, v_whole_img[:, :, :3], 0.2, 0)
-    cv2.imwrite("output/viz_bsp/inter_imgs/{}.png".format(idx), img)
+    cv2.imwrite(os.path.join(root_path, "inter_imgs/{}.png".format(idx)), img)
 
 
 def parent(v_vertex: Vertex):
@@ -481,17 +591,17 @@ def generate_specific_cut(v_id_cut, v_tree: Graph, v_whole_tree: Graph, v_viewpo
 
 
 if __name__ == '__main__':
-    is_visualize_whole_image = True
+    is_visualize_whole_image = False
     is_generate_subtree = False
-    is_generate_sub_imgs = False
-    is_generate_video = False
+    is_generate_sub_imgs = True
+    is_generate_video = True
     is_generate_specific_cut = True
     id_specific_cut = 100
 
-    pool = Pool(16)
-    whole_tree = read_whole_tree(r"D:\Projects\LOD\tree.txt")
+    pool = Pool(1)
+    whole_tree = read_whole_tree(os.path.join(root_path, "tree.txt"))
     whole_img, boundary = viz_whole_tree(whole_tree, False)
-    cv2.imwrite("output/viz_bsp/whole.png", whole_img)
+    cv2.imwrite(os.path.join(root_path, "whole.txt"), whole_img)
 
     if is_visualize_whole_image:
         cv2.namedWindow("1", cv2.WINDOW_GUI_EXPANDED)
@@ -500,23 +610,24 @@ if __name__ == '__main__':
         cv2.waitKey(0)
 
     if is_generate_subtree:
-        tree, tree_states = read_tree(r"D:\Projects\LOD\order_state.txt", whole_tree)
+        tree, tree_states = read_tree(os.path.join(root_path, "order_state.txt"), whole_tree)
     else:
-        with open(r"D:\repo\python\output\viz_bsp\intermediate1.bin", "rb") as f:
+        with open(os.path.join(root_path, "intermediate1.bin"), "rb") as f:
             line = f.read()
             tree = loads(line)
-        with open(r"D:\repo\python\output\viz_bsp\intermediate2.bin", "rb") as f:
+        with open(os.path.join(root_path, "intermediate2.bin"), "rb") as f:
             line = f.read()
             tree_states = loads(line)
 
     if is_generate_sub_imgs:
-        pool.map(partial(viz_item, v_whole_img=whole_img, v_boundary=boundary), list(enumerate(tree)))
+        pool.map(partial(viz_item, v_graph = whole_tree, v_whole_img=whole_img, v_boundary=boundary),
+                 list(enumerate(zip(tree, tree_states)))[20000:20003])
 
-    if is_generate_video:
-        write_video()
+    # if is_generate_video:
+    #     write_video()
 
-    if is_generate_specific_cut:
-        generate_specific_cut(id_specific_cut, tree[id_specific_cut], whole_tree)
+    # if is_generate_specific_cut:
+    #     generate_specific_cut(id_specific_cut, tree[id_specific_cut], whole_tree)
 
     pool.close()
 

@@ -21,14 +21,17 @@ from networkx.drawing.nx_pydot import graphviz_layout
 from tqdm import tqdm
 from multiprocessing import Pool
 
-root_path = r"D:\Projects\LOD\test_scene"
+root_path = r"D:\Projects\LOD\test_scene\l7_sliding"
+# root_path = r"D:\Projects\LOD\test_scene\fixed_v2"
 
 bg_color = "#243763"
 mark_color = "#FF6E31"
 edge_color = "#FFEBB7"
-mark_size = 100
-edge_size = 20
-notation_size = 30
+window_width = 6000
+window_height = 900
+mark_size = 30
+edge_size = 6
+notation_size = 9
 
 @dataclass
 class Node:
@@ -89,6 +92,30 @@ def read_whole_tree(v_path):
     return G
 
 
+def read_whole_non_bsp_tree(v_path):
+    print("Start to read file")
+    with open(os.path.join(root_path, v_path), "r") as f:
+        data = [item.strip().split(" ") for item in f.readlines() if len(item) > 2]
+
+    num_nodes = len(data)
+
+    edges = []
+    attribute = {"cut": []}
+    for id_node, line in tqdm(enumerate(data)):
+        num_child = len(line) - 3
+        for i in range(num_child):
+            id_child = int(line[3 + i])
+            if id_child != -1:
+                edges.append((id_node, id_child))
+
+        attribute["cut"].append(float(line[2]))
+        pass
+
+    G = Graph()  # 2 stands for children number
+    G.add_vertices(num_nodes, attribute)
+    G.add_edges(edges)
+    return G
+
 def _viz_tree(v_indices, v_states, v_graph, v_boundary, v_is_background, v_is_fixed=False):
     total_levels = max(v_graph.vs, key=lambda item: item["level"])["level"] + 1
 
@@ -126,8 +153,8 @@ def _viz_tree(v_indices, v_states, v_graph, v_boundary, v_is_background, v_is_fi
     fig = go.Figure()
     fig.update_layout(
         autosize=False,
-        width=20000,
-        height=3000,
+        width=window_width,
+        height=window_height,
         paper_bgcolor="#FFFFFF",
         plot_bgcolor=bg_color,
         xaxis=dict(showgrid=False, visible=False, showticklabels=False),
@@ -185,7 +212,11 @@ def _viz_tree(v_indices, v_states, v_graph, v_boundary, v_is_background, v_is_fi
         if v_graph.vs[v_states[0]]["level"] == 0:
             current_y = v_graph.vs[v_states[0]]["pos"][1]
         else:
-            current_y = children(v_graph.vs[v_states[0]])[0]["pos"][1]
+            item_children = children(v_graph.vs[v_states[0]])
+            if len(item_children)!=0:
+                current_y = item_children[0]["pos"][1]
+            else:
+                current_y = v_graph.vs[v_states[0]]["pos"][1]
         line_x = [v_boundary[0][0], v_boundary[0][1], None]
         line_y = [current_y, current_y, None]
         fig.add_trace(go.Scatter(x=line_x,
@@ -320,7 +351,7 @@ def write_video():
     file_list = sorted(file_list, key=lambda item: int(item.split(".")[0]))
     whole_img = cv2.imread(os.path.join(root_path, "whole.png"))
     size = (whole_img.shape[1], whole_img.shape[0])
-    out = cv2.VideoWriter(os.path.join(root_path, "project.avi"), cv2.VideoWriter_fourcc(*'mp4v'), 15, size)
+    out = cv2.VideoWriter(os.path.join(root_path, "project.mp4"), cv2.VideoWriter_fourcc(*'mp4v'), 15, size)
 
     for i in tqdm(range(len(file_list))):
         img = cv2.imread(os.path.join(root_path, "inter_imgs", file_list[i]))
@@ -525,18 +556,19 @@ def generate_specific_cut(v_id_cut, v_tree: Graph, v_whole_tree: Graph, v_viewpo
 if __name__ == '__main__':
     is_fix_pos = False
 
-    is_visualize_whole_image = False
-    is_generate_subtree = False
+    is_visualize_whole_image = True
+    is_generate_subtree = True
     is_generate_sub_imgs = True
     is_generate_video = True
     is_generate_specific_cut = True
     id_specific_cut = 100
 
     pool = Pool(16)
-    whole_tree = read_whole_tree(os.path.join(root_path, "tree.txt"))
+    whole_tree = read_whole_non_bsp_tree(os.path.join(root_path, "tree.txt"))
+    # whole_tree = read_whole_tree(os.path.join(root_path, "tree.txt"))
     whole_img, boundary = viz_whole_tree(whole_tree, v_is_fix_pos = True)
     cv2.imwrite(os.path.join(root_path, "whole.png"), whole_img)
-
+    os.makedirs(os.path.join(root_path, "inter_imgs"),exist_ok=True)
     if is_visualize_whole_image:
         cv2.namedWindow("1", cv2.WINDOW_KEEPRATIO)
         cv2.resizeWindow("1", 2000, 300)
@@ -558,8 +590,11 @@ if __name__ == '__main__':
             tree_states = loads(line)
 
     if is_generate_sub_imgs:
-        pool.map(partial(viz_item, v_graph=whole_tree, v_whole_img=whole_img, v_boundary=boundary, v_is_fix_pos=is_fix_pos),
-                 list(enumerate(zip(tree, tree_states)))[:100])
+        list(tqdm(pool.imap(partial(viz_item, v_graph=whole_tree, v_whole_img=whole_img, v_boundary=boundary, v_is_fix_pos=is_fix_pos),
+                 list(enumerate(zip(tree, tree_states)))),total=len(tree)))
+        # pool.map(partial(viz_item, v_graph=whole_tree, v_whole_img=whole_img, v_boundary=boundary, v_is_fix_pos=is_fix_pos),
+        #          list(enumerate(zip(tree, tree_states))))
+
 
     if is_generate_video:
         write_video()

@@ -1,6 +1,7 @@
 dataset:
   scene_boundary: [-50, -50, -10, 250, 200, 60]
-  colmap_dir: "d:/Projects/NeuralRecon/Test_data/OBL_L7/Test_imgs2_colmap_neural/sparse_align"
+  colmap_dir: "C:/DATASET/Test_imgs2_colmap_neural/sparse_align"
+#  colmap_dir: "d:/Projects/NeuralRecon/Test_data/OBL_L7/Test_imgs2_colmap_neural/sparse_align"
   img_size: [6000,4000]
   num_sample: [300000000,300000000,300000000]
   resample_after_n_epoches: 100

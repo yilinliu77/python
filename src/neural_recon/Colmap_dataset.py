@@ -1,5 +1,6 @@
 from typing import List
 
+import cv2
 import torch
 import numpy as np
 from torch.nn.utils.rnn import pad_sequence
@@ -22,6 +23,17 @@ import pysdf
 
 from src.neural_recon.sample import sample_points_cpu
 
+
+def check_visibility(v_img: Image, v_points):
+    points = np.concatenate([v_points, np.ones_like(v_points[:,0:1])], axis=1)
+    pixel_pos = np.matmul(v_img.extrinsic, points.T).T
+    is_locate_at_front = pixel_pos[:,2] > 0
+    pixel_pos = np.matmul(v_img.intrinsic, pixel_pos.T).T
+    pixel_pos = pixel_pos[:,:2] / (pixel_pos[:,2:3] + 1e-8)
+    return np.logical_and(is_locate_at_front, np.logical_and(
+        pixel_pos > 0,
+        pixel_pos < 1,
+    ).all(axis = 1))
 
 def quaternion_rotation_matrix(Q):
     """
@@ -113,15 +125,15 @@ def read_dataset(v_colmap_dir, v_bounds):
     # v_superglue_dir = v_params["dataset"]["superglue_dir"]
     v_segments_dir = os.path.join(v_colmap_dir, "segments")
     bounds_center = (v_bounds[0] + v_bounds[1]) / 2
-    bounds_size = v_bounds[1] - v_bounds[0]
+    bounds_size = (v_bounds[1] - v_bounds[0]).max()
 
     model_matrix = np.zeros((4, 4), dtype=np.float32)
-    model_matrix[0, 0] = bounds_size[0] / 2
-    model_matrix[1, 1] = bounds_size[1] / 2
-    model_matrix[2, 2] = bounds_size[2] / 2
-    model_matrix[0, 3] = bounds_center[0]
-    model_matrix[1, 3] = bounds_center[1]
-    model_matrix[2, 3] = bounds_center[2]
+    model_matrix[0, 0] = bounds_size
+    model_matrix[1, 1] = bounds_size
+    model_matrix[2, 2] = bounds_size
+    model_matrix[0, 3] = bounds_center[0] - bounds_size / 2
+    model_matrix[1, 3] = bounds_center[1] - bounds_size / 2
+    model_matrix[2, 3] = bounds_center[2] - bounds_size / 2
     model_matrix[3, 3] = 1
 
     def is_inside_scene(v_pos):
@@ -218,11 +230,11 @@ def read_dataset(v_colmap_dir, v_bounds):
         projection = imgs[id_img].projection
         pos_2d = np.matmul(projection, np.concatenate([pos_3d, np.ones_like(pos_3d[0:1])], axis=0))
         pos_2d = pos_2d[:2] / pos_2d[2] / pos_2d[3]
-        pos_2d[0] *= img_size[0]
-        pos_2d[1] *= img_size[1]
+        pos_2d[0] *= imgs[id_img].img_size[0]
+        pos_2d[1] *= imgs[id_img].img_size[1]
         img = cv2.circle(img, (int(pos_2d[0]), int(pos_2d[1])), 10, (0, 0, 255), 10)
-        for item in imgs[id_img].detected_points:
-            img = cv2.circle(img, (int(item[0] * img_size[0]), int(item[1] * img_size[1])), 10, (0, 255, 255), 10)
+        # for item in imgs[id_img].detected_points:
+        #     img = cv2.circle(img, (int(item[0] * imgs[id_img].img_size[0]), int(item[1] * imgs[id_img].img_size[1])), 10, (0, 255, 255), 10)
         cv2.namedWindow("1", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("1", 1600, 900)
         cv2.imshow("1", img)
@@ -247,17 +259,45 @@ class Colmap_dataset(torch.utils.data.Dataset):
         vertices = np.asarray(self.mesh.vertices)
         faces = np.asarray(self.mesh.triangles)
 
-        self.bounds_center = (v_bounds[0]+v_bounds[1]) / 2
-        self.bounds_size = v_bounds[1]-v_bounds[0]
-        vertices = (vertices - self.bounds_center) / self.bounds_size * 2
-        points = sample_points_cpu(vertices, faces,
-                          v_num_sample_uniform=1000,
-                          v_num_sample_on_surface=1000,
-                          v_numsample_near_surface=1000,
-                          )
+        self.bounds_center = (v_bounds[0] + v_bounds[1]) / 2
+        self.bounds_size = (v_bounds[1] - v_bounds[0]).max()
+        vertices = (vertices - self.bounds_center) / self.bounds_size + 0.5
 
         if True:
+            sdf_computer=pysdf.PYSDF_computer()
+            sdf_computer.setup_bounds(
+                np.append(self.bounds_center, self.bounds_size)
+            )
+            sdf_computer.setup_mesh(vertices[faces], False)
+            sdf = sdf_computer.compute_sdf(int(1e0), int(1e6), int(1e6), False)
 
+            sample_points = sdf[:, :3]
+            sample_distances = sdf[:, 3:]
+
+            pool = Pool(16)
+            visibility_window = pool.map(
+                partial(check_visibility, v_points=(sample_points-0.5) * self.bounds_size + self.bounds_center),
+                imgs, chunksize=10)
+            visibility_window = np.stack(visibility_window, axis=0)
+            pc = o3d.geometry.PointCloud()
+            pc.points = o3d.utility.Vector3dVector(sample_points)
+            o3d.io.write_point_cloud("output/1.ply", pc)
+
+            pc.points = o3d.utility.Vector3dVector(sample_points[visibility_window[0]])
+            o3d.io.write_point_cloud("output/2.ply", pc)
+
+            visibility_intersection = sdf_computer.check_visibility(
+                (np.asarray([item.extrinsic[:3,3] for item in imgs]) - sdf_computer.m_center) / sdf_computer.m_scale + 0.5,
+                sdf[:,:3]
+            )
+            visibility_intersection=visibility_intersection.reshape([len(imgs), -1]).astype(np.bool)
+            pc.points = o3d.utility.Vector3dVector(sample_points[visibility_intersection[0]==1])
+            o3d.io.write_point_cloud("output/3.ply", pc)
+
+            self.final_visibility = np.logical_and(visibility_window, visibility_intersection)
+            pc.points = o3d.utility.Vector3dVector(sample_points[self.final_visibility[0]])
+            o3d.io.write_point_cloud("output/4.ply", pc)
+            pass
 
         pass
 

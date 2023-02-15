@@ -171,22 +171,22 @@ target_include_directories(ngp PUBLIC ${NGP_INCLUDE_DIRECTORIES})
 target_link_directories(ngp PUBLIC ${NGP_LINK_DIRECTORIES})
 target_link_libraries(ngp PUBLIC ${NGP_LIBRARIES} tiny-cuda-nn)
 
-add_executable(main_cpp main.cu)
-target_link_libraries(main_cpp PRIVATE ngp)
+add_executable(test_cpp test.cu)
+target_link_libraries(test_cpp PRIVATE ngp)
 
 if (MSVC)
 	# Copy CUDA runtime DLLs to the build directory so that Python can find them.
 	file(GLOB CUDA_DLLS "${CUDA_COMPILER_BIN}/cudart64*.dll")
 	if (CUDA_DLLS)
-		add_custom_command(TARGET main_cpp POST_BUILD
-			COMMAND ${CMAKE_COMMAND} -E copy ${CUDA_DLLS} $<TARGET_FILE_DIR:main_cpp>
+		add_custom_command(TARGET test_cpp POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy ${CUDA_DLLS} $<TARGET_FILE_DIR:test_cpp>
 			COMMAND_EXPAND_LISTS
 		)
 	endif()
 endif()
 
 if (Python_FOUND)
-	add_library(pysdf SHARED main_pyapi.cu)
+	add_library(pysdf SHARED sdf_computer_pyapi.cu)
 	set_target_properties(pysdf PROPERTIES CXX_VISIBILITY_PRESET "hidden" CUDA_VISIBILITY_PRESET "hidden")
 	target_link_libraries(pysdf PRIVATE ngp PUBLIC ${PYTHON_LIBRARIES} pybind11::module)
 	target_compile_definitions(pysdf PUBLIC -DNGP_PYTHON)

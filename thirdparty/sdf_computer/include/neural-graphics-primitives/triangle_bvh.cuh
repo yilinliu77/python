@@ -61,23 +61,27 @@ __host__ __device__ std::pair<int, float> trianglebvh_ray_intersect(const Eigen:
 
 class TriangleBvh {
 public:
-	virtual void check_visibility(
-		uint32_t n_elements, 
-		const Eigen::Vector3f* v_camera_poses, 
-		const Eigen::Vector3f* v_point_poses, 
-		const Triangle* v_triangles,
-    	int* visibility, 
-		cudaStream_t stream) = 0;
+    virtual void check_visibility(
+        const uint32_t n_elements,
+        const uint32_t num_camera,
+        const uint32_t num_point,
+        const Eigen::Vector3f* v_camera_poses,
+        const Eigen::Vector3f* v_point_poses,
+        const Triangle* v_triangles,
+        short* visibility,
+        cudaStream_t stream)
+        = 0;
 
-	virtual void signed_distance_gpu(uint32_t n_elements, EMeshSdfMode mode, const Eigen::Vector3f* gpu_positions, float* gpu_distances, const Triangle* gpu_triangles, bool use_existing_distances_as_upper_bounds, cudaStream_t stream) = 0;
-	virtual void ray_trace_gpu(uint32_t n_elements, Eigen::Vector3f* gpu_positions, Eigen::Vector3f* gpu_directions, const Triangle* gpu_triangles, cudaStream_t stream) = 0;
-	virtual bool touches_triangle(const BoundingBox& bb, const Triangle* __restrict__ triangles) const = 0;
-	virtual void build(std::vector<Triangle>& triangles, uint32_t n_primitives_per_leaf) = 0;
-	virtual void build_optix(const tcnn::GPUMemory<Triangle>& triangles, cudaStream_t stream) = 0;
+    virtual void signed_distance_gpu(uint32_t n_elements, EMeshSdfMode mode, const Eigen::Vector3f* gpu_positions, float* gpu_distances, const Triangle* gpu_triangles, bool use_existing_distances_as_upper_bounds, cudaStream_t stream) = 0;
+    virtual void ray_trace_gpu(uint32_t n_elements, Eigen::Vector3f* gpu_positions, Eigen::Vector3f* gpu_directions, const Triangle* gpu_triangles, cudaStream_t stream) = 0;
+    virtual bool touches_triangle(const BoundingBox& bb, const Triangle* __restrict__ triangles) const = 0;
+    virtual void build(std::vector<Triangle>& triangles, uint32_t n_primitives_per_leaf) = 0;
+    virtual void build_optix(const tcnn::GPUMemory<Triangle>& triangles, cudaStream_t stream) = 0;
 
-	static std::unique_ptr<TriangleBvh> make();
+    static std::unique_ptr<TriangleBvh> make();
 
-	TriangleBvhNode* nodes_gpu() const {
+    TriangleBvhNode* nodes_gpu() const
+    {
 		return m_nodes_gpu.data();
 	}
 

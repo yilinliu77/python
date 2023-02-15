@@ -44,7 +44,7 @@ from shared.img_torch_tools import get_img_from_tensor
 
 import cv2
 
-from src.neural_recon.colmap_io import read_dataset
+from src.neural_recon.Colmap_dataset import Colmap_dataset
 from src.neural_recon.dataset import Single_img_dataset, Image, Point_3d, Single_img_dataset_with_kdtree_index, \
     Geometric_dataset, Geometric_dataset_inference
 
@@ -64,13 +64,12 @@ class img_pair_alignment(pl.LightningModule):
         if not os.path.exists(self.hydra_conf["trainer"]["output"]):
             os.makedirs(self.hydra_conf["trainer"]["output"])
 
-        imgs, world_points = read_dataset(self.hydra_conf)
-        self.imgs, self.world_points = imgs, world_points
+        # imgs, world_points = read_dataset(self.hydra_conf)
+        # self.imgs, self.world_points = imgs, world_points
 
         bounds_min = np.array(self.hydra_conf["dataset"]["scene_boundary"][:3], dtype=np.float32)
         bounds_max = np.array(self.hydra_conf["dataset"]["scene_boundary"][3:], dtype=np.float32)
-        bounds_center = (bounds_max + bounds_min) / 2
-        bounds_size = bounds_max - bounds_min
+        self.scene_bounds = np.array([bounds_min,bounds_max])
 
         self.model = tcnn.NetworkWithInputEncoding(
             3, 1,
@@ -88,16 +87,15 @@ class img_pair_alignment(pl.LightningModule):
                 "output_activation": "None",
                 "n_neurons": 64,
                 "n_hidden_layers": 2,
-
             }
         )
         # self.model.to("cuda")
 
         # SDF Computer
-        mesh = o3d.io.read_triangle_mesh(self.hydra_conf["dataset"]["mesh_dir"])
-        vertices = np.asarray(mesh.vertices)
-        faces = np.asarray(mesh.triangles)
-        self.sdf_computer = pysdf.SDF_computer(vertices[faces])
+        # mesh = o3d.io.read_triangle_mesh(self.hydra_conf["dataset"]["mesh_dir"])
+        # vertices = np.asarray(mesh.vertices)
+        # faces = np.asarray(mesh.triangles)
+        # self.sdf_computer = pysdf.SDF_computer(vertices[faces])
 
     def forward_test(self, v_data):
         # While true:
@@ -172,8 +170,14 @@ class img_pair_alignment(pl.LightningModule):
                           )
 
     def val_dataloader(self):
-        self.valid_dataset = Geometric_dataset_inference(
-            self.hydra_conf["model"]["marching_cube_resolution"],
+        # self.valid_dataset = Geometric_dataset_inference(
+        #     self.hydra_conf["model"]["marching_cube_resolution"],
+        #     self.hydra_conf["trainer"]["batch_size"],
+        # )
+        self.valid_dataset = Colmap_dataset(
+            self.hydra_conf["dataset"]["colmap_dir"],
+            self.scene_bounds,
+            "validation",
             self.hydra_conf["trainer"]["batch_size"],
         )
         return DataLoader(self.valid_dataset,
@@ -249,7 +253,7 @@ class img_pair_alignment(pl.LightningModule):
                           os.path.join("outputs", "model_of_test.obj"))
 
 
-@hydra.main(config_name="test_3d_reconstruction.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
+@hydra.main(config_name="unsuper.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
 def main(v_cfg: DictConfig):
     print(OmegaConf.to_yaml(v_cfg))
     seed_everything(0)

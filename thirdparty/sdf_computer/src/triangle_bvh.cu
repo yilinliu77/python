@@ -264,6 +264,15 @@ __host__ __device__ void sorting_network(T values[N]) {
 	}
 }
 
+
+__global__ void check_visibility_kernel(
+    uint32_t n_elements, 
+    const Vector3f* __restrict__ v_camera_poses, 
+    const Vector3f* __restrict__ v_point_poses, 
+    const Triangle* __restrict__ v_triangles,
+    const TriangleBvhNode* __restrict__ bvh_nodes,
+    int* __restrict__ visibility);
+
 template <uint32_t BRANCHING_FACTOR>
 class TriangleBvhWithBranchingFactor : public TriangleBvh {
 public:
@@ -447,6 +456,24 @@ public:
 		} else {
 			return signed_distance_raystab(point, m_nodes.data(), triangles.data());
 		}
+	}
+
+	void check_visibility(
+		uint32_t n_elements, 
+		const Vector3f* v_camera_poses, 
+		const Vector3f* v_point_poses,
+		const Triangle* v_triangles,
+    	int* visibility, 
+		cudaStream_t stream) override
+	{
+		linear_kernel(check_visibility_kernel, 0, stream,
+				n_elements,
+				v_camera_poses,
+				v_point_poses,
+				v_triangles,
+				m_nodes_gpu.data(),
+				visibility
+			);
 	}
 
 	void signed_distance_gpu(uint32_t n_elements, EMeshSdfMode mode, const Vector3f* gpu_positions, float* gpu_distances, const Triangle* gpu_triangles, bool use_existing_distances_as_upper_bounds, cudaStream_t stream) override {
@@ -723,6 +750,32 @@ __global__ void raytrace_kernel(uint32_t n_elements, Vector3f* __restrict__ posi
 	if (p.first >= 0) {
 		directions[i] = triangles[p.first].normal();
 	}
+}
+
+__global__ void check_visibility_kernel(
+    uint32_t n_elements, 
+    const Vector3f* __restrict__ v_camera_poses, 
+    const Vector3f* __restrict__ v_point_poses, 
+    const Triangle* __restrict__ v_triangles,
+    const TriangleBvhNode* __restrict__ bvh_nodes,
+    int* __restrict__ visibility)
+{
+    uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n_elements)
+        return;
+
+    Vector3f dir = v_point_poses[i]-v_camera_poses[i];
+    float distance = dir.norm();
+    auto result = TriangleBvh4::ray_intersect(
+        v_camera_poses[i], 
+        dir, 
+        bvh_nodes,
+        v_triangles
+    );
+    if (result.second > distance)
+        visibility[i]=1;
+    else
+        visibility[i]=0;
 }
 
 NGP_NAMESPACE_END

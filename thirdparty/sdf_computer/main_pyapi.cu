@@ -259,6 +259,49 @@ public:
 };
 
 
+class PYSDF_computer
+{
+public:
+    SDF_computer sdf_computer;
+
+    // v_triangles: (n_triangles, 3, 3)
+    PYSDF_computer(){}
+
+    void setup_mesh(const py::array_t<float>& v_triangles)
+    {
+        auto r = v_triangles.unchecked<3>();
+        std::vector<Eigen::Vector3f> m_vertices;
+        m_vertices.resize(v_triangles.shape(0) * 3);
+        for(int i=0; i < v_triangles.shape(0); ++i)
+            for(int j=0; j < 3; ++j)
+                {
+                    m_vertices[i * 3 + j] = Eigen::Vector3f(r(i,j,0), r(i,j,1), r(i,j,2));
+                }
+
+        sdf_computer.setup_mesh(m_vertices);
+    }
+
+    py::array_t<float> compute_sdf(
+        const int v_num_on_face,
+        const int v_num_near_face,
+        const int v_num_uniform,
+        bool is_scale_to_aabb
+    )
+    {
+        const auto result = sdf_computer.compute_sdf(v_num_on_face,v_num_near_face,v_num_uniform,is_scale_to_aabb);
+
+        py::array_t<float> results({result.first.size(), (size_t)4});
+        auto r = results.mutable_unchecked<2>();
+        for (int i = 0; i < result.first.size(); ++i) {
+            r(i,0) = result.first[i][0];
+            r(i,1) = result.first[i][1];
+            r(i,2) = result.first[i][2];
+            r(i,3) = result.second[i];
+        }
+        return results;
+    }
+};
+
 PYBIND11_MODULE(pysdf, m)
 {
     m.doc() = "Fast SDF generation";

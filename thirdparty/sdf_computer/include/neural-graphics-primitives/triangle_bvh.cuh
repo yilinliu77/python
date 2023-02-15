@@ -61,6 +61,14 @@ __host__ __device__ std::pair<int, float> trianglebvh_ray_intersect(const Eigen:
 
 class TriangleBvh {
 public:
+	virtual void check_visibility(
+		uint32_t n_elements, 
+		const Eigen::Vector3f* v_camera_poses, 
+		const Eigen::Vector3f* v_point_poses, 
+		const Triangle* v_triangles,
+    	int* visibility, 
+		cudaStream_t stream) = 0;
+
 	virtual void signed_distance_gpu(uint32_t n_elements, EMeshSdfMode mode, const Eigen::Vector3f* gpu_positions, float* gpu_distances, const Triangle* gpu_triangles, bool use_existing_distances_as_upper_bounds, cudaStream_t stream) = 0;
 	virtual void ray_trace_gpu(uint32_t n_elements, Eigen::Vector3f* gpu_positions, Eigen::Vector3f* gpu_directions, const Triangle* gpu_triangles, cudaStream_t stream) = 0;
 	virtual bool touches_triangle(const BoundingBox& bb, const Triangle* __restrict__ triangles) const = 0;

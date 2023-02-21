@@ -1,39 +1,69 @@
-from typing import List
+from dataclasses import dataclass
 
 import cv2
 import torch
 import numpy as np
 from torch.nn.utils.rnn import pad_sequence
 
-from src.neural_recon.dataset import Image, Point_3d
-
 from functools import partial
 from multiprocessing import Pool
-from typing import List
+from typing import List, Tuple
 
 import open3d as o3d
 import numpy as np
+import numba as nb
 import os
 
 from tqdm import tqdm
 
-from src.neural_recon.dataset import Image, Point_3d
 
-import pysdf
+@dataclass
+class Image:
+    id_img: int
+    img_name: str
+    img_path: str
+    pos: np.ndarray
+    intrinsic: np.ndarray
+    extrinsic: np.ndarray
+    projection: np.ndarray
+    detected_points: np.ndarray = np.zeros((1, 1))
+    detected_lines: np.ndarray = np.zeros((1, 1))
+    line_field: np.ndarray = np.zeros((1, 1))
+    line_field_path: str = ""
+    img_size: Tuple[int] = (-1, -1)
 
-from src.neural_recon.sample import sample_points_cpu
+
+@dataclass
+class Point_3d:
+    pos: np.ndarray
+    tracks: (int, int)
+
+@nb.njit(cache=True)
+def np_all_axis1(x):
+    """Numba compatible version of np.all(x, axis=1)."""
+    out = np.ones(x.shape[0], dtype=np.bool8)
+    for i in range(x.shape[1]):
+        out = np.logical_and(out, x[:, i])
+    return out
 
 
-def check_visibility(v_img: Image, v_points):
-    points = np.concatenate([v_points, np.ones_like(v_points[:,0:1])], axis=1)
-    pixel_pos = np.matmul(v_img.extrinsic, points.T).T
-    is_locate_at_front = pixel_pos[:,2] > 0
-    pixel_pos = np.matmul(v_img.intrinsic, pixel_pos.T).T
-    pixel_pos = pixel_pos[:,:2] / (pixel_pos[:,2:3] + 1e-8)
-    return np.logical_and(is_locate_at_front, np.logical_and(
+@nb.njit
+def check_visibility(v_projection: np.ndarray, v_points: np.ndarray):
+    _ones = np.ones_like(v_points[:, 0:1])
+    points = np.concatenate((v_points, _ones), axis=1)
+    pixel_pos = np.dot(v_projection, np.ascontiguousarray(np.transpose(points)))
+    pixel_pos = np.transpose(pixel_pos)
+    is_locate_at_front = pixel_pos[:, 2] > 0
+    # pixel_pos = np.matmul(v_img.intrinsic, pixel_pos.T).T
+    pixel_pos = pixel_pos[:, :2] / pixel_pos[:, 2:3] / pixel_pos[:, 3:4]
+
+    is_within_window_ = np.logical_and(
         pixel_pos > 0,
         pixel_pos < 1,
-    ).all(axis = 1))
+    )
+    is_within_window = np_all_axis1(is_within_window_)
+    return np.logical_and(is_locate_at_front, is_within_window)
+
 
 def quaternion_rotation_matrix(Q):
     """
@@ -78,7 +108,7 @@ def quaternion_rotation_matrix(Q):
 
 def read_world_points(original_img_id_to_current_img_id, bounds_center, bounds_size, line):
     pos = np.array([float(line[1]), float(line[2]), float(line[3])], dtype=np.float32)
-    pos = (pos - bounds_center) / bounds_size * 2
+    pos = (pos - bounds_center) / bounds_size + 0.5
     assert (len(line) - 8) % 2 == 0
     num_track = (len(line) - 8) // 2
     tracks = []
@@ -127,7 +157,7 @@ def read_dataset(v_colmap_dir, v_bounds):
     bounds_center = (v_bounds[0] + v_bounds[1]) / 2
     bounds_size = (v_bounds[1] - v_bounds[0]).max()
 
-    model_matrix = np.zeros((4, 4), dtype=np.float32)
+    model_matrix = np.zeros((4, 4),dtype=np.float32)
     model_matrix[0, 0] = bounds_size
     model_matrix[1, 1] = bounds_size
     model_matrix[2, 2] = bounds_size
@@ -137,7 +167,7 @@ def read_dataset(v_colmap_dir, v_bounds):
     model_matrix[3, 3] = 1
 
     def is_inside_scene(v_pos):
-        return v_pos[0] > -1 and v_pos[1] > -1 and v_pos[2] > -1 and v_pos[0] < 1 and v_pos[1] < 1 and v_pos[2] < 1
+        return v_pos[0] > 0 and v_pos[1] > 0 and v_pos[2] > 0 and v_pos[0] < 1 and v_pos[1] < 1 and v_pos[2] < 1
 
     pool = Pool(16)
 
@@ -170,7 +200,7 @@ def read_dataset(v_colmap_dir, v_bounds):
             K[2, 2] = 1
             camera_intrinsic[cam_id] = {}
             camera_intrinsic[cam_id]["normalized_K"] = K
-            camera_intrinsic[cam_id]["img_size"] = (width,height)
+            camera_intrinsic[cam_id]["img_size"] = (width, height)
     print("Found {} cameras".format(len(camera_intrinsic)))
 
     imgs: List[Image] = []
@@ -178,7 +208,7 @@ def read_dataset(v_colmap_dir, v_bounds):
     with open(os.path.join(v_colmap_dir, "images.txt")) as f:
         data = [item.strip().split(" ") for item in f.readlines() if item[0] != "#"]
         assert len(data) % 2 == 0
-        imgs = [Image(-1, None, None, None, None) for _ in range(len(data) // 2)]
+        imgs = [Image(-1, None, None, None, None, None, None) for _ in range(len(data) // 2)]
         for id_img in tqdm(range(len(imgs))):
             line = data[id_img * 2]
             imgs[id_img].id_img, qw, qx, qy, qz, tx, ty, tz, camID, img_name = \
@@ -188,7 +218,10 @@ def read_dataset(v_colmap_dir, v_bounds):
             imgs[id_img].img_path = os.path.join(v_colmap_dir, "../imgs/", img_name)
             extrinsic = quaternion_rotation_matrix([qw, qx, qy, qz])
             extrinsic = np.concatenate([extrinsic, np.array([[tx, ty, tz]]).transpose()], axis=1, dtype=np.float32)
-            extrinsic_homo = np.concatenate([extrinsic, np.array([[0, 0, 0, 1]])], axis=0)
+            extrinsic_homo = np.concatenate([extrinsic, np.array([[0., 0., 0., 1.]])], axis=0, dtype=np.float32)
+            extrinsic_homo_inv = np.linalg.inv(extrinsic_homo)
+            imgs[id_img].pos = extrinsic_homo_inv[:3, 3]
+            imgs[id_img].pos = (imgs[id_img].pos - bounds_center) / bounds_size + 0.5
             projection_matrix = np.zeros((4, 4), dtype=np.float32)
             projection_matrix[:3, :3] = camera_intrinsic[cam_id]["normalized_K"]
             projection_matrix[3, 3] = 1
@@ -199,24 +232,27 @@ def read_dataset(v_colmap_dir, v_bounds):
             imgs[id_img].extrinsic = extrinsic
             imgs[id_img].projection = projection_matrix
             imgs[id_img].img_size = camera_intrinsic[camID]["img_size"]
+            imgs[id_img].img_name=os.path.basename(imgs[id_img].img_path).split(".")[0]
 
     print("Found {} viewpoints".format(len(imgs)))
 
     points_3d: List[Point_3d] = []
-    with open(os.path.join(v_colmap_dir, "points3D.txt")) as f:
-        data = [item.strip().split(" ") for item in f.readlines() if item[0] != "#"]
-        points_3d = list(pool.map(
-            partial(read_world_points, original_img_id_to_current_img_id, bounds_center, bounds_size),
-            data, chunksize=1000))
-    num_original_points = len(points_3d)
-    points_3d = list(filter(lambda item: is_inside_scene(item.pos), points_3d))
+    if False: # For now we don't need it
+        with open(os.path.join(v_colmap_dir, "points3D.txt")) as f:
+            data = [item.strip().split(" ") for item in f.readlines() if item[0] != "#"]
+            points_3d = list(pool.map(
+                partial(read_world_points, original_img_id_to_current_img_id, bounds_center, bounds_size),
+                data, chunksize=1000))
+        num_original_points = len(points_3d)
+        points_3d = list(filter(lambda item: is_inside_scene(item.pos), points_3d))
 
-    print(
-        "Found {} world points after filtering {} points".format(len(points_3d), num_original_points - len(points_3d)))
+        print(
+            "Found {} world points after filtering {} points".format(len(points_3d), num_original_points - len(points_3d)))
 
     # Read point field and line field for each img
     # imgs = list(pool.map(partial(read_superpoints, v_superglue_dir, img_size), enumerate(imgs)))
     imgs = list(pool.map(partial(read_segments, v_segments_dir), enumerate(imgs)))
+    print("Done reading segments")
     pool.close()
 
     # Testcase
@@ -224,6 +260,7 @@ def read_dataset(v_colmap_dir, v_bounds):
         id_point = 0
         point_3d = points_3d[id_point]
         pos_3d = point_3d.pos
+        # pos_3d = (pos_3d - 0.5) * bounds_size + bounds_center
         id_img = point_3d.tracks[0][0]
         id_keypoint = point_3d.tracks[0][1]
         img = np.asarray(cv2.imread(imgs[id_img].img_path)).copy()
@@ -235,6 +272,8 @@ def read_dataset(v_colmap_dir, v_bounds):
         img = cv2.circle(img, (int(pos_2d[0]), int(pos_2d[1])), 10, (0, 0, 255), 10)
         # for item in imgs[id_img].detected_points:
         #     img = cv2.circle(img, (int(item[0] * imgs[id_img].img_size[0]), int(item[1] * imgs[id_img].img_size[1])), 10, (0, 255, 255), 10)
+        print((imgs[id_img].pos - 0.5) * bounds_size + bounds_center)
+        print((pos_3d - 0.5) * bounds_size + bounds_center)
         cv2.namedWindow("1", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("1", 1600, 900)
         cv2.imshow("1", img)
@@ -242,107 +281,3 @@ def read_dataset(v_colmap_dir, v_bounds):
 
     return imgs, points_3d
 
-
-class Colmap_dataset(torch.utils.data.Dataset):
-    def __init__(self, v_colmap_dir_path, v_bounds, v_mode, v_mesh):
-        super(Colmap_dataset, self).__init__()
-        self.trainer_mode = v_mode
-
-        # Read colmap and segments
-        imgs, world_points = read_dataset(v_colmap_dir_path, v_bounds)
-
-        self.imgs: List[Image] = imgs
-        self.world_points: List[Point_3d] = world_points
-
-        # Read mesh and normalize it
-        self.mesh = o3d.io.read_triangle_mesh(os.path.join(v_colmap_dir_path,"gt_mesh.ply"))
-        vertices = np.asarray(self.mesh.vertices)
-        faces = np.asarray(self.mesh.triangles)
-
-        self.bounds_center = (v_bounds[0] + v_bounds[1]) / 2
-        self.bounds_size = (v_bounds[1] - v_bounds[0]).max()
-        vertices = (vertices - self.bounds_center) / self.bounds_size + 0.5
-
-        if True:
-            sdf_computer=pysdf.PYSDF_computer()
-            sdf_computer.setup_bounds(
-                np.append(self.bounds_center, self.bounds_size)
-            )
-            sdf_computer.setup_mesh(vertices[faces], False)
-            sdf = sdf_computer.compute_sdf(int(1e0), int(1e6), int(1e6), False)
-
-            sample_points = sdf[:, :3]
-            sample_distances = sdf[:, 3:]
-
-            pool = Pool(16)
-            visibility_window = pool.map(
-                partial(check_visibility, v_points=(sample_points-0.5) * self.bounds_size + self.bounds_center),
-                imgs, chunksize=10)
-            visibility_window = np.stack(visibility_window, axis=0)
-            pc = o3d.geometry.PointCloud()
-            pc.points = o3d.utility.Vector3dVector(sample_points)
-            o3d.io.write_point_cloud("output/1.ply", pc)
-
-            pc.points = o3d.utility.Vector3dVector(sample_points[visibility_window[0]])
-            o3d.io.write_point_cloud("output/2.ply", pc)
-
-            visibility_intersection = sdf_computer.check_visibility(
-                (np.asarray([item.extrinsic[:3,3] for item in imgs]) - sdf_computer.m_center) / sdf_computer.m_scale + 0.5,
-                sdf[:,:3]
-            )
-            visibility_intersection=visibility_intersection.reshape([len(imgs), -1]).astype(np.bool)
-            pc.points = o3d.utility.Vector3dVector(sample_points[visibility_intersection[0]==1])
-            o3d.io.write_point_cloud("output/3.ply", pc)
-
-            self.final_visibility = np.logical_and(visibility_window, visibility_intersection)
-            pc.points = o3d.utility.Vector3dVector(sample_points[self.final_visibility[0]])
-            o3d.io.write_point_cloud("output/4.ply", pc)
-            pass
-
-        pass
-
-    def __getitem__(self, index):
-        index = 1
-        point_3d = self.world_points[index]
-        projection_matrix_ = np.zeros((len(point_3d.tracks), 4, 4), dtype=np.float32)
-        id_imgs: torch.Tensor = torch.zeros(len(point_3d.tracks), dtype=torch.long)
-        keypoints_: List[torch.Tensor] = []
-        for id_track, track in enumerate(point_3d.tracks):
-            id_img = track[0]
-            id_imgs[id_track] = id_img
-            projection_matrix_[id_track] = self.imgs[id_img].projection
-            keypoints_.append(torch.from_numpy(self.imgs[id_img].detected_points))
-
-        projection_matrix = torch.from_numpy(projection_matrix_)
-        keypoints = pad_sequence(keypoints_, batch_first=True, padding_value=-1)
-        keypoints = torch.cat([keypoints, torch.logical_not(torch.all(keypoints == -1, dim=2, keepdim=True))], dim=2)
-
-        data = {}
-        data["id"] = torch.tensor(index, dtype=torch.long)
-        data["id_imgs"] = id_imgs
-        data["keypoints"] = keypoints
-        data["projection_matrix"] = projection_matrix
-        return data
-
-    def __len__(self):
-        return len(self.world_points)
-
-    @staticmethod
-    def collate_fn(batch):
-        id_points = [item["id"] for item in batch]
-        id_imgs_ = [item["id_imgs"] for item in batch]
-        keypoints_ = [item["keypoints"] for item in batch]
-        projection_matrix_ = [item["projection_matrix"] for item in batch]
-
-        # keypoints = pad_sequence(keypoints_,batch_first=True,padding_value=-1)
-        id_imgs = pad_sequence(id_imgs_, batch_first=True, padding_value=-1)
-        projection_matrix = pad_sequence(projection_matrix_, batch_first=True, padding_value=-1)
-        valid_views = torch.logical_not(torch.all(torch.flatten(projection_matrix, start_dim=2) == -1, dim=2))
-
-        return {
-            'id_points': torch.stack(id_points, dim=0),
-            'id_imgs': id_imgs,
-            'keypoints': keypoints_,
-            'projection_matrix': projection_matrix,
-            'valid_views': valid_views,
-        }

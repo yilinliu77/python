@@ -160,7 +160,7 @@ public:
 
 		m_dual_nodes.resize(node_counter);
 
-		tlog::success() << "Built TriangleOctree: depth=" << max_depth << " nodes=" << m_nodes.size() << " dual_nodes=" << m_dual_nodes.size() << ". Populating dual nodes...";
+		// tlog::success() << "Built TriangleOctree: depth=" << max_depth << " nodes=" << m_nodes.size() << " dual_nodes=" << m_dual_nodes.size() << ". Populating dual nodes...";
 
 		// TODO: find a fast lockfree hashmap implementation and parallelize the bottom for loop
 		std::unordered_map<Vector4i16, uint32_t> coords;

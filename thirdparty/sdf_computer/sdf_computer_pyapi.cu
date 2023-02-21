@@ -295,6 +295,7 @@ public:
         const py::array_t<float>& v_cameras,
         const py::array_t<float>& v_points)
     {
+        // std::cout << "Start 1" << std::endl;
         std::vector<Eigen::Vector3f> cameras;
         std::vector<Eigen::Vector3f> points;
         cameras.resize(v_cameras.shape(0));
@@ -315,14 +316,17 @@ public:
             points[i][2] = r_points(i, 2);
         }
 
+        // std::cout << "Start 2" << std::endl;
         const auto result = sdf_computer.compute_visibility(
             cameras, points);
 
+        // std::cout << "Start 3" << std::endl;
         py::array_t<short> results(result.size());
         auto r = results.mutable_unchecked<1>();
         for (int i = 0; i < result.size(); ++i) {
             r(i) = result[i];
         }
+        // std::cout << "Start 4" << std::endl;
         return results;
     }
 };

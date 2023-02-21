@@ -1,49 +1,15 @@
-import math
 import os, sys
-import pickle
-from dataclasses import dataclass
 from typing import List, Tuple
 
-import cv2
-import hydra
 import numpy as np
 import torch
-import torchvision
 from PIL import Image
-from torch.nn.functional import grid_sample
 from torch.nn.utils.rnn import pad_sequence
 
 from torch.utils.data import Dataset
-from torchvision.transforms.functional import to_tensor
-
-from matplotlib import pyplot as plt
 
 import open3d as o3d
-
-sys.path.append("thirdparty/sdf_computer/build/")
-
 import mesh2sdf
-
-
-@dataclass
-class Image:
-    id_img: int
-    img_path: np.ndarray
-    intrinsic: np.ndarray
-    extrinsic: np.ndarray
-    projection: np.ndarray
-    detected_points: np.ndarray = np.zeros((1, 1))
-    detected_lines: np.ndarray = np.zeros((1, 1))
-    line_field: np.ndarray = np.zeros((1, 1))
-    line_field_path: str = ""
-    img_size: Tuple[int] = (-1, -1)
-
-
-@dataclass
-class Point_3d:
-    pos: np.ndarray
-    tracks: (int, int)
-
 
 class Single_img_dataset(torch.utils.data.Dataset):
     def __init__(self, v_imgs, v_world_points, v_mode):

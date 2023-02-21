@@ -655,7 +655,7 @@ public:
 
 		m_nodes_gpu.resize_and_copy_from_host(m_nodes);
 
-		tlog::success() << "Built TriangleBvh: nodes=" << m_nodes.size();
+		// tlog::success() << "Built TriangleBvh: nodes=" << m_nodes.size();
 	}
 
 	void build_optix(const GPUMemory<Triangle>& triangles, cudaStream_t stream) override {
@@ -666,12 +666,12 @@ public:
 			m_optix.raystab = std::make_unique<optix::Program<Raystab>>((const char*)optix_ptx::raystab_ptx, sizeof(optix_ptx::raystab_ptx), g_optix);
 			m_optix.raytrace = std::make_unique<optix::Program<Raytrace>>((const char*)optix_ptx::raytrace_ptx, sizeof(optix_ptx::raytrace_ptx), g_optix);
 			m_optix.pathescape = std::make_unique<optix::Program<PathEscape>>((const char*)optix_ptx::pathescape_ptx, sizeof(optix_ptx::pathescape_ptx), g_optix);
-			tlog::success() << "Built OptiX GAS and shaders";
+			tlog::success() << "From SDF_computer: Built OptiX GAS and shaders";
 		} else {
-			tlog::warning() << "Falling back to slower TriangleBVH::ray_intersect.";
+			tlog::warning() << "From SDF_computer: Falling back to slower TriangleBVH::ray_intersect.";
 		}
 #else //NGP_OPTIX
-		tlog::warning() << "OptiX was not built. Falling back to slower TriangleBVH::ray_intersect.";
+		tlog::warning() << "From SDF_computer: OptiX was not built. Falling back to slower TriangleBVH::ray_intersect.";
 #endif //NGP_OPTIX
 	}
 

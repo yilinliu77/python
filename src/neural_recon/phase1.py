@@ -58,15 +58,18 @@ class Phase1(pl.LightningModule):
         self.save_hyperparameters(hparams)
 
         self.img = cv2.cvtColor(cv2.imread(v_img_path, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+        self.img_size = self.hydra_conf["dataset"]["img_size"]
+        self.img = cv2.resize(self.img, self.img_size,interpolation=cv2.INTER_AREA)
         self.img_name = os.path.basename(v_img_path).split(".")[0]
         self.log_root = os.path.join(self.hydra_conf["trainer"]["output"], self.img_name)
         os.makedirs(self.log_root,exist_ok=True)
         os.makedirs(os.path.join(self.log_root, "imgs"),exist_ok=True)
+        cv2.imwrite(os.path.join(self.log_root, "gt.png") ,cv2.cvtColor(self.img, cv2.COLOR_RGB2BGR))
 
         # Define models
         self.model1 = tcnn.Encoding(n_input_dims=2, encoding_config={
             "otype": "HashGrid",
-            "n_levels": 16,
+            "n_levels": 8,
             "n_features_per_level": 2,
             "log2_hashmap_size": 19,
             "base_resolution": 16,
@@ -92,10 +95,10 @@ class Phase1(pl.LightningModule):
             self.hydra_conf["trainer"]["batch_size"],
             "training"
         )
-        return DataLoader(self.valid_dataset,
+        return DataLoader(self.train_dataset,
                           batch_size=1,
                           num_workers=self.num_worker,
-                          shuffle=False,
+                          shuffle=True,
                           pin_memory=True,
                           persistent_workers=True if self.num_worker > 0 else 0
                           )
@@ -204,7 +207,7 @@ def main(v_cfg: DictConfig):
             logger=tb_logger,
             accelerator='gpu' if v_cfg["trainer"].gpu != 0 else None,
             devices=v_cfg["trainer"].gpu, enable_model_summary=False,
-            max_epochs=200,
+            max_epochs=500,
             num_sanity_val_steps=2,
             precision=16,
             check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],

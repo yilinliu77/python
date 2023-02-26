@@ -1,6 +1,11 @@
+import cv2
 import torch
 from torch import nn
 import torch.nn.functional as F
+import numpy as np
+import numba as nb
+
+import tinycudann as tcnn
 
 
 def init_bn(module):
@@ -249,7 +254,7 @@ class Explorer(nn.Module):
     def forward(self, v_data):
         sample_point = v_data["sample_point"][0]
         if len(v_data["img_names"]) <= 1:
-            return torch.tensor([0],dtype=torch.float16), torch.tensor([0],dtype=torch.float16)
+            return torch.tensor([0], dtype=torch.float16), torch.tensor([0], dtype=torch.float16)
         features = []
         pixels = []
         for id_img in range(len(v_data["img_names"])):
@@ -274,9 +279,125 @@ class Explorer(nn.Module):
         return predicted_probability, gt_probability
 
     def prepare_gt(self, v_pixels):
-        return torch.var(v_pixels,dim=[1,2]).unsqueeze(1)
+        return torch.var(v_pixels, dim=[1, 2]).unsqueeze(1)
 
     def loss(self, v_predicted_probability, v_gt_probability):
         inv_predicted_probability = 1 - v_predicted_probability
-        loss = torch.mean(inv_predicted_probability*v_gt_probability)
+        loss = torch.mean(inv_predicted_probability * v_gt_probability)
         return loss
+
+
+@nb.njit
+def bresenham(x0, y0, x1, y1, thickness=0):
+    """Yield integer coordinates on the line from (x0, y0) to (x1, y1).
+    Input coordinates should be integers.
+    The result will contain both the start and the end point.
+    """
+    dx = x1 - x0
+    dy = y1 - y0
+
+    xsign = 1 if dx > 0 else -1
+    ysign = 1 if dy > 0 else -1
+
+    dx = abs(dx)
+    dy = abs(dy)
+
+    if dx > dy:
+        xx, xy, yx, yy = xsign, 0, 0, ysign
+    else:
+        dx, dy = dy, dx
+        xx, xy, yx, yy = 0, ysign, xsign, 0
+
+    D = 2 * dy - dx
+    y = 0
+
+    result = []
+    is_thickness_larger = thickness != 0
+    for x in range(dx + 1):
+        if D >= 0:
+            y += 1
+            D -= 2 * dx
+        D += 2 * dy
+        result.append((x0 + x * xx + y * yx, y0 + x * xy + y * yy))
+        if is_thickness_larger:
+            for i in range(1, thickness + 1):
+                result.append((x0 + x * xx + y * yx, y0 + x * xy + y * yy - i))
+                result.append((x0 + x * xx + y * yx, y0 + x * xy + y * yy + i))
+    return result
+
+
+class Segment_explorer(nn.Module):
+    def __init__(self, v_imgs):
+        super(Segment_explorer, self).__init__()
+        # self.fuser = nn.MultiheadAttention(embed_dim=32, num_heads=2, batch_first=True)
+        # self.mlp = nn.Linear(32, 1)
+        self.imgs = v_imgs
+
+        self.model1 = tcnn.Encoding(
+            n_input_dims=6,
+            encoding_config={
+                "otype": "Frequency",
+                "n_frequencies": 12,
+            })
+        self.model2 = tcnn.Network(
+            n_input_dims=self.model1.n_output_dims,
+            n_output_dims=1,
+            network_config={
+                "otype": "FullyFusedMLP",
+                "activation": "ReLU",
+                "output_activation": "None",
+                "n_neurons": 64,
+                "n_hidden_layers": 2,
+            })
+        pass
+
+    def forward(self, v_data):
+        if False:
+            cv2.namedWindow("1", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("1", 1600, 900)
+            cv2.moveWindow("1", 0, 0)
+            for idx, item in enumerate(v_data["img_names"]):
+                img = self.imgs[item[0]]
+                img = cv2.line(img,
+                               (v_data["projected_coordinates"][0, idx, 0].cpu().numpy() * np.array((600, 400))).astype(
+                                   int),
+                               (v_data["projected_coordinates"][0, idx, 1].cpu().numpy() * np.array((600, 400))).astype(
+                                   int),
+                               (0, 0, 255),
+                               5,
+                               )
+                cv2.imshow("1", img)
+                cv2.waitKey()
+            pass
+        # for id_batch in range(v_data["id"].shape[0]):
+        #     sample_segment = v_data["sample_segment"][id_batch]
+        #     if len(v_data["img_names"]) <= 1:
+        #         return torch.tensor([0], dtype=torch.float16), torch.tensor([0], dtype=torch.float16)
+        #     projected_segment = v_data["projected_coordinates"][id_batch]
+        #     roi_regions = []
+        nif_feature = self.model1(v_data["sample_segment"].reshape([-1, 6]))
+        occupancy = torch.sigmoid(self.model2(nif_feature))
+        return occupancy
+
+    def prepare_gt(self, v_pixels):
+        return torch.var(v_pixels, dim=[1, 2]).unsqueeze(1)
+
+    def loss(self, v_predicted_probability, v_data):
+        gt_occupancy = (v_data["ncc"] + 1) / 2
+        gt_edge_similarity = (v_data["edge_similarity"] + 1) / 2
+        gt_edge_magnitude = v_data["edge_magnitude"] / 128
+        gt_probability = (gt_occupancy + gt_edge_similarity + gt_edge_magnitude) / 3
+        loss = torch.nn.functional.mse_loss(v_predicted_probability, gt_probability)
+        return loss
+
+
+if __name__ == '__main__':
+    pixels = np.array(bresenham(10, 10, 0, 0, 2))
+    pixels = np.clip(pixels, 0, 19)
+    cv2.namedWindow("1", cv2.WINDOW_NORMAL)
+    cv2.moveWindow("1", 0, 0)
+    cv2.resizeWindow("1", 900, 900)
+    img = np.zeros((20, 20), dtype=np.uint8)
+    img[pixels[:, 1], pixels[:, 0]] = 255
+    cv2.imshow("1", img)
+    cv2.waitKey()

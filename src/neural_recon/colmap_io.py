@@ -257,27 +257,32 @@ def read_dataset(v_colmap_dir, v_bounds):
 
     # Testcase
     if False:
-        id_point = 0
-        point_3d = points_3d[id_point]
-        pos_3d = point_3d.pos
-        # pos_3d = (pos_3d - 0.5) * bounds_size + bounds_center
-        id_img = point_3d.tracks[0][0]
-        id_keypoint = point_3d.tracks[0][1]
-        img = np.asarray(cv2.imread(imgs[id_img].img_path)).copy()
-        projection = imgs[id_img].projection
-        pos_2d = np.matmul(projection, np.concatenate([pos_3d, np.ones_like(pos_3d[0:1])], axis=0))
-        pos_2d = pos_2d[:2] / pos_2d[2] / pos_2d[3]
-        pos_2d[0] *= imgs[id_img].img_size[0]
-        pos_2d[1] *= imgs[id_img].img_size[1]
-        img = cv2.circle(img, (int(pos_2d[0]), int(pos_2d[1])), 10, (0, 0, 255), 10)
-        # for item in imgs[id_img].detected_points:
-        #     img = cv2.circle(img, (int(item[0] * imgs[id_img].img_size[0]), int(item[1] * imgs[id_img].img_size[1])), 10, (0, 255, 255), 10)
-        print((imgs[id_img].pos - 0.5) * bounds_size + bounds_center)
-        print((pos_3d - 0.5) * bounds_size + bounds_center)
         cv2.namedWindow("1", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("1", 1600, 900)
-        cv2.imshow("1", img)
-        cv2.waitKey()
+        cv2.moveWindow("1", 0, 0)
+
+        id_points = [10]
+        for id_point in id_points:
+            point_3d = points_3d[id_point]
+            pos_3d = point_3d.pos
+            original_pos3d=(pos_3d - 0.5) * bounds_size + bounds_center
+            print("\nPoint: {} has {} cameras".format(original_pos3d, len(point_3d.tracks)))
+            # pos_3d = (pos_3d - 0.5) * bounds_size + bounds_center
+            for track in point_3d.tracks:
+                id_img = track[0]
+                id_keypoint = track[1]
+                img = np.asarray(cv2.imread(imgs[id_img].img_path)).copy()
+                projection = imgs[id_img].projection
+                pos_2d = np.matmul(projection, np.concatenate([pos_3d, np.ones_like(pos_3d[0:1])], axis=0))
+                pos_2d = pos_2d[:2] / pos_2d[2] / pos_2d[3]
+                pos_2d[0] *= imgs[id_img].img_size[0]
+                pos_2d[1] *= imgs[id_img].img_size[1]
+                img = cv2.circle(img, (int(pos_2d[0]), int(pos_2d[1])), 10, (0, 0, 255), 10)
+                # for item in imgs[id_img].detected_points:
+                #     img = cv2.circle(img, (int(item[0] * imgs[id_img].img_size[0]), int(item[1] * imgs[id_img].img_size[1])), 10, (0, 255, 255), 10)
+                print("---- {}".format((imgs[id_img].pos - 0.5) * bounds_size + bounds_center))
+                cv2.imshow("1", img)
+                cv2.waitKey()
 
     return imgs, points_3d
 

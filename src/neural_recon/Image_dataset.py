@@ -1,3 +1,4 @@
+import math
 from typing import List
 
 import cv2
@@ -39,4 +40,4 @@ class Image_dataset(torch.utils.data.Dataset):
         return sample_points.to(torch.float16), (self.img[index[:,1],index[:,0]] / 255.).to(torch.float16)
 
     def __len__(self):
-        return self.sample_points.shape[0] // self.batch_size + 1
+        return math.ceil(self.sample_points.shape[0] / self.batch_size)

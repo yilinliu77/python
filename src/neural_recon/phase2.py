@@ -223,8 +223,8 @@ class Phase2(pl.LightningModule):
             sdf_computer.setup_mesh(data["gt_mesh_vertices"][data["gt_mesh_faces"]],
                                     False)  # Do not automatically compute the bounds
             # Sample points and calculate sdf
-            num_point_near_surface = int(1e6)
-            num_point_uniform = int(1e6)
+            num_point_near_surface = int(1e2)
+            num_point_uniform = int(1e2)
             sdf = sdf_computer.compute_sdf(int(1e0), num_point_near_surface, num_point_uniform, False)
             data["sample_points"] = sdf[:, :3]
             data["sample_distances"] = sdf[:, 3:]
@@ -277,7 +277,7 @@ class Phase2(pl.LightningModule):
             # Both start and end point near surface
             p = data["sample_points"]
             v = data["final_visibility"]
-            num_segment = int(1e6)
+            num_segment = int(1e2)
             index1 = np.random.randint(0, num_point_near_surface, num_segment)
             index2 = np.random.randint(0, num_point_near_surface, num_segment)
             segments1 = np.stack([p[index1], p[index2]], axis=1)
@@ -347,10 +347,18 @@ class Phase2(pl.LightningModule):
         def read_img(v_path):
             original_img = cv2.imread(v_path,cv2.IMREAD_UNCHANGED)
             resized_img = cv2.resize(original_img, img_size)
-            transform_img = cv2.cvtColor(resized_img,cv2.COLOR_BGR2RGB)
+            transform_img = cv2.cvtColor(resized_img,cv2.COLOR_BGR2GRAY)
             gray_img = cv2.cvtColor(resized_img,cv2.COLOR_BGR2GRAY)
-            gx, gy = np.gradient(gray_img)
-            return transform_img, np.stack((gx,gy), axis=2)
+
+            gx = cv2.Sobel(gray_img, cv2.CV_32F, 1, 0, ksize=5,scale=1/128)
+            gy = cv2.Sobel(gray_img, cv2.CV_32F, 0, 1, ksize=5,scale=1/128)
+            # gx_ = cv2.dilate(gx, cv2.getStructuringElement(cv2.MORPH_CROSS,(5,5)))
+            # gy_ = cv2.dilate(gy, cv2.getStructuringElement(cv2.MORPH_CROSS,(5,5)))
+            gradient = np.stack((gx, gy),axis=2)
+            # cv2.namedWindow("1",cv2.WINDOW_NORMAL)
+            # cv2.imshow("1", np.concatenate((gx, gx_, gx___),axis=1))
+            # cv2.waitKey()
+            return transform_img, gradient
 
         imgs = {item.img_name:read_img(item.img_path) for item in v_imgs}
         model = Segment_explorer(imgs)
@@ -363,7 +371,7 @@ class Phase2(pl.LightningModule):
         self.train_dataset = Blender_Segment_dataset(
             self.data,
             self.imgs,
-            "validation",
+            "training",
         )
         return DataLoader(self.train_dataset,
                           batch_size=self.batch_size,

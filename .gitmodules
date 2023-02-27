@@ -19,3 +19,6 @@
 [submodule "thirdparty/tiny-cuda-nn"]
 	path = thirdparty/tiny-cuda-nn
 	url = https://github.com/NVlabs/tiny-cuda-nn
+[submodule "thirdparty/pylbd"]
+	path = thirdparty/pylbd
+	url = https://www.github.com/iago-suarez/pytlbd

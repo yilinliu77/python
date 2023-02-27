@@ -1,5 +1,8 @@
 from typing import List
-
+import sys
+sys.path.append(r"D:\repo\python\thirdparty\pylbd\build\Release")
+import pytlbd
+from scipy.spatial.distance import cdist
 import cv2
 import torch
 import numpy as np
@@ -135,9 +138,10 @@ class Blender_Segment_dataset(torch.utils.data.Dataset):
             # or we will predict it as a negative sample
             if num_view <= 1:
                 projected_segment = np.zeros(0)
-                final_ncc = -1.
-                final_edge_similarity = -1.
-                final_edge_magnitude = -1.
+                final_ncc = 0.
+                final_edge_similarity = 0.
+                final_edge_magnitude = 1.
+                lbd_similarity = -1.
             else:
                 # Calculate the projected segment
                 projected_segment = np.matmul(np.asarray(projection_matrix_),
@@ -154,13 +158,18 @@ class Blender_Segment_dataset(torch.utils.data.Dataset):
                 roi_regions = []
                 edge_similarities = []
                 edge_magnitudes = []
+                lbd_descriptors = []
                 # It might not equal to `num_view`. Some projections might be a single pixel on image. Just skip them
                 for id_view in range(num_view):
                     # Take the data
                     img = self.imgs[img_names[id_view]][0]
                     projected_segment_per_view = projected_segment[id_view]
                     img_size = img.shape[:2][::-1]
+                    ori_coords = (projected_segment_per_view * img_size).astype(np.int64)
 
+                    if True:
+                        viz_img = cv2.line(img.copy(), ori_coords[0],ori_coords[1],(255,0,0),2)
+                        cv2.imwrite("output/loss_test/0_{}_original.png".format(id_view), viz_img)
                     # Compute the related region using a rotated rectangle
                     roi_size, roi_angle, roi_center = extract_roi_rectangle(projected_segment_per_view, img_size)
                     # Check the size
@@ -174,18 +183,28 @@ class Blender_Segment_dataset(torch.utils.data.Dataset):
                     edge_magnitudes.append(edge_magnitude)
 
                     # ROI region
-                    roi_resized = extract_roi_region(img, roi_center, roi_angle, roi_size)
+                    roi_resized = extract_roi_region(img, roi_center, roi_angle, roi_size, id_view)
                     roi_regions.append(roi_resized)
 
+                    descriptor = pytlbd.lbd_single_scale(img, ori_coords.reshape((1,4)), 9, 7)
+                    lbd_descriptors.append(descriptor)
                 if len(roi_regions) <= 1:
-                    final_ncc = -1.
-                    final_edge_similarity = -1.
-                    final_edge_magnitude = -1.
+                    final_ncc = 0.
+                    final_edge_similarity = 0.
+                    final_edge_magnitude = 0.
+                    lbd_similarity = -1.
                 else:
-                    nccs = calculate_ncc_batch(roi_regions)
-                    final_ncc = np.mean(nccs)
-                    final_edge_similarity = np.mean(edge_similarities)
-                    final_edge_magnitude = np.mean(edge_magnitudes)
+                    nccs = calculate_ncc_batch(roi_regions) # [-1,1]
+                    final_ncc = np.mean(nccs) / 2 + 0.5 # [0,1]
+                    final_edge_similarity = np.mean(edge_similarities) # [0,1]
+                    final_edge_magnitude = np.mean(edge_magnitudes) # [0,1]
+                    lbd_similarities = []
+                    for id_view1 in range(len(roi_regions)):
+                        for id_view2 in range(id_view1 + 1, len(roi_regions)):
+                            lbd_similarity = cdist(lbd_descriptors[id_view1], lbd_descriptors[id_view2])
+                            lbd_similarities.append(lbd_similarity)
+                    lbd_similarity = 1 - np.mean(lbd_similarities)
+                    pass
 
             data = {}
             data["id"] = torch.tensor(index, dtype=torch.long)
@@ -196,6 +215,7 @@ class Blender_Segment_dataset(torch.utils.data.Dataset):
             data["ncc"] = final_ncc
             data["edge_similarity"] = final_edge_similarity
             data["edge_magnitude"] = final_edge_magnitude
+            data["lbd_similarity"] = lbd_similarity
             self.cache[index] = data
             return data
         else:
@@ -215,6 +235,7 @@ class Blender_Segment_dataset(torch.utils.data.Dataset):
         ncc = torch.tensor([item["ncc"] for item in batch], dtype=torch.float32).unsqueeze(1)
         edge_similarity = torch.tensor([item["edge_similarity"] for item in batch], dtype=torch.float32).unsqueeze(1)
         edge_magnitude = torch.tensor([item["edge_magnitude"] for item in batch], dtype=torch.float32).unsqueeze(1)
+        lbd_similarity = torch.tensor([item["lbd_similarity"] for item in batch], dtype=torch.float32).unsqueeze(1)
 
         return {
             'id': id,
@@ -225,4 +246,5 @@ class Blender_Segment_dataset(torch.utils.data.Dataset):
             'ncc': ncc,
             'edge_similarity': edge_similarity,
             'edge_magnitude': edge_magnitude,
+            'lbd_similarity': lbd_similarity,
         }

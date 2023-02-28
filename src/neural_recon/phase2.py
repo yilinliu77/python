@@ -1,5 +1,7 @@
 import sys, os
 
+from src.neural_recon.generate_gt import compute_loss
+
 sys.path.append("thirdparty/sdf_computer/build/")
 
 from dataclasses import dataclass
@@ -223,8 +225,8 @@ class Phase2(pl.LightningModule):
             sdf_computer.setup_mesh(data["gt_mesh_vertices"][data["gt_mesh_faces"]],
                                     False)  # Do not automatically compute the bounds
             # Sample points and calculate sdf
-            num_point_near_surface = int(1e2)
-            num_point_uniform = int(1e2)
+            num_point_near_surface = int(1e6)
+            num_point_uniform = int(1e6)
             sdf = sdf_computer.compute_sdf(int(1e0), num_point_near_surface, num_point_uniform, False)
             data["sample_points"] = sdf[:, :3]
             data["sample_distances"] = sdf[:, 3:]
@@ -277,7 +279,7 @@ class Phase2(pl.LightningModule):
             # Both start and end point near surface
             p = data["sample_points"]
             v = data["final_visibility"]
-            num_segment = int(1e2)
+            num_segment = int(1e6)
             index1 = np.random.randint(0, num_point_near_surface, num_segment)
             index2 = np.random.randint(0, num_point_near_surface, num_segment)
             segments1 = np.stack([p[index1], p[index2]], axis=1)
@@ -362,6 +364,24 @@ class Phase2(pl.LightningModule):
 
         imgs = {item.img_name:read_img(item.img_path) for item in v_imgs}
         model = Segment_explorer(imgs)
+
+        # Used to compile the numba function that used in dataset
+        for index in range(self.data["segments"].shape[0]):
+            segment = self.data["segments"][index].astype(np.float32)
+            visibility_mask = self.data["segments_visibility"][:, index]
+            visible_imgs = [item for idx, item in enumerate(self.data["img_database"]) if visibility_mask[idx]]
+            img_names = tuple(item.img_name for item in visible_imgs)
+            projection_matrix_ = [item.projection for item in visible_imgs]
+            homogeneous_sample_segment = np.insert(segment, 3, 1, axis=1)
+            num_view = len(img_names)
+            if num_view <= 1:
+                continue
+            projected_segment = np.matmul(np.asarray(projection_matrix_),
+                                          np.transpose(homogeneous_sample_segment)).swapaxes(1, 2)
+            projected_segment = projected_segment[:, :, :2] / projected_segment[:, :, 2:3]
+            compute_loss(imgs, num_view, projected_segment, img_names)
+            break
+
         return model, imgs
 
     def forward(self, v_data):
@@ -390,7 +410,7 @@ class Phase2(pl.LightningModule):
         )
         return DataLoader(self.valid_dataset,
                           batch_size=self.batch_size,
-                          num_workers=self.num_worker,
+                          num_workers=1,
                           shuffle=False,
                           pin_memory=True,
                           collate_fn=Blender_Segment_dataset.collate_fn,

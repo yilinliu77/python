@@ -88,7 +88,7 @@ if __name__ == '__main__':
     model = Phase2({
         "dataset":
             {"scene_boundary": [-1.5, -1.5, -1.5, 1.5, 1.5, 1.5],
-             "colmap_dir": "C:/Users/whats/Dropbox/Project/2022-Recon/Illustrations/Cube",
+             "colmap_dir": "C:/Users/whats/Dropbox/Project/2022-NeuralStructure/Illustrations/Cube",
              "img_nif_dir": "output/neural_recon/img_nif_log",
              "trained_img_size": [600, 400],
              "num_sample": [300000000, 300000000, 300000000],
@@ -139,7 +139,7 @@ if __name__ == '__main__':
                 viz_img = cv2.line(img,
                                    projected_coordinates[id_img][0],
                                    projected_coordinates[id_img][1],
-                                   (0, 0, 255), 1)
+                                   (0, 0, 255), 2)
                 viz_imgs.append(viz_img)
             viz_imgs = np.concatenate(viz_imgs,axis=1)
             print("==========={}=============".format(idx))

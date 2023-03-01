@@ -30,7 +30,7 @@ class Image:
     detected_lines: np.ndarray = np.zeros((1, 1))
     line_field: np.ndarray = np.zeros((1, 1))
     line_field_path: str = ""
-    img_size: Tuple[int] = (-1, -1)
+    img_size: tuple[int, int] = (-1, -1)
 
 
 @dataclass

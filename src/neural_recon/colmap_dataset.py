@@ -98,11 +98,12 @@ class Colmap_dataset(torch.utils.data.Dataset):
 
 
 class Blender_Segment_dataset(torch.utils.data.Dataset):
-    def __init__(self, v_data, v_imgs, v_mode):
+    def __init__(self, v_data, v_imgs, v_gt_loss, v_mode):
         super(Blender_Segment_dataset, self).__init__()
         self.trainer_mode = v_mode
         self.img_database = v_data["img_database"]
         self.imgs = v_imgs
+        self.gt_loss = v_gt_loss
         self.segments = v_data["segments"]
         self.segments_visibility = v_data["segments_visibility"]
 
@@ -116,15 +117,6 @@ class Blender_Segment_dataset(torch.utils.data.Dataset):
             visibility_mask = self.segments_visibility[:, index]
             visible_imgs = [item for idx, item in enumerate(self.img_database) if visibility_mask[idx]]
 
-            # Read original img
-            if False:
-                original_imgs = [
-                    cv2.resize(cv2.cvtColor(cv2.imread(item.img_path, cv2.IMREAD_UNCHANGED)[:, :, :3], cv2.COLOR_BGR2RGB),
-                               (800, 600)) for item in visible_imgs]
-                tensor_imgs = [img_transform(item) for item in original_imgs]
-                tensor_imgs = torch.stack(tensor_imgs, dim=0)
-                original_imgs = torch.from_numpy(np.stack(original_imgs, axis=0))
-
             img_names = tuple(item.img_name for item in visible_imgs)
 
             # Project the segments on image
@@ -135,10 +127,6 @@ class Blender_Segment_dataset(torch.utils.data.Dataset):
             # or we will predict it as a negative sample
             if num_view <= 1:
                 projected_segment = np.zeros(0)
-                final_ncc = 0.
-                final_edge_similarity = 0.
-                final_edge_magnitude = 1.
-                lbd_similarity = -1.
             else:
                 # Calculate the projected segment
                 projected_segment = np.matmul(np.asarray(projection_matrix_),
@@ -149,13 +137,7 @@ class Blender_Segment_dataset(torch.utils.data.Dataset):
                 is_y_larger_than_x = projected_segment[:, 0, 0] > projected_segment[:, 1, 0]
                 projected_segment[is_y_larger_than_x] = projected_segment[is_y_larger_than_x][:, ::-1]
 
-                final_ncc,final_edge_similarity,final_edge_magnitude,lbd_similarity = compute_loss(self.imgs, num_view, projected_segment, img_names)
-
-            # import time
-            # a = time.time()
-            # for i in range(1000): compute_loss(self.imgs, num_view, projected_segment, img_names)
-            # print(time.time() - a)
-            # exit()
+            final_ncc,final_edge_similarity,final_edge_magnitude,lbd_similarity = self.gt_loss[index]
             data = {}
             data["id"] = torch.tensor(index, dtype=torch.long)
             data["sample_segment"] = torch.from_numpy(segment.astype(np.float32))

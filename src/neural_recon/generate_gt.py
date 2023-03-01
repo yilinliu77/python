@@ -5,6 +5,7 @@ import numpy as np
 import open3d as o3d
 import os
 
+import ray
 from numba import prange
 from scipy.spatial.distance import cdist
 from tqdm import tqdm
@@ -67,13 +68,13 @@ def correlation_coefficient(patch1, patch2):
 @nb.njit()
 def calculate_ncc_batch(v_roi_regions):
     num_region = v_roi_regions.shape[0]
-    nccs = np.zeros(int(num_region * num_region), np.float32)
+    nccs = -np.ones(int(num_region * num_region), np.float32)
     for id_view1 in range(num_region):
         for id_view2 in range(id_view1 + 1, num_region):
             ncc = correlation_coefficient(v_roi_regions[id_view1].astype(np.float32),
                                           v_roi_regions[id_view2].astype(np.float32))
             nccs[id_view1 * num_region + id_view2] = ncc
-    nccs_ = nccs[np.nonzero(nccs)]
+    nccs_ = nccs[nccs != -1]
     return nccs_
 
 
@@ -130,7 +131,7 @@ def extract_roi_region(v_img: np.ndarray, v_roi_center, v_roi_angle, v_roi_size,
 
 
 @nb.jit(forceobj=True)
-def compute_loss(v_imgs, v_num_view, projected_segment, img_names):
+def compute_loss_item(v_imgs, v_num_view, projected_segment, img_names):
     # Compute the related region (resize to (W*H)) on the image according to the projected segment
     # W is the length of the projected segment
     # H is a pre-defined parameter (10 by default)
@@ -146,7 +147,7 @@ def compute_loss(v_imgs, v_num_view, projected_segment, img_names):
         img_size = img.shape[:2][::-1]
         ori_coords = (projected_segment_per_view * img_size).astype(np.int64)
 
-        if False:
+        if True:
             viz_img = cv2.line(img.copy(), ori_coords[0], ori_coords[1], (255, 0, 0), 2)
             cv2.imwrite("output/loss_test/0_{}_original.png".format(id_view), viz_img)
         # Compute the related region using a rotated rectangle
@@ -181,4 +182,46 @@ def compute_loss(v_imgs, v_num_view, projected_segment, img_names):
         final_edge_similarity = np.mean(edge_similarities)  # [0,1]
         final_edge_magnitude = np.mean(edge_magnitudes)  # [0,1]
         pass
+    return final_ncc, final_edge_similarity, final_edge_magnitude, lbd_similarity
+
+
+# @nb.jit(parallel=True)
+@ray.remote
+def compute_loss(
+        v_id,
+        v_segment,
+        v_segment_visibility,
+        v_projections, v_img_names, v_imgs
+):
+    segment = v_segment.astype(np.float32)
+    visibility_mask = v_segment_visibility
+
+    img_names = [item for idx, item in enumerate(v_img_names) if visibility_mask[idx]]
+    projection_matrix_ = [item for idx, item in enumerate(v_projections) if visibility_mask[idx]]
+
+    # Project the segments on image
+    homogeneous_sample_segment = np.insert(segment, 3, 1, axis=1)
+    num_view = len(img_names)
+    # We should at least have two views to reconstruct a target
+    # or we will predict it as a negative sample
+    if num_view <= 1:
+        projected_segment = np.zeros(0)
+        final_ncc = 0.
+        final_edge_similarity = 0.
+        final_edge_magnitude = 1.
+        lbd_similarity = -1.
+    else:
+        # Calculate the projected segment
+        projected_segment = np.matmul(np.asarray(projection_matrix_),
+                                      np.transpose(homogeneous_sample_segment)).swapaxes(1, 2)
+        projected_segment = projected_segment[:, :, :2] / projected_segment[:, :, 2:3]
+
+        # Make sure the start point of the segment is on the left
+        is_y_larger_than_x = projected_segment[:, 0, 0] > projected_segment[:, 1, 0]
+        projected_segment[is_y_larger_than_x] = projected_segment[is_y_larger_than_x][:, ::-1]
+
+        final_ncc, final_edge_similarity, final_edge_magnitude, lbd_similarity = compute_loss_item(v_imgs,
+                                                                                                   num_view,
+                                                                                                   projected_segment,
+                                                                                                   img_names)
     return final_ncc, final_edge_similarity, final_edge_magnitude, lbd_similarity

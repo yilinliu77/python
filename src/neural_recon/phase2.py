@@ -81,8 +81,8 @@ class Phase2(pl.LightningModule):
 
         # self.data = self.prepare_dataset(self.hydra_conf["dataset"]["colmap_dir"], self.scene_bounds)
         # self.model = self.prepare_model1(self.data["img_database"], self.hydra_conf["dataset"]["img_nif_dir"])
-        self.data = self.prepare_dataset_blender(self.hydra_conf["dataset"]["colmap_dir"], self.scene_bounds)
-        self.model, self.imgs = self.prepare_model2(self.data["img_database"])
+        self.data, self.gt_loss = self.prepare_dataset_blender()
+        self.model, self.imgs = self.prepare_model2()
 
     def prepare_dataset(self, v_colmap_dir, v_bounds):
         print("Start to load colmap")
@@ -163,149 +163,10 @@ class Phase2(pl.LightningModule):
 
         return data
 
-    def prepare_dataset_blender(self, v_data_dir, v_bounds):
-        print("Start to load blender")
-
-        model_matrix = np.zeros((4, 4), dtype=np.float32)
-        model_matrix[0, 0] = self.bounds_size
-        model_matrix[1, 1] = self.bounds_size
-        model_matrix[2, 2] = self.bounds_size
-        model_matrix[0, 3] = self.bounds_center[0] - self.bounds_size / 2
-        model_matrix[1, 3] = self.bounds_center[1] - self.bounds_size / 2
-        model_matrix[2, 3] = self.bounds_center[2] - self.bounds_size / 2
-        model_matrix[3, 3] = 1
-
-        # Read intrinsic
-        intrinsic = np.loadtxt(os.path.join(v_data_dir, "cameras.txt")).astype(np.float32)
-
-        intrinsic[0, 0] /= 1920
-        intrinsic[0, 2] /= 1920
-        intrinsic[1, 1] /= 1080
-        intrinsic[1, 2] /= 1080
-
-        # Read poses
-        extrinsics = []
-        for i in range(0, 4):
-            extrinsic = np.loadtxt(os.path.join(v_data_dir, "{}.txt".format(i))).astype(np.float32)
-            extrinsics.append(extrinsic)
-
-        data = {}
-        data["img_database"]: List[Image] = [
-            Image(
-                id_img=i,
-                img_name="{}.png".format(i),
-                img_path=os.path.join(v_data_dir, "{}.png".format(i)),
-                pos=(np.linalg.inv(to_homogeneous(extrinsics[i]))[:3, 3] - self.bounds_center) / self.bounds_size + 0.5,
-                intrinsic=to_homogeneous(intrinsic),
-                extrinsic=to_homogeneous(extrinsics[i]),
-                projection=to_homogeneous(intrinsic @ extrinsics[i] @ model_matrix),
-                detected_points=np.zeros((1, 1)),
-                detected_lines=np.zeros((1, 1)),
-                line_field=np.zeros((1, 1)),
-                line_field_path="",
-                img_size=(1920, 1080)
-            ) for i in range(len(extrinsics))]
-
-        # Read mesh and normalize it
-        self.mesh = o3d.io.read_triangle_mesh(os.path.join(v_data_dir, "annoying.ply"))
-        data["gt_mesh_vertices"] = np.asarray(self.mesh.vertices)
-        data["gt_mesh_faces"] = np.asarray(self.mesh.triangles)
-        data["gt_mesh_vertices"] = (data["gt_mesh_vertices"] - self.bounds_center) / self.bounds_size + 0.5
-
-        # Compute gt visibility
-        if True:
-            # Set -1 to skip the test
-            print("Start to sample points and compute sdf")
-            id_test_img = -1
-            sdf_computer = pysdf.PYSDF_computer()
-            # Fix the bounds
-            sdf_computer.setup_bounds(
-                np.append(self.bounds_center, self.bounds_size)
-            )
-            sdf_computer.setup_mesh(data["gt_mesh_vertices"][data["gt_mesh_faces"]],
-                                    False)  # Do not automatically compute the bounds
-            # Sample points and calculate sdf
-            num_point_near_surface = int(1e6)
-            num_point_uniform = int(1e6)
-            sdf = sdf_computer.compute_sdf(int(1e0), num_point_near_surface, num_point_uniform, False)
-            data["sample_points"] = sdf[:, :3]
-            data["sample_distances"] = sdf[:, 3:]
-
-            print("Start to check visibility")
-            # Start to check visibility
-            pool = Pool(16)
-            check_visibility(np.zeros((4, 4), dtype=np.float32),
-                             np.zeros((2, 3), np.float32))  # Dummy, just for compiling the function
-            visibility_inside_frustum = pool.map(
-                partial(check_visibility, v_points=data["sample_points"]),
-                [item.projection for item in data["img_database"]], chunksize=min(10, len(data["img_database"]) // 2))
-            visibility_inside_frustum = np.stack(visibility_inside_frustum, axis=0)
-
-            visibility_intersection_free = sdf_computer.check_visibility(
-                np.asarray([item.pos for item in data["img_database"]]),
-                data["sample_points"]
-            )
-            visibility_intersection_free = visibility_intersection_free.reshape([len(data["img_database"]), -1]).astype(
-                bool)
-
-            data["final_visibility"] = np.logical_and(visibility_inside_frustum, visibility_intersection_free)
-
-            if id_test_img != -1:
-                tr = o3d.geometry.TriangleMesh()
-                pc = o3d.geometry.PointCloud()
-                # Store normalized model
-                tr.vertices = o3d.utility.Vector3dVector(data["gt_mesh_vertices"])
-                tr.triangles = o3d.utility.Vector3iVector(data["gt_mesh_faces"])
-                o3d.io.write_triangle_mesh("output/model.ply", tr)
-                # Store normalized cameras
-                pc.points = o3d.utility.Vector3dVector(np.asarray([item.pos for item in data["img_database"]]))
-                o3d.io.write_point_cloud("output/cameras.ply", pc)
-                # Store normalized sample points
-                pc.points = o3d.utility.Vector3dVector(data["sample_points"])
-                o3d.io.write_point_cloud("output/1.ply", pc)
-                # Store points inside frustum
-                pc.points = o3d.utility.Vector3dVector(data["sample_points"][visibility_inside_frustum[id_test_img]])
-                o3d.io.write_point_cloud("output/2.ply", pc)
-                # Store points that are collision-free
-                pc.points = o3d.utility.Vector3dVector(
-                    data["sample_points"][visibility_intersection_free[id_test_img] == 1])
-                o3d.io.write_point_cloud("output/3.ply", pc)
-                # Store points that are visible to both
-                pc.points = o3d.utility.Vector3dVector(data["sample_points"][data["final_visibility"][id_test_img]])
-                o3d.io.write_point_cloud("output/4.ply", pc)
-                pc.clear()
-
-            # Sample segments
-            # Both start and end point near surface
-            p = data["sample_points"]
-            v = data["final_visibility"]
-            num_segment = int(1e6)
-            index1 = np.random.randint(0, num_point_near_surface, num_segment)
-            index2 = np.random.randint(0, num_point_near_surface, num_segment)
-            segments1 = np.stack([p[index1], p[index2]], axis=1)
-            visibility1 = np.logical_and(v[:,index1],v[:,index2])
-
-            # Only start or end point near surface
-            index1 = np.random.randint(0, num_point_near_surface, num_segment)
-            index2 = np.random.randint(num_point_near_surface, p.shape[0], num_segment)
-            segments21 = np.stack([p[index1], p[index2]], axis=1)
-            segments22 = np.stack([p[index2], p[index1]], axis=1)
-            visibility21 = np.logical_and(v[:,index1],v[:,index2])
-            visibility22 = np.logical_and(v[:,index2],v[:,index1])
-
-            # None of the points near surface
-            index1 = np.random.randint(num_point_near_surface, p.shape[0], num_segment)
-            index2 = np.random.randint(num_point_near_surface, p.shape[0], num_segment)
-            segments3 = np.stack([p[index1], p[index2]], axis=1)
-            visibility3 = np.logical_and(v[:,index1],v[:,index2])
-
-            segments = np.concatenate((segments1, segments21, segments22, segments3), axis=0)
-            segments_visibility = np.concatenate((visibility1, visibility21, visibility22, visibility3), axis=1)
-            data["segments"] = segments
-            data["segments_visibility"] = segments_visibility
-            pass
-
-        return data
+    def prepare_dataset_blender(self):
+        gt_loss = np.load("output/gt_loss/gt_loss.npy")
+        data = np.load("output/gt_loss/data.npy", allow_pickle=True)[()]
+        return data, gt_loss
 
     def prepare_model1(self, v_imgs, v_nif_dir):
         print("Start to load image models")
@@ -343,45 +204,10 @@ class Phase2(pl.LightningModule):
         self.model = Explorer(img_models)
         return img_models
 
-    def prepare_model2(self, v_imgs):
+    def prepare_model2(self):
         img_size = self.hydra_conf["dataset"]["trained_img_size"]
-
-        def read_img(v_path):
-            original_img = cv2.imread(v_path,cv2.IMREAD_UNCHANGED)
-            resized_img = cv2.resize(original_img, img_size)
-            transform_img = cv2.cvtColor(resized_img,cv2.COLOR_BGR2GRAY)
-            gray_img = cv2.cvtColor(resized_img,cv2.COLOR_BGR2GRAY)
-
-            gx = cv2.Sobel(gray_img, cv2.CV_32F, 1, 0, ksize=5,scale=1/128)
-            gy = cv2.Sobel(gray_img, cv2.CV_32F, 0, 1, ksize=5,scale=1/128)
-            # gx_ = cv2.dilate(gx, cv2.getStructuringElement(cv2.MORPH_CROSS,(5,5)))
-            # gy_ = cv2.dilate(gy, cv2.getStructuringElement(cv2.MORPH_CROSS,(5,5)))
-            gradient = np.stack((gx, gy),axis=2)
-            # cv2.namedWindow("1",cv2.WINDOW_NORMAL)
-            # cv2.imshow("1", np.concatenate((gx, gx_, gx___),axis=1))
-            # cv2.waitKey()
-            return transform_img, gradient
-
-        imgs = {item.img_name:read_img(item.img_path) for item in v_imgs}
+        imgs = np.load("output/gt_loss/imgs.npy", allow_pickle=True)[()]
         model = Segment_explorer(imgs)
-
-        # Used to compile the numba function that used in dataset
-        for index in range(self.data["segments"].shape[0]):
-            segment = self.data["segments"][index].astype(np.float32)
-            visibility_mask = self.data["segments_visibility"][:, index]
-            visible_imgs = [item for idx, item in enumerate(self.data["img_database"]) if visibility_mask[idx]]
-            img_names = tuple(item.img_name for item in visible_imgs)
-            projection_matrix_ = [item.projection for item in visible_imgs]
-            homogeneous_sample_segment = np.insert(segment, 3, 1, axis=1)
-            num_view = len(img_names)
-            if num_view <= 1:
-                continue
-            projected_segment = np.matmul(np.asarray(projection_matrix_),
-                                          np.transpose(homogeneous_sample_segment)).swapaxes(1, 2)
-            projected_segment = projected_segment[:, :, :2] / projected_segment[:, :, 2:3]
-            compute_loss(imgs, num_view, projected_segment, img_names)
-            break
-
         return model, imgs
 
     def forward(self, v_data):
@@ -391,6 +217,7 @@ class Phase2(pl.LightningModule):
         self.train_dataset = Blender_Segment_dataset(
             self.data,
             self.imgs,
+            self.gt_loss,
             "training",
         )
         return DataLoader(self.train_dataset,
@@ -406,6 +233,7 @@ class Phase2(pl.LightningModule):
         self.valid_dataset = Blender_Segment_dataset(
             self.data,
             self.imgs,
+            self.gt_loss,
             "validation",
         )
         return DataLoader(self.valid_dataset,

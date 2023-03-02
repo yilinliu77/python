@@ -6,14 +6,14 @@ dataset:
   img_nif_dir: "output/neural_recon/img_nif_log"
   original_img_size: [1920,1080]
   trained_img_size: [600,400]
-  num_sample: [0,1000000,1000000,100000] # On surface, near surface, uniform, num segments / 4
-  resample_after_n_epoches: 100
+  num_sample: [0,1000000,1000000,1000000] # On surface, near surface, uniform, num segments / 4
+  resample_after_n_epoches: 10000
 
 trainer:
-  check_val_every_n_epoch: 100
+  check_val_every_n_epoch: 10000
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 8
+  num_worker: 4
 
 #  batch_size: 4096
   batch_size: 1000

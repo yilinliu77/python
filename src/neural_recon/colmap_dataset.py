@@ -98,60 +98,34 @@ class Colmap_dataset(torch.utils.data.Dataset):
 
 
 class Blender_Segment_dataset(torch.utils.data.Dataset):
-    def __init__(self, v_data, v_imgs, v_gt_loss, v_mode):
+    def __init__(self, v_raw_data, v_training_data, v_mode):
         super(Blender_Segment_dataset, self).__init__()
         self.trainer_mode = v_mode
-        self.img_database = v_data["img_database"]
-        self.imgs = v_imgs
-        self.gt_loss = v_gt_loss
-        self.segments = v_data["segments"]
-        self.segments_visibility = v_data["segments_visibility"]
+        self.raw_data = v_raw_data
+        self.training_data = v_training_data
+        self.segments = self.raw_data["segments"]
+        self.segments_visibility = self.raw_data["segments_visibility"]
 
         self.cache = {}
         pass
 
     def __getitem__(self, index):
-        if index not in self.cache:
-            # Segment and visibility
-            segment = self.segments[index].astype(np.float32)
-            visibility_mask = self.segments_visibility[:, index]
-            visible_imgs = [item for idx, item in enumerate(self.img_database) if visibility_mask[idx]]
+        segment = self.segments[index].astype(np.float32)
+        projected_segment = self.training_data["projected_segments"][index]
 
-            img_names = tuple(item.img_name for item in visible_imgs)
-
-            # Project the segments on image
-            projection_matrix_ = [item.projection for item in visible_imgs]
-            homogeneous_sample_segment = np.insert(segment, 3, 1, axis=1)
-            num_view = len(img_names)
-            # We should at least have two views to reconstruct a target
-            # or we will predict it as a negative sample
-            if num_view <= 1:
-                projected_segment = np.zeros(0)
-            else:
-                # Calculate the projected segment
-                projected_segment = np.matmul(np.asarray(projection_matrix_),
-                                              np.transpose(homogeneous_sample_segment)).swapaxes(1, 2)
-                projected_segment = projected_segment[:, :, :2] / projected_segment[:, :, 2:3]
-
-                # Make sure the start point of the segment is on the left
-                is_y_larger_than_x = projected_segment[:, 0, 0] > projected_segment[:, 1, 0]
-                projected_segment[is_y_larger_than_x] = projected_segment[is_y_larger_than_x][:, ::-1]
-
-            final_ncc,final_edge_similarity,final_edge_magnitude,lbd_similarity = self.gt_loss[index]
-            data = {}
-            data["id"] = torch.tensor(index, dtype=torch.long)
-            data["sample_segment"] = torch.from_numpy(segment.astype(np.float32))
-            data["img_names"] = img_names
-            data["projected_coordinates"] = projected_segment
-            data["projected_coordinates_tensor"] = torch.from_numpy(projected_segment)
-            data["ncc"] = final_ncc
-            data["edge_similarity"] = final_edge_similarity
-            data["edge_magnitude"] = final_edge_magnitude
-            data["lbd_similarity"] = lbd_similarity
-            # self.cache[index] = data
-            return data
-        else:
-            return self.cache[index]
+        final_ncc,final_edge_similarity,final_edge_magnitude,lbd_similarity = self.training_data["gt_loss"][index]
+        data = {}
+        data["id"] = torch.tensor(index, dtype=torch.long)
+        data["sample_segment"] = torch.from_numpy(segment.astype(np.float32))
+        # data["img_names"] = img_names
+        data["projected_coordinates"] = projected_segment
+        data["projected_coordinates_tensor"] = torch.from_numpy(projected_segment)
+        data["ncc"] = final_ncc
+        data["edge_similarity"] = final_edge_similarity
+        data["edge_magnitude"] = final_edge_magnitude
+        data["lbd_similarity"] = lbd_similarity
+        # self.cache[index] = data
+        return data
 
 
     def __len__(self):
@@ -161,7 +135,7 @@ class Blender_Segment_dataset(torch.utils.data.Dataset):
     def collate_fn(batch):
         id = torch.stack([item["id"] for item in batch], dim=0)
         sample_segment = torch.stack([item["sample_segment"] for item in batch], dim=0)
-        img_names = np.asarray([item["img_names"] for item in batch], dtype=object)
+        # img_names = np.asarray([item["img_names"] for item in batch], dtype=object)
         projected_coordinates = np.asarray([item["projected_coordinates"] for item in batch], dtype=object)
         # projected_coordinates_tensor = [item["projected_coordinates_tensor"] for item in batch]
         ncc = torch.tensor([item["ncc"] for item in batch], dtype=torch.float32).unsqueeze(1)
@@ -172,7 +146,7 @@ class Blender_Segment_dataset(torch.utils.data.Dataset):
         return {
             'id': id,
             'sample_segment': sample_segment,
-            'img_names': img_names,
+            # 'img_names': img_names,
             'projected_coordinates': projected_coordinates,
             # 'projected_coordinates_tensor': projected_coordinates_tensor,
             'ncc': ncc,

@@ -81,8 +81,8 @@ class Phase2(pl.LightningModule):
 
         # self.data = self.prepare_dataset(self.hydra_conf["dataset"]["colmap_dir"], self.scene_bounds)
         # self.model = self.prepare_model1(self.data["img_database"], self.hydra_conf["dataset"]["img_nif_dir"])
-        self.data, self.gt_loss = self.prepare_dataset_blender()
-        self.model, self.imgs = self.prepare_model2()
+        self.raw_data, self.training_data = self.prepare_dataset_blender()
+        self.model = self.prepare_model2()
 
     def prepare_dataset(self, v_colmap_dir, v_bounds):
         print("Start to load colmap")
@@ -164,9 +164,13 @@ class Phase2(pl.LightningModule):
         return data
 
     def prepare_dataset_blender(self):
-        gt_loss = np.load("output/gt_loss/gt_loss.npy")
-        data = np.load("output/gt_loss/data.npy", allow_pickle=True)[()]
-        return data, gt_loss
+        raw_data = np.load("output/gt_loss/data.npy", allow_pickle=True)[()]
+        training_data={
+            "gt_loss":np.load("output/gt_loss/gt_loss.npy"),
+            "imgs":np.load("output/gt_loss/imgs.npy", allow_pickle=True)[()],
+            "projected_segments":np.load("output/gt_loss/projected_segments.npy", allow_pickle=True)[()],
+        }
+        return raw_data, training_data
 
     def prepare_model1(self, v_imgs, v_nif_dir):
         print("Start to load image models")
@@ -205,19 +209,16 @@ class Phase2(pl.LightningModule):
         return img_models
 
     def prepare_model2(self):
-        img_size = self.hydra_conf["dataset"]["trained_img_size"]
-        imgs = np.load("output/gt_loss/imgs.npy", allow_pickle=True)[()]
-        model = Segment_explorer(imgs)
-        return model, imgs
+        model = Segment_explorer(self.training_data["imgs"])
+        return model
 
     def forward(self, v_data):
         pass
 
     def train_dataloader(self):
         self.train_dataset = Blender_Segment_dataset(
-            self.data,
-            self.imgs,
-            self.gt_loss,
+            self.raw_data,
+            self.training_data,
             "training",
         )
         return DataLoader(self.train_dataset,
@@ -231,9 +232,8 @@ class Phase2(pl.LightningModule):
 
     def val_dataloader(self):
         self.valid_dataset = Blender_Segment_dataset(
-            self.data,
-            self.imgs,
-            self.gt_loss,
+            self.raw_data,
+            self.training_data,
             "validation",
         )
         return DataLoader(self.valid_dataset,

@@ -19,6 +19,7 @@ import pytlbd
 
 
 # The similarity is between 0 and 1
+# The magnitude is between 0 and 1
 # Larger is better
 # v_segment: (2, 2)
 # v_direction_img: (h, w, 2)
@@ -51,7 +52,7 @@ def compute_direction_similarity(v_segment: np.ndarray, v_direction_img: np.ndar
     angle_cos = np.zeros(angle_cos1.shape[0], np.float32)
     for i in prange(angle_cos1.shape[0]):
         angle_cos[i] = min(angle_cos1[i], angle_cos2[i])
-    return 1 - np.mean(angle_cos), np.mean(sample_direction_norm) / 380. / 2. + 0.5
+    return 1 - np.mean(angle_cos), np.mean(sample_direction_norm)
 
 
 @nb.njit()
@@ -81,12 +82,12 @@ def calculate_ncc_batch(v_roi_regions):
 @nb.njit()
 def calculate_lbd_score_batch(v_descriptors):
     num_region = v_descriptors.shape[0]
-    scores = np.zeros(int(num_region * num_region), np.float32)
+    scores = -np.ones(int(num_region * num_region), np.float32)
     for id_view1 in range(num_region):
         for id_view2 in range(id_view1 + 1, num_region):
-            score = np.mean(np.sqrt(((v_descriptors[id_view1] - v_descriptors[id_view2]) ** 2).sum(axis=1)))
+            score = np.mean(np.sqrt(((v_descriptors[id_view1] - v_descriptors[id_view2]) ** 2)))
             scores[id_view1 * num_region + id_view2] = score
-    scores_ = scores[np.nonzero(scores)]
+    scores_ = scores[scores!=-1]
     return scores_
 
 
@@ -129,6 +130,37 @@ def extract_roi_region(v_img: np.ndarray, v_roi_center, v_roi_angle, v_roi_size,
         # cv2.waitKey()
     return roi_resized
 
+@nb.jit(forceobj=True)
+def keyline_from_seg(v_segments):
+    keylines = [cv2.line_descriptor.KeyLine() for i in range(v_segments.shape[0])]
+    for i in range(v_segments.shape[0]):
+        kl = cv2.line_descriptor.KeyLine()
+        kl.startPointX = float(v_segments[i][0])
+        kl.startPointY = float(v_segments[i][1])
+        kl.endPointX = float(v_segments[i][2])
+        kl.endPointY = float(v_segments[i][3])
+        kl.sPointInOctaveX = float(v_segments[i][0])
+        kl.sPointInOctaveY = float(v_segments[i][1])
+        kl.ePointInOctaveX = float(v_segments[i][2])
+        kl.ePointInOctaveY = float(v_segments[i][3])
+
+        dx = kl.endPointX - kl.startPointX
+        dy = kl.endPointY - kl.startPointY
+        kl.angle = math.atan2(dy, dx)
+        kl.class_id = i
+        kl.octave = 0
+        kl.pt = (
+            0.5 * (kl.endPointX + kl.startPointX),
+            0.5 * (kl.endPointY + kl.startPointY)
+        )
+        kl.size = 0
+        kl.lineLength = math.sqrt(dx * dx + dy * dy)
+        kl.numOfPixels = int(max(abs(dx), abs(dy)))
+
+        kl.response = 0
+        keylines[i] = kl
+    return keylines
+
 
 @nb.jit(forceobj=True)
 def compute_loss_item(v_imgs, v_num_view, projected_segment, img_names):
@@ -147,7 +179,7 @@ def compute_loss_item(v_imgs, v_num_view, projected_segment, img_names):
         img_size = img.shape[:2][::-1]
         ori_coords = (projected_segment_per_view * img_size).astype(np.int64)
 
-        if True:
+        if False:
             viz_img = cv2.line(img.copy(), ori_coords[0], ori_coords[1], (255, 0, 0), 2)
             cv2.imwrite("output/loss_test/0_{}_original.png".format(id_view), viz_img)
         # Compute the related region using a rotated rectangle
@@ -166,19 +198,23 @@ def compute_loss_item(v_imgs, v_num_view, projected_segment, img_names):
         roi_resized = extract_roi_region(img, roi_center, roi_angle, roi_size, id_view)
         roi_regions.append(roi_resized)
 
+        # LBD descriptor
+        descriptor = cv2.line_descriptor.BinaryDescriptor.createBinaryDescriptor()
+        descriptor = descriptor.compute(img, keyline_from_seg(ori_coords.reshape((1, 4))))[1]
         # descriptor = pytlbd.lbd_single_scale(img, ori_coords.reshape((1, 4)), 9, 7)
-        # lbd_descriptors.append(descriptor)
-        lbd_descriptors.append(np.random.rand(1, 2).astype(np.float32))
+        lbd_descriptors.append(descriptor)
     if len(roi_regions) <= 1:
         final_ncc = 0.
         final_edge_similarity = 0.
         final_edge_magnitude = 0.
-        lbd_similarity = -1.
+        lbd_similarity = 0.
     else:
         nccs = calculate_ncc_batch(np.stack(roi_regions, axis=0))  # [-1,1]
-        lbd_similarities = calculate_lbd_score_batch(np.stack(lbd_descriptors, axis=0))
-        lbd_similarity = 1 - np.mean(lbd_similarities)  # [-1,1]
         final_ncc = np.mean(nccs) / 2 + 0.5  # [0,1]
+
+        lbd_similarities = calculate_lbd_score_batch(np.stack(lbd_descriptors, axis=0).astype(np.float32) / 255.)
+        lbd_similarity = 1 - np.mean(lbd_similarities)
+
         final_edge_similarity = np.mean(edge_similarities)  # [0,1]
         final_edge_magnitude = np.mean(edge_magnitudes)  # [0,1]
         pass
@@ -205,10 +241,10 @@ def compute_loss(
     # We should at least have two views to reconstruct a target
     # or we will predict it as a negative sample
     if num_view <= 1:
-        projected_segment = np.zeros(0)
+        projected_segment = np.zeros((0, 2, 2))
         final_ncc = 0.
         final_edge_similarity = 0.
-        final_edge_magnitude = 1.
+        final_edge_magnitude = 0.
         lbd_similarity = -1.
     else:
         # Calculate the projected segment
@@ -224,4 +260,4 @@ def compute_loss(
                                                                                                    num_view,
                                                                                                    projected_segment,
                                                                                                    img_names)
-    return final_ncc, final_edge_similarity, final_edge_magnitude, lbd_similarity
+    return projected_segment, final_ncc, final_edge_similarity, final_edge_magnitude, lbd_similarity

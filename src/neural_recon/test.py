@@ -1,5 +1,7 @@
+import math
 import random
 import sys, os
+
 
 sys.path.append("thirdparty/sdf_computer/build/")
 
@@ -7,10 +9,6 @@ import cv2
 import numpy as np
 import torch
 from tqdm import tqdm
-
-from src.neural_recon.colmap_dataset import Blender_Segment_dataset
-
-from src.neural_recon.phase2 import Phase2
 
 if __name__ == '__main__1':
     model = Phase2({
@@ -85,6 +83,8 @@ if __name__ == '__main__1':
         pass
 
 if __name__ == '__main__':
+    from src.neural_recon.phase2 import Phase2
+    from src.neural_recon.colmap_dataset import Blender_Segment_dataset
     model = Phase2({
         "dataset":
             {"scene_boundary": [-1.5, -1.5, -1.5, 1.5, 1.5, 1.5],
@@ -106,7 +106,7 @@ if __name__ == '__main__':
     })
 
     data = {
-        "img_database": model.data["img_database"],
+        "img_database": model.raw_data,
         "segments": np.asarray([
             [[0.984628, -0.414957, 0.204155], [0.997870, 0.414072, 0.205961]],
             [[1, -1, 1], [1, -1, -1]],
@@ -116,7 +116,7 @@ if __name__ == '__main__':
             True,
             True,
             True,
-        ])[np.newaxis, :].repeat(len(model.data["img_database"]), 0)
+        ])[np.newaxis, :].repeat(len(model.raw_data), 0)
     }
     data["segments"] = ((data["segments"] - model.bounds_center) / model.bounds_size + 0.5)
     dataset = Blender_Segment_dataset(data, model.imgs, "validation")
@@ -141,7 +141,7 @@ if __name__ == '__main__':
                                    projected_coordinates[id_img][1],
                                    (0, 0, 255), 2)
                 viz_imgs.append(viz_img)
-            viz_imgs = np.concatenate(viz_imgs,axis=1)
+            viz_imgs = np.concatenate(viz_imgs, axis=1)
             print("==========={}=============".format(idx))
             print(data_item["ncc"])
             print(data_item["edge_similarity"])
@@ -150,3 +150,71 @@ if __name__ == '__main__':
             cv2.waitKey()
             pass
         pass
+
+if __name__ == '__main__2':
+    cv2.namedWindow("1", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("1", 1600, 900)
+    cv2.moveWindow("1", 0, 0)
+
+    img1 = cv2.imread(r"C:\Users\whats\Dropbox\Project\2022-NeuralStructure\Illustrations\Cube\0.png")
+    img2 = cv2.imread(r"C:\Users\whats\Dropbox\Project\2022-NeuralStructure\Illustrations\Cube\1.png")
+
+    segment1 = np.array([
+        [946, 451, 946, 909],
+        [946, 451, 1307, 307],
+        [1004, 699, 1004, 803],
+    ], dtype=np.int64)
+    segment2 = np.array([
+        [547, 363, 582, 790],
+        [547, 363, 950, 524],
+        [626, 650, 630, 748],
+    ], dtype=np.int64)
+
+    keylines1 = keyline_from_seg(segment1)
+    keylines2 = keyline_from_seg(segment2)
+
+    lsd_detector = cv2.line_descriptor.LSDDetector.createLSDDetector()
+    lsd_key_lines_single_scale1 = lsd_detector.detect(img1, 1, 1)
+    lsd_key_lines_multi_scale1 = lsd_detector.detect(img1, 2, 3)
+    lsd_key_lines_single_scale2 = lsd_detector.detect(img2, 1, 1)
+    lsd_key_lines_multi_scale2 = lsd_detector.detect(img2, 2, 3)
+
+    descriptor = cv2.line_descriptor.BinaryDescriptor.createBinaryDescriptor()
+    lsd_descriptor_single_scale1 = descriptor.compute(img1, lsd_key_lines_single_scale1)[1]
+    lsd_descriptor_multi_scale1 = descriptor.compute(img1, lsd_key_lines_multi_scale1)[1]
+    my_descriptor1 = descriptor.compute(img1, keylines1)[1]
+    lsd_descriptor_single_scale2 = descriptor.compute(img2, lsd_key_lines_single_scale2)[1]
+    lsd_descriptor_multi_scale2 = descriptor.compute(img2, lsd_key_lines_multi_scale2)[1]
+    my_descriptor2 = descriptor.compute(img2, keylines2)[1]
+
+    # bdm = cv2.line_descriptor.BinaryDescriptorMatcher()
+    # match_result = bdm.match(lsd_descriptor_multi_scale1, lsd_descriptor_multi_scale2)
+    # for item in match_result:
+    #     viz_img1 = np.copy(img1)
+    #     viz_img2 = np.copy(img2)
+    #     cv2.line(viz_img1,
+    #              (int(lsd_key_lines_multi_scale1[item.queryIdx].startPointX),int(lsd_key_lines_multi_scale1[item.queryIdx].startPointY)),
+    #              (int(lsd_key_lines_multi_scale1[item.queryIdx].endPointX),int(lsd_key_lines_multi_scale1[item.queryIdx].endPointY)),
+    #              (0, 0, 255), 2)
+    #     cv2.line(viz_img2,
+    #              (int(lsd_key_lines_multi_scale2[item.trainIdx].startPointX),int(lsd_key_lines_multi_scale2[item.trainIdx].startPointY)),
+    #              (int(lsd_key_lines_multi_scale2[item.trainIdx].endPointX),int(lsd_key_lines_multi_scale2[item.trainIdx].endPointY)),
+    #              (0, 0, 255), 2)
+    #     viz_img = np.concatenate([viz_img1, viz_img2], axis=1)
+    #     cv2.imshow("1", viz_img)
+    #     cv2.waitKey()
+
+    for i in range(3):
+        cv2.line(img1,
+                 segment1[i, 0],
+                 segment1[i, 1],
+                 (0, 0, 255), 2)
+        cv2.line(img2,
+                 segment2[i, 2],
+                 segment2[i, 3],
+                 (0, 0, 255), 2)
+    viz_img = np.concatenate([img1, img2], axis=1)
+    print(0)
+    cv2.imshow("1", viz_img)
+    cv2.waitKey()
+    pass

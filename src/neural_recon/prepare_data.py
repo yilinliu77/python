@@ -194,10 +194,12 @@ def main(hydra_conf: DictConfig):
             resized_img = cv2.resize(original_img, trained_img_size)
             transform_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2GRAY)
             gray_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2GRAY)
-
+            # 1/128 makes the sum of the kernel to be 1
             gx = cv2.Sobel(gray_img, cv2.CV_32F, 1, 0, ksize=5, scale=1 / 128)
             gy = cv2.Sobel(gray_img, cv2.CV_32F, 0, 1, ksize=5, scale=1 / 128)
-            gradient = np.stack((gx, gy), axis=2)
+            # 255 makes the range of gradient lies in [-1,1]
+            # length of the normal vector will be [0, 1]
+            gradient = np.stack((gx, gy), axis=2) / 255.
             return transform_img, gradient
 
         imgs = {item.img_name: read_img(item.img_path) for item in data["img_database"]}
@@ -208,11 +210,14 @@ def main(hydra_conf: DictConfig):
         num_segments = data["segments"].shape[0]
 
         ray.init(include_dashboard=True,
-                 dashboard_host="0.0.0.0", dashboard_port=19999)
+                 dashboard_host="0.0.0.0",
+                 dashboard_port=19999,
+                 # local_mode=True
+                 )
         dummy_task = compute_loss.remote(
             0,
             data["segments"][0],
-            data["segments_visibility"][:,0],
+            data["segments_visibility"][:, 0],
             projections,
             img_names,
             imgs
@@ -235,13 +240,16 @@ def main(hydra_conf: DictConfig):
             ))
 
         # Get the results.
-        gt_loss = np.asarray(ray.get(result_ids)).astype(np.float16)
-        print(time.time()-a)
+        results = ray.get(result_ids)
+        projected_segments = [item[0] for item in results]
+        gt_loss = np.asarray([item[1:] for item in results]).astype(np.float16)
+        print(time.time() - a)
 
     os.makedirs("output/gt_loss", exist_ok=True)
     np.save("output/gt_loss/gt_loss", gt_loss)
-    np.save("output/gt_loss/data" ,data)
-    np.save("output/gt_loss/imgs" ,imgs)
+    np.save("output/gt_loss/data", data)
+    np.save("output/gt_loss/imgs", imgs)
+    np.save("output/gt_loss/projected_segments", projected_segments)
     print("Done")
     pass
 

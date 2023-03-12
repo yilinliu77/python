@@ -4,12 +4,12 @@ multi_thread="-j20"
 
 ROOT_DIR=$PWD
 
-pip install pytorch-lightning hydra-core shapely scikit-image matplotlib tensorboard plyfile opencv-python ternausnet inplace_abn einops open3d
+pip install pytorch-lightning hydra-core shapely scikit-image matplotlib tensorboard plyfile opencv-python opencv-contrib-python ternausnet inplace_abn einops open3d
 
 echo "======================================"
 echo "Start to build tiny-cuda-nn"
 echo "======================================"
-cd $ROOT_DIR/thirdparty/tiny-cuda-nn && git submodule update --init --recursive && cmake . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release ${multi_thread} && cd bindings/torch && python setup.py install
+cd $ROOT_DIR/thirdparty/tiny-cuda-nn && cmake . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release ${multi_thread} && cd bindings/torch && python setup.py install
 
 echo "======================================"
 echo "Start to build sdf_computer"

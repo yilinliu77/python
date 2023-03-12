@@ -20,7 +20,7 @@ from src.neural_recon.colmap_io import read_dataset, Image, Point_3d, check_visi
 from src.neural_recon.sample import sample_points_cpu
 from torchvision import transforms
 
-from generate_gt import extract_roi_region, calculate_ncc_batch, compute_direction_similarity, extract_roi_rectangle, compute_loss
+from src.neural_recon.generate_gt import extract_roi_region, calculate_ncc_batch, compute_direction_similarity, extract_roi_rectangle, compute_loss
 
 img_transform = transforms.Compose([
     transforms.ToPILImage(),
@@ -113,17 +113,15 @@ class Blender_Segment_dataset(torch.utils.data.Dataset):
         segment = self.segments[index].astype(np.float32)
         projected_segment = self.training_data["projected_segments"][index]
 
-        final_ncc,final_edge_similarity,final_edge_magnitude,lbd_similarity = self.training_data["gt_loss"][index]
+        # final_ncc,final_edge_similarity,final_edge_magnitude,lbd_similarity
+        gt_loss = self.training_data["gt_loss"][index]
         data = {}
         data["id"] = torch.tensor(index, dtype=torch.long)
-        data["sample_segment"] = torch.from_numpy(segment.astype(np.float32))
+        data["sample_segment"] = torch.from_numpy(segment.astype(np.float16))
         # data["img_names"] = img_names
-        data["projected_coordinates"] = projected_segment
-        data["projected_coordinates_tensor"] = torch.from_numpy(projected_segment)
-        data["ncc"] = final_ncc
-        data["edge_similarity"] = final_edge_similarity
-        data["edge_magnitude"] = final_edge_magnitude
-        data["lbd_similarity"] = lbd_similarity
+        # data["projected_coordinates"] = projected_segment
+        # data["projected_coordinates_tensor"] = torch.from_numpy(projected_segment)
+        data["gt_loss"] = torch.from_numpy(gt_loss.astype(np.float16))
         # self.cache[index] = data
         return data
 
@@ -136,21 +134,21 @@ class Blender_Segment_dataset(torch.utils.data.Dataset):
         id = torch.stack([item["id"] for item in batch], dim=0)
         sample_segment = torch.stack([item["sample_segment"] for item in batch], dim=0)
         # img_names = np.asarray([item["img_names"] for item in batch], dtype=object)
-        projected_coordinates = np.asarray([item["projected_coordinates"] for item in batch], dtype=object)
+        # projected_coordinates = np.asarray([item["projected_coordinates"] for item in batch], dtype=object)
         # projected_coordinates_tensor = [item["projected_coordinates_tensor"] for item in batch]
-        ncc = torch.tensor([item["ncc"] for item in batch], dtype=torch.float32).unsqueeze(1)
-        edge_similarity = torch.tensor([item["edge_similarity"] for item in batch], dtype=torch.float32).unsqueeze(1)
-        edge_magnitude = torch.tensor([item["edge_magnitude"] for item in batch], dtype=torch.float32).unsqueeze(1)
-        lbd_similarity = torch.tensor([item["lbd_similarity"] for item in batch], dtype=torch.float32).unsqueeze(1)
+        gt_loss = torch.stack([item["gt_loss"] for item in batch], dim=0)
+        # edge_similarity = torch.tensor([item["edge_similarity"] for item in batch], dtype=torch.float32).unsqueeze(1)
+        # edge_magnitude = torch.tensor([item["edge_magnitude"] for item in batch], dtype=torch.float32).unsqueeze(1)
+        # lbd_similarity = torch.tensor([item["lbd_similarity"] for item in batch], dtype=torch.float32).unsqueeze(1)
 
         return {
             'id': id,
             'sample_segment': sample_segment,
             # 'img_names': img_names,
-            'projected_coordinates': projected_coordinates,
+            # 'projected_coordinates': projected_coordinates,
             # 'projected_coordinates_tensor': projected_coordinates_tensor,
-            'ncc': ncc,
-            'edge_similarity': edge_similarity,
-            'edge_magnitude': edge_magnitude,
-            'lbd_similarity': lbd_similarity,
+            # 'ncc': ncc,
+            # 'edge_similarity': edge_similarity,
+            # 'edge_magnitude': edge_magnitude,
+            'gt_loss': gt_loss,
         }

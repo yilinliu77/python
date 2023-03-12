@@ -382,12 +382,68 @@ class Segment_explorer(nn.Module):
     def prepare_gt(self, v_pixels):
         return torch.var(v_pixels, dim=[1, 2]).unsqueeze(1)
 
+    # v_data["gt_loss"] = (batch_size, (ncc, edge_similarity, edge_magnitude, lbd_similarity))
     def loss(self, v_predicted_probability, v_data):
-        gt_occupancy = (v_data["ncc"] + 1) / 2
-        gt_edge_similarity = (v_data["edge_similarity"] + 1) / 2
-        gt_edge_magnitude = v_data["edge_magnitude"] / 128
-        gt_probability = (gt_occupancy + gt_edge_similarity + gt_edge_magnitude) / 3
-        loss = torch.nn.functional.mse_loss(v_predicted_probability, gt_probability)
+        gt_loss = torch.clip(v_data["gt_loss"], 0, 1)
+        gt_probability = (gt_loss[:, 0] + gt_loss[:, 1] + gt_loss[:, 2] + gt_loss[:, 3]) / 4
+        loss = torch.nn.functional.mse_loss(v_predicted_probability[:, 0], gt_probability)
+        return loss
+
+
+class Point_explorer(nn.Module):
+    def __init__(self, v_imgs):
+        super(Point_explorer, self).__init__()
+        self.imgs = v_imgs
+
+        self.model1 = tcnn.Encoding(
+            n_input_dims=3,
+            encoding_config={
+                "otype": "Frequency",
+                "n_frequencies": 12,
+            })
+        self.model2 = tcnn.Network(
+            n_input_dims=self.model1.n_output_dims,
+            n_output_dims=1,
+            network_config={
+                "otype": "FullyFusedMLP",
+                "activation": "ReLU",
+                "output_activation": "None",
+                "n_neurons": 64,
+                "n_hidden_layers": 2,
+            })
+        pass
+
+    def forward(self, v_data):
+        if False:
+            cv2.namedWindow("1", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("1", 1600, 900)
+            cv2.moveWindow("1", 0, 0)
+            for idx, item in enumerate(v_data["img_names"]):
+                img = self.imgs[item[0]]
+                img = cv2.line(img,
+                               (v_data["projected_coordinates"][0, idx, 0].cpu().numpy() * np.array((600, 400))).astype(
+                                   int),
+                               (v_data["projected_coordinates"][0, idx, 1].cpu().numpy() * np.array((600, 400))).astype(
+                                   int),
+                               (0, 0, 255),
+                               5,
+                               )
+                cv2.imshow("1", img)
+                cv2.waitKey()
+            pass
+        # for id_batch in range(v_data["id"].shape[0]):
+        #     sample_segment = v_data["sample_segment"][id_batch]
+        #     if len(v_data["img_names"]) <= 1:
+        #         return torch.tensor([0], dtype=torch.float16), torch.tensor([0], dtype=torch.float16)
+        #     projected_segment = v_data["projected_coordinates"][id_batch]
+        #     roi_regions = []
+        nif_feature = self.model1(v_data["sample_point"].reshape([-1, 3]))
+        occupancy = torch.sigmoid(self.model2(nif_feature))
+        return occupancy
+
+    # v_data["gt_loss"] = (batch_size, ncc,)
+    def loss(self, v_predicted_probability, v_data):
+        loss = torch.nn.functional.mse_loss(v_predicted_probability[:, 0], v_data["gt_loss"][:, 0])
         return loss
 
 

@@ -229,7 +229,7 @@ def read_dataset(v_colmap_dir, v_bounds):
             extrinsic_homo = np.matmul(extrinsic_homo, model_matrix)
             projection_matrix = np.matmul(projection_matrix, extrinsic_homo)
             imgs[id_img].intrinsic = camera_intrinsic[cam_id]["normalized_K"]
-            imgs[id_img].extrinsic = extrinsic
+            imgs[id_img].extrinsic = extrinsic_homo
             imgs[id_img].projection = projection_matrix
             imgs[id_img].img_size = camera_intrinsic[camID]["img_size"]
             imgs[id_img].img_name=os.path.basename(imgs[id_img].img_path).split(".")[0]
@@ -237,7 +237,7 @@ def read_dataset(v_colmap_dir, v_bounds):
     print("Found {} viewpoints".format(len(imgs)))
 
     points_3d: List[Point_3d] = []
-    if False: # For now we don't need it
+    if True: # For now we don't need it
         with open(os.path.join(v_colmap_dir, "points3D.txt")) as f:
             data = [item.strip().split(" ") for item in f.readlines() if item[0] != "#"]
             points_3d = list(pool.map(

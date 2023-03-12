@@ -14,9 +14,6 @@ import numba as nb
 
 import sys
 
-sys.path.append(r"thirdparty/pylbd/build/Release")
-import pytlbd
-
 
 # The similarity is between 0 and 1
 # The magnitude is between 0 and 1
@@ -55,7 +52,7 @@ def compute_direction_similarity(v_segment: np.ndarray, v_direction_img: np.ndar
     return 1 - np.mean(angle_cos), np.mean(sample_direction_norm)
 
 
-@nb.njit()
+# @nb.njit()
 def correlation_coefficient(patch1, patch2):
     product = np.mean((patch1 - patch1.mean()) * (patch2 - patch2.mean()))
     stds = patch1.std() * patch2.std()
@@ -66,7 +63,7 @@ def correlation_coefficient(patch1, patch2):
         return product
 
 
-@nb.njit()
+# @nb.njit()
 def calculate_ncc_batch(v_roi_regions):
     num_region = v_roi_regions.shape[0]
     nccs = -np.ones(int(num_region * num_region), np.float32)
@@ -87,7 +84,7 @@ def calculate_lbd_score_batch(v_descriptors):
         for id_view2 in range(id_view1 + 1, num_region):
             score = np.mean(np.sqrt(((v_descriptors[id_view1] - v_descriptors[id_view2]) ** 2)))
             scores[id_view1 * num_region + id_view2] = score
-    scores_ = scores[scores!=-1]
+    scores_ = scores[scores != -1]
     return scores_
 
 
@@ -109,7 +106,7 @@ def extract_roi_rectangle(v_normalized_segment: np.ndarray, v_img_size: Tuple):
     return roi_size, roi_angle, roi_center
 
 
-@nb.jit(forceobj=True)
+# @nb.jit(forceobj=True)
 def extract_roi_region(v_img: np.ndarray, v_roi_center, v_roi_angle, v_roi_size, id_view):
     diag_length = np.linalg.norm(v_roi_size)
     aabb_roi = cv2.getRectSubPix(v_img, np.ceil((diag_length, diag_length)).astype(np.int64), v_roi_center)
@@ -117,7 +114,7 @@ def extract_roi_region(v_img: np.ndarray, v_roi_center, v_roi_angle, v_roi_size,
     img_rotated = cv2.warpAffine(aabb_roi, M, aabb_roi.shape[:2][::-1], cv2.INTER_CUBIC)
     roi = cv2.getRectSubPix(img_rotated, (v_roi_size[0], v_roi_size[1]), (aabb_roi.shape[1] / 2, aabb_roi.shape[0] / 2))
     roi_resized = cv2.resize(roi, (50, 5), interpolation=cv2.INTER_AREA)
-    if False:
+    if True:
         cv2.imwrite("output/loss_test/1_{}_rotated.png".format(id_view), img_rotated)
         cv2.imwrite("output/loss_test/2_{}_roi.png".format(id_view), roi)
         cv2.imwrite("output/loss_test/3_{}_roi_resized.png".format(id_view), roi_resized)
@@ -129,6 +126,7 @@ def extract_roi_region(v_img: np.ndarray, v_roi_center, v_roi_angle, v_roi_size,
         # cv2.imshow("1", roi_resized)
         # cv2.waitKey()
     return roi_resized
+
 
 @nb.jit(forceobj=True)
 def keyline_from_seg(v_segments):
@@ -162,7 +160,7 @@ def keyline_from_seg(v_segments):
     return keylines
 
 
-@nb.jit(forceobj=True)
+# @nb.jit(forceobj=True)
 def compute_loss_item(v_imgs, v_num_view, projected_segment, img_names):
     # Compute the related region (resize to (W*H)) on the image according to the projected segment
     # W is the length of the projected segment
@@ -179,7 +177,7 @@ def compute_loss_item(v_imgs, v_num_view, projected_segment, img_names):
         img_size = img.shape[:2][::-1]
         ori_coords = (projected_segment_per_view * img_size).astype(np.int64)
 
-        if False:
+        if True:
             viz_img = cv2.line(img.copy(), ori_coords[0], ori_coords[1], (255, 0, 0), 2)
             cv2.imwrite("output/loss_test/0_{}_original.png".format(id_view), viz_img)
         # Compute the related region using a rotated rectangle
@@ -221,43 +219,81 @@ def compute_loss_item(v_imgs, v_num_view, projected_segment, img_names):
     return final_ncc, final_edge_similarity, final_edge_magnitude, lbd_similarity
 
 
-# @nb.jit(parallel=True)
 @ray.remote
 def compute_loss(
-        v_id,
+        v_id_worker,
+        v_num_sample_per_worker,
         v_segment,
         v_segment_visibility,
-        v_projections, v_img_names, v_imgs
+        v_projections, v_img_names, v_imgs,
+        progress_actor: ray.actor.ActorHandle,
+        v_is_dummy: bool
 ):
-    segment = v_segment.astype(np.float32)
-    visibility_mask = v_segment_visibility
+    start_index = v_id_worker * v_num_sample_per_worker
+    end_index = (v_id_worker + 1) * v_num_sample_per_worker
+    if end_index > v_segment.shape[0]:
+        end_index = v_segment.shape[0]
+    real_num = end_index - start_index
+    gt_loss = np.zeros((real_num, 4), dtype=np.float16)
+    projected_points = [[] for _ in range(real_num)]
+    for id_local in range(v_num_sample_per_worker):
+        id_global = v_id_worker * v_num_sample_per_worker + id_local
+        if id_global >= v_segment.shape[0]:
+            break
+        segment = v_segment[id_global].astype(np.float32)
+        visibility_mask = v_segment_visibility[:, id_global]
 
-    img_names = [item for idx, item in enumerate(v_img_names) if visibility_mask[idx]]
-    projection_matrix_ = [item for idx, item in enumerate(v_projections) if visibility_mask[idx]]
+        img_names = [item for idx, item in enumerate(v_img_names) if visibility_mask[idx]]
+        projection_matrix_ = [item for idx, item in enumerate(v_projections) if visibility_mask[idx]]
 
-    # Project the segments on image
-    homogeneous_sample_segment = np.insert(segment, 3, 1, axis=1)
-    num_view = len(img_names)
-    # We should at least have two views to reconstruct a target
-    # or we will predict it as a negative sample
-    if num_view <= 1:
-        projected_segment = np.zeros((0, 2, 2))
-        final_ncc = 0.
-        final_edge_similarity = 0.
-        final_edge_magnitude = 0.
-        lbd_similarity = -1.
-    else:
-        # Calculate the projected segment
-        projected_segment = np.matmul(np.asarray(projection_matrix_),
-                                      np.transpose(homogeneous_sample_segment)).swapaxes(1, 2)
-        projected_segment = projected_segment[:, :, :2] / projected_segment[:, :, 2:3]
+        # Project the segments on image
+        homogeneous_sample_segment = np.insert(segment, 3, 1, axis=1)
+        num_view = len(img_names)
+        # We should at least have two views to reconstruct a target
+        # or we will predict it as a negative sample
+        if num_view <= 1:
+            projected_segment = np.zeros((0, 2, 2))
+            final_ncc = 0.
+            final_edge_similarity = 0.
+            final_edge_magnitude = 0.
+            lbd_similarity = 0.
+        else:
+            # Calculate the projected segment
+            projected_segment = np.matmul(np.asarray(projection_matrix_),
+                                          np.transpose(homogeneous_sample_segment)).swapaxes(1, 2)
+            projected_segment = projected_segment[:, :, :2] / projected_segment[:, :, 2:3]
 
-        # Make sure the start point of the segment is on the left
-        is_y_larger_than_x = projected_segment[:, 0, 0] > projected_segment[:, 1, 0]
-        projected_segment[is_y_larger_than_x] = projected_segment[is_y_larger_than_x][:, ::-1]
+            # Make sure the start point of the segment is on the left
+            is_y_larger_than_x = projected_segment[:, 0, 0] > projected_segment[:, 1, 0]
+            projected_segment[is_y_larger_than_x] = projected_segment[is_y_larger_than_x][:, ::-1]
 
-        final_ncc, final_edge_similarity, final_edge_magnitude, lbd_similarity = compute_loss_item(v_imgs,
-                                                                                                   num_view,
-                                                                                                   projected_segment,
-                                                                                                   img_names)
-    return projected_segment, final_ncc, final_edge_similarity, final_edge_magnitude, lbd_similarity
+            final_ncc, final_edge_similarity, final_edge_magnitude, lbd_similarity = compute_loss_item(v_imgs,
+                                                                                                       num_view,
+                                                                                                       projected_segment,
+                                                                                                       img_names)
+        gt_loss[id_local] = final_ncc, final_edge_similarity, final_edge_magnitude, lbd_similarity
+        projected_points[id_local] = projected_segment
+        if not v_is_dummy and v_num_sample_per_worker // 100 > 0 and id_local % (v_num_sample_per_worker // 100) == 0:
+            progress_actor.report_progress.remote(v_id_worker, id_local)
+
+    if not v_is_dummy:
+        os.makedirs("output/gt_loss/sub/", exist_ok=True)
+        np.save("output/gt_loss/sub/projected_segments_{}".format(v_id_worker), np.array(projected_points, dtype=object))
+        np.save("output/gt_loss/sub/gt_loss_{}".format(v_id_worker), gt_loss)
+        progress_actor.report_progress.remote(v_id_worker, v_num_sample_per_worker)
+    return
+
+
+@ray.remote
+class ProgressActor:
+    def __init__(self, total_num_samples: int):
+        self.total_num_samples = total_num_samples
+        self.num_samples_completed_per_task = {}
+
+    def report_progress(self, task_id: int, num_finished) -> None:
+        self.num_samples_completed_per_task[task_id] = num_finished
+
+    def get_progress(self) -> float:
+        return (
+                sum(self.num_samples_completed_per_task.values()) / self.total_num_samples
+        )

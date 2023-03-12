@@ -1,9 +1,10 @@
 import sys, os
 
-from src.neural_recon.generate_gt import compute_loss
-
 sys.path.append("thirdparty/sdf_computer/build/")
 
+
+from src.neural_recon.Single_point_dataset import Single_point_dataset
+from src.neural_recon.generate_gt import compute_loss
 from dataclasses import dataclass
 from functools import partial
 from multiprocessing import Pool
@@ -56,7 +57,7 @@ from src.neural_recon.dataset import Single_img_dataset, Single_img_dataset_with
 import pysdf
 import open3d as o3d
 
-from src.neural_recon.models import Explorer, Segment_explorer
+from src.neural_recon.models import Explorer, Segment_explorer, Point_explorer
 from src.neural_recon.phase1 import Phase1
 
 
@@ -81,8 +82,13 @@ class Phase2(pl.LightningModule):
 
         # self.data = self.prepare_dataset(self.hydra_conf["dataset"]["colmap_dir"], self.scene_bounds)
         # self.model = self.prepare_model1(self.data["img_database"], self.hydra_conf["dataset"]["img_nif_dir"])
-        self.raw_data, self.training_data = self.prepare_dataset_blender()
-        self.model = self.prepare_model2()
+        # self.raw_data, self.training_data = self.prepare_dataset_blender(self.hydra_conf["dataset"]["data_dir"])
+        # self.model = self.prepare_model2()
+        # self.raw_data, self.training_data = self.prepare_dataset_blender(self.hydra_conf["dataset"]["data_dir"])
+        # self.model = self.prepare_model2()
+        self.raw_data, self.training_data = self.prepare_dataset_point_l7(self.hydra_conf["dataset"]["data_dir"])
+        self.model = Point_explorer(self.training_data["imgs"])
+
 
     def prepare_dataset(self, v_colmap_dir, v_bounds):
         print("Start to load colmap")
@@ -163,12 +169,29 @@ class Phase2(pl.LightningModule):
 
         return data
 
-    def prepare_dataset_blender(self):
-        raw_data = np.load("output/gt_loss/data.npy", allow_pickle=True)[()]
+    def prepare_dataset_blender(self, v_data_dir):
+        raw_data_npy = os.path.join(v_data_dir, "data.npy")
+        gt_loss_npy = os.path.join(v_data_dir, "gt_loss.npy")
+        imgs_npy = os.path.join(v_data_dir, "imgs.npy")
+        projected_segments_npy = os.path.join(v_data_dir, "projected_segments.npy")
+        raw_data = np.load(raw_data_npy, allow_pickle=True)[()]
         training_data={
-            "gt_loss":np.load("output/gt_loss/gt_loss.npy"),
-            "imgs":np.load("output/gt_loss/imgs.npy", allow_pickle=True)[()],
-            "projected_segments":np.load("output/gt_loss/projected_segments.npy", allow_pickle=True)[()],
+            "gt_loss":np.load(gt_loss_npy),
+            "imgs":np.load(imgs_npy, allow_pickle=True)[()],
+            "projected_segments":np.load(projected_segments_npy, allow_pickle=True)[()],
+        }
+        return raw_data, training_data
+
+    def prepare_dataset_point_l7(self, v_data_dir):
+        raw_data_npy = os.path.join(v_data_dir, "data.npy")
+        gt_loss_npy = os.path.join(v_data_dir, "gt_loss.npy")
+        imgs_npy = os.path.join(v_data_dir, "imgs.npy")
+        projected_points_npy = os.path.join(v_data_dir, "projected_points.npy")
+        raw_data = np.load(raw_data_npy, allow_pickle=True)[()]
+        training_data={
+            "gt_loss":np.load(gt_loss_npy),
+            "imgs":np.load(imgs_npy, allow_pickle=True)[()],
+            "projected_points":np.load(projected_points_npy, allow_pickle=True)[()],
         }
         return raw_data, training_data
 
@@ -216,7 +239,8 @@ class Phase2(pl.LightningModule):
         pass
 
     def train_dataloader(self):
-        self.train_dataset = Blender_Segment_dataset(
+        self.train_dataset = Single_point_dataset(
+        # self.train_dataset = Blender_Segment_dataset(
             self.raw_data,
             self.training_data,
             "training",
@@ -226,12 +250,13 @@ class Phase2(pl.LightningModule):
                           num_workers=self.num_worker,
                           shuffle=True,
                           pin_memory=True,
-                          collate_fn=Blender_Segment_dataset.collate_fn,
+                          collate_fn=self.train_dataset.collate_fn,
                           persistent_workers=True if self.num_worker > 0 else 0
                           )
 
     def val_dataloader(self):
-        self.valid_dataset = Blender_Segment_dataset(
+        self.valid_dataset = Single_point_dataset(
+        # self.valid_dataset = Blender_Segment_dataset(
             self.raw_data,
             self.training_data,
             "validation",
@@ -241,7 +266,7 @@ class Phase2(pl.LightningModule):
                           num_workers=1,
                           shuffle=False,
                           pin_memory=True,
-                          collate_fn=Blender_Segment_dataset.collate_fn,
+                          collate_fn=self.valid_dataset.collate_fn,
                           persistent_workers=True if self.num_worker > 0 else 0
                           )
 
@@ -335,7 +360,6 @@ def main(v_cfg: DictConfig):
         trainer.test(model)
     else:
         trainer.fit(model)
-
 
 if __name__ == '__main__':
     if False:

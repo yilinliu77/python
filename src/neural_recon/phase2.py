@@ -89,7 +89,6 @@ class Phase2(pl.LightningModule):
         self.raw_data, self.training_data = self.prepare_dataset_point_l7(self.hydra_conf["dataset"]["data_dir"])
         self.model = Point_explorer(self.training_data["imgs"])
 
-
     def prepare_dataset(self, v_colmap_dir, v_bounds):
         print("Start to load colmap")
         # Read colmap and segments

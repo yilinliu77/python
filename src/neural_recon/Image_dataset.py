@@ -22,22 +22,29 @@ class Image_dataset(torch.utils.data.Dataset):
         super(Image_dataset, self).__init__()
         self.img: torch.Tensor = torch.from_numpy(v_img)
         self.batch_size: int = v_batch_size
-
+        self.mode = v_mode
         # if v_mode == "training":
         #     self.sample_points = np.random.random((int(v_num_samples), 2)).astype(np.float32)
         # else:
         self.sample_points = np.stack(
             np.meshgrid(
-                np.arange(self.img.shape[1],dtype=np.float32) / (self.img.shape[1] - 1),
-                np.arange(self.img.shape[0],dtype=np.float32) / (self.img.shape[0] - 1),
-                indexing="xy"), axis=2).reshape([-1,2])
+                (np.arange(self.img.shape[1], dtype=np.float32) + 0.5) / self.img.shape[1],
+                (np.arange(self.img.shape[0], dtype=np.float32) + 0.5) / self.img.shape[0],
+                indexing="xy"), axis=2).reshape([-1, 2])
+        self.sample_points_random = self.sample_points.copy()
+        np.random.shuffle(self.sample_points_random)
+        self.sample_points = torch.from_numpy(self.sample_points).to(torch.float16)
+        self.sample_points_random = torch.from_numpy(self.sample_points_random).to(torch.float16)
+        self.img = (self.img / 255.).to(torch.float16)
 
     def __getitem__(self, idx):
         start_index = idx * self.batch_size
         end_index = min(idx * self.batch_size + self.batch_size, self.sample_points.shape[0])
-        sample_points = torch.from_numpy(self.sample_points[start_index:end_index])
-        index = (sample_points*torch.flip(torch.tensor(self.img.shape[:2]) - 1,dims=[0])).long()
-        return sample_points.to(torch.float16), (self.img[index[:,1],index[:,0]] / 255.).to(torch.float16)
+        sample_points = self.sample_points[start_index:end_index] if self.mode == "validation" else self.sample_points_random[start_index:end_index]
+        index = (sample_points * torch.flip(torch.tensor(self.img.shape[:2]), dims=[0])).long()
+        index[:,0] = torch.clamp_max(index[:,0], self.img.shape[1] - 1)
+        index[:,1] = torch.clamp_max(index[:,1], self.img.shape[0] - 1)
+        return sample_points, self.img[index[:, 1], index[:, 0]]
 
     def __len__(self):
         return math.ceil(self.sample_points.shape[0] / self.batch_size)

@@ -2,6 +2,8 @@ import math
 import random
 import sys, os
 
+import open3d
+
 from shared.perspective_geometry import extract_fundamental_from_projection
 from src.neural_recon.colmap_io import read_dataset, Image, Point_3d
 
@@ -12,7 +14,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from shared.common_utils import to_homogeneous, save_line_cloud, normalize_vector, normalized_torch_img_to_numpy
-
+from src.neural_recon.optimize_segment import optimize_single_segment, optimize_single_segment_tensor
+from src.neural_recon.phase1 import Phase1
 import faiss
 
 if __name__ == '__main__1':
@@ -217,6 +220,10 @@ if __name__ == '__main__':
 
 
     if False:
+        mesh = open3d.io.read_triangle_mesh(r"D:\Projects\NeuralRecon\Test_data\OBL_L7\Test_imgs2_colmap_neural\sparse_align\detailed_l7_with_ground.ply")
+        mesh.vertices = open3d.utility.Vector3dVector((np.asarray(mesh.vertices)-bounds_center)/bounds_size+0.5)
+        open3d.io.write_triangle_mesh("output/img_field_test/normalized_mesh_world_coordinate.ply", mesh)
+
         imgs, points_3d = read_dataset(
             r"D:\Projects\NeuralRecon\Test_data\OBL_L7\Test_imgs2_colmap_neural\sparse_align",
             [bound_min,
@@ -329,113 +336,64 @@ if __name__ == '__main__':
         distance_from_candidate_points_to_ray = np.linalg.norm(nearest_candidates - projected_points_on_ray, axis=2) # (2M, 1)
         index_best_projected = distance_from_candidate_points_to_ray.argmin(axis=1) # (2M, 1): Index of the best projected points along the ray
 
+        chosen_distances = distance_of_projection[np.arange(projected_points_on_ray.shape[0]),index_best_projected]
         valid_mask = distance_from_candidate_points_to_ray[np.arange(projected_points_on_ray.shape[0]),index_best_projected] < distance_threshold # (2M, 1)
         valid_mask = valid_mask.reshape((-1,2)) # (M, 2)
         valid_mask = np.logical_and(valid_mask[:,0],valid_mask[:,1]) # (M,)
-        initial_points = projected_points_on_ray[np.arange(projected_points_on_ray.shape[0]),index_best_projected] # (2M, 3): The best projected points along the ray
+        initial_points_camera = projected_points_on_ray[np.arange(projected_points_on_ray.shape[0]),index_best_projected] # (2M, 3): The best projected points along the ray
+        initial_points_world=np.transpose(np.linalg.inv(img1.extrinsic) @ np.transpose(np.insert(initial_points_camera, 3, 1, axis=1)))
+        initial_points_world=initial_points_world[:,:3]/initial_points_world[:,3:4]
 
-        line_coordinates = initial_points.reshape(-1, 6) # (M, 6)
+        line_coordinates = initial_points_world.reshape(-1, 6) # (M, 6)
         line_coordinates = line_coordinates[valid_mask]
+        valid_distances = chosen_distances.reshape(-1, 2)
+        valid_distances = valid_distances[valid_mask]
+
         # line_coordinates = points_from_sfm[index_shortest_distance[:, 0], :].reshape(-1, 6)
         id_segment = (valid_mask[:id_segment]).sum()
-        # distance_mask = D[:, 0] < distance_threshold
-        # distance_mask = distance_mask.reshape(-1, 2)
-        # distance_mask = np.all(distance_mask, axis=1)
-        # line_coordinates = line_coordinates[distance_mask]
 
         save_line_cloud("output/img_field_test/initial_segments.obj", line_coordinates)
-        return id_segment, line_coordinates
-    id_segment,line_coordinates = compute_initial(id_segment)
-
-    target_segment_3d = line_coordinates[id_segment]
-    center_point_3d = (target_segment_3d[:3] + target_segment_3d[3:]) / 2
-    center_point_in_camera = (img1.extrinsic @ to_homogeneous(center_point_3d))[:3]
-    start_point_in_camera = (img1.extrinsic @ to_homogeneous(target_segment_3d[:3]))[:3]
-    end_point_in_camera = (img1.extrinsic @ to_homogeneous(target_segment_3d[3:]))[:3]
-    target_segment_2d = lines1[id_segment]
-    center_target_segment_2d = (target_segment_2d[:2] + target_segment_2d[2:]) / 2
+        return id_segment, line_coordinates, valid_distances
+    changed_id_segment, segment_3d_coordinates, segment_3d_distances = compute_initial(id_segment) # Coordinate of the initial segments in world coordinate
 
 
-    def visualize_target(target):
-        point1_2d = img1.projection @ to_homogeneous(target[:3])
-        point1_2d = point1_2d[:2] / point1_2d[2]
-        point2_2d = img1.projection @ to_homogeneous(target[3:])
-        point2_2d = point2_2d[:2] / point2_2d[2]
-        line_img1 = rgb1.copy()
-        cv2.line(line_img1, (point1_2d * shape).astype(np.int32), (point2_2d * shape).astype(np.int32),
-                 (0, 0, 255),
-                 thickness=5, lineType=cv2.LINE_AA)
-        cv2.imshow("1", line_img1)
-        cv2.waitKey()
-    # visualize_target(target_segment_3d)
+    img_model_root_dir = r"D:\repo\python\output\neural_recon\img_nif_log"
+    def load_img_model(img_name):
+        if os.path.exists(os.path.join(img_model_root_dir, img_name)):
+            checkpoint_name = [item for item in os.listdir(os.path.join(img_model_root_dir, img_name)) if
+                               item[-4:] == "ckpt"]
+            assert len(checkpoint_name) == 1
+            state_dict = torch.load(os.path.join(img_model_root_dir, img_name, checkpoint_name[0]))["state_dict"]
+            fake_cfg = {
+                "trainer": {
+                    "learning_rate": 0,
+                    "batch_size": 0,
+                    "num_worker": 0,
+                    "output": "output",
+                },
+                "dataset": {
+                    "img_size": [600, 400],
+                }
+            }
+            img_model = Phase1(fake_cfg, img1.img_path)
+            img_model.load_state_dict(state_dict, strict=True)
+            img_model.eval()
+            return img_model
+        else:
+            print("cannot find model for img {}".format(img_name))
+            raise
 
-    def compute_initial_normal():
-        vector1 = -normalize_vector(center_point_in_camera[:3])
-        vector2 = normalize_vector(start_point_in_camera[:3] - end_point_in_camera[:3])
-        vector3 = np.cross(vector1, vector2)
-        normal = np.cross(vector3, vector2)
-        return normalize_vector(vector2), normalize_vector(vector3), normalize_vector(normal)
-    vector_line, vector_up, normal_in_camera = compute_initial_normal()
+    img_model1 = load_img_model(img1.img_name)
+    img_model2 = load_img_model(img2.img_name)
 
-
-    def compute_roi():
-        half_window_size_meter_horizontal = np.linalg.norm(start_point_in_camera - end_point_in_camera) / 2  # m
-        half_window_size_meter_vertical = 1  # 1m
-        half_window_size_step = 0.1
-
-        # Compute extreme point
-        point1 = start_point_in_camera - vector_up * half_window_size_meter_vertical
-        point2 = start_point_in_camera + vector_up * half_window_size_meter_vertical
-        point3 = end_point_in_camera + vector_up * half_window_size_meter_vertical
-        point4 = end_point_in_camera - vector_up * half_window_size_meter_vertical
-        roi = np.stack((point1, point2, point3, point4), axis=0)
-        roi_2d = np.transpose(img1.intrinsic @ np.transpose(roi))
-        roi_2d = roi_2d[:, :2] / roi_2d[:, 2:3]
-
-        # Compute interpolated point
-        dx = np.arange(-half_window_size_meter_horizontal, half_window_size_meter_horizontal + half_window_size_step,
-                       half_window_size_step)
-        dy = np.arange(-half_window_size_meter_vertical, half_window_size_meter_vertical + half_window_size_step,
-                       half_window_size_step)
-        dxdy = np.stack(np.meshgrid(dx, dy, indexing='xy'), axis=-1)
-        interpolated_coordinates_camera = vector_line[np.newaxis, np.newaxis, :] * dxdy[:, :, 0:1] + vector_up[
-                                                                                                     np.newaxis,
-                                                                                                     np.newaxis,
-                                                                                                     :] * dxdy[:, :,
-                                                                                                          1:2] + center_point_in_camera
-
-        # Visualize
-        line_img1 = rgb1.copy()
-        line_img1 = cv2.polylines(line_img1, [(roi_2d * shape).astype(np.int32).reshape(-1, 1, 2)], True,
-                                  (0, 255, 0),
-                                  thickness=3, lineType=cv2.LINE_AA)
-        cv2.circle(line_img1, (roi_2d[0] * shape).astype(np.int32), 10, (0, 0, 255), 10)
-        cv2.circle(line_img1, (roi_2d[1] * shape).astype(np.int32), 10, (0, 0, 255), 10)
-        cv2.circle(line_img1, (roi_2d[2] * shape).astype(np.int32), 10, (0, 0, 255), 10)
-        cv2.circle(line_img1, (roi_2d[3] * shape).astype(np.int32), 10, (0, 0, 255), 10)
-        # cv2.imshow("1", line_img1)
-        # cv2.waitKey()
-        return roi, interpolated_coordinates_camera, roi_2d
-    roi_3d_in_camera, interpolated_coordinates_camera, roi_2d = compute_roi()
-
-    interpolated_coordinates_shape = interpolated_coordinates_camera.shape
-    shift_coordinates = np.transpose(img1.intrinsic @ np.transpose(interpolated_coordinates_camera.reshape((-1, 3))))
-    shift_coordinates = shift_coordinates[:, :2] / shift_coordinates[:, 2:3]
-    shift_coordinates = shift_coordinates.reshape(interpolated_coordinates_shape[:2] + (2,))
-
-    img_tensor = torch.asarray(rgb1.copy().astype(np.float32) / 255.).permute(2, 0, 1).unsqueeze(0)
-    coordinate_tensor = torch.asarray(shift_coordinates.astype(np.float32)).unsqueeze(0)
-    sampled_img = torch.nn.functional.grid_sample(img_tensor, coordinate_tensor * 2 - 1, align_corners=True)  # [0,1] -> [-1,1]
-    viz_sampled_img = normalized_torch_img_to_numpy(sampled_img)[0]
-
-    # cv2.imshow("1", viz_sampled_img)
-    # cv2.waitKey()
-
-    line_img1 = rgb1.copy()
-    for item in shift_coordinates.reshape((-1, 2)):
-        cv2.circle(line_img1, (item * shape).astype(np.int32), 2, (0, 0, 255), 2)
-    cv2.imshow("1", line_img1)
-    cv2.waitKey()
+    optimize_single_segment_tensor(
+        segment_3d_distances[changed_id_segment],
+        lines1[id_segment],
+        rgb1, rgb2,
+        img1.intrinsic, img1.extrinsic,
+        img2.intrinsic, img2.extrinsic,
+        img_model1, img_model2
+    )
 
     print("Calculate epipolar lines")
 

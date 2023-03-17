@@ -35,10 +35,10 @@ class NGPModel(nn.Module):
             "otype": "HashGrid",
             "n_levels": 16,
             "n_features_per_level": 2,
-            "log2_hashmap_size": 19,
+            "log2_hashmap_size": 24,
             "base_resolution": 16,
             "per_level_scale": 2.0,
-        })
+        }, dtype=torch.float32)
         self.model2 = tcnn.Network(n_input_dims=self.model1.n_output_dims, n_output_dims=3, network_config={
             "otype": "FullyFusedMLP",
             "activation": "ReLU",
@@ -186,7 +186,7 @@ def main(v_cfg: DictConfig):
             devices=v_cfg["trainer"].gpu, enable_model_summary=False,
             max_epochs=v_cfg["trainer"]["max_epoch"],
             num_sanity_val_steps=2,
-            # precision=16,
+            precision=16,
             reload_dataloaders_every_n_epochs=v_cfg["trainer"]["reload_dataloaders_every_n_epochs"],
             check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
             callbacks=[checkpoint_callback]

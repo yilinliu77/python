@@ -4,7 +4,7 @@ multi_thread="-j20"
 
 ROOT_DIR=$PWD
 
-pip install pytorch-lightning hydra-core shapely scikit-image matplotlib tensorboard plyfile opencv-python opencv-contrib-python ternausnet inplace_abn einops open3d
+pip install numba PyMCubes pytorch-lightning hydra-core shapely scikit-image matplotlib tensorboard plyfile opencv-python opencv-contrib-python ternausnet inplace_abn einops open3d
 
 echo "======================================"
 echo "Start to build tiny-cuda-nn"

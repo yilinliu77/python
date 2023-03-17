@@ -1,5 +1,5 @@
 #include <neural-graphics-primitives/common_device.cuh>
-#include <neural-graphics-primitives/testbed.h>
+// #include <neural-graphics-primitives/testbed.h>
 #include <neural-graphics-primitives/thread_pool.h>
 
 #include <json/json.hpp>

@@ -3,7 +3,7 @@
 #include <neural-graphics-primitives/discrete_distribution.h>
 #include <neural-graphics-primitives/envmap.cuh>
 #include <neural-graphics-primitives/random_val.cuh> // helpers to generate random values, directions
-#include <neural-graphics-primitives/render_buffer.h>
+// #include <neural-graphics-primitives/render_buffer.h>
 #include <neural-graphics-primitives/takikawa_encoding.cuh>
 #include <neural-graphics-primitives/tinyobj_loader_wrapper.h>
 #include <neural-graphics-primitives/trainable_buffer.cuh>

@@ -100,12 +100,12 @@ list(APPEND NGP_SOURCES
 	src/common_device.cu
 	src/marching_cubes.cu
 	src/nerf_loader.cu
-	src/render_buffer.cu
-	src/testbed.cu
-	src/testbed_image.cu
-	src/testbed_nerf.cu
-	src/testbed_sdf.cu
-	src/testbed_volume.cu
+	# src/render_buffer.cu
+	# src/testbed.cu
+	# src/testbed_image.cu
+	# src/testbed_nerf.cu
+	# src/testbed_sdf.cu
+	# src/testbed_volume.cu
 	src/thread_pool.cpp
 	src/tinyexr_wrapper.cu
 	src/tinyobj_loader_wrapper.cpp

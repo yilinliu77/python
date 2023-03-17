@@ -499,8 +499,9 @@ class Phase3(pl.LightningModule):
                 checkpoint_name = [item for item in os.listdir(os.path.join(img_model_root_dir, img_name)) if
                                    item[-4:] == "ckpt"]
                 assert len(checkpoint_name) == 1
-                state_dict = torch.load(os.path.join(img_model_root_dir, img_name, checkpoint_name[0]))["state_dict"]
                 img_model = NGPModel()
+                state_dict = torch.load(os.path.join(img_model_root_dir, img_name, checkpoint_name[0]))
+                # state_dict = torch.load(os.path.join(img_model_root_dir, img_name, checkpoint_name[0]))["state_dict"]
                 img_model.load_state_dict({item[6:]:state_dict[item] for item in state_dict}, strict=True)
                 img_model.eval()
                 return img_model

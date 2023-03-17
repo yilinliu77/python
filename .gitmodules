@@ -10,6 +10,7 @@
 [submodule "thirdparty/AA_RMVSNet"]
 	path = thirdparty/AA_RMVSNet
 	url = https://github.com/qt-zhu/aa-rmvsnet
+	branch = main
 [submodule "thirdparty/CasMVSNet_pl"]
 	path = thirdparty/CasMVSNet_pl
 	url = https://github.com/kwea123/CasMVSNet_pl

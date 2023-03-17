@@ -99,8 +99,9 @@ class LModel(nn.Module):
             p.requires_grad = False
 
         # Visualization
-        self.rgb1 = v_data["rgb1"]
-        self.rgb2 = v_data["rgb2"]
+        viz_shape = (1200,800)
+        self.rgb1 = cv2.resize(v_data["rgb1"], viz_shape, cv2.INTER_AREA)
+        self.rgb2 = cv2.resize(v_data["rgb2"], viz_shape, cv2.INTER_AREA)
 
         # Debug
         self.id_patch = v_data["id_patch"]
@@ -167,6 +168,123 @@ class LModel(nn.Module):
         vertical_length2 = self.vertical_length2 * self.length_normalizer
         return seg_distance, vertical_length1, vertical_length2
 
+    def find_up_vector(self, id_start, id_end, v_up):
+        id_up = -1
+        if (id_start, id_end) in self.v_up_dict[self.id_patch]:
+            id_up = self.v_up_dict[self.id_patch][(id_start, id_end)]
+        elif (id_end, id_start) in self.v_up_dict[self.id_patch]:
+            id_up = self.v_up_dict[self.id_patch][(id_end, id_start)]
+        else:
+            raise
+        return v_up[id_up]
+
+    def compute_similarity_loss(self,
+            start_c, end_c, cur_dir, v_up_c, vertical_length1,id_start,id_end,
+                                v_is_debug,v_is_log,v_log_frequency,v_index,id_segment
+        ):
+        roi_bound1, roi_coor1, roi_2d1 = compute_roi(
+            start_c, end_c, (start_c + end_c) / 2,
+            cur_dir, v_up_c, vertical_length1,
+            self.intrinsic1
+        )
+
+        # Visualize region
+        if v_is_debug or (v_is_log and v_index % v_log_frequency == 0):
+            line_img1 = self.rgb1.copy()
+            shape = line_img1.shape[:2][::-1]
+
+            # Original 2D polygon
+            polygon = [self.graph1.nodes[id_point]["pos_2d"] for id_point in self.graph1.graph["faces"][self.id_patch]]
+            polygon = (np.asarray(polygon) * shape).astype(np.int32)
+            cv2.polylines(line_img1, [polygon], True,
+                          (0, 255, 0), thickness=1, lineType=cv2.LINE_AA)
+
+            # Selected segment
+            cv2.line(line_img1,
+                     (self.graph1.nodes[id_start]["pos_2d"] * shape).astype(np.int32),
+                     (self.graph1.nodes[id_end]["pos_2d"] * shape).astype(np.int32),
+                     (0, 0, 255), thickness=1, lineType=cv2.LINE_AA)
+
+            # RoI
+            roi_2d_numpy = roi_2d1.detach().cpu().numpy()
+            line_img1 = cv2.polylines(line_img1, [(roi_2d_numpy * shape).astype(np.int32).reshape(-1, 1, 2)], True,
+                                      (255, 0, 0),
+                                      thickness=1, lineType=cv2.LINE_AA)
+
+            # cv2.circle(line_img1, (roi_2d_numpy[0] * shape).astype(np.int32), 10, (0, 0, 255), 10)
+            # cv2.circle(line_img1, (roi_2d_numpy[1] * shape).astype(np.int32), 10, (0, 0, 255), 10)
+            # cv2.circle(line_img1, (roi_2d_numpy[2] * shape).astype(np.int32), 10, (0, 0, 255), 10)
+            # cv2.circle(line_img1, (roi_2d_numpy[3] * shape).astype(np.int32), 10, (0, 0, 255), 10)
+
+            cv2.imwrite(r"D:\repo\python\output\img_field_test\imgs_log\2d_{}_{:05d}.jpg".format(id_segment, v_index),
+                        line_img1)
+            if v_is_debug:
+                print("Visualize the calculated roi")
+                cv2.namedWindow("1", cv2.WINDOW_NORMAL)
+                cv2.resizeWindow("1", 1600, 900)
+                cv2.moveWindow("1", 5, 5)
+                cv2.imshow("1", line_img1)
+                cv2.waitKey()
+
+        roi_coor_shape = roi_coor1.shape
+        roi_coor_2d = torch.transpose(self.intrinsic1 @ torch.transpose(roi_coor1.reshape((-1, 3)), 0, 1), 0, 1)
+        roi_coor_2d = roi_coor_2d[:, :2] / roi_coor_2d[:, 2:3]
+        roi_coor_2d = roi_coor_2d.reshape(roi_coor_shape[:2] + (2,))
+
+        sampled_img = sample_img_prediction(self.img_model1, roi_coor_2d)
+
+        transformation = to_homogeneous_mat_tensor(self.intrinsic2) @ self.extrinsic2 @ torch.inverse(self.extrinsic1)
+        roi_coor_2d_img2 = torch.transpose(
+            transformation @ torch.transpose(to_homogeneous_tensor(roi_coor1.reshape((-1, 3))), 0, 1), 0, 1)
+        roi_coor_2d_img2 = roi_coor_2d_img2[:, :2] / roi_coor_2d_img2[:, 2:3]
+        roi_coor_2d_img2 = roi_coor_2d_img2.reshape(roi_coor_shape[:2] + (2,))
+        viz_sampled_img2 = sample_img_prediction(self.img_model2, roi_coor_2d_img2)
+
+        # Visualize query points
+        if v_is_debug or (v_is_log and v_index % v_log_frequency == 0):
+            line_img1 = self.rgb1.copy()
+            # line_img1 = cv2.resize(line_img1, (600, 400))
+            shape = line_img1.shape[:2][::-1]
+
+            roi_coor_2d1_numpy = roi_coor_2d.detach().cpu().numpy()
+            sampled_img1_numpy = normalized_torch_img_to_numpy(sampled_img.permute(2, 0, 1))
+            roi_coor_2d2_numpy = roi_coor_2d_img2.detach().cpu().numpy()
+            sampled_img2_numpy = normalized_torch_img_to_numpy(viz_sampled_img2.permute(2, 0, 1))
+
+            for item in roi_coor_2d1_numpy.reshape((-1, 2)):
+                cv2.circle(line_img1, (item * shape).astype(np.int32), 1, (0, 0, 255), 1)
+            img1 = pad_and_enlarge_along_y(sampled_img1_numpy, line_img1)
+            line_img2 = self.rgb2.copy()
+            # line_img2 = cv2.resize(line_img2, (600, 400))
+            shape = line_img2.shape[:2][::-1]
+            for item in roi_coor_2d2_numpy.reshape((-1, 2)):
+                cv2.circle(line_img2, (item * shape).astype(np.int32), 1, (0, 0, 255), 1)
+            img2 = pad_and_enlarge_along_y(sampled_img2_numpy, line_img2)
+
+            cv2.imwrite(r"D:\repo\python\output\img_field_test\imgs_log\3d_{}_{:05d}.jpg".format(id_segment, v_index),
+                        np.concatenate((img1, img2), axis=0))
+            if v_is_debug:
+                print("Visualize the extracted region")
+                cv2.imshow("1", np.concatenate((img1, img2), axis=0))
+                cv2.waitKey()
+
+        loss = torch.nn.functional.mse_loss(sampled_img, viz_sampled_img2)
+        return loss
+
+    def compute_normal_consistency(self,
+                                   point_pos_c, id1, id2, v_ref_normal, v_up
+        ):
+        point1 = point_pos_c[id1]
+        point2 = point_pos_c[id2]
+        cur_dir = normalize_tensor(point2 - point1)
+
+        v_next_normal = torch.cross(cur_dir, self.find_up_vector(id1, id2, v_up))
+        v_ref_normal = normalize_tensor(v_ref_normal)
+        v_next_normal = normalize_tensor(v_next_normal)
+
+        loss = (1 - v_next_normal.dot(v_ref_normal)) / 2 # [0, 2] -> [0, 1]
+        return loss
+
     def forward(self, v_index):
         v_is_debug = False
         v_is_log = True
@@ -176,115 +294,36 @@ class LModel(nn.Module):
 
         point_pos_c = self.ray_c * seg_distance[:, None]
         face_ids = self.graph1.graph["faces"][self.id_patch]
-        losses = []
+        normal_losses = []
+        similarity_losses = []
         for id_segment in range(len(face_ids)):
             id_start = face_ids[id_segment]
             id_end = face_ids[(id_segment + 1) % len(face_ids)]
-            id_next = face_ids[(id_segment + 2) % len(face_ids)]
 
             start_c = point_pos_c[id_start]
             end_c = point_pos_c[id_end]
-            next_c = point_pos_c[id_next]
 
             cur_dir = normalize_tensor(end_c - start_c)
-            # next_dir = normalize_tensor(next_c - end_c)
-            # v_normal_c = torch.cross(cur_dir, next_dir)
-            # v_up_c = normalize_tensor(torch.cross(v_normal_c, cur_dir))
 
-            id_up=-1
-            if (id_start, id_end) in self.v_up_dict[self.id_patch]:
-                id_up = self.v_up_dict[self.id_patch][(id_start, id_end)]
-            elif (id_end, id_start) in self.v_up_dict[self.id_patch]:
-                id_up = self.v_up_dict[self.id_patch][(id_end, id_start)]
-            else:
-                raise
+            v_up_c = self.find_up_vector(id_start, id_end, v_up)
 
-            roi_bound1, roi_coor1, roi_2d1 = compute_roi(
-                start_c, end_c, (start_c+end_c)/2,
-                cur_dir, v_up[id_up], vertical_length1,
-                self.intrinsic1
-            )
+            loss = self.compute_similarity_loss(start_c, end_c, cur_dir, v_up_c, vertical_length1,id_start,id_end,
+                                v_is_debug,v_is_log,v_log_frequency,v_index,id_segment)
 
-            # Visualize
-            if v_is_debug or (v_is_log and v_index % v_log_frequency == 0):
-                line_img1 = self.rgb1.copy()
-                shape = line_img1.shape[:2][::-1]
+            # Normal loss
+            v_cur_normal = torch.cross(cur_dir, v_up_c)
+            id_prev = face_ids[(id_segment - 1) % len(face_ids)]
+            id_next = face_ids[(id_segment + 2) % len(face_ids)]
+            normal_loss1 = self.compute_normal_consistency(point_pos_c, id_prev, id_start, v_cur_normal, v_up)
+            normal_loss2 = self.compute_normal_consistency(point_pos_c, id_end, id_next, v_cur_normal, v_up)
+            normal_loss = (normal_loss1+normal_loss2)/2
+            normal_losses.append(normal_loss)
+            similarity_losses.append(loss)
 
-                # Original 2D polygon
-                polygon = [self.graph1.nodes[id_point]["pos_2d"] for id_point in self.graph1.graph["faces"][self.id_patch]]
-                polygon = (np.asarray(polygon) * shape).astype(np.int32)
-                cv2.polylines(line_img1, [polygon], True,
-                              (0, 255, 0), thickness=2, lineType=cv2.LINE_AA)
-
-                # Selected segment
-                cv2.line(line_img1,
-                         (self.graph1.nodes[id_start]["pos_2d"]*shape).astype(np.int32),
-                         (self.graph1.nodes[id_end]["pos_2d"]*shape).astype(np.int32),
-                         (0, 0, 255), thickness=3, lineType=cv2.LINE_AA)
-
-                # RoI
-                roi_2d_numpy = roi_2d1.detach().cpu().numpy()
-                line_img1 = cv2.polylines(line_img1, [(roi_2d_numpy * shape).astype(np.int32).reshape(-1, 1, 2)], True,
-                                          (255, 0, 0),
-                                          thickness=1, lineType=cv2.LINE_AA)
-
-                # cv2.circle(line_img1, (roi_2d_numpy[0] * shape).astype(np.int32), 10, (0, 0, 255), 10)
-                # cv2.circle(line_img1, (roi_2d_numpy[1] * shape).astype(np.int32), 10, (0, 0, 255), 10)
-                # cv2.circle(line_img1, (roi_2d_numpy[2] * shape).astype(np.int32), 10, (0, 0, 255), 10)
-                # cv2.circle(line_img1, (roi_2d_numpy[3] * shape).astype(np.int32), 10, (0, 0, 255), 10)
-
-                cv2.imwrite(r"D:\repo\python\output\img_field_test\imgs_log\2d_{}_{:05d}.jpg".format(id_segment, v_index), line_img1)
-                if v_is_debug:
-                    print("Visualize the calculated roi")
-                    cv2.namedWindow("1", cv2.WINDOW_NORMAL)
-                    cv2.resizeWindow("1", 1600, 900)
-                    cv2.moveWindow("1", 5, 5)
-                    cv2.imshow("1", line_img1)
-                    cv2.waitKey()
-
-            roi_coor_shape = roi_coor1.shape
-            roi_coor_2d = torch.transpose(self.intrinsic1 @ torch.transpose(roi_coor1.reshape((-1, 3)), 0, 1), 0, 1)
-            roi_coor_2d = roi_coor_2d[:, :2] / roi_coor_2d[:, 2:3]
-            roi_coor_2d = roi_coor_2d.reshape(roi_coor_shape[:2] + (2,))
-
-            sampled_img = sample_img_prediction(self.img_model1, roi_coor_2d)
-
-            transformation = to_homogeneous_mat_tensor(self.intrinsic2) @ self.extrinsic2 @ torch.inverse(self.extrinsic1)
-            roi_coor_2d_img2 = torch.transpose(
-                transformation @ torch.transpose(to_homogeneous_tensor(roi_coor1.reshape((-1, 3))), 0, 1), 0, 1)
-            roi_coor_2d_img2 = roi_coor_2d_img2[:, :2] / roi_coor_2d_img2[:, 2:3]
-            roi_coor_2d_img2 = roi_coor_2d_img2.reshape(roi_coor_shape[:2] + (2,))
-            viz_sampled_img2 = sample_img_prediction(self.img_model2, roi_coor_2d_img2)
-
-            if v_is_debug or (v_is_log and v_index % v_log_frequency == 0):
-                line_img1 = self.rgb1.copy()
-                # line_img1 = cv2.resize(line_img1, (600, 400))
-                shape = line_img1.shape[:2][::-1]
-
-                roi_coor_2d1_numpy = roi_coor_2d.detach().cpu().numpy()
-                sampled_img1_numpy = normalized_torch_img_to_numpy(sampled_img.permute(2, 0, 1))
-                roi_coor_2d2_numpy = roi_coor_2d_img2.detach().cpu().numpy()
-                sampled_img2_numpy = normalized_torch_img_to_numpy(viz_sampled_img2.permute(2, 0, 1))
-
-                for item in roi_coor_2d1_numpy.reshape((-1, 2)):
-                    cv2.circle(line_img1, (item * shape).astype(np.int32), 1, (0, 0, 255), 2)
-                img1 = pad_and_enlarge_along_y(sampled_img1_numpy, line_img1)
-                line_img2 = self.rgb2.copy()
-                # line_img2 = cv2.resize(line_img2, (600, 400))
-                shape = line_img2.shape[:2][::-1]
-                for item in roi_coor_2d2_numpy.reshape((-1, 2)):
-                    cv2.circle(line_img2, (item * shape).astype(np.int32), 1, (0, 0, 255), 2)
-                img2 = pad_and_enlarge_along_y(sampled_img2_numpy, line_img2)
-
-                cv2.imwrite(r"D:\repo\python\output\img_field_test\imgs_log\3d_{}_{:05d}.jpg".format(id_segment,v_index), np.concatenate((img1, img2), axis=0))
-                if v_is_debug:
-                    print("Visualize the extracted region")
-                    cv2.imshow("1", np.concatenate((img1, img2), axis=0))
-                    cv2.waitKey()
-
-            loss = torch.nn.functional.mse_loss(sampled_img, viz_sampled_img2)
-            losses.append(loss)
-        return torch.mean(torch.stack(losses))
+        normal_losses = torch.stack(normal_losses).mean()
+        similarity_losses = torch.stack(similarity_losses).mean()
+        total_loss = normal_losses * 0.5 + similarity_losses * 0.5
+        return total_loss, normal_losses, similarity_losses
 
 
 class Phase3(pl.LightningModule):
@@ -544,20 +583,24 @@ class Phase3(pl.LightningModule):
         }
 
     def training_step(self, batch, batch_idx):
-        loss = self.model(self.trainer.global_step)
+        total_loss, normal_losses, similarity_losses = self.model(self.trainer.global_step)
 
-        self.log("Training_Loss", loss.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
+        self.log("Training_Loss", total_loss.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
+                 batch_size=1)
+        self.log("Training_Normal_Loss", normal_losses.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
+                 batch_size=1)
+        self.log("Training_Similarity_Loss", similarity_losses.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  batch_size=1)
 
-        return loss
+        return total_loss
 
     def validation_step(self, batch, batch_idx):
-        loss = self.model(self.trainer.global_step)
+        total_loss, normal_losses, similarity_losses = self.model(self.trainer.global_step)
 
-        self.log("Validation_Loss", loss.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
+        self.log("Validation_Loss", total_loss.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  batch_size=1)
 
-        return loss
+        return total_loss
 
     def validation_epoch_end(self, result) -> None:
         if self.trainer.sanity_checking:
@@ -582,7 +625,7 @@ def main(v_cfg: DictConfig):
         max_epochs=10000,
         num_sanity_val_steps=2,
         check_val_every_n_epoch=100000000,
-        precision=16,
+        # precision=16,
     )
 
     model = Phase3(v_cfg)

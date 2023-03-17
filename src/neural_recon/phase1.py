@@ -35,7 +35,7 @@ class NGPModel(nn.Module):
             "otype": "HashGrid",
             "n_levels": 16,
             "n_features_per_level": 2,
-            "log2_hashmap_size": 24,
+            "log2_hashmap_size": 19,
             "base_resolution": 16,
             "per_level_scale": 2.0,
         })

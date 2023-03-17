@@ -35,7 +35,7 @@ class NGPModel(nn.Module):
             "otype": "HashGrid",
             "n_levels": 16,
             "n_features_per_level": 2,
-            "log2_hashmap_size": 19,
+            "log2_hashmap_size": 24,
             "base_resolution": 16,
             "per_level_scale": 2.0,
         })
@@ -87,7 +87,9 @@ class Phase1(pl.LightningModule):
             self.img,
             self.hydra_conf["dataset"]["num_sample"],
             self.hydra_conf["trainer"]["batch_size"],
-            "training"
+            "training",
+            self.hydra_conf["dataset"]["sampling_strategy"],
+            self.hydra_conf["dataset"]["query_strategy"],
         )
         return DataLoader(self.train_dataset,
                           batch_size=1,
@@ -102,7 +104,9 @@ class Phase1(pl.LightningModule):
             self.img,
             self.hydra_conf["dataset"]["num_sample"],
             self.hydra_conf["trainer"]["batch_size"],
-            "validation"
+            "validation",
+            self.hydra_conf["dataset"]["sampling_strategy"],
+            self.hydra_conf["dataset"]["query_strategy"],
         )
         return DataLoader(self.valid_dataset,
                           batch_size=1,
@@ -117,12 +121,12 @@ class Phase1(pl.LightningModule):
 
         return {
             'optimizer': optimizer,
-            'lr_scheduler': {
-                "scheduler": StepLR(optimizer, 100, 0.5),
+            # 'lr_scheduler': {
+                # "scheduler": StepLR(optimizer, 100, 0.5),
                 # "scheduler": ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=5),
                 # "frequency": self.hydra_conf["trainer"]["check_val_every_n_epoch"]
-                "monitor": "Validation_Loss",
-            },
+                # "monitor": "Validation_Loss",
+            # },
             'monitor': 'Validation_Loss'
         }
 
@@ -164,14 +168,14 @@ def main(v_cfg: DictConfig):
     bounds_min = np.array((-50, -50, -10), dtype=np.float32)
     bounds_max = np.array((250, 200, 60), dtype=np.float32)
     scene_bounds = np.array([bounds_min, bounds_max])
-    imgs, world_points = read_dataset("d:/Projects/NeuralRecon/Test_data/OBL_L7/Test_imgs2_colmap_neural/sparse_align",
+    imgs, world_points = read_dataset("/mnt/d/Projects/sparse_align/",
                                       scene_bounds)
 
     for id_img in range(len(imgs)):
-        model = Phase1(v_cfg, imgs[id_img].img_path)
         img_name = os.path.basename(imgs[id_img].img_path).split(".")[0]
         if img_name not in v_cfg["dataset"]["target_img"]:
             continue
+        model = Phase1(v_cfg, imgs[id_img].img_path)
         from pytorch_lightning import loggers as pl_loggers
         tb_logger = pl_loggers.TensorBoardLogger(save_dir="output/neural_recon/img_nif_log", name=img_name)
         checkpoint_callback = ModelCheckpoint(dirpath="output/neural_recon/img_nif_log/{}".format(img_name),
@@ -182,7 +186,8 @@ def main(v_cfg: DictConfig):
             devices=v_cfg["trainer"].gpu, enable_model_summary=False,
             max_epochs=v_cfg["trainer"]["max_epoch"],
             num_sanity_val_steps=2,
-            precision=16,
+            # precision=16,
+            reload_dataloaders_every_n_epochs=v_cfg["trainer"]["reload_dataloaders_every_n_epochs"],
             check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
             callbacks=[checkpoint_callback]
         )

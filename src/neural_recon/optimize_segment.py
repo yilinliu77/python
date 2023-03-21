@@ -1,3 +1,5 @@
+from math import ceil
+
 import cv2
 import numba
 import numpy as np
@@ -8,6 +10,55 @@ from tqdm import tqdm
 from shared.common_utils import normalize_vector, normalized_torch_img_to_numpy, padding, to_homogeneous, \
     to_homogeneous_vector, to_homogeneous_tensor, normalize_tensor, to_homogeneous_mat_tensor
 
+
+def compute_initial_normal_based_on_camera(
+        points_pos_3d_c: np.ndarray,
+        v_graph: nx.Graph,
+):
+    point_index = []
+    for id_face, face_ids in enumerate(v_graph.graph["faces"]):
+        for id_segment in range(len(face_ids)):
+            point_index.append(face_ids[id_segment])
+            point_index.append(face_ids[(id_segment + 1) % len(face_ids)])
+            point_index.append(id_face)
+    point_index = np.asarray(point_index).reshape((-1, 3))
+    s_c = points_pos_3d_c[point_index[:, 0]]
+    e_c = points_pos_3d_c[point_index[:, 1]]
+    c_c = (s_c + e_c) / 2
+    center_to_origin = -normalize_vector(c_c)
+    start_to_end = normalize_vector(s_c - e_c)
+    up = normalize_vector(np.cross(center_to_origin, start_to_end))
+    # normal = normalize_vector(np.cross(up, start_to_end))
+    for id_edge, edge in enumerate(point_index):
+        if "up_c" not in v_graph[edge[0]][edge[1]]:
+            v_graph[edge[0]][edge[1]]["up_c"] = {edge[2]: up[id_edge]}
+        else:
+            v_graph[edge[0]][edge[1]]["up_c"].update({edge[2]: up[id_edge]})
+
+    return
+
+
+def sample_img(v_rgb, v_coor_2d):
+    coordinate_tensor = v_coor_2d.unsqueeze(0)
+    sampled_img = torch.nn.functional.grid_sample(v_rgb, coordinate_tensor * 2 - 1,
+                                                  align_corners=True)[0]  # [0,1] -> [-1,1]
+    # viz_sampled_img = normalized_torch_img_to_numpy(sampled_img)[0]
+    return sampled_img.permute(1, 2, 0)
+
+
+def sample_img_prediction(v_model, v_coor_2d):
+    MAX_ITEM_PER_BATCH = 262144
+    coor_2d = v_coor_2d.reshape((-1, 2))
+    results = []
+    for i in range(ceil(coor_2d.shape[0] / MAX_ITEM_PER_BATCH)):
+        sampled_pixels_flatten = v_model(
+            coor_2d[i * MAX_ITEM_PER_BATCH:min(coor_2d.shape[0], (i + 1) * MAX_ITEM_PER_BATCH)])
+        results.append(sampled_pixels_flatten)
+    sampled_pixels = torch.cat(results, dim=0).reshape(v_coor_2d.shape[:2] + (3,))
+    return sampled_pixels
+
+
+### Out of date
 
 def compute_initial_normal(
         v_start_point_in_camera,
@@ -20,23 +71,6 @@ def compute_initial_normal(
     normal = np.cross(up, start_to_end)
     return normalize_vector(start_to_end), normalize_vector(up), normalize_vector(normal)
 
-
-def compute_initial_normal_based_on_camera(
-        v_graph: nx.Graph
-):
-    for id_face, face_ids in enumerate(tqdm(v_graph.graph["faces"])):
-        for id_segment in range(len(face_ids)):
-            id_start = face_ids[id_segment]
-            id_end = face_ids[(id_segment + 1) % len(face_ids)]
-            start_point_in_camera = v_graph.nodes[id_start]["ray_c"] * v_graph.nodes[id_start]["distance"]
-            end_point_in_camera = v_graph.nodes[id_end]["ray_c"] * v_graph.nodes[id_end]["distance"]
-            center_point_in_camera = (start_point_in_camera+end_point_in_camera)/2
-            v_along, v_up, v_normal = compute_initial_normal(start_point_in_camera,end_point_in_camera,center_point_in_camera)
-            if "up_c" not in v_graph[id_start][id_end]:
-                v_graph[id_start][id_end]["up_c"] = {id_face: v_up}
-            else:
-                v_graph[id_start][id_end]["up_c"].update({id_face: v_up})
-    return
 
 def compute_initial_normal_based_on_pos(v_graph: nx.Graph):
     for id_face, face_ids in enumerate(tqdm(v_graph.graph["faces"])):
@@ -80,37 +114,16 @@ def compute_roi(
     roi_2d = roi_2d[:, :2] / roi_2d[:, 2:3]
 
     # Compute interpolated point
-    num_horizontal = half_window_size_meter_horizontal.item() // half_window_size_step
-    num_vertical = half_window_size_meter_vertical.item() // half_window_size_step
+    num_horizontal = max(1, half_window_size_meter_horizontal.item() // half_window_size_step)
+    num_vertical = max(1, half_window_size_meter_vertical.item() // half_window_size_step)
     dx = torch.arange(-num_horizontal, num_horizontal,
                       device=device) / num_horizontal * half_window_size_meter_horizontal
     dy = torch.arange(num_vertical, device=device) / num_vertical * half_window_size_meter_vertical
 
-    # dx = torch.arange(0, half_window_size_meter_horizontal.item() + half_window_size_step,
-    #                half_window_size_step)
-    # dy = torch.arange(0, half_window_size_meter_vertical.item() + half_window_size_step,
-    #                half_window_size_step)
     dxdy = torch.stack(torch.meshgrid(dx, dy, indexing='xy'), dim=-1).to(device)
     interpolated_coordinates_camera = v_line[None, None, :] * dxdy[:, :, 0:1] + v_up[None, None, :] * dxdy[:, :,
                                                                                                       1:2] + c
     return roi, interpolated_coordinates_camera, roi_2d
-
-
-def sample_img(v_rgb, v_coor_2d):
-    img_tensor = torch.asarray(v_rgb.copy().astype(np.float32) / 255.).permute(2, 0, 1).unsqueeze(0)
-    coordinate_tensor = torch.asarray(v_coor_2d.astype(np.float32)).unsqueeze(0)
-    sampled_img = torch.nn.functional.grid_sample(img_tensor, coordinate_tensor * 2 - 1,
-                                                  align_corners=True)  # [0,1] -> [-1,1]
-    viz_sampled_img = normalized_torch_img_to_numpy(sampled_img)[0]
-    return viz_sampled_img
-
-
-def sample_img_prediction(v_model, v_coor_2d):
-    # with torch.no_grad():
-    coor_2d = v_coor_2d.reshape((-1, 2))
-    sampled_pixels_flatten = v_model(coor_2d)
-    sampled_pixels = sampled_pixels_flatten.reshape(v_coor_2d.shape[:2] + (3,))
-    return sampled_pixels
 
 
 def optimize_single_segment(

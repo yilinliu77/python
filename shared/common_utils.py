@@ -1,3 +1,4 @@
+import time
 from typing import List
 
 import cv2
@@ -20,6 +21,9 @@ def debug_imgs(v_imgs: List[np.ndarray]) -> None:
     cv2.waitKey()
     # cv2.destroyWindow("test")
 
+def refresh_timer(a):
+    delta = time.time() - a
+    return delta, time.time()
 
 ###
 # Numpy
@@ -61,8 +65,8 @@ def save_line_cloud(v_file_path: str, v_segments: np.ndarray):
 
 
 def normalize_vector(v_vector):
-    length = np.linalg.norm(v_vector)
-    assert length != 0
+    length = np.linalg.norm(v_vector, axis=-1, keepdims=True)
+    # assert length != 0
     return v_vector / length
 
 

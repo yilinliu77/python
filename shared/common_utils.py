@@ -133,7 +133,7 @@ def to_homogeneous_mat_tensor(v_array: torch.Tensor):
 
 
 def normalize_tensor(v_vector):
-    length = torch.norm(v_vector, dim=-1, keepdim=True)
+    length = torch.linalg.norm(v_vector, dim=-1, keepdim=True)
     # assert length != 0
     return v_vector / length
 
@@ -146,7 +146,7 @@ def normalized_torch_img_to_numpy(v_tensor: torch.Tensor):
         t = v_tensor.permute(1, 2, 0).detach().cpu()
     else:
         raise
-    return (t.numpy() * 255.).astype(np.uint8)
+    return np.clip((t.numpy() * 255.).astype(np.uint8), 0, 255)
 
 # Physics notions(ISO) are used here
 # https://en.wikipedia.org/wiki/Spherical_coordinate_system

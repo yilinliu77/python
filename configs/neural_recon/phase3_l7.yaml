@@ -8,15 +8,15 @@ trainer:
   learning_rate: 1e-4
   gpu: 1
   num_worker: 4
-  batch_size: 4096
+  batch_size: 64
   auto_lr_find: false
-#  resume_from_checkpoint: lightning_logs/version_106/checkpoints/epoch=8999-step=117000.ckpt
+#  resume_from_checkpoint: output/epoch=179999-step=180000.ckpt
   resume_from_checkpoint:
   evaluate: false
   running_sanity_check: false
-  output: output/img_field_test/imgs_log
+  output: imgs_log
 
-  loss_weight: [0.5, 0.5] # normal_weight, similarity_weight
+  loss_weight: [0.1, 0.8, 0.1] # normal_weight, similarity_weight, normalization_weight
   img_model: "model" # ["model", "sample"]
 
 
@@ -26,8 +26,8 @@ model:
 
 hydra:
   run:
-    dir: .
-  output_subdir: null
+    dir: ./outputs/${now:%Y_%m_%d_%H_%M_%S}
+#  output_subdir: null
   job:
     chdir: False
 #  job_logging: disabled

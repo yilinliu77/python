@@ -133,7 +133,7 @@ def to_homogeneous_mat_tensor(v_array: torch.Tensor):
 
 
 def normalize_tensor(v_vector):
-    length = torch.linalg.norm(v_vector, dim=-1, keepdim=True)
+    length = torch.linalg.norm(v_vector+1e-6, dim=-1, keepdim=True)
     # assert length != 0
     return v_vector / length
 
@@ -194,3 +194,11 @@ def caculate_align_mat(pVec_Arr):
 
     qTrans_Mat *= scale
     return qTrans_Mat
+
+
+def get_line_mesh(v_path, v_points, v_lines):
+    with open(v_path,"w") as f:
+        for item in v_points:
+            f.write("v {} {} {} 1 0 0\n".format(item[0],item[1],item[2]))
+        for item in v_lines:
+            f.write("l {} {}\n".format(item[0] + 1, item[1] + 1))

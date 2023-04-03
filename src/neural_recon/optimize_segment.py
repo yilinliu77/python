@@ -28,6 +28,7 @@ def compute_initial_normal_based_on_camera(
     center_to_origin = -normalize_vector(c_c)
     start_to_end = normalize_vector(s_c - e_c)
     up = normalize_vector(np.cross(center_to_origin, start_to_end))
+    # up = normalize_vector(c_c)
     # normal = normalize_vector(np.cross(up, start_to_end))
     for id_edge, edge in enumerate(point_index):
         if "up_c" not in v_graph[edge[0]][edge[1]]:
@@ -85,6 +86,10 @@ def compute_initial_normal_based_on_pos(v_graph: nx.Graph):
                 "ray_c"] * v_graph.nodes[id_end]["distance"]
 
             normal = np.cross(cur_segment, next_segment)
+            sign_flag = normal.dot(np.array((0, 0, 1))) > 0
+            if sign_flag:
+                normal = -normal
+
             if "up_c" not in v_graph[id_start][id_end]:
                 v_graph[id_start][id_end]["up_c"] = {id_face: normalize_vector(np.cross(normal, cur_segment))}
             else:

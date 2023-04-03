@@ -1,10 +1,13 @@
-#!/bin/zsh
+#!/bin/bash
+
+git submodule update --remote
 
 multi_thread="-j20"
 
 ROOT_DIR=$PWD
 
 pip install numba PyMCubes pytorch-lightning hydra-core shapely scikit-image matplotlib tensorboard plyfile opencv-python opencv-contrib-python ternausnet inplace_abn einops open3d
+conda install -y -c intel mkl mkl-devel mkl-static mkl-include
 
 echo "======================================"
 echo "Start to build tiny-cuda-nn"
@@ -19,7 +22,7 @@ cd $ROOT_DIR/thirdparty/sdf_computer && cmake . -B build -DCMAKE_BUILD_TYPE=Rele
 echo "======================================"
 echo "Start to build faiss"
 echo "======================================"
-cd $ROOT_DIR/thirdparty/faiss && cmake -B build . -DFAISS_ENABLE_GPU=ON -DFAISS_ENABLE_PYTHON=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$vcpkg && cmake --build build --target faiss --config Release ${multi_thread} && cmake --build build --target swigfaiss --config Release ${multi_thread} && cd build/faiss/python && python setup.py install
+cd $ROOT_DIR/thirdparty/faiss && cmake -B build . -DCMAKE_PREFIX_PATH=$CONDA_PREFIX -DFAISS_ENABLE_GPU=ON -DFAISS_ENABLE_PYTHON=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$vcpkg && cmake --build build --target faiss --config Release ${multi_thread} && cmake --build build --target swigfaiss --config Release ${multi_thread} && cd build/faiss/python && python setup.py install
 
 # Not used
 # echo "======================================"

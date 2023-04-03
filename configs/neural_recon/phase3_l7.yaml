@@ -4,19 +4,20 @@ dataset:
   only_train_target: 1522
 
 trainer:
-  check_val_every_n_epoch: 1000
+  check_val_every_n_epoch: 1
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 4
-  batch_size: 64
+  num_worker: 0
+  batch_size: 1
   auto_lr_find: false
-#  resume_from_checkpoint: output/epoch=179999-step=180000.ckpt
+#  resume_from_checkpoint: outputs/2023_03_28_15_25_48/lightning_logs/version_0/checkpoints/epoch=12999-step=13000.ckpt
   resume_from_checkpoint:
   evaluate: false
   running_sanity_check: false
   output: imgs_log
 
-  loss_weight: [0.1, 0.8, 0.1] # normal_weight, similarity_weight, normalization_weight
+  loss_weight: [1, 0.01, 0] # similarity_weight, normal_weight, normalization_weight
+  num_sample: 1000 # number of gaussian sample
   img_model: "model" # ["model", "sample"]
 
 
@@ -27,8 +28,8 @@ model:
 hydra:
   run:
     dir: ./outputs/${now:%Y_%m_%d_%H_%M_%S}
-#  output_subdir: null
   job:
     chdir: False
+#  output_subdir: null
 #  job_logging: disabled
 #  hydra_logging: disabled

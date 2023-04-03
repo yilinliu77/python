@@ -24,22 +24,19 @@ from omegaconf import DictConfig, OmegaConf
 
 from src.neural_recon.Image_dataset import Image_dataset
 from src.neural_recon.colmap_io import read_dataset
+from src.neural_recon.phase1 import NGPModel
 
 
-class NGPModel(nn.Module):
+class NGPModelInv1(nn.Module):
     def __init__(self):
-        super(NGPModel, self).__init__()
+        super(NGPModelInv1, self).__init__()
 
         # Define models
-        self.model1 = tcnn.Encoding(n_input_dims=2, encoding_config={
-            "otype": "HashGrid",
-            "n_levels": 16,
-            "n_features_per_level": 2,
-            "log2_hashmap_size": 19,
-            "base_resolution": 16,
-            "per_level_scale": 2.0,
+        self.model1 = tcnn.Encoding(n_input_dims=32, encoding_config={
+            "otype": "Frequency",
+            "n_frequencies": 12
         }, dtype=torch.float32)
-        self.model2 = tcnn.Network(n_input_dims=self.model1.n_output_dims, n_output_dims=3, network_config={
+        self.model2 = tcnn.Network(n_input_dims=self.model1.n_output_dims, n_output_dims=2, network_config={
             "otype": "FullyFusedMLP",
             "activation": "ReLU",
             "output_activation": "None",
@@ -47,16 +44,15 @@ class NGPModel(nn.Module):
             "n_hidden_layers": 2,
         })
 
-    def forward(self, v_pixel_pos):
-        features = self.model1(v_pixel_pos)  # (batch_size, feature_dim)
-        predicted_pixel = self.model2(features)  # (batch_size, feature_dim)
-        return predicted_pixel
-        pass
+    def forward(self, v_features):
+        features = self.model1(v_features)  # (batch_size, feature_dim)
+        predicted_pos = self.model2(features)  # (batch_size, 2)
+        return predicted_pos
 
 
-class Phase1(pl.LightningModule):
+class Phase12(pl.LightningModule):
     def __init__(self, hparams, v_img_path):
-        super(Phase1, self).__init__()
+        super(Phase12, self).__init__()
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
@@ -69,10 +65,21 @@ class Phase1(pl.LightningModule):
         self.img_name = os.path.basename(v_img_path).split(".")[0]
         self.log_root = os.path.join(self.hydra_conf["trainer"]["output"], self.img_name)
         os.makedirs(self.log_root, exist_ok=True)
-        os.makedirs(os.path.join(self.log_root, "imgs"), exist_ok=True)
-        cv2.imwrite(os.path.join(self.log_root, "gt.png"), cv2.cvtColor(self.img, cv2.COLOR_RGB2BGR))
+        os.makedirs(os.path.join(self.log_root, "imgs_inv"), exist_ok=True)
 
-        self.model = NGPModel()
+        self.model_forward = NGPModel()
+        checkpoint_name = [item for item in os.listdir(
+            os.path.join(self.hydra_conf["model"]["input_model"], self.img_name)) if item[-4:] == "ckpt"]
+        assert len(checkpoint_name) == 1
+        # state_dict = torch.load(os.path.join(img_model_root_dir, img_name, checkpoint_name[0]))
+        state_dict = torch.load(
+            os.path.join(self.hydra_conf["model"]["input_model"], self.img_name, checkpoint_name[0]))["state_dict"]
+        self.model_forward.load_state_dict({item[6:]: state_dict[item] for item in state_dict}, strict=True)
+        self.model_forward.eval()
+        for p in self.model_forward.parameters():
+            p.requires_grad=False
+        f = getattr(sys.modules[__name__], self.hydra_conf["model"]["model_name"])
+        self.model_inverse = f()
 
     def train_dataloader(self):
         self.train_dataset = Image_dataset(
@@ -123,22 +130,31 @@ class Phase1(pl.LightningModule):
         }
 
     def training_step(self, batch, batch_idx):
-        predicted_pixel = self.model(batch[0][0])
-        loss = F.mse_loss(predicted_pixel, batch[1][0])
+        pixel_pos = batch[0][0]
+        gt_rgb = batch[1][0]
+        batch_size = gt_rgb.shape[0]
+        predicted_features = self.model_forward.model1(pixel_pos)
+        predicted_pos = self.model_inverse(predicted_features)
+        loss = F.mse_loss(pixel_pos, predicted_pos)
 
         self.log("Training_Loss", loss.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
-                 batch_size=batch[0].shape[0])
+                 batch_size=batch_size)
 
         return loss
 
     def validation_step(self, batch, batch_idx):
-        predicted_pixel = self.model(batch[0][0])
-        loss = F.mse_loss(predicted_pixel, batch[1][0])
+        pixel_pos = batch[0][0]
+        gt_rgb = batch[1][0]
+        batch_size = gt_rgb.shape[0]
+        predicted_features = self.model_forward.model1(pixel_pos)
+        predicted_pos = self.model_inverse(predicted_features)
+        loss = F.mse_loss(pixel_pos, predicted_pos)
+
+        rgb = self.model_forward(predicted_pos)
 
         self.log("Validation_Loss", loss.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
-                 batch_size=batch[0].shape[0])
-
-        return predicted_pixel
+                 batch_size=batch_size)
+        return rgb
 
     def validation_epoch_end(self, result) -> None:
         if self.trainer.sanity_checking:
@@ -147,33 +163,34 @@ class Phase1(pl.LightningModule):
         predicted_pixel = np.clip(predicted_pixel, 0, 1)
         predicted_pixel = predicted_pixel.reshape([self.img.shape[0], self.img.shape[1], 3])
         predicted_pixel = (predicted_pixel * 255).astype(np.uint8)
-        cv2.imwrite(os.path.join(self.log_root, "imgs/{}.png").format(self.trainer.current_epoch),
+        cv2.imwrite(os.path.join(self.log_root, "imgs_inv/{}.png").format(self.trainer.current_epoch),
                     cv2.cvtColor(predicted_pixel, cv2.COLOR_RGB2BGR))
+        self.trainer.logger.experiment.add_image("Image".format(self.trainer.current_epoch),
+                                                  predicted_pixel, self.trainer.current_epoch, dataformats="HWC")
 
 
-@hydra.main(config_name="phase1_img.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
+@hydra.main(config_name="phase12_img.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
 def main(v_cfg: DictConfig):
-    print(OmegaConf.to_yaml(v_cfg))
     seed_everything(0)
+    print(OmegaConf.to_yaml(v_cfg))
+
+    hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
+    log_dir = hydra_cfg['runtime']['output_dir']
+    v_cfg["trainer"]["output"] = os.path.join(log_dir, v_cfg["trainer"]["output"])
 
     # Read dataset and bounds
     bounds_min = np.array((-50, -50, -10), dtype=np.float32)
     bounds_max = np.array((250, 200, 60), dtype=np.float32)
     scene_bounds = np.array([bounds_min, bounds_max])
-    imgs, world_points = read_dataset("/mnt/d/Projects/sparse_align/",
+    imgs, world_points = read_dataset(v_cfg["dataset"]["colmap_dir"],
                                       scene_bounds)
 
     for id_img in range(len(imgs)):
         img_name = os.path.basename(imgs[id_img].img_path).split(".")[0]
         if img_name not in v_cfg["dataset"]["target_img"]:
             continue
-        model = Phase1(v_cfg, imgs[id_img].img_path)
-        from pytorch_lightning import loggers as pl_loggers
-        tb_logger = pl_loggers.TensorBoardLogger(save_dir="output/neural_recon/img_nif_log", name=img_name)
-        checkpoint_callback = ModelCheckpoint(dirpath="output/neural_recon/img_nif_log/{}".format(img_name),
-                                              save_top_k=1, monitor="Validation_Loss")
+        model = Phase12(v_cfg, imgs[id_img].img_path)
         trainer = Trainer(
-            logger=tb_logger,
             accelerator='gpu' if v_cfg["trainer"].gpu != 0 else None,
             devices=v_cfg["trainer"].gpu, enable_model_summary=False,
             max_epochs=v_cfg["trainer"]["max_epoch"],
@@ -181,7 +198,7 @@ def main(v_cfg: DictConfig):
             precision=16,
             reload_dataloaders_every_n_epochs=v_cfg["trainer"]["reload_dataloaders_every_n_epochs"],
             check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
-            callbacks=[checkpoint_callback]
+            default_root_dir=log_dir,
         )
         trainer.fit(model)
 

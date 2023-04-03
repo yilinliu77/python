@@ -1,0 +1,31 @@
+dataset:
+  img_size: [6000,4000]
+  target_img: ['6h00278']
+  num_sample: 1e8
+  sampling_strategy: "random"
+  query_strategy: "fix"
+  colmap_dir: d:/Projects/NeuralRecon/Test_data/OBL_L7/Test_imgs2_colmap_neural/sparse_align
+
+trainer:
+  max_epoch: 2000
+  check_val_every_n_epoch: 3
+  reload_dataloaders_every_n_epochs: 20
+  batch_size: 262144
+  learning_rate: 1e-2
+  gpu: 1
+  num_worker: 4
+  resume_from_checkpoint:
+  output: ./
+
+model:
+  model_name: NGPModel2
+  input_model: output/neural_recon/img_nif_log
+
+hydra:
+  run:
+    dir: ./outputs/imgs/${now:%Y_%m_%d_%H_%M_%S}
+  job:
+    chdir: False
+#  output_subdir: null
+#  job_logging: disabled
+#  hydra_logging: disabled

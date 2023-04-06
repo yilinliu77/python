@@ -78,7 +78,6 @@ class Dummy_dataset(torch.utils.data.Dataset):
 class LModel17(nn.Module):
     def __init__(self, v_data, v_weights, v_img_method, v_log_root):
         super(LModel17, self).__init__()
-
         self.loss_weights = v_weights
         self.img_method = v_img_method
 
@@ -100,6 +99,8 @@ class LModel17(nn.Module):
                              .permute(2, 0, 1).unsqueeze(0))
         self.register_buffer("o_rgb2", torch.asarray(v_data["rgb2"].copy().astype(np.float32) / 255.) \
                              .permute(2, 0, 1).unsqueeze(0))
+        self.register_buffer("edge_field1", torch.asarray(v_data["edge_field1"]).permute(2, 0, 1).unsqueeze(0))
+        self.register_buffer("edge_field2", torch.asarray(v_data["edge_field2"]).permute(2, 0, 1).unsqueeze(0))
 
         # Image models
         self.img_model1 = v_data["img_model1"]
@@ -444,9 +445,9 @@ class LModel17(nn.Module):
 
         return similarity_loss, normal_loss, similarity_loss
 
-    def sample_edge(self, num_per_edge_m2, cur_dir, start_point, num_max_sample = 2000):
+    def sample_edge(self, num_per_edge_m, cur_dir, start_point, num_max_sample = 2000):
         length = torch.linalg.norm(cur_dir+1e-6, dim=1)
-        num_edge_points = torch.clamp((length * num_per_edge_m2).to(torch.long), 1, 2000)
+        num_edge_points = torch.clamp((length * num_per_edge_m).to(torch.long), 1, 2000)
         num_edge_points_ = num_edge_points.roll(1)
         num_edge_points_[0] = 0
         sampled_edge_points = torch.arange(num_edge_points.sum()).to(cur_dir.device) - num_edge_points_.cumsum(
@@ -934,6 +935,30 @@ class LModel17(nn.Module):
 
         return similarity_loss
 
+    def compute_edge_response(self, v_start_point, v_end_point):
+        num_edge_points, coords_c = self.sample_edge(100, v_end_point-v_start_point, v_start_point, 2000)
+        coods2d_1 = (self.intrinsic1 @ coords_c.T).T
+        coods2d_1 = coods2d_1[:, :2] / (coods2d_1[:, 2:3] + 1e-6)
+        coods2d_1 = torch.clamp(coods2d_1, 0, 0.999999)
+        # Sample edge response
+        coordinate_tensor = coods2d_1.unsqueeze(0).unsqueeze(0)
+        sampled_edge1 = torch.nn.functional.grid_sample(self.edge_field1, coordinate_tensor * 2 - 1,
+                                                      align_corners=True)[0]  # [0,1] -> [-1,1]
+
+        # 5. Second img
+        transformation = to_homogeneous_mat_tensor(self.intrinsic2) @ self.extrinsic2 @ torch.inverse(self.extrinsic1)
+        coods2d_2 = (transformation @ to_homogeneous_tensor(coords_c).T).T
+        coods2d_2 = coods2d_2[:, :2] / (coods2d_2[:, 2:3] + 1e-6)
+        valid_mask2 = torch.logical_and(coods2d_2 > 0, coods2d_2 < 1)
+        valid_mask2 = torch.logical_and(valid_mask2[:, 0], valid_mask2[:, 1])
+        coods2d_2 = torch.clamp(coods2d_2, 0, 0.999999)
+        # 6. Second img
+        coordinate_tensor = coods2d_2.unsqueeze(0).unsqueeze(0)
+        sampled_edge2 = torch.nn.functional.grid_sample(self.edge_field2, coordinate_tensor * 2 - 1,
+                                                        align_corners=True)[0]  # [0,1] -> [-1,1]
+
+        pass
+
     def forward(self, v_face_index, v_id_epoch, is_log):
         # 0: Unpack data
         point_index = list(itertools.chain(*[self.edge_point_index[item] for item in v_face_index]))
@@ -949,6 +974,7 @@ class LModel17(nn.Module):
         centroid_point_c = (self.seg_distance[id_centroid] * self.seg_distance_normalizer)[:,None] * \
                            self.ray_c[id_centroid]
 
+        edge_loss = self.compute_edge_response(v_start_point=edge_points[:,0], v_end_point=edge_points[:,1])
         losses = []
         losses += self.sample_points_based_on_convex(edge_points, centroid_point_c, v_id_epoch, is_log)
         # losses += self.sample_points_based_on_vertices(edge_points)
@@ -1465,14 +1491,15 @@ def prepare_dataset_and_model(v_colmap_dir, v_only_train_target):
         o3d.io.write_triangle_mesh(r"output/img_field_test/up_vector_arrow_for_patch_{}.ply".format(id_patch),
                                    arrows)
 
-    cv2.namedWindow("1",cv2.WINDOW_NORMAL)
-    cv2.moveWindow("1",0,0)
-    cv2.resizeWindow("1", 1600, 900)
-
-    mask_img = np.zeros_like(img1.line_field[:,:,0])
-    mask_img[img1.line_field[:,:,2] > 0.01] = 1
-    cv2.imshow("1", mask_img)
-    cv2.waitKey()
+    # cv2.namedWindow("1",cv2.WINDOW_NORMAL)
+    # cv2.moveWindow("1",0,0)
+    # cv2.resizeWindow("1", 1600, 900)
+    #
+    # mask_img = np.zeros_like(img1.line_field[:,:,0])
+    # mask_img[img1.line_field[:,:,2] > 0.005] = 1 # 0.005 -> gradient > 1
+    # from matplotlib import pyplot as plt
+    # plt.imshow(mask_img)
+    # plt.show()
 
     data = {
         "graph1": graph1,

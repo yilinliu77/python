@@ -4,8 +4,9 @@ output/
 .idea/
 temp/
 outputs/
-lightning_logs/
+lightning_logs*/
 *.pth
+.hydra
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -8,17 +8,17 @@ dataset:
 
 trainer:
   max_epoch: 2000
-  check_val_every_n_epoch: 20
+  check_val_every_n_epoch: 5
   reload_dataloaders_every_n_epochs: 20
   batch_size: 262144
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 4
+  num_worker: 0
   resume_from_checkpoint:
   output: ./
 
 model:
-  model_name: NGPModel3
+  model_name: Siren2
   input_model: output/neural_recon/img_nif_log
 
 hydra:

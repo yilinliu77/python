@@ -1,3 +1,5 @@
+from collections import OrderedDict
+
 import mcubes
 import tinycudann as tcnn
 import numpy as np
@@ -84,76 +86,6 @@ class ResidualBlock(torch.nn.Module):
 class NGPModel2(nn.Module):
     def __init__(self):
         super(NGPModel2, self).__init__()
-
-        # Define models
-        self.n_frequencies = 12
-        self.n_layer = 4
-        self.num_freq_per_layer = self.n_frequencies // self.n_layer
-        v_hidden_dim = 256
-
-        self.model2 = nn.ModuleList()
-        for i in range(self.n_layer):
-            self.model2.append(
-                nn.Sequential(
-                    torch.nn.Linear(2 * 2 * self.num_freq_per_layer * (i + 1), v_hidden_dim),
-                    torch.nn.ReLU(),
-                    ResidualBlock(
-                        nn.Sequential(
-                            torch.nn.Linear(v_hidden_dim, v_hidden_dim),
-                            torch.nn.ReLU()
-                        )
-                    ),
-                    ResidualBlock(
-                        nn.Sequential(
-                            torch.nn.Linear(v_hidden_dim, v_hidden_dim),
-                            torch.nn.ReLU()
-                        )
-                    ),
-                    ResidualBlock(
-                        nn.Sequential(
-                            torch.nn.Linear(v_hidden_dim, v_hidden_dim),
-                            torch.nn.ReLU()
-                        )
-                    ),
-                    ResidualBlock(
-                        nn.Sequential(
-                            torch.nn.Linear(v_hidden_dim, v_hidden_dim),
-                            torch.nn.ReLU()
-                        )
-                    ),
-                    torch.nn.Linear(v_hidden_dim, 1)
-                )
-            )
-
-    def positional_encoding(self, input, L):  # [B,...,N]
-        shape = input.shape
-        freq = 2 ** torch.arange(L, dtype=torch.float32, device=input.device) * np.pi  # [L]
-        spectrum = input[..., None] * freq  # [B,...,N,L]
-        sin, cos = spectrum.sin(), spectrum.cos()  # [B,...,N,L]
-        input_enc = torch.stack([sin, cos], dim=-2)  # [B,...,N,2,L]
-        input_enc = input_enc.view(*shape[:-1], -1)  # [B,...,2NL]
-        return input_enc
-
-    def forward(self, v_pixel_pos):
-        bs = v_pixel_pos.shape[0]
-        nf = self.num_freq_per_layer
-        features = self.positional_encoding(v_pixel_pos, self.n_frequencies)  # (batch_size, 2 * n_frequencies * 2)
-        features = features.reshape(bs, 2, 2, -1)
-        predicted_grays = []
-        accumulated_pos_encoding = None
-        for i_layer in range(self.n_layer):
-            feature_layer = features[:, :, :, nf * i_layer:nf * i_layer + nf].reshape(bs, -1)
-            if accumulated_pos_encoding is not None:
-                feature_layer = torch.cat((accumulated_pos_encoding, feature_layer), dim=1)
-            accumulated_pos_encoding = feature_layer
-            predicted_gray = self.model2[i_layer](accumulated_pos_encoding)
-            predicted_grays.append(predicted_gray)
-        return predicted_grays
-
-
-class NGPModel3(nn.Module):
-    def __init__(self):
-        super(NGPModel3, self).__init__()
 
         # Define models
         self.n_frequencies = 24
@@ -268,7 +200,7 @@ class FourierLayer(nn.Module):
         return torch.sin(self.linear(x))
 
 
-class MultiscaleBACON(MFNBase):
+class MultiscaleBACON_(MFNBase):
     def __init__(self,
                  in_size,
                  hidden_size,
@@ -325,95 +257,208 @@ class MultiscaleBACON(MFNBase):
         if self.output_layers is None:
             self.output_layers = np.arange(1, len(self.filters))
 
-        print(self)
+        # print(self)
 
-    def layer_forward(self, coords, filter_outputs, specified_layers,
-                      get_feature, continue_layer, continue_feature):
-        """ for multiscale SDF extraction """
-
-        # hardcode the 8 layer network that we use for all sdf experiments
-        filter_ind_dict = [2, 2, 2, 4, 4, 6, 6, 8, 8]
-        outputs = []
-
-        if continue_feature is None:
-            assert (continue_layer == 0)
-            out = self.filters[filter_ind_dict[0]](coords)
-            filter_output_dict = {filter_ind_dict[0]: out}
-        else:
-            out = continue_feature
-            filter_output_dict = {}
-
-        for i in range(continue_layer + 1, len(self.filters)):
-            if filter_ind_dict[i] not in filter_output_dict.keys():
-                filter_output_dict[filter_ind_dict[i]] = self.filters[filter_ind_dict[i]](coords)
-            out = filter_output_dict[filter_ind_dict[i]] * self.linear[i - 1](out)
-
-            if i in self.output_layers and i == specified_layers:
-                if get_feature:
-                    outputs.append([self.output_linear[i](out), out])
-                else:
-                    outputs.append(self.output_linear[i](out))
-                return outputs
-
-        return outputs
-
-    def forward(self, model_input, specified_layers=None, get_feature=False,
+    def forward(self, coords, specified_layers=None, get_feature=False,
                 continue_layer=0, continue_feature=None):
 
-        if self.is_sdf:
-            model_input = {key: input.clone().detach().requires_grad_(True)
-                           for key, input in model_input.items()}
-
-        if 'coords' in model_input:
-            coords = model_input['coords']
-        elif 'ray_samples' in model_input:
-            coords = model_input['ray_samples']
-
         outputs = []
-        if self.reuse_filters:
+        out = self.filters[0](coords)
+        for i in range(1, len(self.filters)):
+            out = self.filters[i](coords) * self.linear[i - 1](out)
+            if i in self.output_layers:
+                outputs.append(self.output_linear[i](out))
+                if self.stop_after is not None and len(outputs) > self.stop_after:
+                    break
+        return outputs
 
-            # which layers to reuse
-            if len(self.filters) < 9:
-                filter_outputs = 2 * [self.filters[0](coords), ] + \
-                                 (len(self.filters) - 2) * [self.filters[-1](coords), ]
+
+class MultiscaleBACON(nn.Module):
+    def __init__(self):
+        super(MultiscaleBACON, self).__init__()
+        input_scales = [1 / 8, 1 / 8, 1 / 4, 1 / 4, 1 / 4]
+        output_layers = [2, 4, 6, 8, 10, 12, 14, 15]
+
+        self.model = MultiscaleBACON_(
+            2, 256,
+            out_size=1,
+            hidden_layers=16,
+            bias=True,
+            frequency=(6000, 4000),
+            quantization_interval=2 * np.pi,
+            # input_scales=input_scales,
+            output_layers=output_layers,
+            reuse_filters=False
+        )
+
+    def forward(self, v_data):
+        return self.model(v_data - 0.5)
+
+
+class SineLayer(nn.Module):
+    # See paper sec. 3.2, final paragraph, and supplement Sec. 1.5 for discussion of omega_0.
+
+    # If is_first=True, omega_0 is a frequency factor which simply multiplies the activations before the
+    # nonlinearity. Different signals may require different omega_0 in the first layer - this is a
+    # hyperparameter.
+
+    # If is_first=False, then the weights will be divided by omega_0 so as to keep the magnitude of
+    # activations constant, but boost gradients to the weight matrix (see supplement Sec. 1.5)
+
+    def __init__(self, in_features, out_features, bias=True,
+                 is_first=False, omega_0=30):
+        super().__init__()
+        self.omega_0 = omega_0
+        self.is_first = is_first
+
+        self.in_features = in_features
+        self.linear = nn.Linear(in_features, out_features, bias=bias)
+
+        self.init_weights()
+
+    def init_weights(self):
+        with torch.no_grad():
+            if self.is_first:
+                self.linear.weight.uniform_(-1 / self.in_features,
+                                            1 / self.in_features)
             else:
-                filter_outputs = 3 * [self.filters[2](coords), ] + \
-                                 2 * [self.filters[4](coords), ] + \
-                                 2 * [self.filters[6](coords), ] + \
-                                 2 * [self.filters[8](coords), ]
+                self.linear.weight.uniform_(-np.sqrt(6 / self.in_features) / self.omega_0,
+                                            np.sqrt(6 / self.in_features) / self.omega_0)
 
-            # multiscale sdf extractions (evaluate only some layers)
-            if specified_layers is not None:
-                outputs = self.layer_forward(coords, filter_outputs, specified_layers,
-                                             get_feature, continue_layer, continue_feature)
+    def forward(self, input):
+        return torch.sin(self.omega_0 * self.linear(input))
 
-            # evaluate all layers
-            else:
-                out = filter_outputs[0]
-                for i in range(1, len(self.filters)):
-                    out = filter_outputs[i] * self.linear[i - 1](out)
+    def forward_with_intermediate(self, input):
+        # For visualization of activation distributions
+        intermediate = self.omega_0 * self.linear(input)
+        return torch.sin(intermediate), intermediate
 
-                    if i in self.output_layers:
-                        outputs.append(self.output_linear[i](out))
-                        if self.stop_after is not None and len(outputs) > self.stop_after:
-                            break
 
-        # no layer reuse
+class Siren_(nn.Module):
+    def __init__(self, in_features, hidden_features, hidden_layers, out_features, outermost_linear=False,
+                 first_omega_0=30, hidden_omega_0=30.):
+        super().__init__()
+
+        self.net = []
+        self.net.append(SineLayer(in_features, hidden_features,
+                                  is_first=True, omega_0=first_omega_0))
+
+        for i in range(hidden_layers):
+            self.net.append(SineLayer(hidden_features, hidden_features,
+                                      is_first=False, omega_0=hidden_omega_0))
+
+        if outermost_linear:
+            final_linear = nn.Linear(hidden_features, out_features)
+
+            with torch.no_grad():
+                final_linear.weight.uniform_(-np.sqrt(6 / hidden_features) / hidden_omega_0,
+                                             np.sqrt(6 / hidden_features) / hidden_omega_0)
+
+            self.net.append(final_linear)
         else:
-            out = self.filters[0](coords)
-            for i in range(1, len(self.filters)):
-                out = self.filters[i](coords) * self.linear[i - 1](out)
+            self.net.append(SineLayer(hidden_features, out_features,
+                                      is_first=False, omega_0=hidden_omega_0))
 
-                if i in self.output_layers:
-                    outputs.append(self.output_linear[i](out))
-                    if self.stop_after is not None and len(outputs) > self.stop_after:
-                        break
+        self.net = nn.Sequential(*self.net)
 
-        if self.is_sdf:  # convert dtype
-            return {'model_in': model_input['coords'],
-                    'model_out': outputs}  # outputs is a list of tensors
+    def forward(self, coords):
+        coords = coords.clone().detach().requires_grad_(True)  # allows to take derivative w.r.t. input
+        output = self.net(coords)
+        return output, coords
 
-        return {'model_in': model_input, 'model_out': {'output': outputs}}
+    def forward_with_activations(self, coords, retain_grad=False):
+        '''Returns not only model output, but also intermediate activations.
+        Only used for visualizing activations later!'''
+        activations = OrderedDict()
+
+        activation_count = 0
+        x = coords.clone().detach().requires_grad_(True)
+        activations['input'] = x
+        for i, layer in enumerate(self.net):
+            if isinstance(layer, SineLayer):
+                x, intermed = layer.forward_with_intermediate(x)
+
+                if retain_grad:
+                    x.retain_grad()
+                    intermed.retain_grad()
+
+                activations['_'.join((str(layer.__class__), "%d" % activation_count))] = intermed
+                activation_count += 1
+            else:
+                x = layer(x)
+
+                if retain_grad:
+                    x.retain_grad()
+
+            activations['_'.join((str(layer.__class__), "%d" % activation_count))] = x
+            activation_count += 1
+
+        return activations
+
+
+class Siren(nn.Module):
+    def __init__(self):
+        super(Siren, self).__init__()
+        self.model = Siren_(
+            in_features=2,
+            out_features=1,
+            hidden_features=256,
+            hidden_layers=12,
+            outermost_linear=True
+        )
+
+    def forward(self, v_data):
+        return [self.model(v_data * 2 - 1)[0], ]
+
+
+class Siren2(nn.Module):
+    def __init__(self, first_omega_0=30, hidden_omega_0=30.):
+        super(Siren2, self).__init__()
+
+        self.n_frequencies = 12
+        self.hidden_features = 1024
+        self.n_hidden_layers = 4
+
+        self.pos_encoding1 = SineLayer(
+            self.n_frequencies * 4,
+            512,
+            is_first=True, omega_0=first_omega_0
+        )
+
+        self.pos_encoding2 = SineLayer(
+            2,
+            512,
+            is_first=True, omega_0=first_omega_0
+        )
+
+        self.net = []
+        for i in range(self.n_hidden_layers):
+            self.net.append(SineLayer(self.hidden_features, self.hidden_features,
+                                      is_first=False, omega_0=hidden_omega_0))
+        final_linear = nn.Linear(self.hidden_features, 1)
+
+        with torch.no_grad():
+            final_linear.weight.uniform_(-np.sqrt(6 / self.hidden_features) / hidden_omega_0,
+                                         np.sqrt(6 / self.hidden_features) / hidden_omega_0)
+
+        self.net.append(final_linear)
+        self.net = nn.Sequential(*self.net)
+
+    def positional_encoding(self, input, L):  # [B,...,N]
+        shape = input.shape
+        freq = 2 ** torch.arange(L, dtype=torch.float32, device=input.device) * np.pi  # [L]
+        spectrum = input[..., None] * freq  # [B,...,N,L]
+        sin, cos = spectrum.sin(), spectrum.cos()  # [B,...,N,L]
+        input_enc = torch.stack([sin, cos], dim=-2)  # [B,...,N,2,L]
+        input_enc = input_enc.view(*shape[:-1], -1)  # [B,...,2NL]
+        return input_enc
+
+    def forward(self, coords):
+        pos1 = self.pos_encoding1(self.positional_encoding(coords, self.n_frequencies))
+        coords = coords * 2 - 1
+        pos2 = self.pos_encoding2(coords)
+        output = self.net(torch.cat((pos1, pos2), dim=1))
+        return [output]
 
 
 class Phase11(pl.LightningModule):
@@ -432,20 +477,10 @@ class Phase11(pl.LightningModule):
         self.log_root = os.path.join(self.hydra_conf["trainer"]["output"], self.img_name)
         os.makedirs(self.log_root, exist_ok=True)
         os.makedirs(os.path.join(self.log_root, "imgs"), exist_ok=True)
+        cv2.imwrite(os.path.join(self.log_root, "gt.png"), self.img)
 
         f = getattr(sys.modules[__name__], self.hydra_conf["model"]["model_name"])
-        # self.model = f()
-        self.model = MultiscaleBACON(
-            2, 256,
-            out_size=256,
-            hidden_layers=4,
-            bias=True,
-            frequency=(6000, 4000),
-            quantization_interval=2 * np.pi,
-            input_scales=[0.125, 0.125, 0.25, 0.25, 0.25],
-            output_layers=[1, 2, 4],
-            reuse_filters=False
-        )
+        self.model = f()
         print_model_size(self.model)
         # torch.set_float32_matmul_precision('medium')
 
@@ -501,7 +536,9 @@ class Phase11(pl.LightningModule):
         pixel_pos = batch[0][0]
         gt_gray = batch[1][0]
         batch_size = gt_gray.shape[0]
+
         predicted_gray = self.model(pixel_pos)
+
         loss = torch.stack([F.l1_loss(prediction, gt_gray) for prediction in predicted_gray]).mean()
 
         self.log("Training_Loss", loss.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
@@ -513,8 +550,9 @@ class Phase11(pl.LightningModule):
         pixel_pos = batch[0][0]
         gt_gray = batch[1][0]
         batch_size = gt_gray.shape[0]
+
         predicted_gray = self.model(pixel_pos)
-        predicted_gray = self.model(pixel_pos.unsqueeze(0))
+
         loss = torch.stack([F.l1_loss(prediction, gt_gray) for prediction in predicted_gray]).mean()
 
         self.log("Validation_Loss", loss.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,

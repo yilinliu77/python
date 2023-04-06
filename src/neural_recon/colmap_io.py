@@ -144,9 +144,10 @@ def read_segments(v_segments_dir, v_args):
         item.detected_lines[i_segment, 2] = float(line[4 + i_segment * 6 + 4]) / v_img_size[0]
         item.detected_lines[i_segment, 3] = float(line[4 + i_segment * 6 + 5]) / v_img_size[1]
 
-    item.line_field_path = os.path.join(v_segments_dir, "line_field_{}.tiff".format(id_img))
-    # img = cv2.imread(item.line_field_path, cv2.IMREAD_UNCHANGED)
-    # item.line_field = img
+    item.line_field_path = os.path.join(v_segments_dir, "{}.tiff".format(item.img_name))
+    if os.path.exists(item.line_field_path):
+        img = cv2.imread(item.line_field_path, cv2.IMREAD_UNCHANGED)
+        item.line_field = img
     return item
 
 

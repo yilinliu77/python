@@ -461,6 +461,57 @@ class Siren2(nn.Module):
         return [output]
 
 
+class Siren3(nn.Module):
+    def __init__(self, first_omega_0=30, hidden_omega_0=30.):
+        super(Siren3, self).__init__()
+
+        self.n_frequencies = 12
+        self.hidden_features = 256
+        self.n_hidden_layers = 6
+
+        self.pos_encoding1 = SineLayer(
+            self.n_frequencies * 4,
+            128,
+            is_first=True, omega_0=first_omega_0
+        )
+
+        self.pos_encoding2 = SineLayer(
+            2,
+            128,
+            is_first=True, omega_0=first_omega_0
+        )
+
+        self.net = []
+        for i in range(self.n_hidden_layers):
+            self.net.append(SineLayer(self.hidden_features, self.hidden_features,
+                                      is_first=False, omega_0=hidden_omega_0))
+        final_linear = nn.Linear(self.hidden_features, 1)
+
+        with torch.no_grad():
+            final_linear.weight.uniform_(-np.sqrt(6 / self.hidden_features) / hidden_omega_0,
+                                         np.sqrt(6 / self.hidden_features) / hidden_omega_0)
+
+        self.net.append(final_linear)
+        self.net = nn.Sequential(*self.net)
+
+    def positional_encoding(self, input, L):  # [B,...,N]
+        shape = input.shape
+        freq = 2 ** torch.arange(L, dtype=torch.float32, device=input.device) * np.pi  # [L]
+        spectrum = input[..., None] * freq  # [B,...,N,L]
+        sin, cos = spectrum.sin(), spectrum.cos()  # [B,...,N,L]
+        input_enc = torch.stack([sin, cos], dim=-2)  # [B,...,N,2,L]
+        input_enc = input_enc.view(*shape[:-1], -1)  # [B,...,2NL]
+        return input_enc
+
+    def forward(self, coords):
+        pos1 = self.pos_encoding1(self.positional_encoding(coords, self.n_frequencies))
+        coords = coords * 2 - 1
+        pos2 = self.pos_encoding2(coords)
+        output = self.net(torch.cat((pos1, pos2), dim=1))
+        return [output]
+
+
+
 class Phase11(pl.LightningModule):
     def __init__(self, hparams, v_img_path):
         super(Phase11, self).__init__()

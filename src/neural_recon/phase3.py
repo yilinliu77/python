@@ -1465,6 +1465,15 @@ def prepare_dataset_and_model(v_colmap_dir, v_only_train_target):
         o3d.io.write_triangle_mesh(r"output/img_field_test/up_vector_arrow_for_patch_{}.ply".format(id_patch),
                                    arrows)
 
+    cv2.namedWindow("1",cv2.WINDOW_NORMAL)
+    cv2.moveWindow("1",0,0)
+    cv2.resizeWindow("1", 1600, 900)
+
+    mask_img = np.zeros_like(img1.line_field[:,:,0])
+    mask_img[img1.line_field[:,:,2] > 0.01] = 1
+    cv2.imshow("1", mask_img)
+    cv2.waitKey()
+
     data = {
         "graph1": graph1,
         "graph2": graph2,
@@ -1477,6 +1486,8 @@ def prepare_dataset_and_model(v_colmap_dir, v_only_train_target):
         "img_model2": img_model2,
         "rgb1": rgb1,
         "rgb2": rgb2,
+        "edge_field1": img1.line_field,
+        "edge_field2": img2.line_field,
     }
 
     return data

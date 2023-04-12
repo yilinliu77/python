@@ -65,7 +65,7 @@ def save_line_cloud(v_file_path: str, v_segments: np.ndarray):
 
 
 def normalize_vector(v_vector):
-    length = np.linalg.norm(v_vector, axis=-1, keepdims=True)
+    length = np.linalg.norm(v_vector, axis=-1, keepdims=True) + 1e-8
     # assert length != 0
     return v_vector / length
 

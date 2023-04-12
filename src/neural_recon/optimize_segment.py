@@ -40,11 +40,17 @@ def compute_initial_normal_based_on_camera(
 
 
 def sample_img(v_rgb, v_coor_2d):
-    coordinate_tensor = v_coor_2d.unsqueeze(0)
-    sampled_img = torch.nn.functional.grid_sample(v_rgb, coordinate_tensor * 2 - 1,
-                                                  align_corners=True)[0]  # [0,1] -> [-1,1]
-    # viz_sampled_img = normalized_torch_img_to_numpy(sampled_img)[0]
-    return sampled_img.permute(1, 2, 0)
+    MAX_ITEM_PER_BATCH = 262144
+    coor_2d = v_coor_2d
+    results = []
+    for i in range(ceil(coor_2d.shape[1] / MAX_ITEM_PER_BATCH)):
+        sampled_pixels_flatten = torch.nn.functional.grid_sample(v_rgb,
+            coor_2d[:,i * MAX_ITEM_PER_BATCH:min(coor_2d.shape[1], (i + 1) * MAX_ITEM_PER_BATCH)].unsqueeze(0) * 2 - 1,
+                                                                 align_corners=True)[0,0,0]
+        results.append(sampled_pixels_flatten)
+    sampled_pixels = torch.cat(results).reshape(v_coor_2d.shape[:2] + (1,))
+
+    return sampled_pixels
 
 
 def sample_img_prediction(v_model, v_coor_2d):
@@ -58,6 +64,16 @@ def sample_img_prediction(v_model, v_coor_2d):
     sampled_pixels = torch.cat(results, dim=0).reshape(v_coor_2d.shape[:2] + (3,))
     return sampled_pixels
 
+def sample_img_prediction2(v_model, v_coor_2d, v_name):
+    MAX_ITEM_PER_BATCH = 262144
+    coor_2d = v_coor_2d.reshape((-1, 2))
+    results = []
+    for i in range(ceil(coor_2d.shape[0] / MAX_ITEM_PER_BATCH)):
+        sampled_pixels_flatten = v_model(v_name,
+            coor_2d[i * MAX_ITEM_PER_BATCH:min(coor_2d.shape[0], (i + 1) * MAX_ITEM_PER_BATCH)])
+        results.append(sampled_pixels_flatten[1])
+    sampled_pixels = torch.cat(results, dim=0).reshape(v_coor_2d.shape[:2] + (1,))
+    return sampled_pixels
 
 ### Out of date
 

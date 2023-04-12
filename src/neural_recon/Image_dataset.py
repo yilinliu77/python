@@ -87,6 +87,53 @@ class Image_dataset(torch.utils.data.Dataset):
     def __len__(self):
         return math.ceil((self.sample_points.shape[0] if self.mode == "training" else self.original_sample_points.shape[0]) / self.batch_size)
 
+class Images_dataset(torch.utils.data.Dataset):
+    def __init__(self, v_imgs, v_num_samples, v_batch_size, v_mode, v_sampling_strategy, v_query_strategy):
+        super(Images_dataset, self).__init__()
+        self.batch_size: int = v_batch_size
+        self.mode = v_mode
+        self.num_sample = v_num_samples
+
+        # Used for validation
+        self.training_data={}
+        cur_length = 0
+        for img_name in v_imgs:
+            data = {}
+            img = torch.from_numpy(v_imgs[img_name]) / 255.
+            data["img"] = img
+            data["original_sample_points"] = torch.from_numpy(np.stack(
+                np.meshgrid(
+                    (np.arange(img.shape[1], dtype=np.float32) + 0.5) / img.shape[1],
+                    (np.arange(img.shape[0], dtype=np.float32) + 0.5) / img.shape[0],
+                    indexing="xy"), axis=2).reshape([-1, 2]))
+
+            index = (data["original_sample_points"] *
+                         torch.flip(torch.tensor(img.shape[:2]), dims=[0])).long()
+            index[:, 0] = torch.clamp_max(index[:, 0], img.shape[1] - 1)
+            index[:, 1] = torch.clamp_max(index[:, 1], img.shape[0] - 1)
+            data["original_pixel_values"] = img[index[:, 1], index[:, 0]]
+            data["cur_len_s"] = cur_length
+            cur_length+=math.ceil(index.shape[0] / self.batch_size)
+            data["cur_len_e"] = cur_length
+            self.training_data[img_name] = data
+
+        return
+
+    def __getitem__(self, idx):
+        for img_name in self.training_data:
+            if idx in range(self.training_data[img_name]["cur_len_s"], self.training_data[img_name]["cur_len_e"]):
+                item = self.training_data[img_name]
+                idx = idx - item["cur_len_s"]
+                start_index = idx * self.batch_size
+                end_index = min(idx * self.batch_size + self.batch_size, item["original_pixel_values"].shape[0])
+                return img_name,\
+                    item["original_sample_points"][start_index:end_index], \
+                    item["original_pixel_values"][start_index:end_index]
+
+    def __len__(self):
+        return max([self.training_data[img_name]["cur_len_e"] for img_name in self.training_data])
+
+
 class Image_dataset_with_transform(torch.utils.data.Dataset):
     def __init__(self, v_img, v_num_samples, v_batch_size, v_mode, v_sampling_strategy, v_query_strategy):
         super(Image_dataset_with_transform, self).__init__()

@@ -75,6 +75,22 @@ class Dummy_dataset(torch.utils.data.Dataset):
             return self.length
 
 
+class Single_face_dataset(torch.utils.data.Dataset):
+    def __init__(self, v_edge_indexes, id_face, v_training_mode):
+        super(Single_face_dataset, self).__init__()
+        self.data = np.concatenate([np.asarray(item).reshape(-1, 4) for item in v_edge_indexes[id_face:id_face+1]], axis=0)
+        self.id_edge_start = np.cumsum([len(item)//4 for item in v_edge_indexes])[id_face-1]
+        self.length = self.data.shape[0]
+        self.training_mode = v_training_mode
+        pass
+
+    def __getitem__(self, index):
+        return torch.tensor(self.id_edge_start+index,dtype=torch.long), torch.tensor(self.data[index], dtype=torch.long)
+
+    def __len__(self):
+        return self.length
+
+
 class Edge_dataset(torch.utils.data.Dataset):
     def __init__(self, v_edge_indexes, is_one_target, id_edge, v_training_mode):
         super(Edge_dataset, self).__init__()
@@ -1726,16 +1742,20 @@ class Phase3(pl.LightningModule):
 
     def train_dataloader(self):
         is_one_target = self.hydra_conf["dataset"]["only_train_target"]
+        id_face = self.hydra_conf["dataset"]["id_viz_face"]
         id_edge = self.hydra_conf["dataset"]["id_viz_edge"]
-        self.train_dataset = Edge_dataset(self.model.batched_points_per_patch, is_one_target, id_edge, "training")
+        self.train_dataset = Single_face_dataset(self.model.batched_points_per_patch, id_face, "training")
+        # self.train_dataset = Edge_dataset(self.model.batched_points_per_patch, is_one_target, id_edge, "training")
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False)
 
     def val_dataloader(self):
         is_one_target = self.hydra_conf["dataset"]["only_train_target"]
+        id_face = self.hydra_conf["dataset"]["id_viz_face"]
         id_edge = self.hydra_conf["dataset"]["id_viz_edge"]
-        self.valid_dataset = Edge_dataset(self.model.batched_points_per_patch, is_one_target, id_edge, "validation")
+        self.valid_dataset = Single_face_dataset(self.model.batched_points_per_patch, id_face, "validation")
+        # self.valid_dataset = Edge_dataset(self.model.batched_points_per_patch, is_one_target, id_edge, "validation")
         return DataLoader(self.valid_dataset, batch_size=self.batch_size,
                           num_workers=self.hydra_conf["trainer"]["num_worker"])
 

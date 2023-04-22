@@ -107,6 +107,15 @@ def pad_and_enlarge_along_y(v_small_img, v_big_img):
     padding_img = padding(cv2.resize(v_small_img, resized_shape, interpolation=cv2.INTER_AREA), target_h, target_w)
     return np.concatenate((v_big_img,padding_img),axis=1)
 
+def pad_imgs(v_img1, v_img2):
+    size1 = v_img1.shape[:2][::-1]
+    size2 = v_img2.shape[:2][::-1]
+    max_size = np.max([size1, size2], axis=0)
+
+    padding_img1 = padding(v_img1, max_size[1], max_size[0])
+    padding_img2 = padding(v_img2, max_size[1], max_size[0])
+    return np.concatenate((padding_img1,padding_img2),axis=1)
+
 
 ###
 # Tensor

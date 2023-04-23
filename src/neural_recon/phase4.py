@@ -75,26 +75,29 @@ class Singel_node_dataset(torch.utils.data.Dataset):
     def __len__(self):
         return self.length
 
+class Multi_node_dataset(torch.utils.data.Dataset):
+    def __init__(self, v_data, v_id_target_face, v_training_mode):
+        super(Multi_node_dataset,self).__init__()
 
 class LModel20(nn.Module):
-    def __init__(self, v_data, v_is_regress_normal, v_viz_patch, v_viz_edge, v_weights, v_img_method, v_log_root):
+    def __init__(self, v_data, v_is_regress_normal, v_viz_patch, v_log_root):
         super(LModel20, self).__init__()
-        self.loss_weights = v_weights
-        self.img_method = v_img_method
         self.log_root = v_log_root
         self.is_regress_normal = v_is_regress_normal
 
         self.init_regular_variables(v_data)
-        self.register_variables(v_data)
-        self.register_img_model(v_data)
+        self.distances = nn.ParameterList()
+        for id_graph, graph in enumerate(self.graphs):
+            distances = np.asarray([graph.nodes[item]["distance"] for item in graph])
+            distances = torch.from_numpy(distances)
+            self.distances.append(nn.Parameter(distances))
+
         self.calculate_index()
         self.register_distances(True)
         self.register_up_vectors2(v_is_regress_normal)
 
         # Debug
         self.id_viz_face = v_viz_patch
-        self.id_viz_edge = v_viz_edge
-
         # Accurate initialization in patch 1476
         # id_vertices = np.asarray(self.batched_points_per_patch[1476]).reshape(-1, 4)[:, 0]
         # self.seg_distance.data[id_vertices] = torch.tensor(
@@ -105,37 +108,8 @@ class LModel20(nn.Module):
     # Init-related methods
     def init_regular_variables(self, v_data):
         # Graph related
-        self.graph1 = v_data["graph1"]
-        self.graph2 = v_data["graph2"]
-
-        # Visualization
-        # viz_shape = (6000, 4000)
-        self.rgb1 = v_data["rgb1"]
-        self.rgb2 = v_data["rgb2"]
-        # self.rgb1 = cv2.resize(v_data["rgb1"], viz_shape, cv2.INTER_AREA)
-        # self.rgb2 = cv2.resize(v_data["rgb2"], viz_shape, cv2.INTER_AREA)
-
-    def register_variables(self, v_data):
-        transformation = to_homogeneous(v_data["intrinsic2"]) @ v_data["extrinsic2"] \
-                         @ np.linalg.inv(v_data["extrinsic1"])
-        self.register_buffer("intrinsic1", torch.as_tensor(v_data["intrinsic1"]).float())
-        self.register_buffer("extrinsic1", torch.as_tensor(v_data["extrinsic1"]).float())
-        self.register_buffer("transformation", torch.as_tensor(transformation).float())
-        self.register_buffer("edge_field1", torch.asarray(v_data["edge_field1"]).permute(2, 0, 1).unsqueeze(0))
-        self.register_buffer("edge_field2", torch.asarray(v_data["edge_field2"]).permute(2, 0, 1).unsqueeze(0))
-
-    def register_img_model(self, v_data):
-        self.register_buffer("o_rgb1", torch.asarray(v_data["rgb1"].copy().astype(np.float32) / 255.) \
-                             .permute(2, 0, 1).unsqueeze(0))
-        self.register_buffer("o_rgb2", torch.asarray(v_data["rgb2"].copy().astype(np.float32) / 255.) \
-                             .permute(2, 0, 1).unsqueeze(0))
-        # Image models
-        self.img_model1 = v_data["img_model1"]
-        self.img_model2 = v_data["img_model2"]
-        for p in self.img_model1.parameters():
-            p.requires_grad = False
-        for p in self.img_model2.parameters():
-            p.requires_grad = False
+        self.graphs = v_data[1]
+        self.img_database = v_data[0]
 
     def calculate_index(self):
         # Edge index
@@ -513,28 +487,28 @@ class LModel20(nn.Module):
         batch_size = 10
         num_point = id_length.shape[0]
         num_edge = id_length.sum()
-        num_sampled = v_new_distances.shape[1] # Sample from normal distribution + 1
+        num_sampled = v_new_distances.shape[1]  # Sample from normal distribution + 1
 
         losses = []
         masks = []
-        for id_batch in range(num_sampled//batch_size+1):
+        for id_batch in range(num_sampled // batch_size + 1):
             id_batch_start = min(num_sampled, id_batch * batch_size)
-            id_batch_end = min(num_sampled, (id_batch+1) * batch_size)
-            if id_batch_start>=id_batch_end:
+            id_batch_end = min(num_sampled, (id_batch + 1) * batch_size)
+            if id_batch_start >= id_batch_end:
                 continue
             num_batch = id_batch_end - id_batch_start
             similarity_loss, batched_mask, similarity_mask, _ = self.compute_similarity_wrapper(
-                start_rays.repeat_interleave(num_batch,dim=0),
-                end_rays.repeat_interleave(num_batch,dim=0),
-                v_new_distances[:,id_batch_start:id_batch_end].repeat_interleave(id_length, dim=0).reshape(-1),
+                start_rays.repeat_interleave(num_batch, dim=0),
+                end_rays.repeat_interleave(num_batch, dim=0),
+                v_new_distances[:, id_batch_start:id_batch_end].repeat_interleave(id_length, dim=0).reshape(-1),
                 v_old_distances.repeat_interleave(num_batch),
             )
-            losses.append(similarity_loss.reshape(-1,num_batch).T)
-            masks.append(torch.logical_and(batched_mask, similarity_mask).reshape(-1,num_batch).T)
-        similarity_loss_ = torch.cat(losses,dim=0).permute(1,0)
-        similarity_mask_ = torch.cat(masks,dim=0).permute(1,0)
+            losses.append(similarity_loss.reshape(-1, num_batch).T)
+            masks.append(torch.logical_and(batched_mask, similarity_mask).reshape(-1, num_batch).T)
+        similarity_loss_ = torch.cat(losses, dim=0).permute(1, 0)
+        similarity_mask_ = torch.cat(masks, dim=0).permute(1, 0)
         id_mask = torch.arange(
-            num_point,device=id_length.device
+            num_point, device=id_length.device
         ).repeat_interleave(id_length, dim=0)
         similarity_loss = scatter_mean(similarity_loss_, id_mask, dim=0)
         similarity_mask = (scatter_min(similarity_mask_.to(torch.long), id_mask, dim=0)[0]).to(torch.bool)
@@ -599,7 +573,7 @@ class LModel20(nn.Module):
                 sample_id = id_start_point[id_start].repeat_interleave(num_sample)
                 while not torch.all(sample_distance_mask):
                     t_ = new_distance[~sample_distance_mask]
-                    a = self.seg_distance[sample_id[~sample_distance_mask]] +\
+                    a = self.seg_distance[sample_id[~sample_distance_mask]] + \
                         scale_factor * torch.distributions.utils._standard_normal(
                         t_.shape[0],
                         device=self.seg_distance.device,
@@ -607,7 +581,7 @@ class LModel20(nn.Module):
                     new_distance[~sample_distance_mask] = a
                     sample_distance_mask = torch.logical_and(new_distance > 0, new_distance < 1)
                 new_distance = new_distance.reshape(-1, num_sample)
-                new_distance = torch.cat((self.seg_distance[id_start_point[id_start]][:,None], new_distance), dim=1)
+                new_distance = torch.cat((self.seg_distance[id_start_point[id_start]][:, None], new_distance), dim=1)
                 id_best_distance = self.random_search(
                     start_ray, end_ray, new_distance, self.seg_distance[id_end_point],
                     id_length
@@ -985,17 +959,9 @@ class Phase4(pl.LightningModule):
             os.makedirs(self.hydra_conf["trainer"]["output"])
 
         self.data = v_data
-        # self.model = LModel0(self.data)
-        # self.model = LModel15(self.data, self.hydra_conf["trainer"]["loss_weight"],
-        #                       self.hydra_conf["trainer"]["img_model"],
-        #                       self.hydra_conf["trainer"]["output"],
-        #                       self.hydra_conf["trainer"]["num_sample"])
         self.model = LModel20(self.data,
                               self.hydra_conf["model"]["regress_normal"],
                               self.hydra_conf["dataset"]["id_viz_face"],
-                              self.hydra_conf["dataset"]["id_viz_edge"],
-                              self.hydra_conf["trainer"]["loss_weight"],
-                              self.hydra_conf["trainer"]["img_model"],
                               self.hydra_conf["trainer"]["output"]
                               )
         # self.model = LModel31(self.data, self.hydra_conf["trainer"]["loss_weight"], self.hydra_conf["trainer"]["img_model"])
@@ -1091,39 +1057,36 @@ class Phase4(pl.LightningModule):
     #         self.zero_grad()
 
 
-def prepare_dataset_and_model(v_colmap_dir, v_img_model_dir, v_viz_face):
+def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
     print("Start to prepare dataset")
     print("1. Read imgs")
 
     img_cache_name = "output/img_field_test/img_cache.npy"
-    if os.path.exists(img_cache_name):
+    if os.path.exists(img_cache_name) and False:
         print("Found cache ", img_cache_name)
-        imgs, points_3d = np.load(img_cache_name, allow_pickle=True)
+        img_database, points_3d = np.load(img_cache_name, allow_pickle=True)
     else:
         print("Dosen't find cache, read raw img data")
-        bound_min = np.array((-40, -40, -5))
-        bound_max = np.array((130, 150, 60))
-        bounds_center = (bound_min + bound_max) / 2
-        bounds_size = (bound_max - bound_min).max()
-        imgs, points_3d = read_dataset(v_colmap_dir,
-                                       [bound_min,
-                                        bound_max]
-                                       )
-        np.save(img_cache_name[:-4], np.asarray([imgs, points_3d], dtype=object))
+        bound_min = np.array((v_bounds[0], v_bounds[1], v_bounds[2]))
+        bound_max = np.array((v_bounds[3], v_bounds[4], v_bounds[5]))
+        img_database, points_3d = read_dataset(v_colmap_dir,
+                                               [bound_min,
+                                                bound_max]
+                                               )
+        np.save(img_cache_name[:-4], np.asarray([img_database, points_3d], dtype=object))
         print("Save cache to ", img_cache_name)
 
     graph_cache_name = "output/img_field_test/graph_cache.npy"
     print("2. Build graph")
-    if os.path.exists(graph_cache_name):
+    if os.path.exists(graph_cache_name) and False:
         graphs = np.load(graph_cache_name, allow_pickle=True)
     else:
         graphs = []
-        for i in range(1, 3):
+        for i_img in range(len(img_database)):
             data = [item for item in open(
-                os.path.join(v_colmap_dir, "wireframes/wireframe{}.obj".format(
-                    i))).readlines()]
+                os.path.join(v_colmap_dir, "wireframe/{}.obj".format(img_database[i_img].img_name))).readlines()]
             vertices = [item.strip().split(" ")[1:-1] for item in data if item[0] == "v"]
-            vertices = np.asarray(vertices).astype(np.float32) / np.array((1499, 999), dtype=np.float32)
+            vertices = np.asarray(vertices).astype(np.float32) / img_database[i_img].img_size
             faces = [item.strip().split(" ")[1:] for item in data if item[0] == "f"]
             graph = nx.Graph()
             graph.add_nodes_from([(idx, {"pos_2d": item}) for idx, item in enumerate(vertices)])
@@ -1137,44 +1100,22 @@ def prepare_dataset_and_model(v_colmap_dir, v_img_model_dir, v_viz_face):
                 graph.add_edges_from(id_edge_per_face)
 
             graph.graph["faces"] = new_faces
-            print("Read {}/{} vertices".format(vertices.shape[0], len(graph.nodes)))
-            print("Read {} faces".format(len(faces)))
+            # print("Read {}/{} vertices".format(vertices.shape[0], len(graph.nodes)))
+            # print("Read {} faces".format(len(faces)))
             graphs.append(graph)
         graphs = np.asarray(graphs, dtype=object)
         np.save(graph_cache_name, graphs, allow_pickle=True)
 
-    # Delete border line
+    # Mark boundary lines
     for id_graph in range(graphs.shape[0]):
-        nodes_flag = np.asarray([
+        nodes_invalid_flag = np.asarray([
             graphs[id_graph].nodes[node]["pos_2d"][0] == 0 or graphs[id_graph].nodes[node]["pos_2d"][1] == 0 or
             graphs[id_graph].nodes[node]["pos_2d"][0] == 1 or graphs[id_graph].nodes[node]["pos_2d"][1] == 1
             for node in graphs[id_graph].nodes])
-        removed_points = np.asarray(graphs[id_graph].nodes)[nodes_flag]
-        graphs[id_graph].remove_nodes_from(removed_points)
-        remap = dict(zip(np.asarray(graphs[id_graph].nodes), np.arange(graphs[id_graph].number_of_nodes())))
-        graphs[id_graph] = nx.relabel_nodes(graphs[id_graph], remap)
-        face_flag = []
-        for idx, face in enumerate(graphs[id_graph].graph["faces"]):
-            is_remain = True
-            for point in face:
-                if point in removed_points:
-                    is_remain = False
-                    break
-            if is_remain:
-                graphs[id_graph].graph["faces"][idx] = [remap[item] for item in graphs[id_graph].graph["faces"][idx]]
-            face_flag.append(is_remain)
-        graphs[id_graph].graph["faces"] = np.asarray(graphs[id_graph].graph["faces"], dtype=object)[face_flag].tolist()
-
-    graphs[0].graph["face_center"] = np.zeros((len(graphs[0].graph["faces"]), 2), dtype=np.float32)
-    graphs[0].graph["ray_c"] = np.zeros((len(graphs[0].graph["faces"]), 3), dtype=np.float32)
-    for id_face, id_edge_per_face in enumerate(graphs[0].graph["faces"]):
-        # Convex assumption
-        center_point = np.stack(
-            [graphs[0].nodes[id_vertex]["pos_2d"] for id_vertex in id_edge_per_face], axis=0).mean(axis=0)
-        graphs[0].graph["face_center"][id_face] = center_point
+        graphs[id_graph].graph["face_flags"] = [max([nodes_invalid_flag[point] for point in face]) for face in graphs[id_graph].graph["faces"]]
 
     points_cache_name = "output/img_field_test/points_cache.npy"
-    if os.path.exists(points_cache_name):
+    if os.path.exists(points_cache_name) and False:
         points_from_sfm = np.load(points_cache_name)
     else:
         preserved_points = []
@@ -1182,19 +1123,16 @@ def prepare_dataset_and_model(v_colmap_dir, v_img_model_dir, v_viz_face):
             for track in point.tracks:
                 if track[0] in [1, 2]:
                     preserved_points.append(point)
-        points_from_sfm = np.stack([item.pos for item in preserved_points])
+        if len(preserved_points) == 0:
+            points_from_sfm = np.array([[0.5,0.5,0.5]], dtype=np.float32)
+        else:
+            points_from_sfm = np.stack([item.pos for item in preserved_points])
         np.save(points_cache_name, points_from_sfm)
 
-    imgs = imgs[1:3]
-
-    img1 = imgs[0]
-    img2 = imgs[1]
-    graph1 = graphs[0]
-    graph2 = graphs[1]
+    print("Start to calculate initial wireframe for each image")
     print("3. Project points on img1")
-
-    def project_points(points_3d_pos):
-        projected_points = np.transpose(img1.projection @ np.transpose(np.insert(points_3d_pos, 3, 1, axis=1)))
+    def project_points(v_projection_matrix, points_3d_pos):
+        projected_points = np.transpose(v_projection_matrix @ np.transpose(np.insert(points_3d_pos, 3, 1, axis=1)))
         projected_points = projected_points[:, :2] / projected_points[:, 2:3]
         projected_points_mask = np.logical_and(projected_points[:, 0] > 0, projected_points[:, 1] > 0)
         projected_points_mask = np.logical_and(projected_points_mask, projected_points[:, 0] < 1)
@@ -1202,266 +1140,150 @@ def prepare_dataset_and_model(v_colmap_dir, v_img_model_dir, v_viz_face):
         points_3d_pos = points_3d_pos[projected_points_mask]
         projected_points = projected_points[projected_points_mask]
         return points_3d_pos, projected_points
-
-    points_from_sfm, points_from_sfm_2d = project_points(points_from_sfm)
-
-    rgb1 = cv2.imread(img1.img_path, cv2.IMREAD_UNCHANGED)[:, :, :3]
-    rgb2 = cv2.imread(img2.img_path, cv2.IMREAD_UNCHANGED)[:, :, :3]
-
-    # rgb1 = cv2.resize(rgb1, (1500,1000),interpolation=cv2.INTER_AREA)
-    # rgb2 = cv2.resize(rgb2, (1500,1000),interpolation=cv2.INTER_AREA)
-
-    rgb1 = cv2.cvtColor(rgb1, cv2.COLOR_BGR2GRAY)[:, :, None]
-    rgb2 = cv2.cvtColor(rgb2, cv2.COLOR_BGR2GRAY)[:, :, None]
-
-    shape = rgb1.shape[:2][::-1]
-
-    id_patchs = v_viz_face
-    print("Will visualize patch {} during the training".format(id_patchs))
-    print("4. Draw input on img1")
-
-    def draw_initial():
+    def draw_initial(v_rgb, v_graph, v_data):
         # cv2.namedWindow("1", cv2.WINDOW_NORMAL)
         # cv2.resizeWindow("1", 1600, 900)
         # cv2.moveWindow("1", 5, 5)
-        point_img = cv2.cvtColor(rgb1.copy(), cv2.COLOR_GRAY2BGR)
+        point_img = cv2.cvtColor(v_rgb.copy(), cv2.COLOR_GRAY2BGR)
         for point in points_from_sfm_2d:
-            cv2.circle(point_img, (point * shape).astype(np.int32), 2, (0, 0, 255), thickness=4)
+            cv2.circle(point_img, (point * v_data.img_size).astype(np.int32), 2, (0, 0, 255), thickness=4)
         print("Draw lines on img1")
-        line_img1 = cv2.cvtColor(rgb1.copy(), cv2.COLOR_GRAY2BGR)
-        line_img2 = cv2.cvtColor(rgb2.copy(), cv2.COLOR_GRAY2BGR)
+        line_img1 = cv2.cvtColor(v_rgb.copy(), cv2.COLOR_GRAY2BGR)
 
         # Draw first img
-        for idx, face in enumerate(graph1.graph["faces"]):
+        for idx, face in enumerate(v_graph.graph["faces"]):
             # print(idx)
-            vertices = [graph1.nodes[id_node]["pos_2d"] for id_node in face]
-            cv2.polylines(line_img1, [(np.asarray(vertices) * shape).astype(np.int32)], True, (0, 0, 255),
+            vertices = [v_graph.nodes[id_node]["pos_2d"] for id_node in face]
+            cv2.polylines(line_img1, [(np.asarray(vertices) * v_data.img_size).astype(np.int32)], True, (0, 0, 255),
                           thickness=1)
             # cv2.imshow("1", line_img1)
             # cv2.waitKey()
 
         # Draw target patch
-        if True:
-            for id_patch in id_patchs:
-                vertices_t = [graph1.nodes[id_node]["pos_2d"] for id_node in graph1.graph["faces"][id_patch]]
-                cv2.polylines(line_img1, [(np.asarray(vertices_t) * shape).astype(np.int32)], True, (0, 255, 0),
-                              thickness=1)
-                for item in vertices_t:
-                    cv2.circle(line_img1, (item * shape).astype(np.int32), 1, (0, 255, 255), 2)
-
-        # Draw second img
-        for idx, face in enumerate(graph2.graph["faces"]):
-            # print(idx)
-            vertices = [graph2.nodes[id_node]["pos_2d"] for id_node in face]
-            cv2.polylines(line_img2, [(np.asarray(vertices) * shape).astype(np.int32)], True, (0, 0, 255),
-                          thickness=1)
-
-        viz_img = np.concatenate((point_img, line_img1, line_img2), axis=0)
-        cv2.imwrite("output/img_field_test/input_img1.jpg", viz_img)
-
-    if True:
-        draw_initial()
-
-    print("5. Load img models")
-
-    # img_model_root_dir = r"output/neural_recon/img_nif_log"
-
-    def load_img_model2():
-        checkpoint_name = os.path.join(v_img_model_dir, "union.ckpt")
-
-        if os.path.exists(checkpoint_name):
-            img_model = Siren2({img.img_name: img.img_path for img in imgs})
-            state_dict = torch.load(checkpoint_name)["state_dict"]
-            img_model.load_state_dict({item[6:]: state_dict[item] for item in state_dict}, strict=True)
-            img_model.eval()
-            return img_model
-        else:
-            print("cannot find model {}".format(checkpoint_name))
-            raise
-
-    def load_img_model1(img_name):
-        checkpoint_name = os.path.join(v_img_model_dir, img_name + ".ckpt")
-
-        if os.path.exists(checkpoint_name):
-            img_model = NGPModel()
-            # img_model = Siren2()
-            # state_dict = torch.load(os.path.join(img_model_root_dir, img_name, checkpoint_name[0]))
-            state_dict = torch.load(checkpoint_name)["state_dict"]
-            img_model.load_state_dict({item[6:]: state_dict[item] for item in state_dict}, strict=True)
-            # img_model.net = img_model.net[:-1]
-            img_model.eval()
-            return img_model
-        else:
-            print("cannot find model for img {}".format(img_name))
-            raise
-
-    img_model1 = load_img_model1(img1.img_name)
-    img_model2 = load_img_model1(img2.img_name)
-
-    print("6. Compute initial line clouds")
-
-    def compute_initial():
+        # for id_patch in id_patchs:
+        #     vertices_t = [graph1.nodes[id_node]["pos_2d"] for id_node in graph1.graph["faces"][id_patch]]
+        #     cv2.polylines(line_img1, [(np.asarray(vertices_t) * shape).astype(np.int32)], True, (0, 255, 0),
+        #                   thickness=1)
+        #     for item in vertices_t:
+        #         cv2.circle(line_img1, (item * shape).astype(np.int32), 1, (0, 255, 255), 2)
+        viz_img = np.concatenate((point_img, line_img1), axis=0)
+        cv2.imwrite("output/img_field_test/input_img.jpg", viz_img)
+    def compute_initial(v_graph, v_points_3d, v_points_2d, v_extrinsic, v_intrinsic):
         distance_threshold = 5  # 5m; not used
+
+        v_graph.graph["face_center"] = np.zeros((len(v_graph.graph["faces"]), 2), dtype=np.float32)
+        v_graph.graph["ray_c"] = np.zeros((len(v_graph.graph["faces"]), 3), dtype=np.float32)
+        for id_face, id_edge_per_face in enumerate(v_graph.graph["faces"]):
+            # Convex assumption
+            center_point = np.stack(
+                [v_graph.nodes[id_vertex]["pos_2d"] for id_vertex in id_edge_per_face], axis=0).mean(axis=0)
+            v_graph.graph["face_center"][id_face] = center_point
 
         # Query points: (M, 2)
         # points from sfm: (N, 2)
         kd_tree = faiss.IndexFlatL2(2)
-        kd_tree.add(points_from_sfm_2d.astype(np.float32))
-        vertices_2d = np.asarray([graph1.nodes[id_node]["pos_2d"] for id_node in graph1.nodes()])  # (M, 2)
-        centroids_2d = graph1.graph["face_center"]
+        kd_tree.add(v_points_2d.astype(np.float32))
+        vertices_2d = np.asarray([v_graph.nodes[id_node]["pos_2d"] for id_node in v_graph.nodes()])  # (M, 2)
+        centroids_2d = v_graph.graph["face_center"]
         query_points = np.concatenate([vertices_2d, centroids_2d], axis=0)
         shortest_distance, index_shortest_distance = kd_tree.search(query_points, 32)  # (M, K)
 
-        points_from_sfm_camera = (img1.extrinsic @ np.insert(points_from_sfm, 3, 1, axis=1).T).T[:, :3]  # (N, 3)
+        points_from_sfm_camera = (v_extrinsic @ np.insert(v_points_3d, 3, 1, axis=1).T).T[:, :3]  # (N, 3)
 
         # Select the point which is nearest to the actual ray for each endpoints
         # 1. Construct the ray
-        ray_c = (np.linalg.inv(img1.intrinsic) @ np.insert(query_points, 2, 1,
-                                                           axis=1).T).T  # (M, 2); points in camera coordinates
+        # (M, 2); points in camera coordinates
+        ray_c = (np.linalg.inv(v_intrinsic) @ np.insert(query_points, 2, 1,axis=1).T).T
         ray_c = ray_c / np.linalg.norm(ray_c + 1e-6, axis=1, keepdims=True)  # Normalize the points
         nearest_candidates = points_from_sfm_camera[index_shortest_distance]  # (M, K, 3)
         # Compute the shortest distance from the candidate point to the ray for each query point
-        distance_of_projection = nearest_candidates @ ray_c[:, :,
-                                                      np.newaxis]  # (M, K, 1): K projected distance of the candidate point along each ray
-        projected_points_on_ray = distance_of_projection * ray_c[:, np.newaxis,
-                                                           :]  # (M, K, 3): K projected points along the ray
-        distance_from_candidate_points_to_ray = np.linalg.norm(nearest_candidates - projected_points_on_ray + 1e-6,
-                                                               axis=2)  # (M, 1)
-        index_best_projected = distance_from_candidate_points_to_ray.argmin(
-            axis=1)  # (M, 1): Index of the best projected points along the ray
+        # (M, K, 1): K projected distance of the candidate point along each ray
+        distance_of_projection = nearest_candidates @ ray_c[:, :,np.newaxis]
+        # (M, K, 3): K projected points along the ray
+        projected_points_on_ray = distance_of_projection * ray_c[:, np.newaxis,:]
+        distance_from_candidate_points_to_ray = np.linalg.norm(
+            nearest_candidates - projected_points_on_ray + 1e-6,axis=2)  # (M, 1)
+        # (M, 1): Index of the best projected points along the ray
+        index_best_projected = distance_from_candidate_points_to_ray.argmin(axis=1)
 
         chosen_distances = distance_of_projection[np.arange(projected_points_on_ray.shape[0]), index_best_projected]
         valid_mask = distance_from_candidate_points_to_ray[np.arange(
             projected_points_on_ray.shape[0]), index_best_projected] < distance_threshold  # (M, 1)
-        initial_points_camera = projected_points_on_ray[np.arange(projected_points_on_ray.shape[
-                                                                      0]), index_best_projected]  # (M, 3): The best projected points along the ray
-        initial_points_world = (np.linalg.inv(img1.extrinsic) @ np.insert(initial_points_camera, 3, 1, axis=1).T).T
+        # (M, 3): The best projected points along the ray
+        initial_points_camera = projected_points_on_ray[
+            np.arange(projected_points_on_ray.shape[0]), index_best_projected]
+        initial_points_world = (np.linalg.inv(v_extrinsic) @ np.insert(initial_points_camera, 3, 1, axis=1).T).T
         initial_points_world = initial_points_world[:, :3] / initial_points_world[:, 3:4]
 
-        distance_scale = (distance_of_projection.max(axis=1) - distance_of_projection.min(axis=1))
+        for idx, id_node in enumerate(v_graph.nodes):
+            v_graph.nodes[id_node]["pos_world"] = initial_points_world[idx]
+            v_graph.nodes[id_node]["distance"] = chosen_distances[idx, 0]
+            v_graph.nodes[id_node]["ray_c"] = ray_c[idx]
 
-        for idx, id_node in enumerate(graph1.nodes):
-            graph1.nodes[id_node]["pos_world"] = initial_points_world[idx]
-            graph1.nodes[id_node]["distance"] = chosen_distances[idx, 0]
-            graph1.nodes[id_node]["ray_c"] = ray_c[idx]
-            graph1.nodes[id_node]["scale"] = distance_scale[idx, 0]
-
-        for id_face in range(graph1.graph["face_center"].shape[0]):
-            idx = id_face + len(graph1.nodes)
-            # graph1.graph["face_center"]["pos_world"][id_face] = initial_points_world[idx]
-            # graph1.graph["face_center"]["distance"][id_face] = chosen_distances[idx, 0]
-            graph1.graph["ray_c"][id_face] = ray_c[idx]
-
-        # line_coordinates = initial_points_world.reshape(-1, 6)  # (M, 6)
-        # line_coordinates = line_coordinates[valid_mask]
-        # valid_distances = chosen_distances.reshape(-1, 2)
-        # valid_distances = valid_distances[valid_mask]
-        ## line_coordinates = points_from_sfm[index_shortest_distance[:, 0], :].reshape(-1, 6)
-        # id_patch = (valid_mask[:id_patch]).sum()
+        for id_face in range(v_graph.graph["face_center"].shape[0]):
+            idx = id_face + len(v_graph.nodes)
+            v_graph.graph["ray_c"][id_face] = ray_c[idx]
 
         line_coordinates = []
-        for edge in graph1.edges():
+        for edge in v_graph.edges():
             line_coordinates.append(np.concatenate((initial_points_world[edge[0]], initial_points_world[edge[1]])))
         save_line_cloud("output/img_field_test/initial_segments.obj", np.stack(line_coordinates, axis=0))
         pc = o3d.geometry.PointCloud()
-        pc.points = o3d.utility.Vector3dVector(initial_points_world[len(graph1.nodes):])
+        pc.points = o3d.utility.Vector3dVector(initial_points_world[len(v_graph.nodes):])
         o3d.io.write_point_cloud("output/img_field_test/initial_face_centroid.ply", pc)
         return
+    for id_img, img in enumerate(img_database):
+        points_from_sfm, points_from_sfm_2d = project_points(img.projection,points_from_sfm)
+        rgb = cv2.imread(img.img_path, cv2.IMREAD_UNCHANGED)[:, :, :3]
+        rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)[:, :, None]
+        # draw_initial(rgb, graphs[id_img], img)
+        compute_initial(graphs[id_img], points_from_sfm, points_from_sfm_2d, img.extrinsic, img.intrinsic)
 
-    compute_initial()  # Coordinate of the initial segments in world coordinate
-    if False:
-        distances_cache_file = "output/img_field_test/distances_cache.npy"
-        if os.path.exists(distances_cache_file):
-            distances = np.concatenate(np.load(distances_cache_file, allow_pickle=True))
-        else:
-            ray.init(
-                dashboard_port=15002,
-                dashboard_host="0.0.0.0"
-            )
-            num_edges = len(graph1.edges())
-            num_clusters = 7
-            step = (num_edges // num_clusters) + 1
-            ray_c = np.asarray(
-                [(graph1.nodes[id_node1]["ray_c"], graph1.nodes[id_node2]["ray_c"]) for id_node1, id_node2 in
-                 graph1.edges()])
-            futures = [compute_init_based_on_similarity.remote(
-                ray_c[i * step: min((i + 1) * step, num_edges)],
-                img1.intrinsic, img2.intrinsic,
-                img1.extrinsic, img2.extrinsic,
-                img_model1, img_model2,
-                rgb1, rgb2
-            ) for i in range(num_clusters)]
-            distances = np.asarray(ray.get(futures))
-            np.save(distances_cache_file, distances)
-        distance_candidate = [[] for _ in graph1.nodes()]
-        for id_edge, edge in enumerate(tqdm(graph1.edges())):
-            distance_candidate[edge[0]].append(distances[id_edge * 2 + 0])
-            distance_candidate[edge[1]].append(distances[id_edge * 2 + 1])
-
-        for id_node in graph1.nodes():
-            if distance_candidate[id_node][0] != -1:
-                graph1.nodes[id_node]["distance"] = distance_candidate[id_node][0]
-                # graph1.nodes[id_node]["distance"] = np.mean(distance_candidate[id_node])
-                pos_c = (graph1.nodes[id_node]["ray_c"] * graph1.nodes[id_node]["distance"])
-                pos_world = np.linalg.inv(img1.extrinsic) @ to_homogeneous_vector(pos_c)
-                graph1.nodes[id_node]["pos_world"] = pos_world[:3]
-
-        line_coordinates = []
-        for edge in graph1.edges():
-            line_coordinates.append(
-                np.concatenate((graph1.nodes[edge[0]]["pos_world"], graph1.nodes[edge[1]]["pos_world"])))
-        save_line_cloud("output/img_field_test/initial_segments_after_rectify.obj", np.stack(line_coordinates, axis=0))
-
-    point_pos2d = np.asarray([graph1.nodes[id_node]["pos_2d"] for id_node in graph1.nodes()])  # (M, 2)
-    point_pos3d_w = np.asarray([graph1.nodes[id_node]["pos_world"] for id_node in graph1.nodes()])  # (M, 3)
-    distance = np.asarray([graph1.nodes[id_node]["distance"] for id_node in graph1.nodes()])  # (M, 1)
-    ray_c = np.asarray([graph1.nodes[id_node]["ray_c"] for id_node in graph1.nodes()])
-    points_pos_3d_c = ray_c * distance[:, None]  # (M, 3)
-
-    print("7. Visualize target patch")
-    if True:
-        for id_patch in id_patchs:
-            with open("output/img_field_test/target_patch_{}.obj".format(id_patch), "w") as f:
-                for id_point in graph1.graph["faces"][id_patch]:
-                    f.write("v {} {} {}\n".format(point_pos3d_w[id_point, 0], point_pos3d_w[id_point, 1],
-                                                  point_pos3d_w[id_point, 2]))
-                for id_point in range(len(graph1.graph["faces"][id_patch])):
-                    if id_point == len(graph1.graph["faces"][id_patch]) - 1:
-                        f.write("l {} {}\n".format(id_point + 1, 1))
-                    else:
-                        f.write("l {} {}\n".format(id_point + 1, id_point + 2))
-
-    print("8. Another idea comes, I must leave hhh. Take care")
-    if True:
-        for id_edge_per_face, id_edge_per_face in enumerate(graph1.graph["faces"]):
-            pass
-
-    print("9. Calculate initial normal")
-    # compute_initial_normal_based_on_pos(graph1)
-    compute_initial_normal_based_on_camera(points_pos_3d_c, graph1)
-
-    print("10. Visualize target patch normal")
-    if True:
-        arrows = o3d.geometry.TriangleMesh()
-        for id_patch in id_patchs:
-            for id_segment in range(len(graph1.graph["faces"][id_patch])):
-                id_start = graph1.graph["faces"][id_patch][id_segment]
-                id_end = graph1.graph["faces"][id_patch][(id_segment + 1) % len(graph1.graph["faces"][id_patch])]
-                up_vector_c = graph1[id_start][id_end]["up_c"][id_patch]
-                center_point_c = (graph1.nodes[id_end]["ray_c"] * graph1.nodes[id_end]["distance"] +
-                                  graph1.nodes[id_start]["ray_c"] * graph1.nodes[id_start]["distance"]) / 2
-                up_point = center_point_c + up_vector_c
-                up_vector_w = (np.linalg.inv(img1.extrinsic) @ to_homogeneous_vector(up_point)) - np.linalg.inv(
-                    img1.extrinsic) @ to_homogeneous_vector(center_point_c)
-
-                center_point = (graph1.nodes[id_end]["pos_world"] + graph1.nodes[id_start]["pos_world"]) / 2
-                arrow = o3d.geometry.TriangleMesh.create_arrow(cylinder_radius=0.0001, cone_radius=0.00015,
-                                                               cylinder_height=0.001, cone_height=0.001)
-                arrow.rotate(caculate_align_mat(normalize_vector(up_vector_w[:3])), center=(0, 0, 0))
-                arrow.translate(center_point)
-                arrows += arrow
-            o3d.io.write_triangle_mesh(r"output/img_field_test/up_vector_arrow_for_patch_{}.ply".format(id_patch),
-                                       arrows)
+    # point_pos2d = np.asarray([graph1.nodes[id_node]["pos_2d"] for id_node in graph1.nodes()])  # (M, 2)
+    # point_pos3d_w = np.asarray([graph1.nodes[id_node]["pos_world"] for id_node in graph1.nodes()])  # (M, 3)
+    # distance = np.asarray([graph1.nodes[id_node]["distance"] for id_node in graph1.nodes()])  # (M, 1)
+    # ray_c = np.asarray([graph1.nodes[id_node]["ray_c"] for id_node in graph1.nodes()])
+    # points_pos_3d_c = ray_c * distance[:, None]  # (M, 3)
+    #
+    # print("7. Visualize target patch")
+    # if True:
+    #     for id_patch in id_patchs:
+    #         with open("output/img_field_test/target_patch_{}.obj".format(id_patch), "w") as f:
+    #             for id_point in graph1.graph["faces"][id_patch]:
+    #                 f.write("v {} {} {}\n".format(point_pos3d_w[id_point, 0], point_pos3d_w[id_point, 1],
+    #                                               point_pos3d_w[id_point, 2]))
+    #             for id_point in range(len(graph1.graph["faces"][id_patch])):
+    #                 if id_point == len(graph1.graph["faces"][id_patch]) - 1:
+    #                     f.write("l {} {}\n".format(id_point + 1, 1))
+    #                 else:
+    #                     f.write("l {} {}\n".format(id_point + 1, id_point + 2))
+    #
+    # print("9. Calculate initial normal")
+    # # compute_initial_normal_based_on_pos(graph1)
+    # compute_initial_normal_based_on_camera(points_pos_3d_c, graph1)
+    #
+    # print("10. Visualize target patch normal")
+    # if True:
+    #     arrows = o3d.geometry.TriangleMesh()
+    #     for id_patch in id_patchs:
+    #         for id_segment in range(len(graph1.graph["faces"][id_patch])):
+    #             id_start = graph1.graph["faces"][id_patch][id_segment]
+    #             id_end = graph1.graph["faces"][id_patch][(id_segment + 1) % len(graph1.graph["faces"][id_patch])]
+    #             up_vector_c = graph1[id_start][id_end]["up_c"][id_patch]
+    #             center_point_c = (graph1.nodes[id_end]["ray_c"] * graph1.nodes[id_end]["distance"] +
+    #                               graph1.nodes[id_start]["ray_c"] * graph1.nodes[id_start]["distance"]) / 2
+    #             up_point = center_point_c + up_vector_c
+    #             up_vector_w = (np.linalg.inv(img1.extrinsic) @ to_homogeneous_vector(up_point)) - np.linalg.inv(
+    #                 img1.extrinsic) @ to_homogeneous_vector(center_point_c)
+    #
+    #             center_point = (graph1.nodes[id_end]["pos_world"] + graph1.nodes[id_start]["pos_world"]) / 2
+    #             arrow = o3d.geometry.TriangleMesh.create_arrow(cylinder_radius=0.0001, cone_radius=0.00015,
+    #                                                            cylinder_height=0.001, cone_height=0.001)
+    #             arrow.rotate(caculate_align_mat(normalize_vector(up_vector_w[:3])), center=(0, 0, 0))
+    #             arrow.translate(center_point)
+    #             arrows += arrow
+    #         o3d.io.write_triangle_mesh(r"output/img_field_test/up_vector_arrow_for_patch_{}.ply".format(id_patch),
+    #                                    arrows)
 
     # cv2.namedWindow("1",cv2.WINDOW_NORMAL)
     # cv2.moveWindow("1",0,0)
@@ -1473,30 +1295,18 @@ def prepare_dataset_and_model(v_colmap_dir, v_img_model_dir, v_viz_face):
     # plt.imshow(mask_img)
     # plt.show()
 
-    data = {
-        "graph1": graph1,
-        "graph2": graph2,
-        "intrinsic1": img1.intrinsic,
-        "extrinsic1": img1.extrinsic,
-        "intrinsic2": img2.intrinsic,
-        "extrinsic2": img2.extrinsic,
-        "img_model1": img_model1,
-        "img_model2": img_model2,
-        "rgb1": rgb1,
-        "rgb2": rgb2,
-        "edge_field1": img1.line_field,
-        "edge_field2": img2.line_field,
-    }
-
-    return data
+    return img_database, graphs
 
 
-@hydra.main(config_name="phase3_l7.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
+@hydra.main(config_name="phase4_abc.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
     print(OmegaConf.to_yaml(v_cfg))
-    data = prepare_dataset_and_model(v_cfg["dataset"]["colmap_dir"], v_cfg["model"]["img_model_dir"],
-                                     v_cfg["dataset"]["id_viz_face"])
+    data = prepare_dataset_and_model(
+        v_cfg["dataset"]["colmap_dir"],
+        v_cfg["dataset"]["id_viz_face"],
+        v_cfg["dataset"]["scene_boundary"],
+    )
 
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir']

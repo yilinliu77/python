@@ -216,7 +216,7 @@ def read_dataset(v_colmap_dir, v_bounds):
                 int(line[0]), float(line[1]), float(line[2]), float(line[3]), float(line[4]), float(line[5]), float(
                     line[6]), float(line[7]), int(line[8]), line[9]
             original_img_id_to_current_img_id[imgs[id_img].id_img] = id_img
-            imgs[id_img].img_path = os.path.join(v_colmap_dir, "../imgs/", img_name)
+            imgs[id_img].img_path = os.path.join(v_colmap_dir, "imgs/", img_name)
             extrinsic = quaternion_rotation_matrix([qw, qx, qy, qz])
             extrinsic = np.concatenate([extrinsic, np.array([[tx, ty, tz]]).transpose()], axis=1, dtype=np.float32)
             extrinsic_homo = np.concatenate([extrinsic, np.array([[0., 0., 0., 1.]])], axis=0, dtype=np.float32)
@@ -252,8 +252,8 @@ def read_dataset(v_colmap_dir, v_bounds):
 
     # Read point field and line field for each img
     # imgs = list(pool.map(partial(read_superpoints, v_superglue_dir, img_size), enumerate(imgs)))
-    imgs = list(pool.map(partial(read_segments, v_segments_dir), enumerate(imgs)))
-    print("Done reading segments")
+    # imgs = list(pool.map(partial(read_segments, v_segments_dir), enumerate(imgs)))
+    # print("Done reading segments")
     pool.close()
 
     # Testcase

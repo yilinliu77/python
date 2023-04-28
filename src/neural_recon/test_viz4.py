@@ -18,7 +18,7 @@ from src.neural_recon.optimize_segment import optimize_single_segment, optimize_
 from src.neural_recon.phase1 import Phase1
 import faiss
 
-from src.neural_recon.phase3 import prepare_dataset_and_model, LModel17, LModel18, LModel19
+from src.neural_recon.phase3 import prepare_dataset_and_model, LModel19
 
 if __name__ == '__main__':
     # cv2.namedWindow("1", cv2.WINDOW_NORMAL)
@@ -30,18 +30,18 @@ if __name__ == '__main__':
 
     data = prepare_dataset_and_model("d:/Projects/NeuralRecon/Test_data/OBL_L7/Test_imgs2_colmap_neural/sparse_align",
                                      "output/neural_recon/ngp_models",
-                                     1476)
+                                     [1476])
 
     model = LModel19(data,
                      False,
-                     id_viz_face,
+                     [id_viz_face],
                      id_viz_edge,
                      [1, 0.01, 0],
                      "sample",
                      "imgs_log"
                      )
 
-    state_dicts = torch.load("output/img_field_test/epoch=139-step=3640.ckpt")["state_dict"]
+    state_dicts = torch.load("output/img_field_test/epoch=279-step=14280.ckpt")["state_dict"]
     state_dicts = {key[6:]:state_dicts[key] for key in state_dicts}
     model.load_state_dict(state_dicts)
     model.is_regress_normal=True

@@ -2122,7 +2122,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_img_model_dir, v_viz_face):
     print("1. Read imgs")
 
     img_cache_name = "output/img_field_test/img_cache.npy"
-    if os.path.exists(img_cache_name):
+    if os.path.exists(img_cache_name) and False:
         print("Found cache ", img_cache_name)
         imgs, points_3d = np.load(img_cache_name, allow_pickle=True)
     else:
@@ -2140,7 +2140,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_img_model_dir, v_viz_face):
 
     graph_cache_name = "output/img_field_test/graph_cache.npy"
     print("2. Build graph")
-    if os.path.exists(graph_cache_name):
+    if os.path.exists(graph_cache_name) and False:
         graphs = np.load(graph_cache_name, allow_pickle=True)
     else:
         graphs = []
@@ -2200,7 +2200,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_img_model_dir, v_viz_face):
         graphs[0].graph["face_center"][id_face] = center_point
 
     points_cache_name = "output/img_field_test/points_cache.npy"
-    if os.path.exists(points_cache_name):
+    if os.path.exists(points_cache_name) and False:
         points_from_sfm = np.load(points_cache_name)
     else:
         preserved_points = []

@@ -9,8 +9,8 @@ from tqdm import tqdm
 
 ops = os.path.join
 
-root_path = r"D:/DATASET/ABC-NEF"
-output_path = r"D:/DATASET/ABC-NEF/ABC-NEF-COLMAP"
+root_path = r"D:/dataset/SIGA2023/Mechanism/"
+output_path = r"D:/dataset/SIGA2023/Mechanism/ABC-NEF-COLMAP"
 
 if __name__ == '__main__':
     for item_name in tqdm(os.listdir(os.path.join(root_path, "ABC-NEF"))):
@@ -29,8 +29,9 @@ if __name__ == '__main__':
             img_name = frame["file_path"].split("/")[-1] + ".png"
             img_file = os.path.join(item_input_path, "train_img", img_name)
             img = cv2.imread(img_file, cv2.IMREAD_UNCHANGED)
-            img = cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            img =  np.around(img[:,:,:3]*(img[:,:,3:4]/255.)).astype(np.uint8)
+            # img = cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
+            # img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
             cv2.imwrite(ops(item_output_path, "imgs", img_name), img)
             scale_matrix = np.array([[1,0,0,0],[0,-1,0,0],[0,0,-1,0],[0,0,0,1]])
             extrinsic = np.asarray(frame["transform_matrix"])

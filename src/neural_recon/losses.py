@@ -3,7 +3,7 @@ import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_scatter import scatter_mean
+from torch_scatter import scatter_mean, scatter_sum
 
 from src.neural_recon.optimize_segment import sample_img
 
@@ -197,23 +197,16 @@ def loss2(sample_imgs1, sample_imgs2, v_num_points):
     imgs1[imgs_mask] = sample_imgs1[:,0]
     imgs2[imgs_mask[None,:].tile([num_imgs,1,1,1,1])] = sample_imgs2.reshape(-1)
 
+    # Check if pixels in the reference image are most black
+    avg_pixel_color1 = scatter_mean(sample_imgs1,
+                                   torch.arange(v_num_points.shape[0], device=device).repeat_interleave(v_num_points),
+                                   dim=0)
+    black_area_in_img1 = avg_pixel_color1 < 0.05
+
     avg_pixel_color = scatter_mean(sample_imgs2,
                  torch.arange(v_num_points.shape[0],device=device).repeat_interleave(v_num_points),
                  dim=1)
-    penalize_black_background_loss = (0.5-torch.clamp_max(avg_pixel_color,0.5)) * 10
-
-    # imgs1 = torch.ones((num_edges, maxx, 20, 1), device=sample_imgs1.device, dtype=sample_imgs1.dtype)
-    # imgs2 = torch.ones((num_edges, maxx, 20, 1), device=sample_imgs1.device, dtype=sample_imgs1.dtype)
-    # imgs_mask = torch.zeros((num_edges, maxx, 20, 1), device=sample_imgs1.device, dtype=torch.bool)
-    # for idx, length in enumerate(v_num_points):
-    #     img1 = sample_imgs1[start_length:start_length+length].reshape(-1, 20)
-    #     img2 = sample_imgs2[start_length:start_length+length].reshape(-1, 20)
-    #     start_length += length
-    #     imgs1[idx,:img1.shape[0],:,0] *= img1
-    #     imgs2[idx,:img2.shape[0],:,0] *= img2
-    #     imgs_mask[idx,:img2.shape[0],:,0] = True
-    # imgs1 = imgs1 * imgs_mask.to(torch.int32)
-    # imgs2 = imgs2 * imgs_mask.to(torch.int32)
+    penalize_black_background_loss = (0.1-torch.clamp_max(avg_pixel_color,0.1)) * 10
 
     times[0] += time.time() - cur_time
     cur_time = time.time()
@@ -256,4 +249,100 @@ def loss2(sample_imgs1, sample_imgs2, v_num_points):
     times[1] += time.time() - cur_time
     cur_time = time.time()
 
-    return bilateral_ncc + penalize_black_background_loss[:,:,0]
+    # return bilateral_ncc + penalize_black_background_loss[:,:,0], black_area_in_img1
+    return bilateral_ncc, black_area_in_img1
+
+# Pure NCC
+def loss3(sample_imgs1, sample_imgs2, v_num_points):
+    device = sample_imgs1.device
+    times=[0 for _ in range(10)]
+    cur_time = time.time()
+    start_length = 0
+    maxx = torch.max(v_num_points)//20
+    num_imgs = sample_imgs2.shape[0]
+    num_edges = v_num_points.shape[0]
+
+    m = torch.arange(maxx*20,device=device).repeat(v_num_points.shape[0]).reshape(v_num_points.shape[0], maxx*20)
+    imgs_mask = m < v_num_points[:,None]
+    imgs_mask = imgs_mask.reshape(v_num_points.shape[0],maxx, 20, 1)
+
+    imgs1 = torch.zeros((num_edges, maxx, 20, 1), device=device, dtype=sample_imgs1.dtype)
+    imgs2 = torch.zeros((num_imgs, num_edges, maxx, 20, 1), device=device, dtype=sample_imgs1.dtype)
+    imgs1[imgs_mask] = sample_imgs1[:,0]
+    imgs2[imgs_mask[None,:].tile([num_imgs,1,1,1,1])] = sample_imgs2.reshape(-1)
+
+    # Check if pixels in the reference image are most black
+    repeat_index = torch.arange(v_num_points.shape[0],device=device).repeat_interleave(v_num_points)
+    avg_pixel_color1 = scatter_mean(sample_imgs1,
+                                   repeat_index,
+                                   dim=0)
+    black_area_in_img1 = avg_pixel_color1 < 0.05
+
+    avg_pixel_color2 = scatter_mean(sample_imgs2,
+                 repeat_index,
+                 dim=1)
+
+    times[0] += time.time() - cur_time
+    cur_time = time.time()
+
+    A_zero_mean = sample_imgs1 - avg_pixel_color1.repeat_interleave(v_num_points,dim=0)
+    B_zero_mean = sample_imgs2 - avg_pixel_color2.repeat_interleave(v_num_points,dim=1)
+
+    dot_product = scatter_sum(A_zero_mean * B_zero_mean, repeat_index,dim=1)
+    A_norm = torch.sqrt(scatter_sum(A_zero_mean ** 2,repeat_index,dim=0))
+    B_norm = torch.sqrt(scatter_sum(B_zero_mean ** 2,repeat_index,dim=1))
+
+    NCC = dot_product / (A_norm * B_norm + 1e-8)
+    times[1] += time.time() - cur_time
+    cur_time = time.time()
+
+    return NCC, black_area_in_img1
+
+# Pure NCC with spatial weights
+def loss4(sample_imgs1, sample_imgs2, v_num_points):
+    device = sample_imgs1.device
+    times=[0 for _ in range(10)]
+    cur_time = time.time()
+    start_length = 0
+    maxx = torch.max(v_num_points)//20
+    num_imgs = sample_imgs2.shape[0]
+    num_edges = v_num_points.shape[0]
+
+    # Add weights
+    sigma_spatial = 10
+    spatial_normalization_ = 1. / (2. * sigma_spatial * sigma_spatial)
+    spatial_weights = torch.linspace(-10,10,20,device=device,dtype=torch.float32)**2 * spatial_normalization_
+    spatial_weights = spatial_weights.tile((v_num_points//20).sum())
+    spatial_weights = torch.exp(-spatial_weights)
+
+    repeat_index = torch.arange(v_num_points.shape[0],device=device).repeat_interleave(v_num_points)
+    spatial_weights_sum = scatter_sum(spatial_weights, repeat_index)
+    spatial_weights = spatial_weights / spatial_weights_sum.repeat_interleave(v_num_points)
+
+    avg_pixel_color1 = scatter_mean(sample_imgs1,
+                                   repeat_index,
+                                   dim=0)
+    black_area_in_img1 = avg_pixel_color1 < 0.05
+
+    # sample_imgs1 = sample_imgs1 * spatial_weights[:,None]
+    # sample_imgs2 = sample_imgs2 * spatial_weights[None,:,None]
+
+    # Check if pixels in the reference image are most black
+    # avg_pixel_color1 = scatter_mean(sample_imgs1,repeat_index,dim=0)
+    avg_pixel_color2 = scatter_mean(sample_imgs2,repeat_index,dim=1)
+
+    times[0] += time.time() - cur_time
+    cur_time = time.time()
+
+    A_zero_mean = (sample_imgs1 - avg_pixel_color1.repeat_interleave(v_num_points,dim=0)) * spatial_weights[:,None]
+    B_zero_mean = (sample_imgs2 - avg_pixel_color2.repeat_interleave(v_num_points,dim=1)) * spatial_weights[None,:,None]
+
+    dot_product = scatter_sum(A_zero_mean * B_zero_mean, repeat_index,dim=1)
+    A_norm = torch.sqrt(torch.clamp_min(scatter_sum(A_zero_mean ** 2,repeat_index,dim=0), 1e-6))
+    B_norm = torch.sqrt(torch.clamp_min(scatter_sum(B_zero_mean ** 2,repeat_index,dim=1),1e-6))
+
+    NCC = 1 - dot_product / (torch.clamp_min(A_norm * B_norm, 1e-6))
+    times[1] += time.time() - cur_time
+    cur_time = time.time()
+
+    return NCC, black_area_in_img1

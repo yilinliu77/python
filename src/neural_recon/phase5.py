@@ -7,7 +7,7 @@ from torch.distributions import Binomial
 from torch.nn.utils.rnn import pad_sequence
 
 from src.neural_recon.init_segments import compute_init_based_on_similarity
-from src.neural_recon.losses import loss1, loss2
+from src.neural_recon.losses import loss1, loss2, loss4
 
 # sys.path.append("thirdparty/sdf_computer/build/")
 # import pysdf
@@ -157,7 +157,8 @@ class LModel21(nn.Module):
         self.graphs = v_data[1]
         self.img_database = v_data[0]
 
-    def sample_points_2d(self, v_edge_points, v_num_horizontal):
+    # Pls change the v_img_width!!!!!!!
+    def sample_points_2d(self, v_edge_points, v_num_horizontal, v_img_width=800):
         device = v_edge_points.device
         cur_dir = v_edge_points[:, 1] - v_edge_points[:, 0]
         cur_length = torch.linalg.norm(cur_dir, dim=-1) + 1e-6
@@ -165,7 +166,7 @@ class LModel21(nn.Module):
         cur_dir_h = torch.cat((cur_dir, torch.zeros_like(cur_dir[:, 0:1])), dim=1)
         z_axis = torch.zeros_like(cur_dir_h)
         z_axis[:, 2] = 1
-        edge_up = normalize_tensor(torch.cross(cur_dir_h, z_axis, dim=1)[:, :2]) * 0.00167
+        edge_up = normalize_tensor(torch.cross(cur_dir_h, z_axis, dim=1)[:, :2]) * 10 / v_img_width
         # The vertical length is 10 -> 10/6000 = 0.00167
 
         # Compute interpolated point
@@ -238,7 +239,7 @@ class LModel21(nn.Module):
         times[1] += time.time() - cur_time
         cur_time = time.time()
 
-        similarity_loss = loss2(sample_imgs1, sample_imgs2, num_per_edge1)
+        similarity_loss, black_area_in_img1 = loss4(sample_imgs1, sample_imgs2, num_per_edge1)
         similarity_mask = torch.logical_and(valid_mask1[None, :].tile([valid_mask2.shape[0], 1]), valid_mask2)
         similarity_mask = scatter_min(similarity_mask.to(torch.long), torch.arange(
             num_per_edge1.shape[0], device=similarity_loss.device).repeat_interleave(num_per_edge1), dim=1)[0]
@@ -259,7 +260,7 @@ class LModel21(nn.Module):
                             np.concatenate((img1, np.zeros_like(img1[0:1, :]), img2), axis=0))
                 start_length += length
 
-        return similarity_loss, similarity_mask.to(torch.bool), [points_2d1, points_2d2]
+        return similarity_loss, similarity_mask.to(torch.bool), black_area_in_img1, [points_2d1, points_2d2]
 
     #
     # start_rays: (B, E, 3)
@@ -268,8 +269,8 @@ class LModel21(nn.Module):
     # valid_flags: (B, S)
     #
     def random_search(self, start_rays, end_points_c, v_new_distances,
-                      imgs, transformations, intrinsic, valid_flags, num_max_edges_per_vertice):
-        batch_size = 10
+                      imgs, transformations, intrinsic, valid_flags, is_single_img):
+        batch_size = 4
         num_points = v_new_distances.shape[0]
         num_sampled = v_new_distances.shape[1]  # Sample from normal distribution + 1
         num_imgs = imgs.shape[0] - 1
@@ -282,6 +283,7 @@ class LModel21(nn.Module):
 
         losses = []
         masks = []
+        black_area_in_img1s = []
         for id_batch in range(num_sampled // batch_size + 1):
             id_batch_start = min(num_sampled, id_batch * batch_size)
             id_batch_end = min(num_sampled, (id_batch + 1) * batch_size)
@@ -289,17 +291,17 @@ class LModel21(nn.Module):
                 continue
             num_batch = id_batch_end - id_batch_start
 
-            # (B, E*4, S', 3)
-            start_points_c_multiple = torch.cat((
+            # (B, 2, E, S', 3)
+            start_points_c_multiple = torch.stack((
                 repeated_start_points_c[:, :, id_batch_start:id_batch_end],
                 repeated_start_points_c[:, :, id_batch_start:id_batch_end],
             ), dim=1)
-            end_points_c_multiple = torch.cat((
+            end_points_c_multiple = torch.stack((
                 repeated_end_points_c[:, :, id_batch_start:id_batch_end, 0],
                 repeated_end_points_c[:, :, id_batch_start:id_batch_end, 1],
             ), dim=1)
 
-            similarity_loss, similarity_mask, _ = self.compute_similarity_wrapper(
+            similarity_loss, similarity_mask, black_area_in_img1, _ = self.compute_similarity_wrapper(
                 # The layout is like p0_s0, p0_s1, p0_s2, ..., p1_s0, p1_s1
                 start_points_c_multiple.reshape(-1, 3),
                 end_points_c_multiple.reshape(-1, 3),
@@ -308,56 +310,68 @@ class LModel21(nn.Module):
             # (N, B, 2, E, S')
             similarity_loss = similarity_loss.reshape(num_imgs, num_points, 2, num_max_edges, num_batch)
             similarity_mask = similarity_mask.reshape(num_imgs, num_points, 2, num_max_edges, num_batch)
+            black_area_in_img1 = black_area_in_img1.reshape(num_points, 2, num_max_edges, num_batch)
 
             losses.append(similarity_loss)
             masks.append(similarity_mask)
+            black_area_in_img1s.append(black_area_in_img1)
 
         # (N, B, 2, E, S)
         similarity_loss_ = torch.cat(losses, dim=-1)
         similarity_mask_ = torch.cat(masks, dim=-1)
+        black_area_in_img1s = torch.cat(black_area_in_img1s, dim=-1)[:, 0, :, 0]
+        valid_flags = torch.logical_and(~black_area_in_img1s, valid_flags)
+
         penalized_loss = 10.
+        penalized_loss = torch.inf
         # Some vertices are project outside to the images
         similarity_loss_[~similarity_mask_] = penalized_loss
-        # (num_img, num_vertex, 2, 2, num_edge, num_sample)
-        # -> (num_vertex, num_edge, 2, 2, num_sample, num_img)
+        # (num_img, num_vertex, 2, num_edge, num_sample)
+        # -> (num_vertex, num_edge, 2, num_sample, num_img)
         similarity_loss_ = similarity_loss_.permute(1, 3, 2, 4, 0)
         # Some vertices are along the border, discard them
         similarity_loss_[~valid_flags] = penalized_loss
-        similarity_loss_avg = torch.mean(similarity_loss_,dim=-1) # Average about images
+
+        if is_single_img:
+            similarity_loss_avg = similarity_loss_[...,1]  # select the first loss
+        else:
+            similarity_loss_avg = torch.mean(similarity_loss_,dim=-1) # Average about images
 
         # Find best combinations
         similarity_loss_avg_ = similarity_loss_avg.min(dim=2)[0]
+        if True:
+            N, E, S = similarity_loss_avg_.shape
+            K = 3
+            device = similarity_loss_avg.device
 
-        N, E, S = similarity_loss_avg_.shape
-        K=5
-        device = similarity_loss_avg.device
+            # Get the top k persons for each role
+            top_k_values, top_k_indices = torch.topk(similarity_loss_avg_, K, dim=2, largest=False)
+            top_k_indices_flatten = top_k_indices.reshape((N,-1))
+            # Create index pairs for all possible person combinations (including single person)
+            s1_indices, s2_indices = torch.meshgrid(torch.arange(E*K,device=device), torch.arange(E*K,device=device),indexing="ij")
+            num_pairs = s1_indices.shape[0] * s1_indices.shape[1]
+            index_coordinates = torch.stack((s1_indices,s2_indices),dim=-1).reshape(num_pairs,2)
 
-        top_k_values, top_k_indices = torch.topk(similarity_loss_avg_, K, dim=2, largest=False)
-
-        s1_indices, s2_indices = torch.meshgrid(torch.arange(K,device=device), torch.arange(K,device=device))
-        s2_indices = s2_indices.tril(-1) + s2_indices.triu()
-        num_pairs = s1_indices.shape[0] * s1_indices.shape[1]
-        # Reshape and repeat the input tensor along the pair dimension
-        input_expanded = top_k_values.view(N, E, K, 1).repeat(1, 1, 1, num_pairs)
-
-        # Gather passenger values for each pair and calculate the sums
-        passenger_values = input_expanded.gather(
-            2, torch.stack([s1_indices, s2_indices], dim=0).view(1, 1, 2,num_pairs).repeat(N, E, 1, 1))
-        passenger_values = passenger_values.min(dim=2)[0]
-        sums = passenger_values.sum(dim=1)
-        # Find the best passenger assignments for each car
-        best_assignments = torch.argmin(sums, dim=1)
-        # Convert the best assignment indices to actual seat assignments
-        index1 = torch.stack([s1_indices, s2_indices], dim=0).view(1, 2,num_pairs).repeat(N, 1, 1).gather(
-            2, (best_assignments[:,None,None]).expand(-1,2,-1))
-        seat_assignments = top_k_indices.gather(2, index1).squeeze(2)
-
-        id_best = seat_assignments
+            # Index the two distance candidate from all pairs
+            selected_index = top_k_indices_flatten[:,index_coordinates]
+            # Get the value of the two distance candidate for each edge, and choose the smaller one
+            selected_values_ = torch.gather(similarity_loss_avg_[:,:,None,:].expand(-1,-1,num_pairs,-1),3,selected_index[:,None,:,:].expand(-1,E,-1,-1))
+            selected_values = torch.min(selected_values_, dim=3)[0]
+            # Calculate the sums for each person pair
+            is_inf = torch.isinf(selected_values)
+            selected_values[is_inf]=10.
+            summed_value = torch.sum(selected_values, dim=1)
+            min_index = torch.min(summed_value, dim=1)[1]
+            best_index = torch.gather(selected_index,1,min_index[:,None,None].expand(-1,-1,2))[:,0]
+        else:
+            similarity_loss_avg_[torch.isinf(similarity_loss_avg_)] = 10.
+            best_index = similarity_loss_avg_.sum(dim=1).argmin(dim=1,keepdims=True)
         # id_best[similarity_loss_avg[
         #             torch.arange(similarity_loss_avg.shape[0], device=start_rays.device), id_best] == 5] = 0
-        return id_best
+        return best_index
 
     def forward(self, idxs, v_id_epoch, is_log):
+        is_single_img=False
         # 0: Unpack data
         v_id_epoch += 1
         # (1,)
@@ -408,7 +422,7 @@ class LModel21(nn.Module):
         cur_time = time.time()
 
         # Random search
-        if self.training or True:
+        if self.training or False:
             with torch.no_grad():
                 num_sample = 100
                 scale_factor = 0.16
@@ -432,7 +446,7 @@ class LModel21(nn.Module):
                 new_distance = new_distance.reshape(num_vertices, -1)
                 id_best_distance = self.random_search(
                     start_ray_c, end_points_c, new_distance,
-                    imgs, transformations, intrinsic, valid_flags, num_max_edges_per_vertice
+                    imgs, transformations, intrinsic, valid_flags, is_single_img
                 )
                 self.distances[id_cur_imgs][id_start_point_unique] = torch.gather(new_distance,1,id_best_distance)
         times[3] += time.time() - cur_time
@@ -459,7 +473,7 @@ class LModel21(nn.Module):
             end_points_c[:, :, 0],
             end_points_c[:, :, 1],
         ), dim=1)
-        similarity_loss, similarity_mask, [points_2d1, points_2d2] = self.compute_similarity_wrapper(
+        similarity_loss, similarity_mask, black_area_in_img1s, [points_2d1, points_2d2] = self.compute_similarity_wrapper(
             start_points_c_multiple.reshape(-1, 3),
             end_points_c_multiple.reshape(-1, 3),
             imgs, transformations, intrinsic
@@ -468,20 +482,21 @@ class LModel21(nn.Module):
         # Unpack the combination
         similarity_loss = similarity_loss.reshape((num_imgs, num_points, 4, num_max_edges)) # 4 combinations
         similarity_mask = similarity_mask.reshape((num_imgs, num_points, 4, num_max_edges))
-
-        penalized_loss = 5.
-        # similarity_loss[~similarity_mask] = penalized_loss
+        black_area_in_img1s = black_area_in_img1s.reshape((num_points, 4, num_max_edges))[:,0]
+        valid_flags = torch.logical_and(~black_area_in_img1s, valid_flags)
+        penalized_loss = 10.
+        # penalized_loss = torch.inf
+        similarity_loss[~similarity_mask] = penalized_loss
         similarity_loss = similarity_loss.permute(1, 3, 2, 0)
-        # similarity_loss[~valid_flags] = penalized_loss
-        is_single_img = False
+        similarity_loss[~valid_flags] = penalized_loss
         if is_single_img:
-            similarity_loss = similarity_loss[0]
+            similarity_loss_avg = similarity_loss[...,1]
         else:
             similarity_loss_avg = torch.mean(similarity_loss, dim=3)
-            id_min = similarity_loss_avg.argmin(dim=2)
-            similarity_loss = torch.gather(similarity_loss_avg, 2, id_min.unsqueeze(2)).squeeze(2)
-            id_min[~valid_flags] = -1
-            self.indicator[id_cur_imgs][id_vertices][:,:num_max_edges_per_vertice]=id_min
+        id_min = similarity_loss_avg.detach().argmin(dim=2)
+        similarity_loss_final = torch.gather(similarity_loss_avg, 2, id_min.unsqueeze(2)).squeeze(2)
+        self.indicator[id_cur_imgs][id_vertices,:num_max_edges_per_vertice]=id_min
+        self.indicator[id_cur_imgs][id_vertices,:num_max_edges_per_vertice][~valid_flags]=-1
 
         times[4] += time.time() - cur_time
         cur_time = time.time()
@@ -574,7 +589,7 @@ class LModel21(nn.Module):
                 # cv2.imwrite(os.path.join(self.log_root, "3d_{:05d}.jpg".format(v_id_epoch)),
                 #             np.concatenate((line_img1, line_img2), axis=1))
 
-        return torch.mean(similarity_loss), [None, None, None]
+        return torch.mean(similarity_loss_final), [None, None, None]
 
     def len(self):
         return len(self.graph1.graph["faces"])

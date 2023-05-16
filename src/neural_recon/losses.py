@@ -346,3 +346,31 @@ def loss4(sample_imgs1, sample_imgs2, v_num_points):
     cur_time = time.time()
 
     return NCC, black_area_in_img1
+
+# Pure face NCC
+def loss5(sample_imgs1, sample_imgs2, v_num_points):
+    device = sample_imgs1.device
+    times=[0 for _ in range(10)]
+    cur_time = time.time()
+    num_face = v_num_points.shape[0]
+
+    repeat_index = torch.arange(num_face,device=device).repeat_interleave(v_num_points)
+
+    avg_pixel_color1 = scatter_mean(sample_imgs1,repeat_index,dim=0)
+    avg_pixel_color2 = scatter_mean(sample_imgs2,repeat_index,dim=0)
+
+    times[0] += time.time() - cur_time
+    cur_time = time.time()
+
+    A_zero_mean = sample_imgs1 - avg_pixel_color1.repeat_interleave(v_num_points,dim=0)
+    B_zero_mean = sample_imgs2 - avg_pixel_color2.repeat_interleave(v_num_points,dim=0)
+
+    dot_product = scatter_sum(A_zero_mean * B_zero_mean, repeat_index,dim=0)
+    A_norm = torch.sqrt(torch.clamp_min(scatter_sum(A_zero_mean ** 2,repeat_index,dim=0), 1e-6))
+    B_norm = torch.sqrt(torch.clamp_min(scatter_sum(B_zero_mean ** 2,repeat_index,dim=0), 1e-6))
+
+    NCC = 1 - dot_product / (torch.clamp_min(A_norm * B_norm, 1e-6))
+    times[1] += time.time() - cur_time
+    cur_time = time.time()
+
+    return NCC

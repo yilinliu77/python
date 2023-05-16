@@ -38,7 +38,7 @@ if __name__ == '__main__':
                      "imgs_log"
                      )
 
-    state_dicts = torch.load("outputs/2023_05_04_15_30_51/lightning_logs/version_0/checkpoints/epoch=59-step=180.ckpt")["state_dict"]
+    state_dicts = torch.load("outputs/2023_05_05_14_59_40/lightning_logs/version_0/checkpoints/epoch=19-step=60.ckpt")["state_dict"]
     state_dicts = {key[6:]:state_dicts[key] for key in state_dicts}
     model.load_state_dict(state_dicts)
     # model.is_regress_normal=True
@@ -51,6 +51,9 @@ if __name__ == '__main__':
                num_workers=0)
 
     with torch.no_grad():
+        big_img1 = None
+        big_img2 = []
+
         for id_vertice, idxs_ in enumerate((dataloader)):
             idxs=[]
             for item in idxs_:
@@ -98,7 +101,7 @@ if __name__ == '__main__':
             num_imgs = transformations.shape[0]
             num_points = start_points_c.shape[0]
             num_max_edges = start_points_c.shape[1]
-            similarity_loss, similarity_mask, black_area_in_img1s, _ = model.compute_similarity_wrapper(
+            similarity_loss, similarity_mask, black_area_in_img1s, [p1,p2] = model.compute_similarity_wrapper(
                 start_points_c.reshape(-1, 3),
                 end_points_c.reshape(-1, 3),
                 imgs, transformations, intrinsic
@@ -142,16 +145,30 @@ if __name__ == '__main__':
             end_points_2d1 = (end_points_2d1[:, :2] / end_points_2d1[:, 2:3]).cpu().numpy()
             end_points_2d1 = (np.clip(end_points_2d1, 0, 0.99999) * shape1).astype(int)
 
+
             line_img1 = rgb1.copy()
+            if big_img1 is None:
+                big_img1 = line_img1.copy()
 
             line_thickness = 1
             point_thickness = 2
             point_radius = 1
 
+            p1 = (np.clip(p1.cpu().numpy(), 0, 0.99999) * shape1).astype(int)
+            line_img1[p1[:,1],p1[:,0]] = (0,0,255)
             for id_ver, _ in enumerate(end_points_2d1):
+                if valid_flags[0, id_ver] and similarity_loss_avg[0, id_ver] < 1e-1:
+                    cv2.line(big_img1, start_points_2d1[id_ver], end_points_2d1[id_ver], (0, 0, 255),
+                             thickness=line_thickness)
                 cv2.line(line_img1, start_points_2d1[id_ver], end_points_2d1[id_ver], (0, 0, 255),
                          thickness=line_thickness)
+
             for id_ver, _ in enumerate(end_points_2d1):
+                if valid_flags[0,id_ver] and similarity_loss_avg[0, id_ver] < 1e-1:
+                    cv2.circle(big_img1, start_points_2d1[id_ver], radius=point_radius,
+                               color=(0, 255, 255), thickness=point_thickness)
+                    cv2.circle(big_img1, end_points_2d1[id_ver], radius=point_radius,
+                               color=(0, 255, 255), thickness=point_thickness)
                 cv2.circle(line_img1, start_points_2d1[id_ver], radius=point_radius,
                            color=(0, 255, 255), thickness=point_thickness)
                 cv2.circle(line_img1, end_points_2d1[id_ver], radius=point_radius,
@@ -161,6 +178,8 @@ if __name__ == '__main__':
             for i_img in range(imgs[1:].shape[0]):
                 rgb2 = cv2.cvtColor((imgs[1 + i_img].cpu().numpy() * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
                 line_img2 = rgb2.copy()
+                if len(big_img2) < 10:
+                    big_img2.append(line_img2.copy())
                 shape2 = rgb2.shape[:2][::-1]
                 start_points_2d2 = (transformations[i_img] @ to_homogeneous_tensor(start_points_c).T).T
                 start_points_2d2 = (start_points_2d2[:, :2] / start_points_2d2[:, 2:3]).cpu().numpy()
@@ -170,9 +189,17 @@ if __name__ == '__main__':
                 end_points_2d2 = (np.clip(end_points_2d2, 0, 0.99999) * shape2).astype(int)
 
                 for id_ver, _ in enumerate(end_points_2d2):
+                    if valid_flags[0, id_ver] and similarity_loss_avg[0, id_ver] < 1e-1:
+                        cv2.line(big_img2[i_img], start_points_2d2[id_ver], end_points_2d2[id_ver], (0, 0, 255),
+                                 thickness=line_thickness)
                     cv2.line(line_img2, start_points_2d2[id_ver], end_points_2d2[id_ver], (0, 0, 255),
                              thickness=line_thickness)
                 for id_ver, _ in enumerate(end_points_2d2):
+                    if valid_flags[0, id_ver] and similarity_loss_avg[0, id_ver] < 1e-1:
+                        cv2.circle(big_img2[i_img], start_points_2d2[id_ver], radius=point_radius,
+                                   color=(0, 255, 255), thickness=point_thickness)
+                        cv2.circle(big_img2[i_img], end_points_2d2[id_ver], radius=point_radius,
+                                   color=(0, 255, 255), thickness=point_thickness)
                     cv2.circle(line_img2, start_points_2d2[id_ver], radius=point_radius,
                                color=(0, 255, 255), thickness=point_thickness)
                     cv2.circle(line_img2, end_points_2d2[id_ver], radius=point_radius,
@@ -194,5 +221,16 @@ if __name__ == '__main__':
             thickness = 1
             cv2.putText(big_imgs, log_str, (50, 100), fontFace, fontScale, (0, 0, 255), thickness)
             cv2.imwrite(os.path.join("outputs/test_viz_5", "2d_{:05d}.jpg".format(id_vertice)), big_imgs)
+
+        big_imgs = np.concatenate(
+            (np.concatenate(
+                (big_img1, big_img2[0], big_img2[1], big_img2[2]), axis=1),
+             np.concatenate(
+                 (big_img2[3], big_img2[4], big_img2[5], big_img2[6]), axis=1),
+             np.concatenate(
+                 (big_img2[7], big_img2[8], big_img2[9], big_img2[9]), axis=1),
+            )
+            , axis=0)
+        cv2.imwrite(os.path.join("outputs/test_viz_5", "xxx.jpg".format(id_vertice)), big_imgs)
 
         pass

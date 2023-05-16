@@ -595,9 +595,9 @@ class LModel21(nn.Module):
         return len(self.graph1.graph["faces"])
 
 
-class Phase5(pl.LightningModule):
+class Phase7(pl.LightningModule):
     def __init__(self, hparams, v_data):
-        super(Phase5, self).__init__()
+        super(Phase7, self).__init__()
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
@@ -972,7 +972,7 @@ def main(v_cfg: DictConfig):
     log_dir = hydra_cfg['runtime']['output_dir']
     v_cfg["trainer"]["output"] = os.path.join(log_dir, v_cfg["trainer"]["output"])
 
-    model = Phase5(v_cfg, data)
+    model = Phase7(v_cfg, data)
 
     trainer = Trainer(
         accelerator='gpu' if v_cfg["trainer"].gpu != 0 else None,

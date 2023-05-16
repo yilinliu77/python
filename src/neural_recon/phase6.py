@@ -7,7 +7,7 @@ from torch.distributions import Binomial
 from torch.nn.utils.rnn import pad_sequence
 
 from src.neural_recon.init_segments import compute_init_based_on_similarity
-from src.neural_recon.losses import loss1, loss2
+from src.neural_recon.losses import loss1, loss2, loss4, loss5
 
 # sys.path.append("thirdparty/sdf_computer/build/")
 # import pysdf
@@ -53,6 +53,7 @@ from shared.common_utils import debug_imgs, to_homogeneous, save_line_cloud, to_
 from src.neural_recon.colmap_io import read_dataset, Image, Point_3d, check_visibility
 from src.neural_recon.phase1 import NGPModel
 
+
 class Multi_edge_single_img_dataset(torch.utils.data.Dataset):
     def __init__(self, v_data, v_is_one_target, v_id_target_face, v_training_mode, mul_number=1):
         super(Multi_edge_single_img_dataset, self).__init__()
@@ -83,8 +84,8 @@ class Multi_edge_single_img_dataset(torch.utils.data.Dataset):
         ref_img = cv2.imread(self.img_database[self.target_img].img_path, cv2.IMREAD_GRAYSCALE)
         imgs = np.concatenate((ref_img[None, :], src_imgs), axis=0)
         ray_c = np.stack([self.graphs[self.target_img].nodes[id_node]["ray_c"]
-                          for id_node in self.training_edges[idx,:2]], axis=0)
-        valid_flags = self.training_edges[idx,2]
+                          for id_node in self.training_edges[idx, :2]], axis=0)
+        valid_flags = self.training_edges[idx, 2]
         # assert valid_flags.shape[0]==3 # Currently we only support 3 edges per point
         return torch.tensor(self.target_img, dtype=torch.long), \
             torch.tensor(self.training_edges[idx]).to(torch.long), \
@@ -94,7 +95,6 @@ class Multi_edge_single_img_dataset(torch.utils.data.Dataset):
             torch.from_numpy(ray_c).to(torch.float32), \
             torch.tensor(valid_flags).to(torch.bool), \
             self.id_training_edges_in_original_set[idx]
-
 
     @staticmethod
     def collate_fn(items):
@@ -135,7 +135,7 @@ class LModel22(nn.Module):
         for id_graph, graph in enumerate(self.graphs):
             distances = np.asarray([graph.nodes[item]["distance"] for item in graph])
             training_edges = graph.graph["training_edges"]
-            id_edge_points = training_edges[:,:2]
+            id_edge_points = training_edges[:, :2]
             distances_ = torch.from_numpy(distances[id_edge_points]).to(torch.float32) / self.distance_normalizer
             self.distances.append(nn.Parameter(distances_))
         # Debug
@@ -264,8 +264,8 @@ class LModel22(nn.Module):
         num_sampled = v_new_distances.shape[2]  # Sample from normal distribution + 1
         num_imgs = imgs.shape[0] - 1
 
-        repeated_start_points_c = start_rays[:, None, :] * v_new_distances[:, 0][:,:,None] * self.distance_normalizer
-        repeated_end_points_c = end_rays[:, None, :] * v_new_distances[:, 1][:,:,None] * self.distance_normalizer
+        repeated_start_points_c = start_rays[:, None, :] * v_new_distances[:, 0][:, :, None] * self.distance_normalizer
+        repeated_end_points_c = end_rays[:, None, :] * v_new_distances[:, 1][:, :, None] * self.distance_normalizer
 
         losses = []
         masks = []
@@ -278,8 +278,8 @@ class LModel22(nn.Module):
 
             similarity_loss, similarity_mask, _ = self.compute_similarity_wrapper(
                 #
-                repeated_start_points_c[:, id_batch_start:id_batch_end].reshape(-1,3),
-                repeated_end_points_c[:, id_batch_start:id_batch_end].reshape(-1,3),
+                repeated_start_points_c[:, id_batch_start:id_batch_end].reshape(-1, 3),
+                repeated_end_points_c[:, id_batch_start:id_batch_end].reshape(-1, 3),
                 imgs, transformations, intrinsic
             )
             similarity_loss = similarity_loss.reshape(num_imgs, num_edges, num_batch)
@@ -298,7 +298,7 @@ class LModel22(nn.Module):
         similarity_loss_ = similarity_loss_.permute(1, 2, 0)
         # Some vertices are along the border, discard them
         similarity_loss_[~valid_flags] = penalized_loss
-        similarity_loss_avg = torch.mean(similarity_loss_,dim=-1) # Average about images
+        similarity_loss_avg = torch.mean(similarity_loss_, dim=-1)  # Average about images
 
         id_best = similarity_loss_avg.argmin(dim=1)
         # id_best[similarity_loss_avg[
@@ -352,7 +352,7 @@ class LModel22(nn.Module):
                 new_distance = -torch.ones((num_edges, 2, num_sample), device=device, dtype=torch.float32)
                 sample_distance_mask = torch.logical_and(new_distance > 0, new_distance < 1)
                 # (B * S)
-                repeated_vertices_distances = vertices_distances[:,:,None].tile((1,1,num_sample))
+                repeated_vertices_distances = vertices_distances[:, :, None].tile((1, 1, num_sample))
                 while not torch.all(sample_distance_mask):
                     t_ = new_distance[~sample_distance_mask]
                     a = repeated_vertices_distances[~sample_distance_mask] + \
@@ -369,7 +369,7 @@ class LModel22(nn.Module):
                     imgs, transformations, intrinsic, valid_flags
                 )
                 self.distances[id_cur_imgs][id_sample] = torch.gather(
-                    new_distance,2,(id_best_distance[None,None,:]).expand(-1,2,-1)).permute(2,1,0)[:,:,0]
+                    new_distance, 2, (id_best_distance[None, None, :]).expand(-1, 2, -1)).permute(2, 1, 0)[:, :, 0]
         times[3] += time.time() - cur_time
         cur_time = time.time()
 
@@ -569,6 +569,517 @@ class Phase5(pl.LightningModule):
             return
 
 
+def sample_new_distance(v_original_distances, num_sample=99, scale_factor=1.6, v_max=10, ):
+    num_vertices = v_original_distances.shape[0]
+    device = v_original_distances.device
+    # (B, S)
+    new_distance = -torch.ones((num_vertices, num_sample), device=device, dtype=v_original_distances.dtype)
+    sample_distance_mask = torch.logical_and(new_distance > 0, new_distance < v_max)
+    # (B, S)
+    repeated_vertices_distances = v_original_distances[:, None].tile((1, num_sample))
+    while not torch.all(sample_distance_mask):
+        t_ = new_distance[~sample_distance_mask]
+        a = repeated_vertices_distances[~sample_distance_mask] + \
+            scale_factor * torch.distributions.utils._standard_normal(
+            t_.shape[0],
+            device=device,
+            dtype=t_.dtype)
+        new_distance[~sample_distance_mask] = a
+        sample_distance_mask = torch.logical_and(new_distance > 0, new_distance < v_max)
+    # (B, (S + 1))
+    new_distance = torch.cat((v_original_distances[:, None], new_distance), dim=1)
+    return new_distance
+
+
+def get_up_vector(start_points, end_points, t):
+    # https://math.stackexchange.com/questions/137362/how-to-find-perpendicular-vector-to-another-vector
+    cur_dir = end_points - start_points
+    a, b, c = cur_dir[:, 0], cur_dir[:, 1], cur_dir[:, 2]
+    up_c = torch.stack((
+        -b * torch.cos(t) - (a * c) / torch.sqrt(a * a + b * b) * torch.sin(t),
+        a * torch.cos(t) - (b * c) / torch.sqrt(a * a + b * b) * torch.sin(t),
+        torch.sqrt(a * a + b * b) * torch.sin(t)
+    ), dim=1)
+    return normalize_tensor(up_c)
+
+
+def sample_new_ups(v_edge_points):
+    num_edges = v_edge_points.shape[0]
+    t = torch.linspace(0, 1, steps=100, device=v_edge_points.device) * torch.pi * 2
+    num_sample = t.shape[0]
+
+    sampled_ups = get_up_vector(
+        v_edge_points[:, None, 0, :].tile(1, num_sample, 1).view(-1, 3),
+        v_edge_points[:, None, 1, :].tile(1, num_sample, 1).view(-1, 3),
+        t[None, :].tile(num_edges, 1).view(-1),
+    ).view(num_edges, num_sample, 3)
+
+    return sampled_ups
+
+
+def sample_edge(num_per_edge_m, cur_dir, start_point, num_max_sample=2000):
+    times = [0 for _ in range(10)]
+    cur_time = time.time()
+    length = torch.linalg.norm(cur_dir + 1e-6, dim=1)
+    num_edge_points = torch.clamp((length * num_per_edge_m).to(torch.long), 1, 2000)
+    num_edge_points_ = num_edge_points.roll(1)
+    num_edge_points_[0] = 0
+    times[1] += time.time() - cur_time
+    cur_time = time.time()
+    sampled_edge_points = torch.arange(num_edge_points.sum(), device=cur_dir.device) - num_edge_points_.cumsum(
+        dim=0).repeat_interleave(num_edge_points)
+    times[2] += time.time() - cur_time
+    cur_time = time.time()
+    sampled_edge_points = sampled_edge_points / ((num_edge_points - 1 + 1e-8).repeat_interleave(num_edge_points))
+    times[3] += time.time() - cur_time
+    cur_time = time.time()
+    sampled_edge_points = cur_dir.repeat_interleave(num_edge_points, dim=0) * sampled_edge_points[:, None] \
+                          + start_point.repeat_interleave(num_edge_points, dim=0)
+    times[4] += time.time() - cur_time
+    cur_time = time.time()
+    return num_edge_points, sampled_edge_points
+
+
+def sample_triangles(num_per_m, p1, p2, p3, num_max_sample=500):
+    d1 = p2 - p1
+    d2 = p3 - p2
+    area = torch.linalg.norm(torch.cross(d1, d2) + 1e-6, dim=1).abs() / 2
+
+    num_edge_points, edge_points = sample_edge(num_per_m,
+                                               torch.stack((d1, d2, p1 - p3), dim=1).reshape(-1, 3),
+                                               # torch.stack((d1,), dim=1).reshape(-1, 3),
+                                               torch.stack((p1, p2, p3), dim=1).reshape(-1, 3),
+                                               # torch.stack((p1,), dim=1).reshape(-1, 3),
+                                               num_max_sample=num_max_sample)
+    num_edge_points = num_edge_points.reshape(-1, 3).sum(dim=1)
+    # num_edge_points = num_edge_points.reshape(-1, 1).sum(dim=1)
+
+    num_per_m2 = num_per_m * num_per_m
+    num_tri_samples = torch.clamp((area * num_per_m2).to(torch.long), 1, num_max_sample * 4)
+    samples = torch.rand(num_tri_samples.sum(), 2, device=p1.device)
+    _t1 = torch.sqrt(samples[:, 0:1] + 1e-6)
+    sampled_polygon_points = (1 - _t1) * p1.repeat_interleave(num_tri_samples, dim=0) + \
+                             _t1 * (1 - samples[:, 1:2]) * p2.repeat_interleave(num_tri_samples, dim=0) + \
+                             _t1 * samples[:, 1:2] * p3.repeat_interleave(num_tri_samples, dim=0)
+
+    # Only use the code below for debug
+    if True:
+        num_total_points = num_edge_points + num_tri_samples
+        num_total_points_cumsum = num_total_points.cumsum(0).roll(1)
+        num_total_points_cumsum[0] = 0
+        sampled_total_points = torch.zeros((num_total_points.sum(), 3), device=p1.device, dtype=torch.float32)
+        num_edge_points_ = num_edge_points.cumsum(0).roll(1)
+        num_edge_points_[0] = 0
+        num_tri_points_ = num_tri_samples.cumsum(0).roll(1)
+        num_tri_points_[0] = 0
+        edge_index = torch.arange(num_edge_points.sum(), device=p1.device) \
+                     - (num_edge_points_ - num_total_points_cumsum).repeat_interleave(num_edge_points)
+        tri_index = torch.arange(num_tri_samples.sum(), device=p1.device) \
+                    - (num_tri_points_ - num_total_points_cumsum - num_edge_points).repeat_interleave(
+            num_tri_samples)
+        sampled_total_points[edge_index] = edge_points
+        sampled_total_points[tri_index] = sampled_polygon_points
+        return num_total_points, sampled_total_points
+    return None, torch.cat((edge_points, sampled_polygon_points), dim=0)
+
+
+def sample_points_2d(v_edge_points, v_num_horizontal, v_img_width=800, v_vertical_length=10):
+    device = v_edge_points.device
+    cur_dir = v_edge_points[:, 1] - v_edge_points[:, 0]
+    cur_length = torch.linalg.norm(cur_dir, dim=-1) + 1e-6
+
+    cur_dir_h = torch.cat((cur_dir, torch.zeros_like(cur_dir[:, 0:1])), dim=1)
+    z_axis = torch.zeros_like(cur_dir_h)
+    z_axis[:, 2] = 1
+    edge_up = normalize_tensor(torch.cross(cur_dir_h, z_axis, dim=1)[:, :2]) * v_vertical_length / v_img_width
+    # The vertical length is 10 -> 10/6000 = 0.00167
+
+    # Compute interpolated point
+    num_horizontal = v_num_horizontal
+    num_half_vertical = 10
+    num_coordinates_per_edge = num_horizontal * num_half_vertical * 2
+
+    begin_idxes = num_horizontal.cumsum(dim=0)
+    total_num_x_coords = begin_idxes[-1]
+    begin_idxes = begin_idxes.roll(1)  # Used to calculate the value
+    begin_idxes[0] = 0  # (M,)
+    dx = torch.arange(num_horizontal.sum(), device=device) - \
+         begin_idxes.repeat_interleave(num_horizontal)  # (total_num_x_coords,)
+    dx = dx / (num_horizontal - 1).repeat_interleave(num_horizontal)
+    dy = torch.arange(num_half_vertical, device=device) / (num_half_vertical - 1)
+    dy = torch.cat((torch.flip(-dy, dims=[0]), dy))
+
+    # Meshgrid
+    total_num_coords = total_num_x_coords * dy.shape[0]
+    coords_x = dx.repeat_interleave(torch.ones_like(dx, dtype=torch.long) * dy.shape[0])  # (total_num_coords,)
+    coords_y = torch.tile(dy, (total_num_x_coords,))  # (total_num_coords,)
+    coords = torch.stack((coords_x, coords_y), dim=1)
+
+    interpolated_coordinates = \
+        cur_dir.repeat_interleave(num_coordinates_per_edge, dim=0) * coords_x[:, None] + \
+        edge_up.repeat_interleave(num_coordinates_per_edge, dim=0) * coords_y[:, None] + \
+        v_edge_points[:, 0].repeat_interleave(num_coordinates_per_edge, dim=0)
+
+    return num_coordinates_per_edge, interpolated_coordinates
+
+
+def compute_similarity_wrapper(start_points, end_points,
+                               imgs, transformations, intrinsic, v_vertical_length=10):
+    times = [0 for _ in range(10)]
+    cur_time = time.time()
+    num_src_imgs = imgs.shape[0] - 1
+    points_c = torch.stack([start_points, end_points], dim=1).reshape(-1, 3)
+    times[0] += time.time() - cur_time
+    cur_time = time.time()
+
+    edge_points = (intrinsic @ points_c.T).T
+    edge_points = edge_points[:, :2] / (edge_points[:, 2:3] + 1e-6)
+    edge_points = edge_points.reshape(-1, 2, 2)
+
+    # sample step=0.01
+    num_horizontal = torch.clamp((torch.linalg.norm(end_points - start_points, dim=-1) / 0.01).to(torch.long),
+                                 2, 1000)
+
+    num_per_edge1, points_2d1 = sample_points_2d(edge_points, num_horizontal, imgs[0].shape[1],
+                                                 v_vertical_length=v_vertical_length)
+
+    valid_mask1 = torch.logical_and(points_2d1 > 0, points_2d1 < 1)
+    valid_mask1 = torch.logical_and(valid_mask1[:, 0], valid_mask1[:, 1])
+    points_2d1 = torch.clamp(points_2d1, 0, 0.999999)
+
+    edge_points = (transformations @ to_homogeneous_tensor(points_c).T).transpose(1, 2)
+    edge_points = edge_points[:, :, :2] / (edge_points[:, :, 2:3] + 1e-6)
+    edge_points = edge_points.reshape(num_src_imgs, -1, 2, 2)
+
+    num_per_edge2, points_2d2 = sample_points_2d(edge_points.reshape(-1, 2, 2),
+                                                 num_horizontal.tile(num_src_imgs), imgs[0].shape[1],
+                                                 v_vertical_length=v_vertical_length)
+    num_per_edge2 = num_per_edge2.reshape(num_src_imgs, -1)
+    points_2d2 = points_2d2.reshape(num_src_imgs, -1, 2)
+
+    valid_mask2 = torch.logical_and(points_2d2 > 0, points_2d2 < 1)
+    valid_mask2 = torch.logical_and(valid_mask2[:, :, 0], valid_mask2[:, :, 1])
+    points_2d2 = torch.clamp(points_2d2, 0, 0.999999)
+
+    # 4. Sample pixel color
+    sample_imgs1 = sample_img(imgs[0:1, None, :, :], points_2d1[None, :, :])[0]
+    sample_imgs2 = sample_img(imgs[1:, None], points_2d2)
+    times[1] += time.time() - cur_time
+    cur_time = time.time()
+
+    similarity_loss, black_area_in_img1 = loss4(sample_imgs1, sample_imgs2, num_per_edge1)
+    similarity_mask = torch.logical_and(valid_mask1[None, :].tile([valid_mask2.shape[0], 1]), valid_mask2)
+    similarity_mask = scatter_min(similarity_mask.to(torch.long), torch.arange(
+        num_per_edge1.shape[0], device=similarity_loss.device).repeat_interleave(num_per_edge1), dim=1)[0]
+    times[3] += time.time() - cur_time
+    cur_time = time.time()
+    return similarity_loss, similarity_mask.to(torch.bool), black_area_in_img1, [points_2d1, points_2d2]
+
+
+def get_initial_normal(v_center_ray):
+    return v_center_ray
+
+
+def sample_new_directions_batch(v_input, num_sample, v_variance):
+    batch_size = v_input.shape[0]
+    device = v_input.device
+    v_input = v_input / (v_input.norm(dim=1, keepdim=True) + 1e-6)
+
+    # Generate N random unit vectors for each input vector
+    random_vectors = torch.randn(batch_size, num_sample, 3, device=device)
+    random_vectors = random_vectors / (torch.norm(random_vectors, dim=2, keepdim=True) + 1e-6)
+
+    # Project random vectors onto the plane orthogonal to the input vectors
+    projections = torch.matmul(random_vectors, v_input.unsqueeze(2))
+    orthogonal_vectors = random_vectors - projections * v_input.unsqueeze(1)
+
+    # Generate Gaussian distributed angles
+    angles = torch.randn(batch_size, num_sample, device=device) * math.sqrt(v_variance)
+
+    # Calculate the new directions
+    new_directions = torch.cos(angles).unsqueeze(2) * v_input.unsqueeze(1) + torch.sin(angles).unsqueeze(
+        2) * orthogonal_vectors
+
+    new_directions = normalize_tensor(new_directions)
+    return new_directions
+
+
+def sample_new_distance_and_normals(v_center_distance, v_init_normal, num_sample=100, v_max=10., scale_factor=1.6, ):
+    num_vertices = v_center_distance.shape[0]
+    device = v_center_distance.device
+    dtype = v_center_distance.dtype
+    # (B, S)
+    new_distance = -torch.ones((num_vertices, num_sample - 1), device=device, dtype=dtype)
+    sample_distance_mask = torch.logical_and(new_distance > 0, new_distance < v_max)
+    # (B, S)
+    repeated_vertices_distances = v_center_distance[:, None].tile((1, num_sample - 1))
+    while not torch.all(sample_distance_mask):
+        t_ = new_distance[~sample_distance_mask]
+        a = repeated_vertices_distances[~sample_distance_mask] + \
+            scale_factor * torch.distributions.utils._standard_normal(
+            t_.shape[0],
+            device=device,
+            dtype=t_.dtype)
+        new_distance[~sample_distance_mask] = a
+        sample_distance_mask = torch.logical_and(new_distance > 0, new_distance < v_max)
+    # (B, (S + 1))
+    new_distance = torch.cat((v_center_distance[:, None], new_distance), dim=1)
+
+    new_normals = -torch.ones((num_vertices, num_sample - 1, 3), device=device, dtype=dtype)
+    sample_normals_mask = torch.zeros_like(new_normals[:, :, 0], dtype=torch.bool)
+    while not torch.all(sample_normals_mask):
+        a = sample_new_directions_batch(v_init_normal, num_sample - 1, 0.3)
+        new_normals[~sample_normals_mask] = a[~sample_normals_mask]
+        sample_normals_mask = (v_init_normal[:, None, :] * new_normals).sum(dim=-1) > 0
+
+    new_normals = sample_new_directions_batch(v_init_normal, num_sample - 1, 0.3)
+    new_normals = torch.cat((v_init_normal[:, None, :], new_normals), dim=1)
+    return new_distance, new_normals
+
+
+def get_edge_vertices(v_center_point, v_normal, src_rays):
+    # Calculate the distance from the origin to the plane along the normal vector
+    d = torch.sum(v_center_point * v_normal, dim=2)
+    # Calculate the dot product between the rays (a) and the normal vectors
+    a_dot_v_normal = torch.matmul(src_rays, v_normal.transpose(1, 2))
+    # Calculate the t values for each ray-plane intersection
+    t = d[:, None, :] / a_dot_v_normal
+    collision_points = src_rays[:, :, None, :] * t[:, :, :, None]
+    return collision_points
+
+
+def evaluate_candidates(v_edge_points, v_center_points_candidate,v_padded_rays_c_mask, v_intrinsic, v_transformation, v_img1, v_img2):
+    num_face, num_sample, num_vertices = v_edge_points.shape[:-1]
+    p1 = v_edge_points.reshape(-1, 3)
+    p2 = torch.roll(v_edge_points,-1,dims=2).reshape(-1, 3)
+    p3 = v_center_points_candidate[:,:,None,:].tile(1,1,num_vertices,1).reshape(-1, 3)
+    num_sampled_points, sampled_points = sample_triangles(10, p1, p2, p3,
+                                      num_max_sample=500)
+
+    points_2d1 = (v_intrinsic @ sampled_points.T).T
+    points_2d1 = points_2d1[:, :2] / (points_2d1[:, 2:3] + 1e-6)
+    points_2d1 = points_2d1.reshape(-1, 2)
+    valid_mask1 = torch.logical_and(points_2d1 > 0, points_2d1 < 1)
+    valid_mask1 = torch.logical_and(valid_mask1[:, 0], valid_mask1[:, 1])
+    points_2d1 = torch.clamp(points_2d1, 0, 0.999999)
+
+    points_2d2 = (v_transformation @ to_homogeneous_tensor(sampled_points).T).transpose(0, 1)
+    points_2d2 = points_2d2[:, :2] / (points_2d2[:, 2:3] + 1e-6)
+    points_2d2 = points_2d2.reshape(-1, 2)
+
+    valid_mask2 = torch.logical_and(points_2d2 > 0, points_2d2 < 1)
+    valid_mask2 = torch.logical_and(valid_mask2[:, 0], valid_mask2[:, 1])
+    points_2d2 = torch.clamp(points_2d2, 0, 0.999999)
+
+    # 4. Sample pixel color
+    sample_imgs1 = sample_img(v_img1[None,None, :], points_2d1[None, :, :])[0]
+    sample_imgs2 = sample_img(v_img2[None,None,:], points_2d2[None, :, :])[0]
+
+    similarity_loss = loss5(sample_imgs1, sample_imgs2, num_sampled_points)
+    similarity_loss = similarity_loss.reshape(num_face, num_sample, num_vertices)
+    # Coordinates outside image range
+    similarity_mask = torch.logical_and(valid_mask1, valid_mask2)
+    similarity_mask = scatter_min(similarity_mask.to(torch.long), torch.arange(
+        num_sampled_points.shape[0], device=similarity_loss.device).repeat_interleave(num_sampled_points), dim=0)[0]
+    similarity_loss[v_padded_rays_c_mask[:,None,:].tile(1,num_sample,1)] = 0
+    return num_sampled_points.reshape(num_face, num_sample, num_vertices), sampled_points
+
+
+def optimize(v_data, v_log_root):
+    v_img_database: list[Image] = v_data[0]
+    v_graphs: np.ndarray[nx.Graph] = v_data[1]
+    v_img_pairs: list[np.ndarray] = v_data[2]
+    v_points_sfm = v_data[3]
+    device = torch.device("cuda")
+    torch.set_grad_enabled(False)
+
+    vertical_length = 5
+
+    for id_img1, graph in enumerate(v_graphs):
+        all_face_ids = graph.graph["faces"]
+
+        rays_c = [None] * len(graph.nodes)
+        distances = [None] * len(graph.nodes)
+        for idx, id_node in enumerate(graph.nodes):
+            rays_c[idx] = graph.nodes[id_node]["ray_c"]
+            distances[idx] = graph.nodes[id_node]["distance"]
+
+        id_src_imgs = v_img_pairs[id_img1][:, 0]
+        ref_img = cv2.imread(v_img_database[id_img1].img_path,
+                             cv2.IMREAD_GRAYSCALE)
+        src_imgs = [cv2.imread(v_img_database[int(item)].img_path,
+                               cv2.IMREAD_GRAYSCALE) for item in id_src_imgs]
+        projection2 = np.stack([v_img_database[int(id_img)].projection for id_img in id_src_imgs], axis=0)
+        intrinsic = v_img_database[id_img1].intrinsic
+        transformation = projection2 @ np.linalg.inv(v_img_database[id_img1].extrinsic)
+
+        imgs = torch.from_numpy(np.concatenate(([ref_img], src_imgs), axis=0)).to(device).to(torch.float32) / 255.
+        transformation = torch.from_numpy(transformation).to(device).to(torch.float32)
+        intrinsic = torch.from_numpy(intrinsic).to(device).to(torch.float32)
+
+        face_flags = graph.graph["face_flags"]
+        rays_c = torch.from_numpy(np.stack(rays_c)).to(device).to(torch.float32)
+        distances = torch.from_numpy(np.stack(distances)).to(device).to(torch.float32)
+        centers_ray_c = torch.from_numpy(graph.graph["ray_c"]).to(device).to(torch.float32)
+        center_distances = torch.from_numpy(graph.graph["distance"]).to(device).to(torch.float32)
+
+        num_face = len(face_flags)
+        max_num_vertices_in_faces = max([len(item) for item in graph.graph["faces"]])
+        padded_rays_c = torch.zeros((num_face, max_num_vertices_in_faces, 3), dtype=torch.float32, device=device)
+        for id_face, face in enumerate(graph.graph["faces"]):
+            padded_rays_c[id_face, :len(face)] = rays_c[face]
+        padded_rays_c_mask = torch.all(padded_rays_c==0,dim=2)
+
+        face_mask = torch.tensor(face_flags, dtype=torch.bool, device=device)
+
+        init_normal_per_face = get_initial_normal(centers_ray_c)
+        distances_candidate, normal_candidates = sample_new_distance_and_normals(
+            center_distances, init_normal_per_face)
+        center_points_candidate = distances_candidate[:, :, None] * centers_ray_c[:, None, :]
+        edge_points = get_edge_vertices(center_points_candidate, normal_candidates, padded_rays_c)
+        # (num_face, max_vertices, num_sample, 3)
+        edge_points = edge_points.permute(0, 2, 1, 3)
+        id_best = evaluate_candidates(edge_points, center_points_candidate,padded_rays_c_mask, intrinsic,transformation[0],
+                                      imgs[0], imgs[1])
+
+        reconstructed_face = [False for _ in face_flags]
+
+        # id_cur_face = np.random.randint(0, len(all_face_ids) - 1)
+        id_cur_face = 13
+        cur_iter = 0
+        while id_cur_face != -1:
+            if not face_flags[id_cur_face] or reconstructed_face[id_cur_face]:
+                id_cur_face = np.random.randint(0, len(all_face_ids) - 1)
+                continue
+
+            id_ver = torch.tensor(graph.graph["faces"][id_cur_face], dtype=torch.long, device=device)
+
+            center_ray = centers_ray_c[id_cur_face]
+            center_distance = center_distances[id_cur_face]
+
+            num_vertex = id_ver.shape[0]
+            id_start_ver = id_ver[:, None].tile((1, 2)).reshape(-1)
+
+            num_sample = 200
+            id_end_ver = torch.stack((id_ver.roll(-1), id_ver.roll(1)), dim=1).reshape(-1)
+
+            optimized_distances = distances.clone()
+            for iter in range(10):
+                new_distance = sample_new_distance(optimized_distances[id_ver], num_sample=num_sample - 1)
+                start_points_c = new_distance[:, None, :].tile((1, 2, 1)).reshape(-1, new_distance.shape[1], 1) \
+                                 * rays_c[id_start_ver][:, None, :]
+                end_points_c = optimized_distances[id_end_ver, None] * rays_c[id_end_ver]
+
+                similarity_loss, similarity_mask, black_area_in_img1s, [p1, p2] = compute_similarity_wrapper(
+                    start_points_c.reshape(-1, 3),
+                    end_points_c[:, None, :].tile((1, start_points_c.shape[1], 1)).reshape(-1, 3),
+                    imgs[0:2], transformation[0:1], intrinsic, v_vertical_length=vertical_length)
+
+                similarity_loss_ = similarity_loss.reshape(1, num_vertex, 2, num_sample)
+                similarity_mask = similarity_mask.reshape(1, num_vertex, 2, num_sample)
+                black_area_in_img1s = black_area_in_img1s.reshape(num_vertex, 2, num_sample)[:, :, 0]
+
+                # Set the loss to inf if any of the two edges lies outside the image
+                similarity_loss_[~similarity_mask] = torch.inf
+                # Set the loss to inf if the original edge lies at dark area
+                similarity_loss_[0, black_area_in_img1s] = torch.inf
+
+                similarity_loss_avg = similarity_loss_.sum(dim=2)
+                id_min = similarity_loss_avg.argmin(dim=2, keepdims=True)
+                # Reset the index if the loss is inf
+                id_min[torch.isinf(torch.gather(similarity_loss_avg, dim=2, index=id_min))] = 0
+                optimized_distances[id_ver] = torch.gather(new_distance, dim=1, index=id_min[0])[:, 0]
+                pass
+
+            # Test
+            start_points_c = optimized_distances[id_start_ver, None] * rays_c[id_start_ver]
+            end_points_c = optimized_distances[id_end_ver, None] * rays_c[id_end_ver]
+            similarity_loss, similarity_mask, black_area_in_img1s, [p1, p2] = compute_similarity_wrapper(
+                start_points_c.reshape(-1, 3),
+                end_points_c.reshape(-1, 3),
+                imgs[0:2], transformation[0:1], intrinsic, v_vertical_length=vertical_length)
+
+            # Same as above
+            similarity_loss_ = similarity_loss.reshape(1, num_vertex, 2)
+            similarity_mask = similarity_mask.reshape(1, num_vertex, 2)
+            black_area_in_img1s = black_area_in_img1s.reshape(num_vertex, 2)
+            similarity_loss_[~similarity_mask] = torch.inf
+            similarity_loss_[0, black_area_in_img1s] = torch.inf
+            similarity_loss_avg = similarity_loss_.mean(dim=2)
+            final_similarity_loss = similarity_loss_avg.mean()
+
+            # Log
+            if True:
+                img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
+                img12 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
+                img21 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
+                img22 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
+
+                sp_2d1 = ((intrinsic @ start_points_c.T).T).cpu().numpy()
+                ep_2d1 = ((intrinsic @ end_points_c.T).T).cpu().numpy()
+                sp_2d2 = (transformation[0] @ to_homogeneous_tensor(start_points_c).T).T.cpu().numpy()
+                ep_2d2 = (transformation[0] @ to_homogeneous_tensor(end_points_c).T).T.cpu().numpy()
+                sp_2d1 = sp_2d1[:, :2] / sp_2d1[:, 2:3]
+                ep_2d1 = ep_2d1[:, :2] / ep_2d1[:, 2:3]
+                sp_2d2 = sp_2d2[:, :2] / sp_2d2[:, 2:3]
+                ep_2d2 = ep_2d2[:, :2] / ep_2d2[:, 2:3]
+
+                shape = img11.shape[:2][::-1]
+                sp_2d1 = np.around(sp_2d1 * shape).astype(np.int64)
+                ep_2d1 = np.around(ep_2d1 * shape).astype(np.int64)
+                sp_2d2 = np.around(sp_2d2 * shape).astype(np.int64)
+                ep_2d2 = np.around(ep_2d2 * shape).astype(np.int64)
+                ip_2d1 = np.around(p1.cpu().numpy() * shape).astype(np.int64)
+                ip_2d2 = np.around(p2.cpu().numpy() * shape).astype(np.int64)
+                img12[ip_2d1[:, 1], ip_2d1[:, 0]] = (0, 0, 255)
+                img22[ip_2d2[0, :, 1], ip_2d2[0, :, 0]] = (0, 0, 255)
+
+                line_color = (0, 0, 255)
+                line_thickness = 2
+                point_color = (0, 255, 255)
+                point_thickness = 3
+                for i_edge in range(sp_2d1.shape[0]):
+                    cv2.line(img11, sp_2d1[i_edge], ep_2d1[i_edge], line_color, line_thickness)
+                    cv2.line(img21, sp_2d2[i_edge], ep_2d2[i_edge], line_color, line_thickness)
+                for i_point in range(sp_2d1.shape[0]):
+                    cv2.circle(img11, sp_2d1[i_point], 1, point_color, point_thickness)
+                    cv2.circle(img11, ep_2d1[i_point], 1, point_color, point_thickness)
+                    cv2.circle(img21, sp_2d2[i_point], 1, point_color, point_thickness)
+                    cv2.circle(img21, ep_2d2[i_point], 1, point_color, point_thickness)
+
+                cv2.imwrite(os.path.join(v_log_root, "{}_{}.jpg").format(cur_iter, id_cur_face),
+                            np.concatenate([
+                                np.concatenate([img11, img21], axis=1),
+                                np.concatenate([img12, img22], axis=1),
+                            ], axis=0)
+                            )
+                print("{:3d}:{:.4f}".format(cur_iter,
+                                            similarity_loss_avg[~torch.isinf(similarity_loss_avg)].mean().item()))
+
+            # Check
+            if ~torch.isinf(final_similarity_loss) and ~torch.isnan(final_similarity_loss) \
+                    and final_similarity_loss < 1e-1:
+                id_points_per_edge = torch.stack((id_ver, id_ver.roll(-1)), dim=1)
+                edge_distances = optimized_distances[id_points_per_edge.view(-1)]
+                edge_points = rays_c[id_points_per_edge.view(-1)] * edge_distances[:, None]
+                edge_points = edge_points.view(id_points_per_edge.shape[0], 2, 3)
+
+                sampled_ups_per_edge = sample_new_ups(edge_points)
+                sampled_points = sample_points_3d(edge_points, sampled_ups_per_edge)
+                loss = compute_similarity(sampled_points)
+                id_best_normal = loss.argmin()
+
+                print(1)
+
+            id_cur_face = np.random.randint(0, len(all_face_ids) - 1)
+            # id_cur_face = 23
+            cur_iter += 1
+
+        exit()
+
+    pass
+
+
 @ray.remote
 def read_graph(v_filename, img_size):
     data = [item for item in open(v_filename).readlines()]
@@ -600,25 +1111,17 @@ def read_graph(v_filename, img_size):
     face_flags = []
     for id_face, face in enumerate(graph.graph["faces"]):
         face_flags.append(min([graph.nodes[point]["valid_flag"] for point in face]))
+        center_point_2d = np.zeros(2, dtype=np.float32)
         for id_point in range(len(face)):
             id_start = id_point
             id_end = (id_start + 1) % len(face)
             if "id_face" not in graph[face[id_start]][face[id_end]]:
                 graph[face[id_start]][face[id_end]]["id_face"] = []
             graph[face[id_start]][face[id_end]]["id_face"].append(id_face)
+            center_point_2d += graph.nodes[face[id_start]]["pos_2d"]
+        center_point_2d /= len(face)
 
     graph.graph["face_flags"] = face_flags
-
-    training_edges = []
-    for id_start_node, id_end_node in graph.edges():
-        training_edges.append(np.asarray((
-            id_start_node, id_end_node,
-            graph[id_start_node][id_end_node]["valid_flag"],
-            graph[id_start_node][id_end_node]["id_face"][0],
-            graph[id_start_node][id_end_node]["id_face"][1] if len(
-                graph[id_start_node][id_end_node]["id_face"]) > 0 else -1,)
-        ))
-    graph.graph["training_edges"] = np.stack(training_edges,axis=0).astype(np.int64)
     return graph
 
 
@@ -650,9 +1153,9 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
             # local_mode=True
         )
         tasks = [read_graph.remote(
-                os.path.join(v_colmap_dir, "wireframe/{}.obj".format(img_database[i_img].img_name)),
-                img_database[i_img].img_size
-            ) for i_img in range(len(img_database))]
+            os.path.join(v_colmap_dir, "wireframe/{}.obj".format(img_database[i_img].img_name)),
+            img_database[i_img].img_size
+        ) for i_img in range(len(img_database))]
         graphs = ray.get(tasks)
         print("Read {} graphs".format(len(graphs)))
         graphs = np.asarray(graphs, dtype=object)
@@ -697,7 +1200,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
         line_img1 = v_rgb.copy()
 
         # Draw first img
-        for idx, (id_start,id_end) in enumerate(v_graph.edges()):
+        for idx, (id_start, id_end) in enumerate(v_graph.edges()):
             # print(idx)
             start = (v_graph.nodes[id_start]["pos_2d"] * img.img_size).astype(np.int32)
             end = (v_graph.nodes[id_end]["pos_2d"] * img.img_size).astype(np.int32)
@@ -707,7 +1210,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
 
         # Draw target patch
         for id_edge in v_viz_face:
-            (id_start,id_end) = np.asarray(v_graph.edges)[id_edge]
+            (id_start, id_end) = np.asarray(v_graph.edges)[id_edge]
             start = (v_graph.nodes[id_start]["pos_2d"] * img.img_size).astype(np.int32)
             end = (v_graph.nodes[id_end]["pos_2d"] * img.img_size).astype(np.int32)
             cv2.line(line_img1, start, end, (0, 255, 0), thickness=1)
@@ -721,6 +1224,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
 
         v_graph.graph["face_center"] = np.zeros((len(v_graph.graph["faces"]), 2), dtype=np.float32)
         v_graph.graph["ray_c"] = np.zeros((len(v_graph.graph["faces"]), 3), dtype=np.float32)
+        v_graph.graph["distance"] = np.zeros((len(v_graph.graph["faces"]),), dtype=np.float32)
         for id_face, id_edge_per_face in enumerate(v_graph.graph["faces"]):
             # Convex assumption
             center_point = np.stack(
@@ -771,6 +1275,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
         for id_face in range(v_graph.graph["face_center"].shape[0]):
             idx = id_face + len(v_graph.nodes)
             v_graph.graph["ray_c"][id_face] = ray_c[idx]
+            v_graph.graph["distance"][id_face] = chosen_distances[idx, 0]
 
         line_coordinates = []
         for edge in v_graph.edges():
@@ -796,7 +1301,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
     camera_pair_data = [np.asarray(item.strip().split(" ")[1:], dtype=np.float32).reshape(-1, 2) for item in
                         camera_pair_txt[1::2]]
 
-    return img_database, graphs, camera_pair_data
+    return img_database, graphs, camera_pair_data, points_from_sfm
 
 
 @hydra.main(config_name="phase6.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
@@ -812,6 +1317,8 @@ def main(v_cfg: DictConfig):
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir']
     v_cfg["trainer"]["output"] = os.path.join(log_dir, v_cfg["trainer"]["output"])
+
+    optimize(data, v_cfg["trainer"]["output"])
 
     model = Phase5(v_cfg, data)
 

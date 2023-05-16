@@ -17,7 +17,7 @@ trainer:
   resume_from_checkpoint:
   evaluate: false
   running_sanity_check: false
-  output: imgs_log
+  output: .
 
   loss_weight: [1, 0.01, 0] # similarity_weight, normal_weight, normalization_weight
   num_sample: 1000 # number of gaussian sample

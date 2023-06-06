@@ -1,6 +1,7 @@
 import itertools
 import sys, os
 import time
+from copy import copy
 from typing import List
 
 from torch.distributions import Binomial
@@ -782,6 +783,92 @@ def optimize(v_data, v_log_root):
 
 
         optimized_distance = optimize_node(node_data, rays_c, ray_distances_c)
+
+        # Remove the redundant face and edges in the graph
+        # And build the dual graph in order to navigate between patches
+        def fix_graph(v_graph):
+            dual_graph = nx.Graph()
+
+            id_original_to_current={}
+            for id_face, face in enumerate(graph.graph["faces"]):
+                if not graph.graph["face_flags"][id_face]:
+                    continue
+                has_black = False
+                for idx, id_start in enumerate(face):
+                    id_end = face[(idx+1)%len(face)]
+                    if v_graph.edges[(id_start,id_end)]["is_black"]:
+                        has_black = True
+                        break
+                if has_black:
+                    continue
+
+                id_original_to_current[id_face]=len(dual_graph.nodes)
+                dual_graph.add_node(len(dual_graph.nodes),id_vertex=face, id_in_original_array=id_face)
+
+            for node in dual_graph.nodes():
+                faces = dual_graph.nodes[node]["id_vertex"]
+                for idx, id_start in enumerate(faces):
+                    id_end = faces[(idx + 1) % len(faces)]
+                    t = copy(graph.edges[(id_start,id_end)]["id_face"])
+                    t.remove(dual_graph.nodes[node]["id_in_original_array"])
+                    if t[0] in id_original_to_current:
+                        edge = (node, id_original_to_current[t[0]])
+                        if edge not in dual_graph.edges():
+                            id_points_in_another_face=dual_graph.nodes[id_original_to_current[t[0]]]["id_vertex"]
+                            adjacent_vertices=[]
+                            while True:
+                                adjacent_vertices.append(id_start)
+                                idx+=1
+                                if idx >= len(faces):
+                                    adjacent_vertices.append(id_end)
+                                    break
+                                id_start = faces[idx]
+                                id_end = faces[(idx + 1) % len(faces)]
+                                if id_end not in id_points_in_another_face:
+                                    adjacent_vertices.append(id_start)
+                                    break
+
+                            # adjacent_vertices.append(id_start)
+                            dual_graph.add_edge(edge[0], edge[1], adjacent_vertices=adjacent_vertices)
+                            break
+
+            v_graph.graph["dual_graph"] = dual_graph
+
+            # Visualize
+            if True:
+                for idx, id_face in enumerate(dual_graph.nodes):
+                    print("{}/{}".format(idx, len(dual_graph.nodes)))
+                    img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
+                    shape = img11.shape[:2][::-1]
+                    face = dual_graph.nodes[id_face]["id_vertex"]
+
+                    for idx, id_start in enumerate(face):
+                        id_end = face[(idx + 1) % len(face)]
+                        pos1 = np.around(v_graph.nodes[id_start]["pos_2d"] * shape).astype(np.int64)
+                        pos2 = np.around(v_graph.nodes[id_end]["pos_2d"] * shape).astype(np.int64)
+                        cv2.line(img11, pos1, pos2, (0, 0, 255), 2)
+
+                    for id_another_face in dual_graph[id_face]:
+                        face = dual_graph.nodes[id_another_face]["id_vertex"]
+                        for idx, id_start in enumerate(face):
+                            id_end = face[(idx + 1) % len(face)]
+                            pos1 = np.around(v_graph.nodes[id_start]["pos_2d"] * shape).astype(np.int64)
+                            pos2 = np.around(v_graph.nodes[id_end]["pos_2d"] * shape).astype(np.int64)
+                            cv2.line(img11, pos1, pos2, (0, 255, 255), 1)
+
+                        for id_vertex in dual_graph[id_face][id_another_face]["adjacent_vertices"]:
+                            pos1 = np.around(v_graph.nodes[id_vertex]["pos_2d"] * shape).astype(np.int64)
+                            cv2.circle(img11, pos1, 2, (0, 255, 0), 2)
+
+
+
+                    cv2.imshow("1", img11)
+                    cv2.waitKey()
+
+            return
+
+
+        fix_graph(graph)
 
         # For each patch, initialize plane hypothesis
         initialize_plane_hypothesis(rays_c, optimized_distance, graph)

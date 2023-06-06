@@ -816,21 +816,22 @@ def optimize(v_data, v_log_root):
                         if edge not in dual_graph.edges():
                             id_points_in_another_face=dual_graph.nodes[id_original_to_current[t[0]]]["id_vertex"]
                             adjacent_vertices=[]
+                            id_cur = idx
                             while True:
                                 adjacent_vertices.append(id_start)
-                                idx+=1
-                                if idx >= len(faces):
+                                id_cur+=1
+                                if id_cur >= len(faces):
                                     adjacent_vertices.append(id_end)
                                     break
-                                id_start = faces[idx]
-                                id_end = faces[(idx + 1) % len(faces)]
+                                id_start = faces[id_cur]
+                                id_end = faces[(id_cur + 1) % len(faces)]
                                 if id_end not in id_points_in_another_face:
                                     adjacent_vertices.append(id_start)
                                     break
 
                             # adjacent_vertices.append(id_start)
                             dual_graph.add_edge(edge[0], edge[1], adjacent_vertices=adjacent_vertices)
-                            break
+
 
             v_graph.graph["dual_graph"] = dual_graph
 

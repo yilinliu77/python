@@ -369,22 +369,22 @@ def evaluate_candidates(v_edge_points, v_intrinsic, v_transformation,
     return similarity_loss, valid_mask2
 
 
-def determine_valid_edges(v_edge_rays_c, v_edge_distances_c, v_img, v_intrinsic):
-    edge_points_c = v_edge_rays_c * v_edge_distances_c[:, :, None]
-    p = (v_intrinsic @ edge_points_c.reshape(-1, 3).T).T
-    p = p[:, :2] / p[:, 2:3]
-    p = p.reshape(-1, 2, 2)
+def determine_valid_edges(v_graph, v_img):
+    for edge in v_graph.edges():
+        pos1 = v_graph.nodes[edge[0]]["pos_2d"]
+        pos2 = v_graph.nodes[edge[1]]["pos_2d"]
+        pos = torch.from_numpy(np.stack((pos1,pos2),axis=0).astype(np.float32)).to(v_img.device).unsqueeze(0)
 
-    ns, s = sample_points_2d(p,
-                             torch.tensor([100] * p.shape[0], dtype=torch.long, device=p.device),
-                             v_img_width=v_img.shape[1], v_vertical_length=10)
-    pixels = sample_img(v_img[None, None, :, :], s[None, :])[0]
+        ns, s = sample_points_2d(pos,
+                                 torch.tensor([100] * pos.shape[0], dtype=torch.long, device=pos.device),
+                                 v_img_width=v_img.shape[1], v_vertical_length=10)
+        pixels = sample_img(v_img[None, None, :, :], s[None, :])[0]
 
-    mean_pixels = scatter_mean(pixels,
-                               torch.arange(ns.shape[0], device=p.device).repeat_interleave(ns),
-                               dim=0)
-
-    return mean_pixels > 0.05
+        mean_pixels = scatter_mean(pixels,
+                                   torch.arange(ns.shape[0], device=pos.device).repeat_interleave(ns),
+                                   dim=0)
+        v_graph.edges[edge]["is_black"] = mean_pixels < 0.05
+    return
 
 
 def optimize1(v_data, v_log_root):
@@ -568,15 +568,18 @@ def optimize(v_data, v_log_root):
     vertical_length = 5
 
     for id_img1, graph in enumerate(v_graphs):
+        # The vertex id for each face
         all_face_ids = np.asarray(graph.graph["faces"], dtype=object)
 
+        # The ray of each node in camera coordinate
         rays_c = [None] * len(graph.nodes)
-        distances = [None] * len(graph.nodes)
-        id_end = []
+        # The distance of each node along the ray direction in camera coordinate
+        ray_distances_c = [None] * len(graph.nodes)
+        # id_end = []
         for idx, id_points in enumerate(graph.nodes):
             rays_c[idx] = graph.nodes[id_points]["ray_c"]
-            distances[idx] = graph.nodes[id_points]["distance"]
-            id_end.append(list(graph[0].keys()))
+            ray_distances_c[idx] = graph.nodes[id_points]["distance"]
+            # id_end.append(list(graph[0].keys()))
 
         id_src_imgs = v_img_pairs[id_img1][:, 0]
         ref_img = cv2.imread(v_img_database[id_img1].img_path,
@@ -593,26 +596,208 @@ def optimize(v_data, v_log_root):
         # Vertex
         num_vertex = len(rays_c)
         rays_c = torch.from_numpy(np.stack(rays_c)).to(device).to(torch.float32)
-        distances = torch.from_numpy(np.stack(distances)).to(device).to(torch.float32)
+        ray_distances_c = torch.from_numpy(np.stack(ray_distances_c)).to(device).to(torch.float32)
         # Face
         face_flags = torch.tensor(graph.graph["face_flags"], dtype=torch.bool, device=device)
-        centers_ray_c = torch.from_numpy(graph.graph["ray_c"]).to(device).to(torch.float32)
-        center_distances = torch.from_numpy(graph.graph["distance"]).to(device).to(torch.float32)
+        centroid_rays_c = torch.from_numpy(graph.graph["ray_c"]).to(device).to(torch.float32)
+        centroid_ray_distances_c = torch.from_numpy(graph.graph["distance"]).to(device).to(torch.float32)
 
-        point_id_per_edge=[]
-        edge_id_dict = {}
-        for edge in graph.edges():
-            point_id_per_edge.append(edge)
-            edge_id_dict[(edge[0],edge[1])] = len(point_id_per_edge)
-            edge_id_dict[(edge[1],edge[0])] = -len(point_id_per_edge)
+        def prepare_edge_data(v_graph):
+            determine_valid_edges(v_graph, imgs[0])
+            # The id of the vertex for all edges
+            point_id_per_edge = []
+            # The id of a specific edge in the `point_id_per_edge`
+            edge_id_dict = {}
+            for edge in v_graph.edges():
+                if not v_graph.edges[edge]["valid_flag"] or v_graph.edges[edge]["is_black"]:
+                    continue
+                point_id_per_edge.append(edge)
+                # + and - to distinguish whether the edge is flip
+                edge_id_dict[(edge[0], edge[1])] = len(point_id_per_edge)
+                edge_id_dict[(edge[1], edge[0])] = -len(point_id_per_edge)
+            return point_id_per_edge, edge_id_dict
+
+
+        point_id_per_edge, edge_id_dict = prepare_edge_data(graph)
         point_id_per_edge = torch.tensor(point_id_per_edge, dtype=torch.long, device=device)
+
+        def prepare_node_data(v_point_id_per_edge, v_device):
+            unique_point_ids, counts = torch.unique(v_point_id_per_edge, return_counts=True)
+            unique_point_ids = unique_point_ids[counts>1]
+            num_point = unique_point_ids.shape[0]
+            max_counts = counts.max()
+
+            node_data = -torch.ones((num_point,max_counts+1), device=v_device, dtype=torch.long)
+            for idx, id_point in enumerate(unique_point_ids):
+                coords = torch.stack(torch.where(v_point_id_per_edge==id_point),dim=1)
+                num_valid = coords.shape[0]
+                coords[:,1] = 1 - coords[:,1] # Index another point
+                node_data[idx,0] = id_point
+                node_data[idx,1:num_valid+1] = v_point_id_per_edge[coords[:,0],coords[:,1]]
+            return node_data
+
+        # Index the valid nodes and the corresponding edges
+        # The node_data is in the shape of [M,K],
+        # where M is the number of valid node, K is the maximum edges (K=2) means every node has at most 1 edge
+        # invalid edges are padded with -1
+        node_data = prepare_node_data(point_id_per_edge, device)
+
+        # Visualize the nodes that to be optimized
+        if False:
+            img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
+            shape = img11.shape[:2][::-1]
+
+            # Draw edges
+            for node in node_data:
+                id_start = int(node[0].cpu().item())
+                for id_end in node[1:]:
+                    id_end=int(id_end.cpu().item())
+                    if id_end==-1:
+                        break
+                    start_pos = np.around((graph.nodes[id_start]["pos_2d"]) * shape).astype(np.int64)
+                    end_pos = np.around((graph.nodes[id_end]["pos_2d"]) * shape).astype(np.int64)
+                    cv2.line(img11, start_pos, end_pos, (0, 0, 255), 2)
+
+            # Draw nodes
+            for node in node_data:
+                id_start = int(node[0].cpu().item())
+                start_pos = np.around((graph.nodes[id_start]["pos_2d"]) * shape).astype(np.int64)
+                cv2.circle(img11, start_pos, 2, (0, 255, 255), 2)
+
+            cv2.imshow("1",img11)
+            cv2.waitKey(0)
+
+        def optimize_node(v_node_data, v_rays_c, v_ray_distances_c):
+            id_start_points = v_node_data[:,0]
+            id_end_points = v_node_data[:,1:]
+            # M
+            num_vertex = id_start_points.shape[0]
+            # N
+            num_max_edge_per_vertex = id_end_points.shape[1]
+
+            optimized_distance = v_ray_distances_c.clone()
+            # (M, N)
+            end_distances = optimized_distance[id_end_points]
+            # K
+            num_sample = 100
+
+            # (M, K, N)
+            edge_valid_flag = (id_end_points == -1)[:, None, :].tile(1, num_sample, 1)
+
+            cur_iter=0
+            last_loss = None
+            num_tolerence = 10
+            while True:
+                # (M, K)
+                start_distances_candidate = sample_new_distance(optimized_distance[id_start_points], num_sample=num_sample).view(
+                    num_vertex, num_sample, )
+                # (M, K, 3)
+                start_points_c = start_distances_candidate[:, :, None] * v_rays_c[id_start_points][:, None, :]
+                # (M, K, N, 3)
+                start_points_c = start_points_c[:,:,None,:].tile(1, 1, num_max_edge_per_vertex, 1)
+                # (M, K, N, 3)
+                end_points_c = (end_distances[:, :, None] * v_rays_c[id_end_points])[:, None, :, :].tile(1, 100, 1, 1)
+
+                # (M, K, N, 2, 3)
+                edges_points = torch.stack((start_points_c,end_points_c), dim=-2)
+
+                ncc_loss, ncc_loss_mask = evaluate_candidates(edges_points.reshape(-1, 2, 3),
+                                                              intrinsic, transformation[0], imgs[0], imgs[1])
+                ncc_loss[~ncc_loss_mask] = torch.inf
+                ncc_loss = ncc_loss.reshape(num_vertex, num_sample, num_max_edge_per_vertex)
+                ncc_loss[edge_valid_flag] = 0
+                ncc_loss = ncc_loss.mean(dim=-1)
+                id_best = ncc_loss.argmin(dim=1)
+
+                optimized_distance[id_start_points] = torch.gather(start_distances_candidate, 1, id_best[:,None])[:,0]
+                end_distances=optimized_distance[id_end_points]
+
+                total_loss = torch.gather(ncc_loss, 1, id_best[:, None]).mean()
+
+                if last_loss is None:
+                    last_loss = total_loss
+                else:
+                    delta = last_loss-total_loss
+
+                    print("{:3d}:{:.4f}; Delta:{:.4f}".format(cur_iter,
+                                                              total_loss.cpu().item(),
+                                                              delta.cpu().item()
+                                                              ))
+
+                    if delta < 1e-5:
+                        num_tolerence -=1
+                    else:
+                        num_tolerence = 5
+                        last_loss = total_loss
+                    if num_tolerence<=0:
+                        break
+
+                # Visualize
+                if True:
+                    img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
+                    img12 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
+                    img21 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
+                    img22 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
+
+                    start_points_c = optimized_distance[id_start_points][:, None] * v_rays_c[id_start_points]
+                    start_points_c = start_points_c[:,None,:,].tile(1,num_max_edge_per_vertex,1)
+                    end_points_c = optimized_distance[id_end_points][:, :, None] * v_rays_c[id_end_points]
+
+                    all_points_c = torch.stack((start_points_c,end_points_c),dim=-2)
+                    all_points_c = all_points_c[~edge_valid_flag[:,0]]
+                    all_points_c = all_points_c.reshape(-1,3)
+                    p_2d1 = ((intrinsic @ all_points_c.T).T).cpu().numpy()
+                    p_2d2 = (transformation[0] @ to_homogeneous_tensor(all_points_c).T).T.cpu().numpy()
+                    p_2d1 = p_2d1[:, :2] / p_2d1[:, 2:3]
+                    p_2d2 = p_2d2[:, :2] / p_2d2[:, 2:3]
+
+                    p_2d1 = p_2d1.reshape(-1,2,2)
+                    p_2d2 = p_2d2.reshape(-1,2,2)
+
+                    shape = img11.shape[:2][::-1]
+                    p_2d1 = np.around(p_2d1 * shape).astype(np.int64)
+                    p_2d2 = np.around(p_2d2 * shape).astype(np.int64)
+                    line_color = (0, 0, 255)
+                    line_thickness = 2
+                    point_color = (0, 255, 255)
+                    point_thickness = 3
+                    for i_edge in range(p_2d1.shape[0]):
+                        cv2.line(img11, p_2d1[i_edge, 0], p_2d1[i_edge, 1], line_color, line_thickness)
+                        cv2.line(img21, p_2d2[i_edge, 0], p_2d2[i_edge, 1], line_color, line_thickness)
+                    for i_point in range(p_2d1.shape[0]):
+                        cv2.circle(img11, p_2d1[i_point, 0], 1, point_color, point_thickness)
+                        cv2.circle(img11, p_2d1[i_point, 1], 1, point_color, point_thickness)
+                        cv2.circle(img21, p_2d2[i_point, 0], 1, point_color, point_thickness)
+                        cv2.circle(img21, p_2d2[i_point, 1], 1, point_color, point_thickness)
+
+                    cv2.imwrite(os.path.join(v_log_root, "{}.jpg").format(cur_iter),
+                                np.concatenate([
+                                    np.concatenate([img11, img21], axis=1),
+                                    np.concatenate([img12, img22], axis=1),
+                                ], axis=0)
+                                )
+
+                cur_iter+=1
+            return optimized_distance
+
+
+        optimized_distance = optimize_node(node_data, rays_c, ray_distances_c)
+
+        # For each patch, initialize plane hypothesis
+        initialize_plane_hypothesis(rays_c, optimized_distance, graph)
+
+        # Optimize plane hypothesis based on: 1) NCC; 2) Distance to the optimized vertices
+        optimize_plane_hypothesis()
+
+        # Determine the final location of vertices
+        determine_vertices_location()
 
         # Edges
         num_edge = len(graph.edges())
         num_max_edge_per_vertex = max([len(graph[item]) for item in graph.nodes])
 
         edge_rays_c = rays_c[point_id_per_edge]
-        edge_distances_c = distances[point_id_per_edge]
+        edge_distances_c = ray_distances_c[point_id_per_edge]
         edge_is_not_black = determine_valid_edges(edge_rays_c, edge_distances_c, imgs[0], intrinsic)[:, 0]
         to_non_black_edge_id = -torch.ones(num_edge,device=device,dtype=torch.long)
         to_non_black_edge_id[edge_is_not_black] = torch.arange(edge_is_not_black.sum(),device=device)
@@ -635,10 +820,6 @@ def optimize(v_data, v_log_root):
         edge_distances_c = edge_distances_c[edge_is_not_black]
         num_edge = edge_distances_c.shape[0]
         num_sample = 100
-
-        # edge_rays_c = edge_rays_c[1:2]
-        # edge_distances_c = edge_distances_c[1:2]
-        # num_edge = 1
 
         target_point_id_per_vertex = []
         magic_id1 = []
@@ -676,7 +857,7 @@ def optimize(v_data, v_log_root):
         id_start_points = target_point_id_per_vertex[:, 0]
         id_end_points = target_point_id_per_vertex[:, 2]
         id_prev_points = target_point_id_per_vertex[:, 1]
-        original_start_distances = distances[id_start_points]
+        original_start_distances = ray_distances_c[id_start_points]
         end_distances = original_start_distances.clone()[magic_id1]
         prev_distances = original_start_distances.clone()[magic_id2]
 
@@ -873,7 +1054,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
     print("1. Read imgs")
 
     img_cache_name = "output/img_field_test/img_cache.npy"
-    if os.path.exists(img_cache_name) and False:
+    if os.path.exists(img_cache_name):
         print("Found cache ", img_cache_name)
         img_database, points_3d = np.load(img_cache_name, allow_pickle=True)
     else:
@@ -889,7 +1070,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
 
     graph_cache_name = "output/img_field_test/graph_cache.npy"
     print("2. Build graph")
-    if os.path.exists(graph_cache_name) and False:
+    if os.path.exists(graph_cache_name):
         graphs = np.load(graph_cache_name, allow_pickle=True)
     else:
         ray.init(

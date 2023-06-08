@@ -774,11 +774,11 @@ def optimize(v_data, v_log_root):
                                                               ))
 
                     if delta < 1e-5:
-                        num_tolerence -=1
+                        num_tolerence -= 1
                     else:
                         num_tolerence = 5
                         last_loss = total_loss
-                    if num_tolerence<=0:
+                    if num_tolerence <= 0:
                         break
 
                 # Visualize
@@ -826,15 +826,14 @@ def optimize(v_data, v_log_root):
                                 ], axis=0)
                                 )
 
-                cur_iter+=1
+                cur_iter += 1
             return optimized_distance
-
 
         optimized_distance = optimize_node(node_data, rays_c, ray_distances_c)
 
         # Remove the redundant face and edges in the graph
         # And build the dual graph in order to navigate between patches
-        def fix_graph(v_graph):
+        def fix_graph(v_graph, is_visualize=False):
             dual_graph = nx.Graph()
 
             id_original_to_current={}
@@ -884,7 +883,7 @@ def optimize(v_data, v_log_root):
             v_graph.graph["dual_graph"] = dual_graph
 
             # Visualize
-            if True:
+            if is_visualize:
                 for idx, id_face in enumerate(dual_graph.nodes):
                     print("{}/{}".format(idx, len(dual_graph.nodes)))
                     img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
@@ -916,452 +915,148 @@ def optimize(v_data, v_log_root):
 
             return
 
-
         fix_graph(graph)
 
-        # For each patch, initialize plane hypothesis
-        initialize_plane_hypothesis(rays_c, optimized_distance, graph)
-
-        # Optimize plane hypothesis based on: 1) NCC; 2) Distance to the optimized vertices
-        optimize_plane_hypothesis()
-
-        # Determine the final location of vertices
-        determine_vertices_location()
-
-        # Edges
-        num_edge = len(graph.edges())
-        num_max_edge_per_vertex = max([len(graph[item]) for item in graph.nodes])
-
-        # 滤去几乎全黑的边
-        edge_rays_c = rays_c[point_id_per_edge]
-        edge_distances_c = ray_distances_c[point_id_per_edge]
-        edge_is_not_black = determine_valid_edges(edge_rays_c, edge_distances_c, imgs[0], intrinsic)[:, 0]
-        # 只给有效的边编号，无效的为-1
-        to_non_black_edge_id = -torch.ones(num_edge, device=device, dtype=torch.long)
-        to_non_black_edge_id[edge_is_not_black] = torch.arange(edge_is_not_black.sum(), device=device)
-
-        # 遍历graph中的每一个face，对于每个face，生成一个edge_point_id
-        edge_point_id_per_face = []
-        for face_ids, face_flag in zip(all_face_ids, face_flags):
-            if not face_flag:
-                continue
-            # face的每一个edge
-            local_id_edges = []
-            for i, id_start in enumerate(face_ids):
-                id_end = face_ids[(i + 1) % len(face_ids)]
-                id_edge = edge_id_dict[(id_start, id_end)]
-                mask = 1 if id_edge > 0 else -1
-                local_id_edges.append((to_non_black_edge_id[abs(id_edge) - 1] + 1) * mask)
-            # 连接点id成为edge
-            a = torch.tensor(local_id_edges, dtype=torch.long, device=device)
-            b = torch.roll(a, -1)
-            edge_point_id_per_face.append(torch.stack((a, b), dim=1))
-
-        edge_rays_c = edge_rays_c[edge_is_not_black]
-        edge_distances_c = edge_distances_c[edge_is_not_black]
-        num_edge = edge_distances_c.shape[0]
-        num_sample = 100
-
-        target_point_id_per_vertex = []
-        magic_id1 = []
-        magic_id2 = []
-        num_total_edges = 0
-        valid_face_slices = []  # xdt
-        valid_face_id = []
-        for id_face, id_points in enumerate(all_face_ids):
-            if not face_flags[id_face]:
-                continue
-
-            # 遍历face的每一条边，如果存在某一条边是黑边，则该面无效
-            has_black_edge = False
-            local_target_points = []
-            for id_iter in range(len(id_points)):
-                id_start = id_points[id_iter]
-                id_end = id_points[(id_iter + 1) % len(id_points)]
-                id_prev = id_points[(id_iter - 1) % len(id_points)]
-                if not edge_is_not_black[abs(edge_id_dict[(id_start, id_end)]) - 1]:
-                    has_black_edge = True
-                    break
-                local_target_points.append((id_start, id_prev, id_end))
-
-            if has_black_edge:
-                continue
-
-            valid_face_slices.append([num_total_edges, num_total_edges + len(local_target_points)])
-            valid_face_id.append(id_face)
-            # 没有黑边的面：将当前面的local_target_points列表扩展到target_point_id_per_vertex列表中
-            target_point_id_per_vertex.extend(local_target_points)
-            magic_id1.append(torch.roll(
-                num_total_edges + torch.arange(len(local_target_points), device=device, dtype=torch.long), -1))
-            magic_id2.append(torch.roll(
-                num_total_edges + torch.arange(len(local_target_points), device=device, dtype=torch.long), 1))
-            num_total_edges += len(local_target_points)
-        target_point_id_per_vertex = torch.tensor(target_point_id_per_vertex, dtype=torch.long, device=device)
-        magic_id1 = torch.cat(magic_id1)
-        magic_id2 = torch.cat(magic_id2)
-
-        # Training
-        num_vertex = target_point_id_per_vertex.shape[0]
-        id_start_points = target_point_id_per_vertex[:, 0]
-        id_end_points = target_point_id_per_vertex[:, 2]
-        id_prev_points = target_point_id_per_vertex[:, 1]
-        original_start_distances = ray_distances_c[id_start_points]
-        end_distances = original_start_distances.clone()[magic_id1]
-        prev_distances = original_start_distances.clone()[magic_id2]
-
-        # distances[id_prev_points]与prev_distances是一样的，但是在后续的优化过程中，我们只优化original_start_distances
-        # 不同的face可能共享同一个顶点，初始时的深度是一样的，最终优化深度可以是不一样的
-        unique_target_vertex_id = torch.unique(id_start_points)
-        # 由于不同的face可能共享同样的顶点，同一id_start_points可能对应不同的id_end_points和id_prev_points
-        # magic_id3用于取出（给定id_start_points）的所有前后点对
-        magic_id3 = [torch.where(id_start_points == idx)[0] for idx in unique_target_vertex_id]
-
-        # 生成0到n-1的所有非重复二维排列
-        def generate_combinations(n):
-            indices = torch.arange(n, device=device, dtype=torch.long)
-            grid_x, grid_y = torch.meshgrid(indices, indices)
-            combinations = torch.stack((grid_x, grid_y), dim=-1).view(-1, 2)
-            combinations = combinations[combinations[:, 0] != combinations[:, 1]]
-            return combinations
-
-        cur_iter = 0
-        while True:
-            start_distances_candidate = sample_new_distance(original_start_distances, num_sample=num_sample).view(
-                num_vertex, num_sample, )
-            start_points_c = start_distances_candidate[:, :, None] * rays_c[id_start_points][:, None, :]
-            end_points_c = (end_distances[:, None] * rays_c[id_end_points])[:, None, :].tile(1, 100, 1)
-            prev_points_c = (prev_distances[:, None] * rays_c[id_prev_points])[:, None, :].tile(1, 100, 1)
-
-            # num_edges * 2, num_sample, 2, 3
-            edges_points = torch.stack((
-                torch.stack((start_points_c, end_points_c), dim=-2),
-                torch.stack((start_points_c, prev_points_c), dim=-2),
-            ), dim=1).reshape(2 * num_vertex, num_sample, 2, 3)
-
-            ncc_loss, ncc_loss_mask = evaluate_candidates(edges_points.reshape(-1, 2, 3),
-                                                          intrinsic, transformation[0], imgs[0], imgs[1])
-            ncc_loss[~ncc_loss_mask] = torch.inf  # Set it to 0 in order to get the samples below
-            ncc_loss = ncc_loss.reshape(num_vertex, 2, num_sample)
-            ncc_loss = ncc_loss.mean(dim=1)
-
-            total_losses = []
-            for id_vertex in range(unique_target_vertex_id.shape[0]):
-                num_local_vertex = magic_id3[id_vertex].shape[0]
-                ncc = ncc_loss[magic_id3[id_vertex]]
-                target_id = magic_id3[id_vertex]
-                assert num_local_vertex <= 3
-                # 只有一个当前后顶点对，直接取ncc loss最小的采样距离更新original_start_distances
-                if num_local_vertex == 1:
-                    id_best = ncc.argmin(dim=1)[0]
-                    original_start_distances[magic_id3[id_vertex]] = start_distances_candidate[
-                        magic_id3[id_vertex], id_best]
-                    total_losses.append(torch.stack((
-                        ncc[0, id_best],
-                        ncc[0, id_best],
-                        torch.zeros_like(ncc[0, id_best]),
-                    )))
-                # 多个前后顶点对
-                elif num_local_vertex >= 2:
-                    # 生成所有的局部顶点序列组合
-                    all_combinations = generate_combinations(num_local_vertex)
-
-                    # 生成局部顶点距离组合
-                    distance_loss = torch.abs(start_distances_candidate[target_id][all_combinations[:, 0]] - \
-                                              original_start_distances[target_id][all_combinations[:, 1]].view(-1, 1))
-                    # distance_loss计算每一个点与另外两个点的距离
-                    distance_loss = distance_loss.view(num_local_vertex - 1, num_local_vertex, num_sample)
-
-                    if num_local_vertex > 2:
-                        # origin_dis_loss计算除了该点，另外两个点之间的距离
-                        comb_ori = torch.combinations(torch.arange(num_local_vertex - 1, device=device))
-                        comb_ori = comb_ori[None, :].tile(num_local_vertex, 1, 1)
-                        indicator = torch.arange(
-                            num_local_vertex, device=device)[:, None, None].tile(1, comb_ori.shape[1], 2)
-                        comb_ori[comb_ori >= indicator] += 1
-                        origin_dis_com = original_start_distances[target_id][comb_ori]
-                        origin_dis_loss = torch.abs(
-                            origin_dis_com[:, :, 0] - origin_dis_com[:, :, 1]).permute(0, 1).view(1, -1, 1)
-                    else:
-                        origin_dis_loss = torch.zeros((1, 2, 1), device=device, dtype=torch.float32)
-
-                    all_distance_loss = torch.cat((distance_loss, origin_dis_loss.tile(1, 1, num_sample)), dim=0)
-
-                    loss_d = all_distance_loss.min(dim=0)[0] + 0.1 * all_distance_loss.max(dim=0)[0]
-
-                    weighted_consistency_loss = loss_d * 20 / 10
-                    total_loss = ncc + weighted_consistency_loss
-                    id_best = total_loss.argmin(dim=-1)
-                    # 更新点位置
-                    original_start_distances[magic_id3[id_vertex]] = start_distances_candidate[
-                        magic_id3[id_vertex], id_best]
-                    ncc_loss_ = torch.gather(ncc, 1, id_best.view(-1, 1)).mean()
-                    consistency_loss_ = torch.gather(weighted_consistency_loss, 1, id_best.view(-1, 1)).mean()
-                    loss_ = torch.gather(total_loss, 1, id_best.view(-1, 1)).mean()
-                    total_losses.append((
-                        torch.stack((loss_, ncc_loss_, consistency_loss_))
-                    ))
-            # id_best = ncc_loss.argmin(dim=1)
-            # chosen_distance = torch.gather(start_distances_candidate, dim=1, index=id_best.view(-1,1))[:,0]
-            # chosen_start_points_c = torch.gather(start_points_c, dim=1, index=id_best.view(-1,1,1).tile(1,1,3))[:,0]
-            # chosen_end_points_c = end_points_c[:,0]
-            # chosen_loss = torch.gather(ncc_loss, dim=1, index=id_best.view(-1,1))
-            # original_start_distances = chosen_distance
-            end_distances = original_start_distances.clone()[magic_id1]
-            prev_distances = original_start_distances.clone()[magic_id2]
-            total_losses = torch.stack(total_losses)
-
-            chosen_start_points_c = original_start_distances[:, None] * rays_c[id_start_points]
-            chosen_end_points_c = end_distances[:, None] * rays_c[id_end_points]
-
-            # Log
-            if True:
-                img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
-                img12 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
-                img21 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
-                img22 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
-
-                start_points_c = chosen_start_points_c
-                end_points_c = chosen_end_points_c
-                sp_2d1 = ((intrinsic @ start_points_c.T).T).cpu().numpy()
-                ep_2d1 = ((intrinsic @ end_points_c.T).T).cpu().numpy()
-                sp_2d2 = (transformation[0] @ to_homogeneous_tensor(start_points_c).T).T.cpu().numpy()
-                ep_2d2 = (transformation[0] @ to_homogeneous_tensor(end_points_c).T).T.cpu().numpy()
-                sp_2d1 = sp_2d1[:, :2] / sp_2d1[:, 2:3]
-                ep_2d1 = ep_2d1[:, :2] / ep_2d1[:, 2:3]
-                sp_2d2 = sp_2d2[:, :2] / sp_2d2[:, 2:3]
-                ep_2d2 = ep_2d2[:, :2] / ep_2d2[:, 2:3]
-
-                shape = img11.shape[:2][::-1]
-                sp_2d1 = np.around(sp_2d1 * shape).astype(np.int64)
-                ep_2d1 = np.around(ep_2d1 * shape).astype(np.int64)
-                sp_2d2 = np.around(sp_2d2 * shape).astype(np.int64)
-                ep_2d2 = np.around(ep_2d2 * shape).astype(np.int64)
-                line_color = (0, 0, 255)
-                line_thickness = 2
-                point_color = (0, 255, 255)
-                point_thickness = 3
-                for i_edge in range(sp_2d1.shape[0]):
-                    cv2.line(img11, sp_2d1[i_edge], ep_2d1[i_edge], line_color, line_thickness)
-                    cv2.line(img21, sp_2d2[i_edge], ep_2d2[i_edge], line_color, line_thickness)
-                for i_point in range(sp_2d1.shape[0]):
-                    cv2.circle(img11, sp_2d1[i_point], 1, point_color, point_thickness)
-                    cv2.circle(img11, ep_2d1[i_point], 1, point_color, point_thickness)
-                    cv2.circle(img21, sp_2d2[i_point], 1, point_color, point_thickness)
-                    cv2.circle(img21, ep_2d2[i_point], 1, point_color, point_thickness)
-
-                cv2.imwrite(os.path.join(v_log_root, "{}.jpg").format(cur_iter),
-                            np.concatenate([
-                                np.concatenate([img11, img21], axis=1),
-                                np.concatenate([img12, img22], axis=1),
-                            ], axis=0)
-                            )
-                print("{:3d}:{:.4f}; {:.4f}; {:.4f}".format(cur_iter,
-                                                            total_losses[:, 0].mean().cpu().item(),
-                                                            total_losses[:, 1].mean().cpu().item(),
-                                                            total_losses[:, 2].mean().cpu().item(),
-                                                            ))
-
-            cur_iter += 1
-            if cur_iter >= 1:
-                break
-
-        # xdt
-        def fit_plane_svd(points):
-            abcd = []
-            centroid = np.mean(points, axis=0)
+        # fun defined by xdt
+        def fit_plane_svd(points: torch.Tensor) -> torch.Tensor:
+            centroid = torch.mean(points, axis=0)
             centered_points = points - centroid
-            u, s, vh = np.linalg.svd(centered_points)
-            abcd.extend(vh[-1])
-            abcd.append(-np.dot(vh[-1], centroid))
+            u, s, vh = torch.linalg.svd(centered_points)
+            d = -torch.dot(vh[-1], centroid)
+            abcd = torch.cat((vh[-1], torch.tensor([d]).to(device)))
             return abcd
+        # TODO: using ray_c
+        def project_points_to_plane(points: torch.Tensor, abcd: torch.Tensor) -> torch.Tensor:
+            normal, d = abcd[0:3], abcd[3]
+            t = -(torch.matmul(points, normal) + d) / torch.dot(normal, normal)
+            projected_points = points + t.unsqueeze(1) * normal
+            return projected_points
 
-        def sample_points_on_sphere(n_points, r, c):
-            indices = np.arange(0, n_points, dtype=float) + 0.5
-            phi = np.arccos(1 - 2 * indices / n_points)
-            theta = np.pi * (1 + 5 ** 0.5) * indices
-            x, y, z = np.cos(theta) * np.sin(phi), np.sin(theta) * np.sin(phi), np.cos(phi)
-            return r * np.vstack([x, y, z]).T + c
+        def ncc_matching_cost(img1, img2):
+            mean1 = torch.mean(img1)
+            mean2 = torch.mean(img2)
+            std1 = torch.std(img1)
+            std2 = torch.std(img2)
+            norm_img1 = (img1 - mean1) / std1
+            norm_img2 = (img2 - mean2) / std2
+            ncc = torch.sum(norm_img1 * norm_img2) / (img1.numel() - 1)
+            matching_cost = 1 - ncc
+            return matching_cost
 
-        def project_points_to_plane(points, abcd):
-            normal, d = np.array(abcd[0:3]), np.array(abcd[3])
-            projected_points = []
-            for point in points:
-                t = -(np.dot(normal, point) + d) / np.dot(normal, normal)
-                projected_point = point + t * normal
-                projected_points.append(projected_point)
-            return np.array(projected_points)
+        def vectors_to_angles(normal_vectors):
+            x, y, z = normal_vectors.unbind(dim=1)
+            phi = torch.atan2(y, x)
+            theta = torch.acos(z)
+            return torch.stack([phi, theta], dim=1)
 
-        def is_point_on_plane(points, abcd, epsilon=1e-6):
-            a, b, c, d = abcd
-            result = a * points[:, 0] + b * points[:, 1] + c * points[:, 2] + d
-            return np.sum(np.abs(result) < epsilon)
+        def angles_to_vectors(angles):
+            phi, theta = angles.unbind(dim=1)
+            x = torch.sin(theta) * torch.cos(phi)
+            y = torch.sin(theta) * torch.sin(phi)
+            z = torch.cos(theta)
+            return torch.stack([x, y, z], dim=1)
 
-        poly_abcd_list = []
-        sample_points_on_face = []
-        # sample points on each face
-        all_points_pos = original_start_distances[:, None, None] * rays_c[id_start_points][:, None, :]
-        all_points_pos = all_points_pos.view(-1, 3).cpu().numpy()
-        poly_abcd_list = []
-        projected_points_list = []
-        sample_points_on_face = []
-        sample_points_on_face_slice = []
-        for face_slice in valid_face_slices:
-            points_cur_face = all_points_pos[face_slice[0]:face_slice[1]]
-            assert (len(points_cur_face) >= 3)
-            # fit plane
-            p_abcd = fit_plane_svd(points_cur_face)
-            poly_abcd_list.append(p_abcd)
-            # proj to fitting plane
-            projected_points = project_points_to_plane(points_cur_face, p_abcd)
-            projected_points_list.append(projected_points)
-            # sample points on the fitting plane
-            centroid = np.mean(projected_points, axis=0)
-            start_idx = len(sample_points_on_face)
-            for i in range(len(points_cur_face)):
-                p1 = points_cur_face[i]
-                p2 = points_cur_face[(i + 1) % len(points_cur_face)]
-                sample_points_on_face.append(np.array([p1, p2, centroid]))
-            end_idx = len(sample_points_on_face)
-            sample_points_on_face_slice.append([start_idx, end_idx])
-
-        # sample on triangle
-        sample_points_on_face = np.array(sample_points_on_face)
-        tri = torch.from_numpy(sample_points_on_face).to(device).to(torch.float32)
-        num_samples_tri, sample_points_on_face = sample_triangles(100, tri[:, 0, :], tri[:, 1, :], tri[:, 2, :])
-
-        # aggregate triangle to face
-        num_samples_face = [sum(num_samples_tri[slice[0]:slice[1]]).cpu().numpy() for slice in
-                            sample_points_on_face_slice]
-
-        # proj points onto 2d image
+        # img data pre
         intrinsic1 = v_img_database[id_img1].intrinsic
-        intrinsic1 = torch.from_numpy(intrinsic1).to(device).to(torch.float32)
         intrinsic2 = v_img_database[1].intrinsic
+        intrinsic1 = torch.from_numpy(intrinsic1).to(device).to(torch.float32)
         intrinsic2 = torch.from_numpy(intrinsic2).to(device).to(torch.float32)
         v_img1 = imgs[0]
         v_img2 = imgs[1]
 
-        # project the 3d points into 2d space
-        points_2d1 = (intrinsic1 @ sample_points_on_face.T).T
-        points_2d1 = points_2d1[:, :2] / points_2d1[:, 2:3]
-        points_2d2 = (transformation[0] @ to_homogeneous_tensor(sample_points_on_face).T).T
-        points_2d2 = points_2d2[:, :2] / points_2d2[:, 2:3]
+        # optimized data pre
+        optimized_points_pos = optimized_distance[:, None, None] * rays_c[:, None, :]
+        patches_list = graph.graph["dual_graph"].nodes  # each patch = id_vertexes
+        patch_vertexes_id = [patches_list[i]['id_vertex'] for i in range(len(patches_list))]
+        # torch.arange(len(patch_vertexes_id)).repeat_interleave
+        vertexes_face_indices = [[i] * len(patch_vertexes) for i, patch_vertexes in enumerate(patch_vertexes_id)]
 
-        # sample pixel
-        sample_imgs1 = sample_img(v_img1[None, None, :], points_2d1[None, :, :])[0]
-        sample_imgs2 = sample_img(v_img2[None, None, :], points_2d2[None, :, :])[0]
+        # optimized_points_pos[torch.tensor(vertexes_id)]
+        def initialize_plane_hypothesis(rays_c, optimized_distance, graph):
+            # 1. calculate ncc loss of each patch
+            # for each patch do:
+            # a) 3d vertexes of each patch -> fitting plane
+            # b) 3d vertexes -> 3d vertexes projected to fitting plane(projected polygon)
+            # c) sample points on projected polygon
+            # d) project sample points to img1 and img2 and get pixel
+            # e) calculate the ncc loss
+            poly_abcd_list = []
+            sample_points_list = []
+            projected_vertexes_list = []
+            sample_points_2d1 = []
+            sample_points_2d2 = []
+            centroid_list = []
+            ncc_list = []
+            for patch_idx in range(len(patches_list)):
+                id_vertexes = patches_list[patch_idx]['id_vertex']
+                pos_vertexes = optimized_points_pos[id_vertexes].view(-1,3)
+                assert (len(pos_vertexes) >= 3)
 
-        def ncc_matching_cost(img1, img2):
-            # 计算每个图像的均值
-            mean1 = torch.mean(img1)
-            mean2 = torch.mean(img2)
-            # 计算每个图像的标准差
-            std1 = torch.std(img1)
-            std2 = torch.std(img2)
-            # 归一化每个图像
-            norm_img1 = (img1 - mean1) / std1
-            norm_img2 = (img2 - mean2) / std2
-            # 计算归一化互相关
-            ncc = torch.sum(norm_img1 * norm_img2) / (img1.numel() - 1)
-            # 计算匹配代价
-            matching_cost = 1 - ncc
-            return matching_cost
+                # a) 3d vertexes of each patch -> fitting plane
+                p_abcd = fit_plane_svd(pos_vertexes)
+                poly_abcd_list.append(p_abcd)
 
-        ncc_list = []
-        sample_points_slice = []
-        start_idx = 0
-        for num in num_samples_face:
-            img1 = sample_imgs1[start_idx: start_idx + num]
-            img2 = sample_imgs2[start_idx: start_idx + num]
-            ncc = ncc_matching_cost(img1, img2)
-            ncc_list.append(ncc)
-            sample_points_slice.append([start_idx, start_idx + num])
-            start_idx += num
+                # b) 3d vertexes -> 3d vertexes projected to fitting plane(projected polygon)
+                projected_points = project_points_to_plane(pos_vertexes, p_abcd)
+                projected_vertexes_list.append(projected_points)
 
-        # find the best ncc
-        idx_best = ncc_list.index(min(ncc_list))
-        id_best_face = valid_face_id[idx_best]
-        best_face_point_id_slice = valid_face_slices[idx_best]
+                # c) sample points on projected polygon
+                # polygon -> triangles (using the centroid)
+                num_sample = projected_points.shape[0]
+                triangles_idx = [[i, (i+1) % num_sample] for i in range(num_sample)]
+                centroid = torch.mean(projected_points, axis=0)
+                centroid_list.append(centroid)
+                triangles = projected_points[torch.tensor(triangles_idx)]
+                triangles = torch.cat((triangles, centroid.tile(num_sample,1)[:,None,:]), dim=1)
 
-        # debug
-        sample_points_on_face_proj_1 = (intrinsic1 @ sample_points_on_face.T).T
-        sample_points_on_face_proj_1 = sample_points_on_face_proj_1[:, :2] / sample_points_on_face_proj_1[:, 2:3]
-        sample_points_on_face_proj_2 = (transformation[0] @ to_homogeneous_tensor(sample_points_on_face).T).T
-        sample_points_on_face_proj_2 = sample_points_on_face_proj_2[:, :2] / sample_points_on_face_proj_2[:, 2:3]
-        best_sample_points_slice = sample_points_slice[idx_best]
+                # sample points on the fitting plane
+                _, sample_points_on_face = \
+                    sample_triangles(100, triangles[:, 0, :], triangles[:, 1, :], triangles[:, 2, :])
+                sample_points_list.append(sample_points_on_face)
 
-        best_face_sample_point1 = sample_points_on_face_proj_1[best_sample_points_slice[0]:best_sample_points_slice[1]]
-        best_face_sample_point1 = best_face_sample_point1.cpu().numpy()
-        best_face_sample_point2 = sample_points_on_face_proj_2[best_sample_points_slice[0]:best_sample_points_slice[1]]
-        best_face_sample_point2 = best_face_sample_point2.cpu().numpy()
+                # d) project sample points to img1 and img2
+                points_2d1 = (intrinsic1 @ sample_points_on_face.T).T
+                points_2d1 = points_2d1[:, :2] / points_2d1[:, 2:3]
+                points_2d2 = (transformation[0] @ to_homogeneous_tensor(sample_points_on_face).T).T
+                points_2d2 = points_2d2[:, :2] / points_2d2[:, 2:3]
+                sample_points_2d1.append(points_2d1)
+                sample_points_2d2.append(points_2d2)
 
-        shape = img11.shape[:2][::-1]
-        best_face_sample_point1 = np.around(best_face_sample_point1 * shape).astype(np.int64)
-        best_face_sample_point2 = np.around(best_face_sample_point2 * shape).astype(np.int64)
+                # get pixel
+                sample_imgs1 = sample_img(v_img1[None, None, :], points_2d1[None, :, :])[0]
+                sample_imgs2 = sample_img(v_img2[None, None, :], points_2d2[None, :, :])[0]
 
-        if True:
-            img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
-            img12 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
-            img21 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
-            img22 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
+                # e) calculate the ncc loss
+                ncc = ncc_matching_cost(sample_imgs1, sample_imgs2)
+                ncc_list.append(ncc)
 
-            start_points_c = chosen_start_points_c
-            end_points_c = chosen_end_points_c
-            sp_2d1 = (intrinsic @ start_points_c.T).T.cpu().numpy()
-            ep_2d1 = (intrinsic @ end_points_c.T).T.cpu().numpy()
-            sp_2d2 = (transformation[0] @ to_homogeneous_tensor(start_points_c).T).T.cpu().numpy()
-            ep_2d2 = (transformation[0] @ to_homogeneous_tensor(end_points_c).T).T.cpu().numpy()
-            sp_2d1 = sp_2d1[:, :2] / sp_2d1[:, 2:3]
-            ep_2d1 = ep_2d1[:, :2] / ep_2d1[:, 2:3]
-            sp_2d2 = sp_2d2[:, :2] / sp_2d2[:, 2:3]
-            ep_2d2 = ep_2d2[:, :2] / ep_2d2[:, 2:3]
+            # 2. sorted patches according the ncc loss
+            ncc_list = torch.stack(ncc_list).view(-1)
 
-            shape = img11.shape[:2][::-1]
-            sp_2d1 = np.around(sp_2d1 * shape).astype(np.int64)
-            ep_2d1 = np.around(ep_2d1 * shape).astype(np.int64)
-            sp_2d2 = np.around(sp_2d2 * shape).astype(np.int64)
-            ep_2d2 = np.around(ep_2d2 * shape).astype(np.int64)
-            line_color = (0, 0, 255)
-            line_thickness = 2
-            point_color = (0, 255, 255)
-            point_thickness = 3
-            for i_edge in range(sp_2d1.shape[0]):
-                cv2.line(img11, sp_2d1[i_edge], ep_2d1[i_edge], line_color, line_thickness)
-                cv2.line(img21, sp_2d2[i_edge], ep_2d2[i_edge], line_color, line_thickness)
-            for i_point in range(sp_2d1.shape[0]):
-                if best_face_point_id_slice[0] < i_point < best_face_point_id_slice[1]:
-                    point_color = (0, 255, 0)
-                else:
-                    point_color = (0, 255, 255)
-                cv2.circle(img11, sp_2d1[i_point], 1, point_color, point_thickness)
-                cv2.circle(img11, ep_2d1[i_point], 1, point_color, point_thickness)
-                cv2.circle(img21, sp_2d2[i_point], 1, point_color, point_thickness)
-                cv2.circle(img21, ep_2d2[i_point], 1, point_color, point_thickness)
+            poly_abcd_list = torch.stack(poly_abcd_list).view(-1,4)
+            centroid_list = torch.stack(centroid_list).view(-1, 3)
+            # initialize
+            z_depth = centroid_list[:,2]
 
-            point_color = (0, 0, 255)
-            for i_point_sample in range(best_face_sample_point1.shape[0]):
-                cv2.circle(img11, best_face_sample_point1[i_point_sample], 1, point_color, point_thickness)
-                cv2.circle(img21, best_face_sample_point2[i_point_sample], 1, point_color, point_thickness)
+            angle = vectors_to_angles(poly_abcd_list[:, 0:3])
 
-            cv2.imwrite(os.path.join(v_log_root, "{}.jpg").format(cur_iter),
-                        np.concatenate([
-                            np.concatenate([img11, img21], axis=1),
-                            np.concatenate([img12, img22], axis=1),
-                        ], axis=0)
-                        )
-            print("{:3d}:{:.4f}; {:.4f}; {:.4f}".format(cur_iter,
-                                                        total_losses[:, 0].mean().cpu().item(),
-                                                        total_losses[:, 1].mean().cpu().item(),
-                                                        total_losses[:, 2].mean().cpu().item(),
-                                                        ))
-            # poly
-            point_world = (np.linalg.inv(v_img_database[id_img1].extrinsic)
-                                     @ to_homogeneous_vector(start_points_c.cpu().numpy()).T).T
-            point_world = point_world[:, :3] / point_world[:, 3:4]
-            best_face_point_world = point_world[best_face_point_id_slice[0]:best_face_point_id_slice[1]]
-            visualize_polygon(best_face_point_world, os.path.join(v_log_root, "{}_best_face.obj").format(cur_iter))
-            visualize_polygon_with_normal(projected_points_list[idx_best], poly_abcd_list[idx_best][0:3],
-                                          os.path.join(v_log_root, "{}_projected_best_face.obj").format(cur_iter))
+            return z_depth, angle, ncc_list
+
+        # For each patch, initialize plane hypothesis
+        z_depth, angle, ncc = initialize_plane_hypothesis(rays_c, optimized_distance, graph)
+
+        def optimize_plane_hypothesis(z_depth, angle, ncc):
+            sorted_values, sorted_indices = torch.sort(ncc, descending=False)
+
+
+
+        # Optimize plane hypothesis based on: 1) NCC; 2) Distance to the optimized vertices
+        optimize_plane_hypothesis(z_depth, angle, ncc)
+
+        return
+        # Determine the final location of vertices
+        determine_vertices_location()
+
         exit()
 
 

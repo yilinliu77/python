@@ -838,6 +838,7 @@ def optimize(v_data, v_log_root):
 
             id_original_to_current={}
             for id_face, face in enumerate(graph.graph["faces"]):
+
                 if not graph.graph["face_flags"][id_face]:
                     continue
                 has_black = False
@@ -850,7 +851,10 @@ def optimize(v_data, v_log_root):
                     continue
 
                 id_original_to_current[id_face]=len(dual_graph.nodes)
-                dual_graph.add_node(len(dual_graph.nodes),id_vertex=face, id_in_original_array=id_face)
+                dual_graph.add_node(len(dual_graph.nodes),id_vertex=face,
+                                    id_in_original_array=id_face,
+                                    face_center=graph.graph['face_center'][id_face],
+                                    ray_c=graph.graph['ray_c'][id_face])
 
             for node in dual_graph.nodes():
                 faces = dual_graph.nodes[node]["id_vertex"]
@@ -878,7 +882,6 @@ def optimize(v_data, v_log_root):
 
                             # adjacent_vertices.append(id_start)
                             dual_graph.add_edge(edge[0], edge[1], adjacent_vertices=adjacent_vertices)
-
 
             v_graph.graph["dual_graph"] = dual_graph
 
@@ -908,11 +911,8 @@ def optimize(v_data, v_log_root):
                             pos1 = np.around(v_graph.nodes[id_vertex]["pos_2d"] * shape).astype(np.int64)
                             cv2.circle(img11, pos1, 2, (0, 255, 0), 2)
 
-
-
                     cv2.imshow("1", img11)
                     cv2.waitKey()
-
             return
 
         fix_graph(graph)
@@ -944,6 +944,7 @@ def optimize(v_data, v_log_root):
             return matching_cost
 
         def vectors_to_angles(normal_vectors):
+            normal_vectors = normal_vectors / torch.norm(normal_vectors, dim=1, keepdim=True)
             x, y, z = normal_vectors.unbind(dim=1)
             phi = torch.atan2(y, x)
             theta = torch.acos(z)
@@ -955,6 +956,16 @@ def optimize(v_data, v_log_root):
             y = torch.sin(theta) * torch.sin(phi)
             z = torch.cos(theta)
             return torch.stack([x, y, z], dim=1)
+
+        def intersection_of_ray_and_plane(planes, rays_direction):
+            # planes: n*4 ray: n*3
+            n = planes[:, :3]
+            d = planes[:, 3]
+            denominator = torch.sum(n * rays_direction, dim=1)
+            t = -d / torch.sum(n * rays_direction, dim=1)
+            intersection_points = torch.unsqueeze(t, 1) * rays_direction
+            valid_intersection = (denominator != 0) & (t >= 0)
+            return valid_intersection, intersection_points
 
         # img data pre
         intrinsic1 = v_img_database[id_img1].intrinsic
@@ -968,9 +979,26 @@ def optimize(v_data, v_log_root):
         optimized_points_pos = optimized_distance[:, None, None] * rays_c[:, None, :]
         patches_list = graph.graph["dual_graph"].nodes  # each patch = id_vertexes
         patch_vertexes_id = [patches_list[i]['id_vertex'] for i in range(len(patches_list))]
-        # torch.arange(len(patch_vertexes_id)).repeat_interleave
-        vertexes_face_indices = [[i] * len(patch_vertexes) for i, patch_vertexes in enumerate(patch_vertexes_id)]
 
+        # torch.arange(len(patch_vertexes_id)).repeat_interleave
+        vertexes_indices = [[i] * len(patch_vertexes) for i, patch_vertexes in enumerate(patch_vertexes_id)]
+
+        # polygon -> edge (using the centroid)
+        # TODO：1
+        edge_list = []  # num_tri * 2
+        for patch in patch_vertexes_id:
+            num_vertex = len(patch)
+            edge_id = [[patch[i], patch[(i + 1) % num_vertex]] for i in range(num_vertex)]
+            edge_list.extend(edge_id)
+        num_points_per_face = torch.tensor([len(item) for item in patch_vertexes_id], dtype=torch.long, device=device)
+        edge_list = torch.tensor(edge_list).to(device).to(torch.long)
+        edge = optimized_points_pos[edge_list].squeeze(dim=2)
+        # patch_id of edge belongs to
+        edges_indices = [torch.tensor([i] * len(patch_vertexes)) for i, patch_vertexes in enumerate(patch_vertexes_id)]
+        edges_indices = torch.cat(edges_indices).to(device)
+        torch.cat((scatter_mean(edge[:,0], edges_indices, dim=0)[:,None,:].repeat_interleave(num_points_per_face, dim=0), edge),dim=1)
+
+        # centroid = torch.tensor()
         # optimized_points_pos[torch.tensor(vertexes_id)]
         def initialize_plane_hypothesis(rays_c, optimized_distance, graph):
             # 1. calculate ncc loss of each patch
@@ -1002,12 +1030,12 @@ def optimize(v_data, v_log_root):
 
                 # c) sample points on projected polygon
                 # polygon -> triangles (using the centroid)
-                num_sample = projected_points.shape[0]
-                triangles_idx = [[i, (i+1) % num_sample] for i in range(num_sample)]
+                num_vertex = projected_points.shape[0]
+                triangles_idx = [[i, (i+1) % num_vertex] for i in range(num_vertex)]
                 centroid = torch.mean(projected_points, axis=0)
                 centroid_list.append(centroid)
                 triangles = projected_points[torch.tensor(triangles_idx)]
-                triangles = torch.cat((triangles, centroid.tile(num_sample,1)[:,None,:]), dim=1)
+                triangles = torch.cat((triangles, centroid.tile(num_vertex,1)[:,None,:]), dim=1)
 
                 # sample points on the fitting plane
                 _, sample_points_on_face = \
@@ -1035,19 +1063,26 @@ def optimize(v_data, v_log_root):
 
             poly_abcd_list = torch.stack(poly_abcd_list).view(-1,4)
             centroid_list = torch.stack(centroid_list).view(-1, 3)
-            # initialize
-            z_depth = centroid_list[:,2]
 
-            angle = vectors_to_angles(poly_abcd_list[:, 0:3])
-
-            return z_depth, angle, ncc_list
+            return poly_abcd_list, ncc_list
 
         # For each patch, initialize plane hypothesis
-        z_depth, angle, ncc = initialize_plane_hypothesis(rays_c, optimized_distance, graph)
+        poly_abcd_list, ncc = initialize_plane_hypothesis(rays_c, optimized_distance, graph)
+
+        # get the intersection of the fitting plane and ray_c
+        rays_c_valid_patch = [patches_list[i]['ray_c'] for i in range(len(patches_list))]
+        rays_c_valid_patch = torch.tensor(rays_c_valid_patch).to(device).to(torch.float32)
+        isValid, intersection = intersection_of_ray_and_plane(poly_abcd_list, rays_c_valid_patch)
+        assert(torch.sum(isValid) == isValid.shape[0])
+        z_depth = intersection[:, 2]
+        angle = vectors_to_angles(poly_abcd_list[:, 0:3])
 
         def optimize_plane_hypothesis(z_depth, angle, ncc):
             sorted_values, sorted_indices = torch.sort(ncc, descending=False)
+            # process the patches in the order of ncc loss
+            # 1. sample plane (depth and normal)
 
+            #
 
 
         # Optimize plane hypothesis based on: 1) NCC; 2) Distance to the optimized vertices

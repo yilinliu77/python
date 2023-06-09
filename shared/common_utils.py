@@ -230,21 +230,20 @@ def ray_line_intersection1(v_plane_normal, v_plane_point, v_ray_origin, v_ray_di
     return intersection_point
 
 def ray_line_intersection2(v_plane_abcd, v_ray_origin, v_ray_direction):
-    plane_normal = v_plane_abcd[:,:3]
-    plane_d = v_plane_abcd[:,3:4]
+    plane_normal = v_plane_abcd[:3]
+    plane_d = v_plane_abcd[3:4]
 
     # Compute the parameter t
-    numerator = - (torch.dot(plane_normal, v_ray_origin) + plane_d)
-    denominator = torch.dot(plane_normal, v_ray_direction)
+    numerator = - (torch.sum(plane_normal * v_ray_origin, dim=1) + plane_d)
+    denominator = torch.sum(plane_normal * v_ray_direction, dim=1)
 
     # Check if the ray is parallel to the plane
-    if abs(denominator) < 1e-6:
+    if (torch.abs(denominator) < 1e-6).any():
         print("Ray is parallel to the plane, no intersection.")
-        return None
+        raise
 
     t = numerator / denominator
 
     # Compute the intersection point
-    intersection_point = v_ray_origin + t * v_ray_direction
-
+    intersection_point = v_ray_origin + t[:,None] * v_ray_direction
     return intersection_point

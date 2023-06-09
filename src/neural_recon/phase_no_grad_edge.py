@@ -925,7 +925,14 @@ def optimize(v_data, v_log_root):
             d = -torch.dot(vh[-1], centroid)
             abcd = torch.cat((vh[-1], torch.tensor([d]).to(device)))
             return abcd
+
         # TODO: using ray_c
+        def project_points_to_plane(points: torch.Tensor, abcd: torch.Tensor) -> torch.Tensor:
+            normal, d = abcd[0:3], abcd[3]
+            t = -(torch.matmul(points, normal) + d) / torch.dot(normal, normal)
+            projected_points = points + t.unsqueeze(1) * normal
+            return projected_points
+
         def project_points_to_plane(points: torch.Tensor, abcd: torch.Tensor) -> torch.Tensor:
             normal, d = abcd[0:3], abcd[3]
             t = -(torch.matmul(points, normal) + d) / torch.dot(normal, normal)
@@ -965,6 +972,7 @@ def optimize(v_data, v_log_root):
             t = -d / torch.sum(n * rays_direction, dim=1)
             intersection_points = torch.unsqueeze(t, 1) * rays_direction
             valid_intersection = (denominator != 0) & (t >= 0)
+            # n * _
             return valid_intersection, intersection_points
 
         # img data pre
@@ -979,9 +987,6 @@ def optimize(v_data, v_log_root):
         optimized_points_pos = optimized_distance[:, None, None] * rays_c[:, None, :]
         patches_list = graph.graph["dual_graph"].nodes  # each patch = id_vertexes
         patch_vertexes_id = [patches_list[i]['id_vertex'] for i in range(len(patches_list))]
-
-        # torch.arange(len(patch_vertexes_id)).repeat_interleave
-        vertexes_indices = [[i] * len(patch_vertexes) for i, patch_vertexes in enumerate(patch_vertexes_id)]
 
         # polygon -> edge (using the centroid)
         # TODO：1
@@ -998,8 +1003,6 @@ def optimize(v_data, v_log_root):
         edges_indices = torch.cat(edges_indices).to(device)
         torch.cat((scatter_mean(edge[:,0], edges_indices, dim=0)[:,None,:].repeat_interleave(num_points_per_face, dim=0), edge),dim=1)
 
-        # centroid = torch.tensor()
-        # optimized_points_pos[torch.tensor(vertexes_id)]
         def initialize_plane_hypothesis(rays_c, optimized_distance, graph):
             # 1. calculate ncc loss of each patch
             # for each patch do:
@@ -1074,19 +1077,61 @@ def optimize(v_data, v_log_root):
         rays_c_valid_patch = torch.tensor(rays_c_valid_patch).to(device).to(torch.float32)
         isValid, intersection = intersection_of_ray_and_plane(poly_abcd_list, rays_c_valid_patch)
         assert(torch.sum(isValid) == isValid.shape[0])
-        z_depth = intersection[:, 2]
+        depth = torch.linalg.norm(intersection, dim=-1)
         angle = vectors_to_angles(poly_abcd_list[:, 0:3])
 
-        def optimize_plane_hypothesis(z_depth, angle, ncc):
+        def sample_depth_and_angle(depth, angle):
+            # sample depth
+            sample_depth = torch.normal(depth.repeat(100,1))
+            # sample angle
+            sample_angle = torch.normal(angle.repeat(100,1), torch.full_like(angle, 2 * math.pi / 6).repeat(100,1))
+            sample_angle = torch.clamp(sample_angle, min=-2 * math.pi, max=2 * math.pi)
+            return sample_depth, sample_angle
+
+        def compute_plane_abcd(patch_ray, ray_depth, normal):
+            intersection = patch_ray * ray_depth
+            d = -torch.sum(intersection * normal, dim=1, keepdim=True)
+            plane_abcd = torch.cat([normal, d], dim=1)
+            return intersection, plane_abcd
+
+        def intersection_of_ray_and_all_plane(planes_abcd, vertexes_ray):
+            # planes: n*4 ray: m*3
+            n_planes = planes_abcd.size(0)
+            m_rays = vertexes_ray.size(0)
+
+            # 将平面参数和射线向量扩展为广播兼容的形状
+            planes_abcd_expanded = planes_abcd.unsqueeze(1).expand(n_planes, m_rays, 4)
+            vertexes_ray_expanded = vertexes_ray.unsqueeze(0).expand(n_planes, m_rays, 3)
+
+            # 计算射线与平面的交点
+            numerator = -planes_abcd_expanded[..., -1].unsqueeze(-1)  # 分子：-(D)
+            denominator = torch.sum(planes_abcd_expanded[..., :3] * vertexes_ray_expanded, dim=-1).unsqueeze(-1) # 分母：(A * v_ray.x + B * v_ray.y + C * v_ray.z)
+            t = numerator / denominator  # t = -(D) / (A * v_ray.x + B * v_ray.y + C * v_ray.z)
+            intersection_points = t * vertexes_ray_expanded  # p = p0 + t * v_ray，这里我们假设 p0 为原点 (0, 0, 0)
+            # n*m*3
+            return intersection_points
+
+        def optimize_plane_hypothesis(depth, angle, ncc):
             sorted_values, sorted_indices = torch.sort(ncc, descending=False)
             # process the patches in the order of ncc loss
-            # 1. sample plane (depth and normal)
+            for i in range(len(sorted_indices)):
+                patch_id, init_ncc_loss = sorted_indices[i], sorted_values[i]
+                vertexes_id = torch.tensor(patch_vertexes_id[patch_id]).to(device).to(torch.long)
+                vertexes_pos = optimized_points_pos[vertexes_id]
+                vertexes_ray = rays_c[vertexes_id]
+                patch_ray = torch.tensor(patches_list[int(patch_id)]['ray_c']).to(device).to(torch.float32)
+                # sample plane
+                samples_depth, samples_angle = sample_depth_and_angle(depth[patch_id].unsqueeze(0), angle[patch_id].unsqueeze(0))
+                samples_abc = angles_to_vectors(samples_angle)
 
-            #
+                samples_intersection, samples_abcd = compute_plane_abcd(patch_ray, samples_depth, samples_abc)
+
+                samples_planes_vertexes_pos = intersection_of_ray_and_all_plane(samples_abcd, vertexes_ray)
+
 
 
         # Optimize plane hypothesis based on: 1) NCC; 2) Distance to the optimized vertices
-        optimize_plane_hypothesis(z_depth, angle, ncc)
+        optimize_plane_hypothesis(depth, angle, ncc)
 
         return
         # Determine the final location of vertices

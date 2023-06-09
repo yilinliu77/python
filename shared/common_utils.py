@@ -21,9 +21,11 @@ def debug_imgs(v_imgs: List[np.ndarray]) -> None:
     cv2.waitKey()
     # cv2.destroyWindow("test")
 
+
 def refresh_timer(a):
     delta = time.time() - a
     return delta, time.time()
+
 
 ###
 # Numpy
@@ -105,7 +107,8 @@ def pad_and_enlarge_along_y(v_small_img, v_big_img):
         resized_shape = (int(target_h / source_h * source_w), target_h)
 
     padding_img = padding(cv2.resize(v_small_img, resized_shape, interpolation=cv2.INTER_AREA), target_h, target_w)
-    return np.concatenate((v_big_img,padding_img),axis=1)
+    return np.concatenate((v_big_img, padding_img), axis=1)
+
 
 def pad_imgs(v_img1, v_img2):
     size1 = v_img1.shape[:2][::-1]
@@ -114,7 +117,7 @@ def pad_imgs(v_img1, v_img2):
 
     padding_img1 = padding(v_img1, max_size[1], max_size[0])
     padding_img2 = padding(v_img2, max_size[1], max_size[0])
-    return np.concatenate((padding_img1,padding_img2),axis=1)
+    return np.concatenate((padding_img1, padding_img2), axis=1)
 
 
 ###
@@ -142,7 +145,7 @@ def to_homogeneous_mat_tensor(v_array: torch.Tensor):
 
 
 def normalize_tensor(v_vector):
-    length = torch.linalg.norm(v_vector+1e-6, dim=-1, keepdim=True)
+    length = torch.linalg.norm(v_vector + 1e-6, dim=-1, keepdim=True)
     # assert length != 0
     return v_vector / length
 
@@ -157,21 +160,25 @@ def normalized_torch_img_to_numpy(v_tensor: torch.Tensor):
         raise
     return np.clip((t.numpy() * 255.).astype(np.uint8), 0, 255)
 
+
 # Physics notions(ISO) are used here
 # https://en.wikipedia.org/wiki/Spherical_coordinate_system
 # Phi: xy plane; [-pi,pi]
 # Theta: z; [0,pi]
 def vector_to_sphere_coordinate(v_tensor):
     normalized_tensor = normalize_tensor(v_tensor)
-    phi = torch.atan2(normalized_tensor[...,1],normalized_tensor[...,0])
-    theta = torch.atan2(torch.sqrt(normalized_tensor[...,1]**2+normalized_tensor[...,0]**2),normalized_tensor[...,2])
-    return torch.stack((phi,theta),dim=-1)
+    phi = torch.atan2(normalized_tensor[..., 1], normalized_tensor[..., 0])
+    theta = torch.atan2(torch.sqrt(normalized_tensor[..., 1] ** 2 + normalized_tensor[..., 0] ** 2),
+                        normalized_tensor[..., 2])
+    return torch.stack((phi, theta), dim=-1)
+
 
 def sphere_coordinate_to_vector(v_phi, v_theta):
     x = torch.cos(v_phi) * torch.sin(v_theta)
     y = torch.sin(v_phi) * torch.sin(v_theta)
     z = torch.cos(v_theta)
-    return torch.stack((x,y,z),dim=-1)
+    return torch.stack((x, y, z), dim=-1)
+
 
 # These two functions are calculating the rotation matrix for an arrow that created by open3d
 def get_cross_prod_mat(pVec_Arr):
@@ -183,11 +190,12 @@ def get_cross_prod_mat(pVec_Arr):
     ])
     return qCross_prod_mat
 
+
 def caculate_align_mat(pVec_Arr):
     scale = np.linalg.norm(pVec_Arr)
-    pVec_Arr = pVec_Arr/ scale
+    pVec_Arr = pVec_Arr / scale
     # must ensure pVec_Arr is also a unit vec.
-    z_unit_Arr = np.array([0,0,1])
+    z_unit_Arr = np.array([0, 0, 1])
     z_mat = get_cross_prod_mat(z_unit_Arr)
 
     z_c_vec = np.matmul(z_mat, pVec_Arr)
@@ -199,15 +207,44 @@ def caculate_align_mat(pVec_Arr):
         qTrans_Mat = np.eye(3, 3)
     else:
         qTrans_Mat = np.eye(3, 3) + z_c_vec_mat + np.matmul(z_c_vec_mat,
-                                                    z_c_vec_mat)/(1 + np.dot(z_unit_Arr, pVec_Arr))
+                                                            z_c_vec_mat) / (1 + np.dot(z_unit_Arr, pVec_Arr))
 
     qTrans_Mat *= scale
     return qTrans_Mat
 
 
 def get_line_mesh(v_path, v_points, v_lines):
-    with open(v_path,"w") as f:
+    with open(v_path, "w") as f:
         for item in v_points:
-            f.write("v {} {} {} 1 0 0\n".format(item[0],item[1],item[2]))
+            f.write("v {} {} {} 1 0 0\n".format(item[0], item[1], item[2]))
         for item in v_lines:
             f.write("l {} {}\n".format(item[0] + 1, item[1] + 1))
+
+# Not verified
+def ray_line_intersection1(v_plane_normal, v_plane_point, v_ray_origin, v_ray_direction):
+    t = torch.dot(v_plane_normal, (v_plane_point - v_ray_origin)) / torch.dot(v_plane_normal, v_ray_direction)
+
+    # Compute the intersection point
+    intersection_point = v_ray_origin + t * v_ray_direction
+
+    return intersection_point
+
+def ray_line_intersection2(v_plane_abcd, v_ray_origin, v_ray_direction):
+    plane_normal = v_plane_abcd[:,:3]
+    plane_d = v_plane_abcd[:,3:4]
+
+    # Compute the parameter t
+    numerator = - (torch.dot(plane_normal, v_ray_origin) + plane_d)
+    denominator = torch.dot(plane_normal, v_ray_direction)
+
+    # Check if the ray is parallel to the plane
+    if abs(denominator) < 1e-6:
+        print("Ray is parallel to the plane, no intersection.")
+        return None
+
+    t = numerator / denominator
+
+    # Compute the intersection point
+    intersection_point = v_ray_origin + t * v_ray_direction
+
+    return intersection_point

@@ -50,7 +50,7 @@ from src.neural_recon.optimize_segment import compute_initial_normal, compute_ro
 from shared.common_utils import debug_imgs, to_homogeneous, save_line_cloud, to_homogeneous_vector, normalize_tensor, \
     to_homogeneous_mat_tensor, to_homogeneous_tensor, normalized_torch_img_to_numpy, padding, \
     vector_to_sphere_coordinate, sphere_coordinate_to_vector, caculate_align_mat, normalize_vector, \
-    pad_and_enlarge_along_y, refresh_timer, get_line_mesh
+    pad_and_enlarge_along_y, refresh_timer, get_line_mesh, ray_line_intersection1, ray_line_intersection2
 
 from src.neural_recon.colmap_io import read_dataset, Image, Point_3d, check_visibility
 # from src.neural_recon.phase1 import NGPModel
@@ -829,7 +829,12 @@ def optimize(v_data, v_log_root):
                 cur_iter += 1
             return optimized_distance
 
-        optimized_distance = optimize_node(node_data, rays_c, ray_distances_c)
+        optmized_distance_cache = "output/optimized_distance.tar"
+        if os.path.exists(optmized_distance_cache):
+            optimized_distance = torch.load(optmized_distance_cache).to(device)
+        else:
+            optimized_distance = optimize_node(node_data, rays_c, ray_distances_c)
+            torch.save(optimized_distance, optmized_distance_cache)
 
         # Remove the redundant face and edges in the graph
         # And build the dual graph in order to navigate between patches
@@ -944,6 +949,7 @@ def optimize(v_data, v_log_root):
             return matching_cost
 
         def vectors_to_angles(normal_vectors):
+            normal_vectors = normalize_tensor(normal_vectors)
             x, y, z = normal_vectors.unbind(dim=1)
             phi = torch.atan2(y, x)
             theta = torch.acos(z)
@@ -1040,18 +1046,27 @@ def optimize(v_data, v_log_root):
 
             angle = vectors_to_angles(poly_abcd_list[:, 0:3])
 
-            return z_depth, angle, ncc_list
+            return z_depth, angle, ncc_list, poly_abcd_list
 
         # For each patch, initialize plane hypothesis
-        z_depth, angle, ncc = initialize_plane_hypothesis(rays_c, optimized_distance, graph)
+        z_depth, angle, ncc, poly_abcd_list = initialize_plane_hypothesis(rays_c, optimized_distance, graph)
+
+        def save_plane(v_abcds, rays_c, patch_vertexes_id):
+            ray_line_intersection2(v_abcds, rays_c * z_depth, rays_c[id_patch])
+            for id_patch in range(len(patch_vertexes_id)):
+                ray_line_intersection2(v_abcds, rays_c[id_patch]*z_depth[id_patch], rays_c[id_patch])
+            pass
+
+        save_plane(poly_abcd_list, rays_c, patch_vertexes_id)
 
         def optimize_plane_hypothesis(z_depth, angle, ncc):
             sorted_values, sorted_indices = torch.sort(ncc, descending=False)
 
 
-
         # Optimize plane hypothesis based on: 1) NCC; 2) Distance to the optimized vertices
         optimize_plane_hypothesis(z_depth, angle, ncc)
+
+
 
         return
         # Determine the final location of vertices

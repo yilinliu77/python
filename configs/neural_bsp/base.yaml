@@ -10,7 +10,7 @@ trainer:
   resume_from_checkpoint:
   evaluate: false
   output: .
-  check_val_every_n_epoch: 10
+  check_val_every_n_epoch: 1000
 
 model:
   model_name: BSP_base_model

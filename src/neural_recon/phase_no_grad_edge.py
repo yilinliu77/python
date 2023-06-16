@@ -753,6 +753,7 @@ def optimize(v_data, v_log_root):
             cv2.imshow("1", img11)
             cv2.waitKey(0)
 
+        img_src_id = 0
         def optimize_node(v_node_data, v_rays_c, v_ray_distances_c):
             id_start_points = v_node_data[:, 0]
             id_end_points = v_node_data[:, 1:]
@@ -789,7 +790,8 @@ def optimize(v_data, v_log_root):
                 edges_points = torch.stack((start_points_c, end_points_c), dim=-2)
 
                 ncc_loss, ncc_loss_mask = evaluate_candidates(edges_points.reshape(-1, 2, 3),
-                                                              intrinsic, transformation[0], imgs[0], imgs[1])
+                                                              intrinsic, transformation[img_src_id],
+                                                              imgs[0], imgs[img_src_id+1])
                 ncc_loss[~ncc_loss_mask] = torch.inf
                 ncc_loss = ncc_loss.reshape(num_vertex, num_sample, num_max_edge_per_vertex)
                 ncc_loss[edge_valid_flag] = 0
@@ -823,8 +825,8 @@ def optimize(v_data, v_log_root):
                 if True:
                     img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
                     img12 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
-                    img21 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
-                    img22 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
+                    img21 = cv2.cvtColor(src_imgs[img_src_id], cv2.COLOR_GRAY2BGR)
+                    img22 = cv2.cvtColor(src_imgs[img_src_id], cv2.COLOR_GRAY2BGR)
 
                     start_points_c = optimized_distance[id_start_points][:, None] * v_rays_c[id_start_points]
                     start_points_c = start_points_c[:, None, :, ].tile(1, num_max_edge_per_vertex, 1)
@@ -834,7 +836,7 @@ def optimize(v_data, v_log_root):
                     all_points_c = all_points_c[~edge_valid_flag[:, 0]]
                     all_points_c = all_points_c.reshape(-1, 3)
                     p_2d1 = ((intrinsic @ all_points_c.T).T).cpu().numpy()
-                    p_2d2 = (transformation[0] @ to_homogeneous_tensor(all_points_c).T).T.cpu().numpy()
+                    p_2d2 = (transformation[img_src_id] @ to_homogeneous_tensor(all_points_c).T).T.cpu().numpy()
                     p_2d1 = p_2d1[:, :2] / p_2d1[:, 2:3]
                     p_2d2 = p_2d2[:, :2] / p_2d2[:, 2:3]
 
@@ -1096,7 +1098,7 @@ def optimize(v_data, v_log_root):
 
                 for i in range(num_points):
                     img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
-                    img21 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
+                    img21 = cv2.cvtColor(src_imgs[img_src_id], cv2.COLOR_GRAY2BGR)
                     img11[p_2d1[i, :, 1], p_2d1[i, :, 0]] = point_color
                     img21[p_2d2[i, :, 1], p_2d2[i, :, 0]] = point_color
 
@@ -1108,12 +1110,8 @@ def optimize(v_data, v_log_root):
             return ncc
 
         # img data pre
-        intrinsic1 = v_img_database[id_img1].intrinsic
-        intrinsic2 = v_img_database[1].intrinsic
-        intrinsic1 = torch.from_numpy(intrinsic1).to(device).to(torch.float32)
-        intrinsic2 = torch.from_numpy(intrinsic2).to(device).to(torch.float32)
         v_img1 = imgs[0]
-        v_img2 = imgs[1]
+        v_img2 = imgs[img_src_id+1]
 
         # optimized data pre
         optimized_points_pos = optimized_distance[:, None, None] * rays_c[:, None, :]
@@ -1187,28 +1185,14 @@ def optimize(v_data, v_log_root):
                 triangle_normal = triangle_normal.repeat_interleave(num_samples, dim=0)
 
                 ncc = bilateral_ncc(sample_points_on_face, triangle_normal,
-                                    intrinsic1, transformation[0], v_img1, v_img2).mean()
+                                    intrinsic, transformation[img_src_id], v_img1, v_img2).mean()
 
-                # # d) project sample points to img1 and img2
-                # points_2d1 = (intrinsic1 @ sample_points_on_face.T).T
-                # points_2d1 = points_2d1[:, :2] / points_2d1[:, 2:3]
-                # points_2d2 = (transformation[0] @ to_homogeneous_tensor(sample_points_on_face).T).T
-                # points_2d2 = points_2d2[:, :2] / points_2d2[:, 2:3]
-                # # sample_points_2d1.append(points_2d1)
-                # # sample_points_2d2.append(points_2d2)
-                #
-                # # get pixel
-                # sample_imgs1 = sample_img(v_img1[None, None, :], points_2d1[None, :, :])[0]
-                # sample_imgs2 = sample_img(v_img2[None, None, :], points_2d2[None, :, :])[0]
-                #
-                # # e) calculate the ncc loss
-                # ncc = ncc_matching_cost(sample_imgs1, sample_imgs2)
                 ncc_list.append(ncc)
 
                 # Visualize
                 if False:
                     img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
-                    img21 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
+                    img21 = cv2.cvtColor(src_imgs[img_src_id], cv2.COLOR_GRAY2BGR)
 
                     shape = img11.shape[:2][::-1]
                     p_2d1 = np.around(points_2d1.cpu().numpy() * shape).astype(np.int64)
@@ -1275,13 +1259,13 @@ def optimize(v_data, v_log_root):
 
                 img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
                 img12 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
-                img21 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
-                img22 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
+                img21 = cv2.cvtColor(src_imgs[img_src_id], cv2.COLOR_GRAY2BGR)
+                img22 = cv2.cvtColor(src_imgs[img_src_id], cv2.COLOR_GRAY2BGR)
 
                 all_points_c = torch.stack((start_points_c, end_points_c), dim=-2)
                 all_points_c = all_points_c.reshape(-1, 3)
                 p_2d1 = ((intrinsic @ all_points_c.T).T).cpu().numpy()
-                p_2d2 = (transformation[0] @ to_homogeneous_tensor(all_points_c).T).T.cpu().numpy()
+                p_2d2 = (transformation[img_src_id] @ to_homogeneous_tensor(all_points_c).T).T.cpu().numpy()
                 p_2d1 = p_2d1[:, :2] / p_2d1[:, 2:3]
                 p_2d2 = p_2d2[:, :2] / p_2d2[:, 2:3]
 
@@ -1312,7 +1296,7 @@ def optimize(v_data, v_log_root):
 
         save_plane(poly_abcd_list, rays_c, patch_vertexes_id)
 
-        visualize_plane(ncc, patch_vertexes_id)
+        #visualize_plane(ncc, patch_vertexes_id)
 
         def sample_depth_and_angle(depth, angle, num_sample=100):
             # sample depth
@@ -1394,6 +1378,8 @@ def optimize(v_data, v_log_root):
             # 2. process the patches in the order of ncc loss
             for i in range(len(sorted_indices)):
                 patch_id, init_ncc_loss = sorted_indices[i], sorted_values[i]
+                if init_ncc_loss <= 0.05:
+                    continue
                 isValid, intersection = intersection_of_ray_and_plane(optimized_abcd_list[patch_id].unsqueeze(0),
                                                                       rays_c_valid_patch[patch_id].unsqueeze(0))
                 assert (torch.sum(isValid) == isValid.shape[0])
@@ -1441,11 +1427,11 @@ def optimize(v_data, v_log_root):
                     triangle_normal = triangle_normal.repeat_interleave(num_samples, dim=0)
 
                     ncc_loss_points = bilateral_ncc(sample_points_on_face, triangle_normal, intrinsic,
-                                                    transformation[0], v_img1, v_img2)
+                                                    transformation[img_src_id], v_img1, v_img2)
 
                     # get the edge point of each sample patch plane
                     ncc_loss_edge, ncc_loss_mask = evaluate_candidates(edges.reshape(-1, 2, 3),
-                                                                       intrinsic, transformation[0], v_img1, v_img2)
+                                                                       intrinsic, transformation[img_src_id], v_img1, v_img2)
                     ncc_loss_edge = torch.mean(ncc_loss_edge.view(num_plane_sample+1,-1), dim=1)
 
                     # filter the points int adj patch (in img2 candidate)
@@ -1462,7 +1448,7 @@ def optimize(v_data, v_log_root):
                             adj_patch_vertex_pos.append(vertexes_pos_adj)
                         mask_points_in_adj_patch = points_in_adj_patch(sample_points_on_face,
                                                                        adj_patch_vertex_pos,
-                                                                       transformation[0])
+                                                                       transformation[img_src_id])
                         ncc_loss_points = ncc_loss_points[~mask_points_in_adj_patch]
 
                     # 5. Find best
@@ -1497,20 +1483,20 @@ def optimize(v_data, v_log_root):
                     def vis_(all_points_c_, sample_points_c_, patch_id_, cur_iter_):
                         img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
                         img12 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
-                        img21 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
-                        img22 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
+                        img21 = cv2.cvtColor(src_imgs[img_src_id], cv2.COLOR_GRAY2BGR)
+                        img22 = cv2.cvtColor(src_imgs[img_src_id], cv2.COLOR_GRAY2BGR)
 
                         shape = img11.shape[:2][::-1]
                         # vertex
                         p_2d1 = (intrinsic @ all_points_c_.T).T.cpu().numpy()
-                        p_2d2 = (transformation[0] @ to_homogeneous_tensor(all_points_c_).T).T.cpu().numpy()
+                        p_2d2 = (transformation[img_src_id] @ to_homogeneous_tensor(all_points_c_).T).T.cpu().numpy()
                         p_2d1 = p_2d1[:, :2] / p_2d1[:, 2:3]
                         p_2d2 = p_2d2[:, :2] / p_2d2[:, 2:3]
                         p_2d1 = np.around(p_2d1 * shape).astype(np.int64)
                         p_2d2 = np.around(p_2d2 * shape).astype(np.int64)
                         # sample points
                         s_2d1 = (intrinsic @ sample_points_c_.T).T.cpu().numpy()
-                        s_2d2 = (transformation[0] @ to_homogeneous_tensor(sample_points_c_).T).T.cpu().numpy()
+                        s_2d2 = (transformation[img_src_id] @ to_homogeneous_tensor(sample_points_c_).T).T.cpu().numpy()
                         s_2d1 = s_2d1[:, :2] / s_2d1[:, 2:3]
                         s_2d2 = s_2d2[:, :2] / s_2d2[:, 2:3]
                         s_2d1 = np.around(s_2d1 * shape).astype(np.int64)

@@ -3,12 +3,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy
 import torch
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import minimum_spanning_tree
 from sklearn.cluster import KMeans
 import networkx as nx
 
 import faiss
 import torch
 from tqdm import tqdm
+
+from scipy.spatial import Delaunay, distance_matrix
 
 
 def normalize(v, v_axis):
@@ -122,9 +126,9 @@ def calculate_nearest_points(v_query_points, v_target_vertices, v_id_primitives)
     return min_dis, id_primitives
 
 
-def calculate_gradients(v_query_points, v_min_dis):
-    q = v_query_points.reshape(100, 100, 2)
-    d = v_min_dis.reshape(100, 100, )
+def calculate_gradients(v_query_points, v_min_dis, v_resolution):
+    q = v_query_points.reshape(v_resolution, v_resolution, 2)
+    d = v_min_dis.reshape(v_resolution, v_resolution, )
 
     # Calculate gradients
     gy, gx = np.gradient(d, )
@@ -517,24 +521,24 @@ def fit_curve(input_x, input_y):
 def get_curve_points(coeff, input_x):
     y_ = np.stack(
         (coeff[2] * np.ones_like(input_x),
-        coeff[1] * input_x + coeff[4],
-        coeff[0] * input_x**2 + coeff[3] * input_x + coeff[5]), axis=1
+         coeff[1] * input_x + coeff[4],
+         coeff[0] * input_x ** 2 + coeff[3] * input_x + coeff[5]), axis=1
     )
     output_y = np.asarray([np.roots(item) for item in y_], dtype=np.float32)
     return output_y
 
 
 def fit_segment(input_x, input_y):
-    k,b = np.polyfit(input_x,input_y,1)
+    k, b = np.polyfit(input_x, input_y, 1)
     # y=kx+b
-    return np.array((k,-1,b))
+    return np.array((k, -1, b))
 
 
 def fit_segment_torch(batched_input):
     batched_input = torch.from_numpy(batched_input).cuda()
-    A = torch.stack((batched_input[:,:,0], torch.ones_like(batched_input[:,:,0])), dim=2)
-    kb = torch.linalg.lstsq(A, batched_input[:,:,1]).solution
-    abc = torch.stack((kb[:,0], -torch.ones_like(kb[:,0]), kb[:,1]),dim=1)
+    A = torch.stack((batched_input[:, :, 0], torch.ones_like(batched_input[:, :, 0])), dim=2)
+    kb = torch.linalg.lstsq(A, batched_input[:, :, 1]).solution
+    abc = torch.stack((kb[:, 0], -torch.ones_like(kb[:, 0]), kb[:, 1]), dim=1)
     # y=kx+b
     return abc
 
@@ -566,8 +570,8 @@ def curve_clustering(v_points, v_dis, v_gradient, v_gd, target_vertices):
     target_id1 = 1037
     target_id2 = 1047
 
-    input_x = all_surface_points[[target_id1,target_id2],:,0].reshape(-1)
-    input_y = all_surface_points[[target_id1,target_id2],:,1].reshape(-1)
+    input_x = all_surface_points[[target_id1, target_id2], :, 0].reshape(-1)
+    input_y = all_surface_points[[target_id1, target_id2], :, 1].reshape(-1)
 
     coeff = fit_segment(input_x, input_y)
     # coeff = fit_curve(input_x, input_y)
@@ -575,13 +579,13 @@ def curve_clustering(v_points, v_dis, v_gradient, v_gd, target_vertices):
 
     output_y = get_segment_points(coeff, input_x)
 
-    plt.xlim(-0.5,0.5)
-    plt.ylim(-0.5,0.5)
+    plt.xlim(-0.5, 0.5)
+    plt.ylim(-0.5, 0.5)
     # plt.scatter(all_p[target_id1,:,0],all_p[target_id1,:,1], c=(1,0,0), s=1)
-    plt.scatter(input_x,input_y, c=(0,1,0),  s=2)
+    plt.scatter(input_x, input_y, c=(0, 1, 0), s=2)
     # plt.scatter(input_x[:,None].repeat(2,axis=1).reshape(-1),output_y.reshape(-1), c=(0,0,1),  s=2)
-    plt.scatter(input_x,output_y, c=(0,0,1),  s=2)
-    plt.scatter(p0.reshape(-1,2)[target_id1,0],p0.reshape(-1,2)[target_id1,1], c=(0,0,1),  s=2)
+    plt.scatter(input_x, output_y, c=(0, 0, 1), s=2)
+    plt.scatter(p0.reshape(-1, 2)[target_id1, 0], p0.reshape(-1, 2)[target_id1, 1], c=(0, 0, 1), s=2)
     plt.show(block=True)
     return
 
@@ -616,13 +620,13 @@ def segment_clustering(v_points, v_dis, v_gradient, v_gd, target_vertices):
     coeff = results[0]
 
     x = all_surface_points[target_id, :, 0]
-    y = -(coeff[0]*x-coeff[2])/coeff[1]
+    y = -(coeff[0] * x - coeff[2]) / coeff[1]
 
-    plt.xlim(-0.5,0.5)
-    plt.ylim(-0.5,0.5)
-    plt.scatter(all_p[target_id,:,0],all_p[target_id,:,1], c=(1,0,0), s=1)
-    plt.scatter(all_surface_points[target_id,:,0],all_surface_points[target_id,:,1], c=(0,1,0),  s=1)
-    plt.scatter(p0.reshape(-1,2)[target_id,0],p0.reshape(-1,2)[target_id,1], c=(0,0,1),  s=2)
+    plt.xlim(-0.5, 0.5)
+    plt.ylim(-0.5, 0.5)
+    plt.scatter(all_p[target_id, :, 0], all_p[target_id, :, 1], c=(1, 0, 0), s=1)
+    plt.scatter(all_surface_points[target_id, :, 0], all_surface_points[target_id, :, 1], c=(0, 1, 0), s=1)
+    plt.scatter(p0.reshape(-1, 2)[target_id, 0], p0.reshape(-1, 2)[target_id, 1], c=(0, 0, 1), s=2)
     plt.show(block=True)
     return
 
@@ -668,21 +672,31 @@ def clustering(v_points, v_dis, v_gradient, v_gd, target_vertices, v_viz=False):
 
 
 def sample_edge(v_points, num_per_edge_m=100):
-    v_segment = v_points[:,1]-v_points[:,0]
+    v_segment = v_points[:, 1] - v_points[:, 0]
     length = np.linalg.norm(v_segment + 1e-6, axis=1)
     num_edge_points = np.clip((length * num_per_edge_m).astype(np.int64), 1, 2000)
-    num_edge_points_ = np.roll(num_edge_points,1)
+    num_edge_points_ = np.roll(num_edge_points, 1)
     num_edge_points_[0] = 0
     sampled_edge_points = np.arange(num_edge_points.sum()) - num_edge_points_.cumsum(axis=0).repeat(num_edge_points)
     sampled_edge_points = sampled_edge_points / ((num_edge_points - 1 + 1e-8).repeat(num_edge_points))
     sampled_edge_points = v_segment.repeat(num_edge_points, axis=0) * sampled_edge_points[:, None] \
-                          + v_points[:,0].repeat(num_edge_points, axis=0)
+                          + v_points[:, 0].repeat(num_edge_points, axis=0)
     return num_edge_points, sampled_edge_points
+
+
+def find_level_set(v_query_points, v_dis, v_g, v_specific_distance=None, v_resolution=100):
+    v_query_points + v_g
+
+    if v_specific_distance is not None:
+        return v_query_points[np.where(np.abs(v_dis - v_specific_distance) < 0.005)]
+    else:
+        raise
+    pass
+
 
 def generate_training_data():
     query_points = generate_query_points()
     target_vertices, id_primitives = generate_test_shape2()
-
 
     kdtree = faiss.IndexFlatL2(2)
     res = faiss.StandardGpuResources()
@@ -690,55 +704,163 @@ def generate_training_data():
     kdtree.add(target_vertices.astype(np.float32))
 
     # The nearest surface points of all query points
-    nearest_points, nearest_ids = kdtree.search(query_points, 1)
-    nearest_surface_points = target_vertices[nearest_ids[:,0],]
+    squared_dis, nearest_ids = kdtree.search(query_points, 1)
+    nearest_surface_points = target_vertices[nearest_ids[:, 0],]
 
+    udf = np.sqrt(squared_dis[:, 0])
+
+    # Visualize the target shape
+    if False:
+        _, axes = plt.subplots(1, 2)
+        axes[0].scatter(target_vertices[:, 0], target_vertices[:, 1], s=1, c=(1, 0, 0))
+        axes[0].set_title("Target shape")
+        axes[0].axis('scaled')
+        axes[0].set_xlim(-0.5, 0.5)
+        axes[0].set_ylim(-0.5, 0.5)
+        axes[0].tick_params(left=False, right=False, labelleft=False,
+                            labelbottom=False, bottom=False)
+        axes[1].scatter(query_points[:, 0], query_points[:, 1], c=udf)
+        axes[1].set_title("UDF")
+        axes[1].axis('scaled')
+        axes[1].set_xlim(-0.5, 0.5)
+        axes[1].set_ylim(-0.5, 0.5)
+        axes[1].tick_params(left=False, right=False, labelleft=False,
+                            labelbottom=False, bottom=False)
+
+        plt.show(block=True)
+
+    g, _, _, _ = calculate_gradients(query_points, udf, v_resolution=100)
+    g = normalize(g, v_axis=-1)
+    coords_x = query_points.reshape(100, 100, 2)[0, :, 0]
+
+    d_inter = scipy.interpolate.RegularGridInterpolator((coords_x, coords_x),
+                                                        udf.reshape(100, 100, 1).transpose([1, 0, 2]),
+                                                        bounds_error=False, fill_value=0)
+    g_inter = scipy.interpolate.RegularGridInterpolator((coords_x, coords_x),
+                                                        g.transpose([1, 0, 2]),
+                                                        bounds_error=False, fill_value=0)
+
+    level_set_values = [0.01, 0.02, 0.03, 0.04, 0.05]
+    level_set_values = [0.03,]
+    level_set_colors = np.random.random((len(level_set_values), 3))
+    for i_level, level_set_value in enumerate(level_set_values):
+        # 1. Get all the level set points
+        level_set_points = query_points + g.reshape(-1, 2) * (udf - level_set_value)[:, None]
+        for i in range(5):
+            d = d_inter(level_set_points)
+            gradient_direction = normalize(g_inter(level_set_points), v_axis=-1)
+            level_set_points = level_set_points + gradient_direction * (d - level_set_value)
+
+        # Filter out
+        level_set_points = level_set_points[np.abs(d_inter(level_set_points)[:, 0] - level_set_value) < 1e-6]
+
+        # 2. Subsample the level set points
+        grid_size = 0.01
+        x_min, y_min = -0.5, -0.5
+        x_max, y_max = +0.5, +0.5
+        grid_width = int(np.ceil((x_max - x_min) / grid_size))
+        grid_height = int(np.ceil((y_max - y_min) / grid_size))
+
+        i_indices = ((level_set_points[:, 1] - y_min) / grid_size).astype(int)
+        j_indices = ((level_set_points[:, 0] - x_min) / grid_size).astype(int)
+
+        grid_sum = np.zeros((grid_height, grid_width, 2))
+        grid_num = np.zeros((grid_height, grid_width), dtype=np.int64)
+        np.add.at(grid_num, (i_indices, j_indices), 1)
+        np.add.at(grid_sum, (i_indices, j_indices), level_set_points)
+        grid_mean = grid_sum / grid_num[:, :, None]
+
+        # 3. Subsample the level set points
+        grid_coords = grid_mean[~np.isnan(grid_mean).all(axis=2)]
+
+        gradient_direction = normalize(g_inter(grid_coords), v_axis=-1)
+        distances = distance_matrix(grid_coords, grid_coords)
+        for id_point in tqdm(range(distances.shape[0])):
+            distances[id_point][distances[id_point] > 0.02] = np.inf
+            dot_g = (gradient_direction[id_point] * gradient_direction).sum(axis=-1)
+            distances[id_point][dot_g < 0] = np.inf
+
+        # 4. Build the graph
+        adj = distances.copy()
+        adj[adj != np.inf] = 1
+        adj[adj == np.inf] = 0
+        np.fill_diagonal(adj, 0)
+        graph = nx.from_numpy_array(adj)
+
+        components = list(nx.connected_components(graph))
+        component_colors = np.random.random((len(components), 3))
+        for i_component, component in enumerate(components):
+            # Create a subgraph for the current component
+            subgraph = graph.subgraph(component)
+            for edge in subgraph.edges():
+                # plt.plot(grid_coords[edge, 0], grid_coords[edge, 1], '-', c=component_colors[i_component])
+                plt.plot(grid_coords[edge, 0], grid_coords[edge, 1], '-', c=level_set_colors[i_level])
+
+        # for edge in graph.edges():
+        #     plt.plot(grid_coords[edge, 0], grid_coords[edge, 1], 'r-')
+        plt.scatter(grid_coords[:, 0], grid_coords[:, 1], s=1)
+        plt.title("d={}".format(level_set_value))
+        # plt.show(block=True)
+    plt.axis('scaled')
+    plt.xlim(-0.5, 0.5)
+    plt.ylim(-0.5, 0.5)
+    plt.tick_params(left=False, right=False, labelleft=False,
+                        labelbottom=False, bottom=False)
+    plt.show(block=True)
     # nearest_points_for_target_points_ = kdtree.search(target_vertices, 10)
     # nearest_points_for_target_points = target_vertices[nearest_points_for_target_points_[1]]
     # abcs = fit_segment_torch(nearest_points_for_target_points)
 
+    level_set_points = find_level_set(query_points, udf, g, 0.05, 100)
+
+    plt.xlim(-0.5, 0.5)
+    plt.ylim(-0.5, 0.5)
+    plt.scatter(level_set_points[:, 0], level_set_points[:, 1], s=1)
+    plt.show(block=True)
+
     num_queries = query_points.shape[0]
     all_combinations = np.stack(
-        np.meshgrid(np.arange(0,num_queries),np.arange(0,num_queries),indexing="xy"),
-        axis=-1).reshape(-1,2)
-    all_combinations=all_combinations[all_combinations[:,0]!=all_combinations[:,1]]
+        np.meshgrid(np.arange(0, num_queries), np.arange(0, num_queries), indexing="xy"),
+        axis=-1).reshape(-1, 2)
+    all_combinations = all_combinations[all_combinations[:, 0] != all_combinations[:, 1]]
 
     num_pair = all_combinations.shape[0]
     selected_points = query_points[all_combinations]
     selected_nearest_surface_points = nearest_surface_points[all_combinations]
 
     batch_size = 100000
-    num_batch = int(np.ceil(num_pair/batch_size))
+    num_batch = int(np.ceil(num_pair / batch_size))
     result_similarities = []
     for i in tqdm(range(num_batch)):
         times = [0] * 10
         cur = time.time()
         id_start = batch_size * i
-        id_end = batch_size * (i+1)
+        id_end = batch_size * (i + 1)
         num_edge_points, sampled_edge_points = sample_edge(selected_nearest_surface_points[id_start:id_end])
-        times[0]+=time.time()-cur
+        times[0] += time.time() - cur
         cur = time.time()
-        udf = kdtree.search(sampled_edge_points, 1)[0][:,0]
-        times[1]+=time.time()-cur
+        udf = kdtree.search(sampled_edge_points, 1)[0][:, 0]
+        times[1] += time.time() - cur
         cur = time.time()
-        result = np.bincount(np.arange(num_edge_points.shape[0],dtype=np.int64).repeat(num_edge_points),
+        result = np.bincount(np.arange(num_edge_points.shape[0], dtype=np.int64).repeat(num_edge_points),
                              weights=udf)
         result = result / num_edge_points
-        times[2]+=time.time()-cur
+        times[2] += time.time() - cur
         cur = time.time()
         result_similarities.append(result)
 
         if False:
-            result=result.reshape(100,100)
-            plt.scatter(query_points[:,0],query_points[:,1],c=result)
-            plt.scatter(target_vertices[:,0],target_vertices[:,1],c=(1,0,0),s=1)
-            plt.xlim(-0.5,0.5)
-            plt.ylim(-0.5,0.5)
+            result = result.reshape(100, 100)
+            plt.scatter(query_points[:, 0], query_points[:, 1], c=result)
+            plt.scatter(target_vertices[:, 0], target_vertices[:, 1], c=(1, 0, 0), s=1)
+            plt.xlim(-0.5, 0.5)
+            plt.ylim(-0.5, 0.5)
             plt.colorbar()
             plt.show()
         pass
 
     pass
+
 
 if __name__ == '__main__':
     print("Start to construct dataset")

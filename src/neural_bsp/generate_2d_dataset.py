@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy
@@ -7,6 +8,8 @@ import networkx as nx
 
 import faiss
 import torch
+from tqdm import tqdm
+
 
 def normalize(v, v_axis):
     norm = np.linalg.norm(v, axis=v_axis)
@@ -663,26 +666,77 @@ def clustering(v_points, v_dis, v_gradient, v_gd, target_vertices, v_viz=False):
                     G.add_edge(idx, (y + 1) * side + (x + 1))
     return
 
+
+def sample_edge(v_points, num_per_edge_m=100):
+    v_segment = v_points[:,1]-v_points[:,0]
+    length = np.linalg.norm(v_segment + 1e-6, axis=1)
+    num_edge_points = np.clip((length * num_per_edge_m).astype(np.int64), 1, 2000)
+    num_edge_points_ = np.roll(num_edge_points,1)
+    num_edge_points_[0] = 0
+    sampled_edge_points = np.arange(num_edge_points.sum()) - num_edge_points_.cumsum(axis=0).repeat(num_edge_points)
+    sampled_edge_points = sampled_edge_points / ((num_edge_points - 1 + 1e-8).repeat(num_edge_points))
+    sampled_edge_points = v_segment.repeat(num_edge_points, axis=0) * sampled_edge_points[:, None] \
+                          + v_points[:,0].repeat(num_edge_points, axis=0)
+    return num_edge_points, sampled_edge_points
+
 def generate_training_data():
     query_points = generate_query_points()
     target_vertices, id_primitives = generate_test_shape2()
 
+
     kdtree = faiss.IndexFlatL2(2)
+    res = faiss.StandardGpuResources()
+    kdtree = faiss.index_cpu_to_gpu(res, 0, kdtree)
     kdtree.add(target_vertices.astype(np.float32))
 
+    # The nearest surface points of all query points
     nearest_points, nearest_ids = kdtree.search(query_points, 1)
+    nearest_surface_points = target_vertices[nearest_ids[:,0],]
 
-    nearest_points_for_target_points_ = kdtree.search(target_vertices, 10)
-    nearest_points_for_target_points = target_vertices[nearest_points_for_target_points_[1]]
-    abcs = fit_segment_torch(nearest_points_for_target_points)
+    # nearest_points_for_target_points_ = kdtree.search(target_vertices, 10)
+    # nearest_points_for_target_points = target_vertices[nearest_points_for_target_points_[1]]
+    # abcs = fit_segment_torch(nearest_points_for_target_points)
 
     num_queries = query_points.shape[0]
-    all_combinations = torch.combinations(torch.arange(num_queries), r=2, with_replacement=True)
+    all_combinations = np.stack(
+        np.meshgrid(np.arange(0,num_queries),np.arange(0,num_queries),indexing="xy"),
+        axis=-1).reshape(-1,2)
     all_combinations=all_combinations[all_combinations[:,0]!=all_combinations[:,1]]
-    query_points = torch.from_numpy(query_points).cuda()
 
+    num_pair = all_combinations.shape[0]
     selected_points = query_points[all_combinations]
+    selected_nearest_surface_points = nearest_surface_points[all_combinations]
 
+    batch_size = 100000
+    num_batch = int(np.ceil(num_pair/batch_size))
+    result_similarities = []
+    for i in tqdm(range(num_batch)):
+        times = [0] * 10
+        cur = time.time()
+        id_start = batch_size * i
+        id_end = batch_size * (i+1)
+        num_edge_points, sampled_edge_points = sample_edge(selected_nearest_surface_points[id_start:id_end])
+        times[0]+=time.time()-cur
+        cur = time.time()
+        udf = kdtree.search(sampled_edge_points, 1)[0][:,0]
+        times[1]+=time.time()-cur
+        cur = time.time()
+        result = np.bincount(np.arange(num_edge_points.shape[0],dtype=np.int64).repeat(num_edge_points),
+                             weights=udf)
+        result = result / num_edge_points
+        times[2]+=time.time()-cur
+        cur = time.time()
+        result_similarities.append(result)
+
+        if False:
+            result=result.reshape(100,100)
+            plt.scatter(query_points[:,0],query_points[:,1],c=result)
+            plt.scatter(target_vertices[:,0],target_vertices[:,1],c=(1,0,0),s=1)
+            plt.xlim(-0.5,0.5)
+            plt.ylim(-0.5,0.5)
+            plt.colorbar()
+            plt.show()
+        pass
 
     pass
 

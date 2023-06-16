@@ -6,8 +6,9 @@ multi_thread="-j20"
 
 ROOT_DIR=$PWD
 
-pip install numba PyMCubes pytorch-lightning hydra-core shapely scikit-image matplotlib tensorboard plyfile opencv-python opencv-contrib-python ternausnet inplace_abn einops open3d
-conda install -y -c intel mkl mkl-devel mkl-static mkl-include
+conda install -y -c intel -c pyg mkl mkl-devel mkl-static mkl-include pyg
+pip install numba PyMCubes pytorch-lightning hydra-core shapely scikit-image matplotlib tensorboard plyfile opencv-python opencv-contrib-python ternausnet inplace_abn einops open3d ray
+pip install torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cu118.html
 
 echo "======================================"
 echo "Start to build tiny-cuda-nn"

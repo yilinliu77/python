@@ -57,6 +57,8 @@ from src.neural_recon.colmap_io import read_dataset, Image, Point_3d, check_visi
 from scipy.spatial import Delaunay
 from math import ceil
 
+from src.neural_recon.phase_no_grad_edge_util import Collision_checker
+
 
 def sample_new_distance(v_original_distances, num_sample=100, scale_factor=1.6, v_max=10, ):
     num_vertices = v_original_distances.shape[0]
@@ -342,7 +344,7 @@ def evaluate_candidates(v_edge_points, v_intrinsic, v_transformation,
     num_edge, _, _ = v_edge_points.shape
 
     num_horizontal = torch.clamp(
-        (torch.linalg.norm(v_edge_points[:, 0] - v_edge_points[:, 1], dim=-1) / 0.01).to(torch.long),
+        (torch.linalg.norm(v_edge_points[:, 0] - v_edge_points[:, 1], dim=-1) / 0.001).to(torch.long),
         2, 1000)
 
     points_2d1 = (v_intrinsic @ v_edge_points.view(-1, 3).T).T
@@ -676,6 +678,9 @@ def optimize(v_data, v_log_root):
         imgs = torch.from_numpy(np.concatenate(([ref_img], src_imgs), axis=0)).to(device).to(torch.float32) / 255.
         # transformation store the transformation matrix from ref_img to src_imgs
         transformation = torch.from_numpy(transformation).to(device).to(torch.float32)
+        c1_2_c2 = torch.from_numpy(
+            v_img_database[int(id_src_imgs[0])].extrinsic @ np.linalg.inv(v_img_database[id_img1].extrinsic)
+        ).to(device).to(torch.float32)
         intrinsic = torch.from_numpy(intrinsic).to(device).to(torch.float32)
 
         # Vertex
@@ -1296,7 +1301,7 @@ def optimize(v_data, v_log_root):
 
         save_plane(poly_abcd_list, rays_c, patch_vertexes_id)
 
-        #visualize_plane(ncc, patch_vertexes_id)
+        visualize_plane(ncc, patch_vertexes_id)
 
         def sample_depth_and_angle(depth, angle, num_sample=100):
             # sample depth
@@ -1363,10 +1368,10 @@ def optimize(v_data, v_log_root):
                 mask = torch.logical_or(mask, ~points_outside_polygon(sample_points, polygon_points, transformation_))
             return mask
 
-        def optimize_plane_hypothesis(poly_abcd_list, ncc, v_patches_list, v_dual_graph):
+        def optimize_plane_hypothesis(poly_abcd_list, ncc, v_patches_list, v_dual_graph, v_c1_2_c2):
             # 1. get the intersection of the fitting plane and ray_c
-            rays_c_valid_patch = [v_patches_list[i]['ray_c'] for i in range(len(v_patches_list))]
-            rays_c_valid_patch = torch.tensor(rays_c_valid_patch).to(device).to(torch.float32)
+            rays_c_valid_patch = np.stack([v_patches_list[i]['ray_c'] for i in range(len(v_patches_list))],axis=0)
+            rays_c_valid_patch = torch.from_numpy(rays_c_valid_patch).to(device).to(torch.float32)
             # isValid, intersection = intersection_of_ray_and_plane(poly_abcd_list, rays_c_valid_patch)
             # assert (torch.sum(isValid) == isValid.shape[0])
             # depth = torch.linalg.norm(intersection, dim=-1)
@@ -1374,6 +1379,7 @@ def optimize(v_data, v_log_root):
 
             sorted_values, sorted_indices = torch.sort(ncc, descending=False)
 
+            collision_checker = Collision_checker()
             optimized_abcd_list = poly_abcd_list.clone()
             # 2. process the patches in the order of ncc loss
             for i in range(len(sorted_indices)):
@@ -1432,33 +1438,54 @@ def optimize(v_data, v_log_root):
                     # get the edge point of each sample patch plane
                     ncc_loss_edge, ncc_loss_mask = evaluate_candidates(edges.reshape(-1, 2, 3),
                                                                        intrinsic, transformation[img_src_id], v_img1, v_img2)
-                    ncc_loss_edge = torch.mean(ncc_loss_edge.view(num_plane_sample+1,-1), dim=1)
+                    ncc_loss_edge = ncc_loss_edge.view(num_plane_sample+1,-1)
+                    ncc_loss_edge = torch.mean(ncc_loss_edge, dim=1)
 
                     # filter the points int adj patch (in img2 candidate)
-                    filter_points = False
+                    filter_points = True
                     if filter_points:
-                        adj_patch_id_list = [edge[1] for edge in list(v_dual_graph.edges(int(patch_id)))]
-                        adj_patch_vertex_pos = []
-                        for adj_patch_id in adj_patch_id_list:
-                            vertexes_id_adj = torch.tensor(patch_vertexes_id[adj_patch_id]).to(device).to(torch.long)
-                            vertexes_ray_adj = rays_c[vertexes_id_adj]
-                            valid_mask, vertexes_pos_adj = intersection_of_ray_and_plane(
-                                poly_abcd_list[patch_id].tile(vertexes_ray_adj.shape[0], 1),
-                                vertexes_ray_adj)
-                            adj_patch_vertex_pos.append(vertexes_pos_adj)
-                        mask_points_in_adj_patch = points_in_adj_patch(sample_points_on_face,
-                                                                       adj_patch_vertex_pos,
-                                                                       transformation[img_src_id])
-                        ncc_loss_points = ncc_loss_points[~mask_points_in_adj_patch]
+                        sample_points_on_face_c2 = (v_c1_2_c2 @ to_homogeneous_tensor(
+                            sample_points_on_face).transpose(0, 1)).transpose(0, 1)[:, :3]
+                        point_mask = collision_checker.check_ray(
+                            torch.zeros_like(sample_points_on_face_c2),
+                            sample_points_on_face_c2)
+                        edges_shape = edges.shape
+                        edges_c2 = (v_c1_2_c2 @ to_homogeneous_tensor(
+                            edges.reshape(-1, 3)).transpose(0, 1)).transpose(0, 1)[:, :3]
+                        edge_mask = collision_checker.check_ray(
+                            torch.zeros_like(edges_c2),
+                            edges_c2).reshape(*edges_shape[:-1])
+                        edge_mask = torch.all(edge_mask, dim=-1)
 
+
+                        # adj_patch_id_list = [edge[1] for edge in list(v_dual_graph.edges(int(patch_id)))]
+                        # adj_patch_vertex_pos = []
+                        # for adj_patch_id in adj_patch_id_list:
+                        #     vertexes_id_adj = torch.tensor(patch_vertexes_id[adj_patch_id]).to(device).to(torch.long)
+                        #     vertexes_ray_adj = rays_c[vertexes_id_adj]
+                        #     valid_mask, vertexes_pos_adj = intersection_of_ray_and_plane(
+                        #         poly_abcd_list[patch_id].tile(vertexes_ray_adj.shape[0], 1),
+                        #         vertexes_ray_adj)
+                        #     adj_patch_vertex_pos.append(vertexes_pos_adj)
+                        # mask_points_in_adj_patch = points_in_adj_patch(sample_points_on_face,
+                        #                                                adj_patch_vertex_pos,
+                        #                                                transformation[0])
+                        # ncc_loss_points = ncc_loss_points[~mask_points_in_adj_patch]
+                        ncc_loss_points = ncc_loss_points[~point_mask]
+                        num_samples = scatter_add((~point_mask).to(torch.int64),
+                                                  torch.arange(num_samples.shape[0], device=device)
+                                                  .repeat_interleave(num_samples))
+
+                    ncc_loss_edge = torch.mean(ncc_loss_edge.view(num_plane_sample + 1, -1), dim=1)
                     # 5. Find best
                     points_to_tri = torch.arange(num_samples.shape[0]).to(device).repeat_interleave(num_samples)
                     ncc_loss_triangle = scatter_mean(ncc_loss_points, points_to_tri, dim=0)
                     if filter_points:
-                        points_to_tri = points_to_tri[~mask_points_in_adj_patch]
-                        tri_idx = torch.arange(num_samples.shape[0]).to(device)
-                        missing_tri_idx = tri_idx[~torch.isin(tri_idx, torch.unique(points_to_tri))]
-                        ncc_loss_triangle[missing_tri_idx] = 0
+                        pass
+                        # points_to_tri = points_to_tri[~mask_points_in_adj_patch]
+                        # tri_idx = torch.arange(num_samples.shape[0]).to(device)
+                        # missing_tri_idx = tri_idx[~torch.isin(tri_idx, torch.unique(points_to_tri))]
+                        # ncc_loss_triangle[missing_tri_idx] = 0
                     ncc_loss_triangle = ncc_loss_triangle.view(num_plane_sample + 1, -1)
                     ncc_loss_patch = torch.mean(ncc_loss_triangle, dim=1)
                     ncc_loss_patch = ncc_loss_patch + ncc_loss_edge
@@ -1528,7 +1555,8 @@ def optimize(v_data, v_log_root):
                         sample_points_c_init = sample_points_on_face[0:num_sample_points[0]]
                         vis_(all_points_c_init, sample_points_c_init, patch_id, cur_iter)
 
-                    vis_(all_points_c, sample_points_c, patch_id, cur_iter + 1)
+                    vis_(all_points_c, sample_points_c, patch_id, cur_iter
+                         + 1)
 
                     if ncc_loss_optimized <= 0.01 or cur_iter >= 5:
                         print(
@@ -1537,11 +1565,21 @@ def optimize(v_data, v_log_root):
                     else:
                         print("patch{:2d} iter={:2d}: ncc={:.2f}".format(patch_id, cur_iter + 1, ncc_loss_optimized))
                         cur_iter = cur_iter + 1
-                    pass
+
+                # Update triangles
+                final_edge_points = all_points_c[torch.tensor(edges_idx)]
+                final_centroid = torch.mean(all_points_c, dim=0)
+                final_triangles = torch.cat(
+                    (final_edge_points, final_centroid[None, None, :].tile(num_vertex, 1, 1)), dim=1)
+
+                final_triangles_c2 = (v_c1_2_c2 @ to_homogeneous_tensor(
+                    final_triangles).transpose(1,2)).transpose(1,2)[:,:,:3]
+                collision_checker.add_triangles(final_triangles_c2)
             return optimized_abcd_list
 
         # Optimize plane hypothesis based on: 1) NCC; 2) Distance to the optimized vertices
-        optimized_abcd_list = optimize_plane_hypothesis(poly_abcd_list, ncc, patches_list, graph.graph["dual_graph"])
+        optimized_abcd_list = optimize_plane_hypothesis(poly_abcd_list, ncc, patches_list, graph.graph["dual_graph"],
+                                                        c1_2_c2)
 
         save_plane(optimized_abcd_list, rays_c, patch_vertexes_id, file_path="output/optimized.ply")
         return
@@ -1592,7 +1630,8 @@ def read_graph(v_filename, img_size):
             center_point_2d += graph.nodes[face[id_start]]["pos_2d"]
         center_point_2d /= len(face)
 
-    graph.graph["face_flags"] = face_flags
+    graph.graph["face_flags"] = np.array(face_flags, dtype=bool)
+
     return graph
 
 

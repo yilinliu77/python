@@ -1802,9 +1802,31 @@ def optimize_plane(v_data, v_log_root):
 
         initialized_planes = initialize_patches(rays_c, ray_distances_c, vertex_id_per_face) # (num_patch, 4)
 
+        def vectors_to_angles(normal_vectors):
+            normal_vectors = normal_vectors / torch.norm(normal_vectors, dim=1, keepdim=True)
+            x, y, z = normal_vectors.unbind(dim=1)
+            phi = torch.atan2(y, x)
+            theta = torch.acos(z)
+            return torch.stack([phi, theta], dim=1)
+
+        def angles_to_vectors(angles):
+            phi, theta = angles.unbind(dim=1)
+            x = torch.sin(theta) * torch.cos(phi)
+            y = torch.sin(theta) * torch.sin(phi)
+            z = torch.cos(theta)
+            return torch.stack([x, y, z], dim=1)
+
+        def sample_new_planes(v_original_distances, v_dual_graph):
+            id_neighbour_patches = [list(v_dual_graph[id_node].keys()) for id_node in v_dual_graph.nodes]
+
+            plane_angles = vectors_to_angles(v_original_distances[:,:3])
+
+
+            return
+
         def optimize_planes(initialized_planes, rays_c, dual_graph):
             # 1. Sample new hypothesis from 1) propagation 2) random perturbation
-            sample_new_planes(initialized_planes, ) # [15, 100, 4]
+            sample_new_planes(initialized_planes, dual_graph) # [15, 100, 4]
 
             # 2. Compute validity from 1) ncc 2) edge fitness
             # compute ncc

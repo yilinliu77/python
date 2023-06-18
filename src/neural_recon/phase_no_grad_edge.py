@@ -62,7 +62,7 @@ from src.neural_recon.phase_no_grad_edge_util import Collision_checker
 
 def sample_new_distance(v_original_distances,
                         num_sample=100, scale_factor=1.6,
-                        v_max=10, ):
+                        v_max=10., v_min=0.):
     num_vertices = v_original_distances.shape[0]
     device = v_original_distances.device
     # (B, S)
@@ -78,7 +78,7 @@ def sample_new_distance(v_original_distances,
             device=device,
             dtype=t_.dtype)
         new_distance[~sample_distance_mask] = a
-        sample_distance_mask = torch.logical_and(new_distance > 0, new_distance < v_max)
+        sample_distance_mask = torch.logical_and(new_distance > v_min, new_distance < v_max)
     # (B, (S + 1))
     new_distance = torch.cat((v_original_distances[:, None], new_distance), dim=1)
     return new_distance
@@ -1833,16 +1833,10 @@ def optimize_plane(v_data, v_log_root):
 
         def sample_depth_and_angle(depth, angle, num_sample=100):
             # sample depth
-            sample_depth = sample_new_distance(depth)
-
-            # sample angle
-            sample_angle = torch.normal(angle[:,None,:].repeat(1, num_sample, 1),
-                                        torch.full_like(angle, 2 * math.pi / 6)[:,None,:].repeat(1, num_sample, 1))
-            # sample_angle = torch.clamp(sample_angle, min=-2 * math.pi, max=2 * math.pi)
-            # add itself
-            # sample_depth = torch.cat((depth[None, :], sample_depth), dim=0)
-            # sample_angle = torch.cat((angle, sample_angle), dim=0)
-            return sample_depth, sample_angle
+            sample_depths = sample_new_distance(depth, num_sample)
+            sample_angles = sample_new_distance(angle.reshape(-1), num_sample, scale_factor=torch.pi/3, v_max=100, v_min=-100)
+            sample_angles = sample_angles.reshape(depth.shape[0], 2, num_sample) % (2*torch.pi)
+            return sample_depths, sample_angles.permute(0,2,1)
 
         def sample_new_planes(v_original_parameters, v_centroid_rays_c, v_dual_graph):
             id_neighbour_patches = [list(v_dual_graph[id_node].keys()) for id_node in v_dual_graph.nodes]

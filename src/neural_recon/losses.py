@@ -334,6 +334,9 @@ def loss4(sample_imgs1, sample_imgs2, v_num_points):
     times[0] += time.time() - cur_time
     cur_time = time.time()
 
+    # A_zero_mean = (sample_imgs1 - avg_pixel_color1.repeat_interleave(v_num_points,dim=0))
+    # B_zero_mean = (sample_imgs2 - avg_pixel_color2.repeat_interleave(v_num_points,dim=1))
+
     A_zero_mean = (sample_imgs1 - avg_pixel_color1.repeat_interleave(v_num_points,dim=0)) * spatial_weights[:,None]
     B_zero_mean = (sample_imgs2 - avg_pixel_color2.repeat_interleave(v_num_points,dim=1)) * spatial_weights[None,:,None]
 

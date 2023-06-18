@@ -60,7 +60,9 @@ from math import ceil
 from src.neural_recon.phase_no_grad_edge_util import Collision_checker
 
 
-def sample_new_distance(v_original_distances, num_sample=100, scale_factor=1.6, v_max=10, ):
+def sample_new_distance(v_original_distances,
+                        num_sample=100, scale_factor=1.6,
+                        v_max=10, ):
     num_vertices = v_original_distances.shape[0]
     device = v_original_distances.device
     # (B, S)
@@ -1774,6 +1776,8 @@ def optimize_plane(v_data, v_log_root):
 
         dual_graph = graph.graph["dual_graph"]
         vertex_id_per_face = [dual_graph.nodes[id_node]["id_vertex"] for id_node in dual_graph.nodes]
+        centroid_rays_c = torch.from_numpy(
+            np.stack([dual_graph.nodes[id_node]["ray_c"] for id_node in dual_graph], axis=0)).to(device)
 
         # 2. Initialize planes for each patch
         num_patch = len(dual_graph.nodes)
@@ -1816,17 +1820,44 @@ def optimize_plane(v_data, v_log_root):
             z = torch.cos(theta)
             return torch.stack([x, y, z], dim=1)
 
-        def sample_new_planes(v_original_distances, v_dual_graph):
+        def intersection_of_ray_and_plane(planes, rays_direction):
+            # planes: n*4 ray: n*3
+            n = planes[:, :3]
+            d = planes[:, 3]
+            denominator = torch.sum(n * rays_direction, dim=1)
+            t = -d / torch.sum(n * rays_direction, dim=1)
+            intersection_points = torch.unsqueeze(t, 1) * rays_direction
+            valid_intersection = (denominator != 0) & (t >= 0)
+            # n * _
+            return valid_intersection, intersection_points
+
+        def sample_depth_and_angle(depth, angle, num_sample=100):
+            # sample depth
+            sample_depth = sample_new_distance(depth)
+
+            # sample angle
+            sample_angle = torch.normal(angle[:,None,:].repeat(1, num_sample, 1),
+                                        torch.full_like(angle, 2 * math.pi / 6)[:,None,:].repeat(1, num_sample, 1))
+            # sample_angle = torch.clamp(sample_angle, min=-2 * math.pi, max=2 * math.pi)
+            # add itself
+            # sample_depth = torch.cat((depth[None, :], sample_depth), dim=0)
+            # sample_angle = torch.cat((angle, sample_angle), dim=0)
+            return sample_depth, sample_angle
+
+        def sample_new_planes(v_original_parameters, v_centroid_rays_c, v_dual_graph):
             id_neighbour_patches = [list(v_dual_graph[id_node].keys()) for id_node in v_dual_graph.nodes]
 
-            plane_angles = vectors_to_angles(v_original_distances[:,:3])
+            plane_angles = vectors_to_angles(v_original_parameters[:, :3])
+            initial_centroids = intersection_of_ray_and_plane(v_original_parameters, v_centroid_rays_c)[1]
+            init_depth = torch.linalg.norm(initial_centroids, dim=-1)
 
+            sample_depth, sample_angle = sample_depth_and_angle(init_depth, plane_angles, 100)
 
             return
 
-        def optimize_planes(initialized_planes, rays_c, dual_graph):
+        def optimize_planes(initialized_planes, v_rays_c, v_centroid_rays_c, dual_graph):
             # 1. Sample new hypothesis from 1) propagation 2) random perturbation
-            sample_new_planes(initialized_planes, dual_graph) # [15, 100, 4]
+            sample_new_planes(initialized_planes, v_centroid_rays_c, dual_graph) # [15, 100, 4]
 
             # 2. Compute validity from 1) ncc 2) edge fitness
             # compute ncc
@@ -1837,7 +1868,7 @@ def optimize_plane(v_data, v_log_root):
             pass
 
         # 3. Propagate and sample plane hypothesises
-        optimize_planes(initialized_planes, rays_c, dual_graph)
+        optimize_planes(initialized_planes, rays_c, centroid_rays_c, dual_graph)
 
         def prepare_edge_data(v_graph):
             determine_valid_edges(v_graph, imgs[0])

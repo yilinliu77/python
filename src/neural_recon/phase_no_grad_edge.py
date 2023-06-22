@@ -62,21 +62,21 @@ from src.neural_recon.phase_no_grad_edge_util import Collision_checker
 
 def sample_new_distance(v_original_distances,
                         num_sample=100, scale_factor=1.6,
-                        v_max=10., v_min=0.):
+                        v_max=10., v_min=0., v_random_g=None):
     num_vertices = v_original_distances.shape[0]
     device = v_original_distances.device
     # (B, S)
     new_distance = -torch.ones((num_vertices, num_sample - 1), device=device, dtype=v_original_distances.dtype)
-    sample_distance_mask = torch.logical_and(new_distance > 0, new_distance < v_max)
+    sample_distance_mask = torch.zeros_like(new_distance).to(torch.bool)
     # (B, S)
     repeated_vertices_distances = v_original_distances[:, None].tile((1, num_sample - 1))
+
     while not torch.all(sample_distance_mask):
         t_ = new_distance[~sample_distance_mask]
         a = repeated_vertices_distances[~sample_distance_mask] + \
-            scale_factor * torch.distributions.utils._standard_normal(
-            t_.shape[0],
-            device=device,
-            dtype=t_.dtype)
+            scale_factor * torch.normal(
+                torch.zeros(t_.shape[0], dtype=t_.dtype, device=device),
+                torch.ones(t_.shape[0], dtype=t_.dtype, device=device), generator=v_random_g)
         new_distance[~sample_distance_mask] = a
         sample_distance_mask = torch.logical_and(new_distance > v_min, new_distance < v_max)
     # (B, (S + 1))
@@ -133,30 +133,31 @@ def sample_edge(num_per_edge_m, cur_dir, start_point, num_max_sample=2000):
     return num_edge_points, sampled_edge_points
 
 
-def sample_triangles(num_per_m, p1, p2, p3, num_max_sample=500):
+def sample_triangles(num_per_m, p1, p2, p3, num_max_sample=500, v_random_g=None, v_sample_edge=True):
     d1 = p2 - p1
     d2 = p3 - p2
     area = torch.linalg.norm(torch.cross(d1, d2) + 1e-6, dim=1).abs() / 2
 
-    num_edge_points, edge_points = sample_edge(num_per_m,
-                                               torch.stack((d1, d2, p1 - p3), dim=1).reshape(-1, 3),
-                                               # torch.stack((d1,), dim=1).reshape(-1, 3),
-                                               torch.stack((p1, p2, p3), dim=1).reshape(-1, 3),
-                                               # torch.stack((p1,), dim=1).reshape(-1, 3),
-                                               num_max_sample=num_max_sample)
-    num_edge_points = num_edge_points.reshape(-1, 3).sum(dim=1)
-    # num_edge_points = num_edge_points.reshape(-1, 1).sum(dim=1)
-
     num_per_m2 = num_per_m * num_per_m
     num_tri_samples = torch.clamp((area * num_per_m2).to(torch.long), 1, num_max_sample * 4)
-    samples = torch.rand(num_tri_samples.sum(), 2, device=p1.device)
-    _t1 = torch.sqrt(samples[:, 0:1] + 1e-6)
-    sampled_polygon_points = (1 - _t1) * p1.repeat_interleave(num_tri_samples, dim=0) + \
-                             _t1 * (1 - samples[:, 1:2]) * p2.repeat_interleave(num_tri_samples, dim=0) + \
-                             _t1 * samples[:, 1:2] * p3.repeat_interleave(num_tri_samples, dim=0)
 
-    # Only use the code below for debug
-    if True:
+    # samples = torch.rand(num_tri_samples.sum(), 2, device=p1.device)
+    samples = torch.rand(num_tri_samples.sum(), 2, device=p1.device, generator=v_random_g)
+    u = (p2 - p1).repeat_interleave(num_tri_samples, dim=0)
+    v = (p3 - p1).repeat_interleave(num_tri_samples, dim=0)
+    sampled_polygon_points = samples[:, 0:1] * u + samples[:, 1:2] * v
+    inside_mask = samples.sum(dim=-1) > 1
+    sampled_polygon_points[inside_mask] = ((1 - samples[:, 0:1]) * u + (1 - samples[:, 1:2]) * v)[inside_mask]
+    sampled_polygon_points = sampled_polygon_points + p1.repeat_interleave(num_tri_samples, dim=0)
+
+    if v_sample_edge:
+        num_edge_points, edge_points = sample_edge(num_per_m,
+                                                   torch.stack((d1, d2, p1 - p3), dim=1).reshape(-1, 3),
+                                                   # torch.stack((d1,), dim=1).reshape(-1, 3),
+                                                   torch.stack((p1, p2, p3), dim=1).reshape(-1, 3),
+                                                   # torch.stack((p1,), dim=1).reshape(-1, 3),
+                                                   num_max_sample=num_max_sample)
+        num_edge_points = num_edge_points.reshape(-1, 3).sum(dim=1)
         num_total_points = num_edge_points + num_tri_samples
         num_total_points_cumsum = num_total_points.cumsum(0).roll(1)
         num_total_points_cumsum[0] = 0
@@ -173,7 +174,8 @@ def sample_triangles(num_per_m, p1, p2, p3, num_max_sample=500):
         sampled_total_points[edge_index] = edge_points
         sampled_total_points[tri_index] = sampled_polygon_points
         return num_total_points, sampled_total_points
-    return None, torch.cat((edge_points, sampled_polygon_points), dim=0)
+    else:
+        return num_tri_samples, sampled_polygon_points
 
 
 def sample_points_2d(v_edge_points, v_num_horizontal,
@@ -1869,7 +1871,9 @@ def optimize_plane(v_data, v_log_root):
             norm_img2 = v_img2 - v_img2.mean(dim=[1, 2])[:, None, None]
 
             ncc1 = torch.sum(norm_img1 * norm_img2, dim=[1, 2])
-            ncc2 = torch.sqrt(torch.sum(norm_img1 ** 2, dim=[1, 2]) * torch.sum(norm_img2 ** 2, dim=[1, 2]))
+            ncc2 = torch.sqrt(torch.clamp_min(
+                torch.sum(norm_img1 ** 2, dim=[1, 2]) * torch.sum(norm_img2 ** 2, dim=[1, 2]),
+                1e-8))
             ncc2 = torch.clamp_min(ncc2, 1e-6)
             ncc = 1 - ncc1 / ncc2
             return ncc
@@ -1896,15 +1900,17 @@ def optimize_plane(v_data, v_log_root):
             window_points = window_points + v_points_c[:, None, None, :]
 
             points_2d1 = (v_intrinsic @ window_points.reshape(-1, 3).T).T
-            points_2d1 = points_2d1[:, :2] / points_2d1[:, 2:3]
+            points_2d1 = points_2d1[:, :2] / (points_2d1[:, 2:3] + 1e-8)
             points_2d2 = (v_transformation @ to_homogeneous_tensor(window_points.reshape(-1, 3)).T).T
-            points_2d2 = points_2d2[:, :2] / points_2d2[:, 2:3]
+            points_2d2 = points_2d2[:, :2] / (points_2d2[:, 2:3] + 1e-8)
+            valid_mask = torch.logical_and(points_2d2 < 1, points_2d2 > 0).all(dim=-1)
 
             sample_imgs1 = sample_img(v_img1[None, None, :], points_2d1[None, :, :])[0]
             sample_imgs2 = sample_img(v_img2[None, None, :], points_2d2[None, :, :])[0]
 
             sample_imgs1 = sample_imgs1.reshape(num_points, v_window_size, v_window_size)
             sample_imgs2 = sample_imgs2.reshape(num_points, v_window_size, v_window_size)
+            valid_mask = valid_mask.reshape(num_points, v_window_size, v_window_size).all(dim=1).all(dim=1)
 
             ncc = bilateral_ncc_(sample_imgs1, sample_imgs2)
 
@@ -1930,31 +1936,33 @@ def optimize_plane(v_data, v_log_root):
                         np.concatenate([img11, img21], axis=1),
                     ], axis=0))
                     cv2.waitKey()
+
+            ncc[~valid_mask] = torch.inf
             return ncc
 
-        def sample_depth_and_angle(depth, angle, num_sample=100):
+        def sample_depth_and_angle(depth, angle, num_sample=100, v_random_g=None):
             # sample depth
-            sample_depths = sample_new_distance(depth, num_sample)
+            sample_depths = sample_new_distance(depth, num_sample, v_random_g=v_random_g)
             sample_angles = sample_new_distance(angle.reshape(-1), num_sample, scale_factor=torch.pi / 3, v_max=100,
-                                                v_min=-100)
+                                                v_min=-100, v_random_g=v_random_g)
             sample_angles = sample_angles.reshape(depth.shape[0], 2, num_sample) % (2 * torch.pi)
             return sample_depths, sample_angles.permute(0, 2, 1)
 
-        def sample_new_planes(v_original_parameters, v_centroid_rays_c, v_dual_graph):
+        def sample_new_planes(v_original_parameters, v_centroid_rays_c, v_dual_graph, v_random_g=None):
             plane_angles = vectors_to_angles(v_original_parameters[:, :3])
             initial_centroids = intersection_of_ray_and_plane(v_original_parameters, v_centroid_rays_c)[1]
             init_depth = torch.linalg.norm(initial_centroids, dim=-1)
 
-            sample_depth, sample_angle = sample_depth_and_angle(init_depth, plane_angles, 100)
+            sample_depth, sample_angle = sample_depth_and_angle(init_depth, plane_angles, 100, v_random_g=v_random_g)
             id_neighbour_patches = [list(v_dual_graph[id_node].keys()) for id_node in v_dual_graph.nodes]
             for patch_id in range(len(id_neighbour_patches)):
                 # itself
-                sample_depth[patch_id, 0] = init_depth[patch_id]
-                sample_angle[patch_id, 0] = plane_angles[patch_id]
+                # sample_depth[patch_id, 0] = init_depth[patch_id]
+                # sample_angle[patch_id, 0] = plane_angles[patch_id]
                 # propagation from neighbour
                 id_neighbour = id_neighbour_patches[patch_id]
-                sample_depth[patch_id, 1:1 + len(id_neighbour)] = init_depth[torch.tensor(id_neighbour)]
-                sample_angle[patch_id, 1:1 + len(id_neighbour)] = plane_angles[torch.tensor(id_neighbour)]
+                # sample_depth[patch_id, 1:1 + len(id_neighbour)] = init_depth[torch.tensor(id_neighbour)]
+                # sample_angle[patch_id, 1:1 + len(id_neighbour)] = plane_angles[torch.tensor(id_neighbour)].clone()
             return sample_depth.contiguous(), sample_angle.contiguous()
 
         def save_plane(v_abcds, rays_c, patch_vertexes_id, file_path="output/init.ply"):
@@ -1999,7 +2007,8 @@ def optimize_plane(v_data, v_log_root):
             last_loss = [None] * patch_num
             best_loss = [None] * patch_num
             delta = [None] * patch_num
-            num_tolerence = [100] * patch_num
+            MAX_TOLERENCE = 500
+            num_tolerence = [MAX_TOLERENCE] * patch_num
 
             final_loss = [None] * patch_num
 
@@ -2014,39 +2023,68 @@ def optimize_plane(v_data, v_log_root):
                 return (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
 
             tri_colors = [generate_random_color() for _ in range(100)]
-
+            sample_g = torch.Generator(device)
+            sample_g.manual_seed(0)
+            random_g = []
+            for _ in range(patch_num):
+                g = torch.Generator(device)
+                g.manual_seed(0)
+                random_g.append(g)
             end_flag = [0] * patch_num
             while True:
                 # 1. Sample new hypothesis from 1) propagation 2) random perturbation
-                samples_depth, samples_angle = sample_new_planes(optimized_abcd_list, v_centroid_rays_c, dual_graph)
+                # samples_depth = []
+                # samples_angle = []
+                # for patch_id in range(patch_num):
+                #     samples_depth_, samples_angle_ = sample_new_planes(optimized_abcd_list[patch_id:patch_id+1],
+                #                                                        v_centroid_rays_c[patch_id:patch_id+1],
+                #                                                        dual_graph)
+                #     samples_depth.append(samples_depth_)
+                #     samples_angle.append(samples_angle_)
+                # samples_depth=torch.stack(samples_depth,dim=0)
+                # samples_angle=torch.stack(samples_angle,dim=0)
+                samples_depth, samples_angle = sample_new_planes(optimized_abcd_list,
+                                                                 v_centroid_rays_c,
+                                                                 dual_graph,
+                                                                 sample_g)
                 samples_abc = angles_to_vectors(samples_angle)  # n * 100 * 3
                 samples_intersection, samples_abcd = compute_plane_abcd(v_centroid_rays_c, samples_depth, samples_abc)
 
                 if sum(end_flag) == patch_num:
                     break
 
-                for patch_id in range(patch_num):
-                    if patch_id != 1 and patch_id != 0:
+                for v_patch_id in range(patch_num):
+                    # if v_patch_id != 1 and v_patch_id != 8:
+                        # if v_patch_id != 1:
+                        # continue
+                    if end_flag[v_patch_id] == 1:
                         continue
-                    if end_flag[patch_id] == 1:
-                        continue
+                    # if v_patch_id != 1:
+                    #     continue
                     # vertexes pos
-                    samples_abcd_c = samples_abcd[patch_id]
-                    vertexes_id = torch.tensor(patch_vertexes_id[patch_id])
-                    vertexes_pos = intersection_of_ray_and_all_plane(samples_abcd_c, v_rays_c[vertexes_id])  # 100 * n * 3
-                    samples_planes_intersection = samples_intersection[patch_id]
+                    samples_abcd_c = samples_abcd[v_patch_id]
+                    vertexes_id = torch.tensor(patch_vertexes_id[v_patch_id])
+                    vertexes_pos = intersection_of_ray_and_all_plane(samples_abcd_c,
+                                                                     v_rays_c[vertexes_id])  # 100 * n * 3
+                    samples_planes_intersection = samples_intersection[v_patch_id]
                     # triangle
                     num_vertex_c = len(vertexes_id)
                     edges_idx = [[i, (i + 1) % num_vertex_c] for i in range(num_vertex_c)]
                     edges = vertexes_pos[:, torch.tensor(edges_idx)]
-                    centroid = torch.mean(vertexes_pos, dim=1)
+                    # centroid = torch.mean(vertexes_pos, dim=1)
+                    centroid = intersection_of_ray_and_all_plane(samples_abcd_c,
+                                                                 v_centroid_rays_c[v_patch_id:v_patch_id + 1])[:, 0]
                     triangles = torch.cat((edges, centroid[:, None, None, :].tile(1, num_vertex_c, 1, 1)), dim=2)
                     triangles = triangles.view(-1, 3, 3)  # (100*num_tri,3,3)
 
                     # sample points on the fitting plane
                     # get each sample point's ncc loss, then aggregate to each patch
                     num_samples, sample_points_on_face = sample_triangles(100, triangles[:, 0, :],
-                                                                          triangles[:, 1, :], triangles[:, 2, :])
+                                                                          triangles[:, 1, :],
+                                                                          triangles[:, 2, :],
+                                                                          v_random_g=random_g[v_patch_id],
+                                                                          v_sample_edge=False
+                                                                          )
 
                     triangle_normal = normalize_tensor(torch.cross(triangles[:, 0, :] - triangles[:, 1, :],
                                                                    triangles[:, 1, :] - triangles[:, 2, :]))
@@ -2055,17 +2093,17 @@ def optimize_plane(v_data, v_log_root):
                     # 2. Compute validity from 1) ncc 2) edge fitness
                     ncc_loss_points = bilateral_ncc(sample_points_on_face, triangle_normal, intrinsic,
                                                     transformation[img_src_id], v_img1, v_img2)
-                    ncc_loss_points = torch.where(torch.isnan(ncc_loss_points),
-                                                  torch.tensor(torch.finfo(ncc_loss_points.dtype).max),
-                                                  ncc_loss_points)
-
-                    ncc_loss_edge, ncc_loss_mask, num_samples_per_edge = evaluate_candidates(edges.reshape(-1, 2, 3),
-                                                                                             intrinsic,
-                                                                                             transformation[img_src_id],
-                                                                                             v_img1,
-                                                                                             v_img2)
-                    ncc_loss_edge = ncc_loss_edge.view(num_plane_sample, -1)
-                    ncc_loss_edge = torch.mean(ncc_loss_edge, dim=1)
+                    # ncc_loss_points = torch.where(torch.isnan(ncc_loss_points),
+                    #                               torch.tensor(torch.finfo(ncc_loss_points.dtype).max),
+                    #                               ncc_loss_points)
+                    #
+                    # ncc_loss_edge, ncc_loss_mask, num_samples_per_edge = evaluate_candidates(edges.reshape(-1, 2, 3),
+                    #                                                                          intrinsic,
+                    #                                                                          transformation[img_src_id],
+                    #                                                                          v_img1,
+                    #                                                                          v_img2)
+                    # ncc_loss_edge = ncc_loss_edge.view(num_plane_sample, -1)
+                    # ncc_loss_edge = torch.mean(ncc_loss_edge, dim=1)
 
                     points_to_tri = torch.arange(num_samples.shape[0]).to(device).repeat_interleave(num_samples)
                     ncc_loss_triangle = scatter_mean(ncc_loss_points, points_to_tri, dim=0)
@@ -2076,11 +2114,9 @@ def optimize_plane(v_data, v_log_root):
                     best_abcd = samples_abcd_c[id_best]
 
                     # update
-                    id_best_v[patch_id] = id_best
-                    optimized_abcd_list[patch_id] = best_abcd
-                    best_loss[patch_id] = ncc_loss_patch[id_best]
-                    depth = torch.linalg.norm(samples_planes_intersection[id_best].unsqueeze(0), dim=-1)
-                    angle = vectors_to_angles(best_abcd[0:3].unsqueeze(0))
+                    # id_best_v[v_patch_id] = id_best
+                    optimized_abcd_list[v_patch_id] = best_abcd
+                    best_loss[v_patch_id] = ncc_loss_patch[id_best]
 
                     # 3. Finish iteration and visualize
                     num_sample_points = num_samples.view(num_plane_sample, -1).sum(dim=-1)
@@ -2088,7 +2124,8 @@ def optimize_plane(v_data, v_log_root):
                     if id_best == 0:
                         sample_points_c = sample_points_on_face[0:num_sample_points[id_best]]
                     else:
-                        sample_points_c = sample_points_on_face[num_sample_points[id_best - 1]:num_sample_points[id_best]]
+                        sample_points_c = sample_points_on_face[
+                                          num_sample_points[id_best - 1]:num_sample_points[id_best]]
                     all_points_c = vertexes_pos[id_best].view(-1, 3)
                     all_points_c = torch.cat((all_points_c, centroid[id_best].unsqueeze(0)), dim=0)
 
@@ -2121,20 +2158,20 @@ def optimize_plane(v_data, v_log_root):
                         point_thickness = 3
 
                         tri_c = 0
-                        tri_point_num = torch.cumsum(tri_point_num,dim=0)
+                        tri_point_num = torch.cumsum(tri_point_num, dim=0)
                         for i_point in range(s_2d1.shape[0]):
                             if i_point >= tri_point_num[tri_c]:
                                 tri_c += 1
                             sample_point_color = tri_colors[tri_c]
-                            cv2.circle(img11, s_2d1[i_point], 1, sample_point_color, 2)
-                            cv2.circle(img21, s_2d2[i_point], 1, sample_point_color, 2)
+                            cv2.circle(img11, s_2d1[i_point], 1, sample_point_color, 1)
+                            cv2.circle(img21, s_2d2[i_point], 1, sample_point_color, 1)
 
                         for i_point in range(p_2d1.shape[0]):
                             cv2.circle(img11, p_2d1[i_point], 1, vertex_point_color, point_thickness)
                             cv2.circle(img21, p_2d2[i_point], 1, vertex_point_color, point_thickness)
 
                         if text:
-                            cv2.putText(img21, text, (50,50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2, cv2.LINE_AA)
+                            cv2.putText(img21, text, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
 
                         cv2.imwrite(os.path.join(v_log_root, "patch_{}_iter_{}.jpg").format(patch_id_, cur_iter_),
                                     np.concatenate([
@@ -2143,47 +2180,61 @@ def optimize_plane(v_data, v_log_root):
                                     ], axis=0)
                                     )
 
-                    # debug
-                    debug_id = 59
-                    if patch_id == 1 and (cur_iter[patch_id]+1) == debug_id:
-                        print("debug")
-
                     # save the init result
-                    if cur_iter[patch_id] == 0:
-                        print("Patch {:3d} cur_iter{:4d}:{:.4f};".format(patch_id,
-                                                                         cur_iter[patch_id],
+                    if cur_iter[v_patch_id] == 0:
+                        print("Patch {:3d} cur_iter{:4d}:{:.4f};".format(v_patch_id,
+                                                                         cur_iter[v_patch_id],
                                                                          ncc_loss_patch[0].cpu().item()))
                         all_points_c_init = vertexes_pos[0].view(-1, 3)
                         sample_points_c_init = sample_points_on_face[0:num_sample_points[0]]
-                        vis_(all_points_c_init, sample_points_c_init, patch_id, cur_iter[patch_id],
-                             num_samples.view(100,-1)[0], str(ncc_loss_patch[0].cpu()))
+                        vis_(all_points_c_init, sample_points_c_init, v_patch_id, cur_iter[v_patch_id],
+                             num_samples.view(100, -1)[0], str(ncc_loss_patch[0].cpu()))
 
-                    vis_(all_points_c, sample_points_c, patch_id, cur_iter[patch_id] + 1,
-                         num_samples.view(100,-1)[id_best], str(ncc_loss_patch[id_best].cpu()))
+                    if cur_iter[v_patch_id] % 50 == 0:
+                        vis_(all_points_c, sample_points_c, v_patch_id, cur_iter[v_patch_id] + 1,
+                             num_samples.view(100, -1)[id_best], str(ncc_loss_patch[id_best].cpu()))
 
-                    if last_loss[patch_id] is None:
-                        last_loss[patch_id] = best_loss[patch_id]
+                    xxx = False
+                    if xxx:
+                        for i in range(100):
+                            all_points_c = vertexes_pos[i].view(-1, 3)
+                            all_points_c = torch.cat((all_points_c, centroid[i].unsqueeze(0)), dim=0)
+
+                            if i == 0:
+                                sample_points_c = sample_points_on_face[0:num_sample_points[i]]
+                            else:
+                                sample_points_c = sample_points_on_face[
+                                                  num_sample_points[i - 1]:num_sample_points[i]]
+
+                            vis_(all_points_c, sample_points_c, v_patch_id, "__{}".format(i),
+                                 num_samples.view(100, -1)[i], str(ncc_loss_patch[i].cpu()))
+
+                    if last_loss[v_patch_id] is None:
+                        last_loss[v_patch_id] = best_loss[v_patch_id]
                     else:
-                        delta[patch_id] = last_loss[patch_id] - best_loss[patch_id]
-                        print("Patch {:3d} cur_iter{:4d}:{:.4f}; Delta:{:.4f}".format(patch_id,
-                                                                                      cur_iter[patch_id]+1,
-                                                                                      best_loss[patch_id].cpu().item(),
-                                                                                      delta[patch_id].cpu().item()))
-                        if delta[patch_id] < 1e-4:
-                            num_tolerence[patch_id] -= 1
+                        delta[v_patch_id] = last_loss[v_patch_id] - best_loss[v_patch_id]
+                        print("Patch {:3d} cur_iter{:4d}:{:.4f}; Delta:{:.4f}".format(v_patch_id,
+                                                                                      cur_iter[v_patch_id] + 1,
+                                                                                      best_loss[
+                                                                                          v_patch_id].cpu().item(),
+                                                                                      delta[v_patch_id].cpu().item()))
+                        if delta[v_patch_id] < 1e-4:
+                            num_tolerence[v_patch_id] -= 1
                         else:
-                            num_tolerence[patch_id] = 100
-                            last_loss[patch_id] = best_loss[patch_id]
+                            num_tolerence[v_patch_id] = MAX_TOLERENCE
+                            last_loss[v_patch_id] = best_loss[v_patch_id]
 
-                        if num_tolerence[patch_id] <= 0:
-                            end_flag[patch_id] = 1
+                        if num_tolerence[v_patch_id] <= 0:
+                            end_flag[v_patch_id] = 1
 
-                    cur_iter[patch_id] += 1
+                    cur_iter[v_patch_id] += 1
 
                 continue
 
-            save_plane(optimized_abcd_list, v_rays_c, patch_vertexes_id, file_path="output/optimized.ply")
+            save_plane(optimized_abcd_list, v_rays_c, patch_vertexes_id,
+                       file_path=os.path.join(v_log_root,"optimized.ply"))
             return optimized_abcd_list
+
         # 3. Propagate and sample plane hypothesises
         optimized_abcd_list = optimize_planes(initialized_planes, rays_c, centroid_rays_c, dual_graph)
 
@@ -2458,29 +2509,6 @@ def main(v_cfg: DictConfig):
 
     # optimize(data, v_cfg["trainer"]["output"])
     optimize_plane(data, v_cfg["trainer"]["output"])
-
-    model = Phase5(v_cfg, data)
-
-    trainer = Trainer(
-        accelerator='gpu' if v_cfg["trainer"].gpu != 0 else None,
-        # strategy = "ddp",
-        devices=v_cfg["trainer"].gpu, enable_model_summary=False,
-        max_epochs=int(1e8),
-        num_sanity_val_steps=2,
-        check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
-        default_root_dir=log_dir,
-        # precision=16,
-        # gradient_clip_val=0.5
-    )
-
-    if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
-        state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
-        model.load_state_dict(state_dict, strict=False)
-
-    if v_cfg["trainer"].evaluate:
-        trainer.test(model)
-    else:
-        trainer.fit(model)
 
 
 if __name__ == '__main__':

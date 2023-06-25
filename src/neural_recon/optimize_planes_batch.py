@@ -11,7 +11,7 @@ from src.neural_recon.geometric_util import angles_to_vectors, compute_plane_abc
 from src.neural_recon.io_utils import generate_random_color, save_plane
 from src.neural_recon.loss_utils import compute_regularization, Glue_loss_computer, \
     Bilateral_ncc_computer, Edge_loss_computer
-from src.neural_recon.phase_no_grad_edge_util import Collision_checker
+from src.neural_recon.collision_checker import Collision_checker
 from src.neural_recon.sample_utils import sample_new_planes, sample_triangles
 
 

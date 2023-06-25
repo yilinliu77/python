@@ -58,7 +58,7 @@ from src.neural_recon.colmap_io import read_dataset, Image, Point_3d, check_visi
 from scipy.spatial import Delaunay
 from math import ceil
 
-from src.neural_recon.phase_no_grad_edge_util import Collision_checker
+from src.neural_recon.collision_checker import Collision_checker
 from src.neural_recon.sample_utils import sample_points_2d
 from src.neural_recon.optimize_planes_batch import optimize_planes_batch
 

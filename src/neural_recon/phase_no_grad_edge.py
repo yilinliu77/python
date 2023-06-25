@@ -2026,7 +2026,7 @@ def optimize_plane(v_data, v_log_root):
                     break
 
                 for patch_id in range(patch_num):
-                    if patch_id != 1 and patch_id != 0:
+                    if patch_id not in [1,8]:
                         continue
                     if end_flag[patch_id] == 1:
                         continue

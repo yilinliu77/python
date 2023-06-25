@@ -11,6 +11,7 @@ from src.neural_recon.geometric_util import angles_to_vectors, compute_plane_abc
 from src.neural_recon.io_utils import generate_random_color, save_plane
 from src.neural_recon.loss_utils import compute_regularization, Glue_loss_computer, \
     Bilateral_ncc_computer, Edge_loss_computer
+from src.neural_recon.phase_no_grad_edge_util import Collision_checker
 from src.neural_recon.sample_utils import sample_new_planes, sample_triangles
 
 
@@ -18,9 +19,10 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
                           imgs, dilated_gradients1, dilated_gradients2,
                           transformation,
                           intrinsic,
+                          v_c1_2_c2,
                           v_log_root
                           ):
-    # pre data
+    # Prepare data
     device = initialized_planes.device
     patch_num = len(initialized_planes)
     patches_list = dual_graph.nodes  # each patch = id_vertexes
@@ -55,6 +57,7 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
         v_enable_color_weights=True,
         v_window_size=7
     )
+    collision_checker = Collision_checker()
 
     while True:
         # 1. Sample new hypothesis from 1) propagation 2) random perturbation
@@ -72,7 +75,6 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
         # samples_depth[11, 0] = 4.35
         # samples_angle[11, 0, 0] = 2.0643
         # samples_angle[11, 0, 1] = 0.4344
-
         samples_abc = angles_to_vectors(samples_angle)  # n * 100 * 3
         samples_intersection, samples_abcd = compute_plane_abcd(v_centroid_rays_c, samples_depth, samples_abc)
 
@@ -113,6 +115,27 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
                                                            triangles_pos[:, 1, :] - triangles_pos[:, 2, :]))
             triangle_normal = triangle_normal.repeat_interleave(num_sample_points, dim=0)
             points_to_tri = torch.arange(num_sample_points.shape[0]).to(device).repeat_interleave(num_sample_points)
+
+            # Collision
+            # Viz
+            test_collision = False
+            if test_collision and cur_iter[v_patch_id] > 20 and v_patch_id == 8:
+                collision_checker.save_ply(os.path.join(v_log_root, "collision_test.ply"))
+                sample_points_on_face_c2 = (v_c1_2_c2 @ to_homogeneous_tensor(sample_points_on_face).T).T[:, :3]
+                collision_flag = collision_checker.check_ray(torch.zeros_like(sample_points_on_face_c2),
+                                                             sample_points_on_face_c2)
+
+                id_end = num_sample_points[:num_vertex].sum()
+                local_flag = collision_flag[:id_end].cpu().numpy()
+                p2 = (transformation[0] @ to_homogeneous_tensor(
+                    sample_points_on_face[:id_end]).T).T[:, :3]
+                p2 = p2[:, :2] / p2[:, 2:3]
+                p2 = torch.round(p2 * 800).cpu().numpy().astype(np.int64)
+                viz_img = cv2.cvtColor(v_img2.cpu().numpy(), cv2.COLOR_GRAY2BGR)
+                viz_img[p2[local_flag, 1], p2[local_flag, 0]] = (0, 0, 255)
+                viz_img[p2[~local_flag, 1], p2[~local_flag, 0]] = (0, 255, 255)
+                cv2.imshow("1", viz_img)
+                cv2.waitKey()
 
             # 5. Compute loss
             # 1) NCC loss
@@ -162,7 +185,8 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
                     sample_points_c = sample_points_on_face[0:num_sample_points_per_triangle[id_best]]
                 else:
                     sample_points_c = sample_points_on_face[
-                                      num_sample_points_per_triangle[id_best - 1]:num_sample_points_per_triangle[id_best]]
+                                      num_sample_points_per_triangle[id_best - 1]:num_sample_points_per_triangle[
+                                          id_best]]
                 all_points_c = local_vertex_pos[id_best].view(-1, 3)
                 all_points_c = torch.cat((all_points_c, local_centroid[id_best].unsqueeze(0)), dim=0)
 
@@ -257,8 +281,47 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
 
             cur_iter[v_patch_id] += 1
 
+        # Update triangles
+        final_triangles_list = []
+        for v_patch_id in range(patch_num):
+            local_vertex_pos = intersection_of_ray_and_all_plane(optimized_abcd_list[v_patch_id:v_patch_id + 1],
+                                                                 v_rays_c[patch_vertexes_id[v_patch_id]])
+            num_vertex = len(patch_vertexes_id[v_patch_id])
+            edges_idx = [[i, (i + 1) % num_vertex] for i in range(num_vertex)]
+            local_edge_pos = local_vertex_pos[:, edges_idx][0]
+            local_centroid = intersection_of_ray_and_plane(
+                optimized_abcd_list[v_patch_id:v_patch_id + 1],
+                v_centroid_rays_c[v_patch_id:v_patch_id + 1])[1]
+            triangles_pos = torch.cat((
+                local_edge_pos, local_centroid[:, None, :].tile(num_vertex, 1, 1)), dim=1)
+            final_triangles_list.append(triangles_pos)
+        final_triangles = torch.cat(final_triangles_list, dim=0)
+        final_triangles_c2 = (v_c1_2_c2 @ to_homogeneous_tensor(
+            final_triangles).transpose(1, 2)).transpose(1, 2)[:, :, :3]
+        collision_checker.clear()
+        collision_checker.add_triangles(final_triangles_c2)
         continue
 
     save_plane(optimized_abcd_list, v_rays_c, patch_vertexes_id,
                file_path=os.path.join(v_log_root, "optimized.ply"))
     return optimized_abcd_list
+
+
+def local_assemble(v_planes, v_rays_c, v_centroid_rays_c, dual_graph,
+                   imgs, dilated_gradients1, dilated_gradients2,
+                   transformation,
+                   intrinsic,
+                   v_c1_2_c2,
+                   v_log_root
+                   ):
+    # 1. Prepare variables
+
+    # 2. Choose initial patch
+
+    while True:
+        # 3. Select nearby patch and expand
+
+        # 4. Global optimize
+        pass
+
+    return

@@ -314,6 +314,15 @@ def optimize_plane(v_data, v_log_root):
                                                     imgs, dilated_gradients1, dilated_gradients2,
                                                     transformation,
                                                     intrinsic,
+                                                    c1_2_c2,
+                                                    v_log_root
+                                                    )
+        # 4. Local assemble
+        optimized_abcd_list = local_assemble(initialized_planes, rays_c, centroid_rays_c, dual_graph,
+                                                    imgs, dilated_gradients1, dilated_gradients2,
+                                                    transformation,
+                                                    intrinsic,
+                                                    c1_2_c2,
                                                     v_log_root
                                                     )
 

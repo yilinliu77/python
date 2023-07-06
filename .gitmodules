@@ -22,3 +22,6 @@
 	path = thirdparty/tiny-cuda-nn
 	url = https://github.com/NVlabs/tiny-cuda-nn
 	branch = master
+[submodule "thirdparty/bvh-distance-queries"]
+	path = thirdparty/bvh-distance-queries
+	url = https://github.com/YuliangXiu/bvh-distance-queries

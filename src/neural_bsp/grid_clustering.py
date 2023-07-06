@@ -118,19 +118,28 @@ def calculate_distances(query_points, target_vertices):
 def visualize_raw_data(query_points, target_vertices, v_viz_flag):
     if not v_viz_flag:
         return
-    # Visualize
-    plt.scatter(query_points[:, 0], query_points[:, 1], s=5, c=id_nearest_primitive,
-                cmap="tab20"
-                # cmap="flag"
-                )
-    plt.colorbar()
-    plt.scatter(target_vertices[:, 0], target_vertices[:, 1], s=3, color=(1, 0, 0))
 
-    plt.xlim(-0.5, 0.5)
-    plt.ylim(-0.5, 0.5)
-    plt.tick_params(left=False, right=False, labelleft=False,
-                    labelbottom=False, bottom=False)
-    plt.axis('scaled')
+    fig, axes = plt.subplots(1, 2)
+    axes[0].scatter(target_vertices[:, 0], target_vertices[:, 1], s=3, color=(1, 0, 0))
+    axes[0].set_title("Target shape")
+    axes[0].axis('scaled')
+    axes[0].set_xlim(-0.5, 0.5)
+    axes[0].set_ylim(-0.5, 0.5)
+    axes[0].tick_params(left=False, right=False, labelleft=False,
+                        labelbottom=False, bottom=False)
+
+    axes[1].scatter(query_points[:, 0], query_points[:, 1], s=5, c=id_nearest_primitive,
+                    cmap="tab20"
+                    # cmap="flag"
+                    )
+    axes[1].set_title("Generalized space partition")
+    # plt.colorbar()
+    axes[1].scatter(target_vertices[:, 0], target_vertices[:, 1], s=3, color=(1, 0, 0))
+    axes[1].axis('scaled')
+    axes[1].set_xlim(-0.5, 0.5)
+    axes[1].set_ylim(-0.5, 0.5)
+    axes[1].tick_params(left=False, right=False, labelleft=False,
+                        labelbottom=False, bottom=False)
     plt.show(block=True)
 
 
@@ -201,6 +210,31 @@ def visualize_boundary_edge(query_points, target_vertices, boundary_edges, v_viz
     plt.show(block=True)
 
 
+def visualize_gradient_direction(query_points, target_vertices, g, v_viz_flag):
+    if not v_viz_flag:
+        return
+    resolution = g.shape[0]
+    g = normalize(g.reshape(-1, 2), -1)
+
+    plt.title("Gradient direction")
+    plt.quiver(query_points[:, 0], query_points[:, 1], g[:, 0], g[:, 1],
+               angles='xy', scale_units='xy', scale=resolution,
+               headwidth=3,
+               headaxislength=3,
+               headlength=3,
+               )
+
+    plt.scatter(target_vertices[:, 0], target_vertices[:, 1], s=3, color=(1, 0, 0))
+    plt.axis("scaled")
+    plt.xlim(-0.5, 0.5)
+    plt.ylim(-0.5, 0.5)
+    plt.tick_params(left=False, right=False, labelleft=False,
+                    labelbottom=False, bottom=False)
+    plt.show(block=True)
+
+    return
+
+
 def calculate_gradients(v_query_points, v_min_dis, v_resolution):
     q = v_query_points.reshape(v_resolution, v_resolution, 2)
     d = v_min_dis.reshape(v_resolution, v_resolution, )
@@ -222,20 +256,20 @@ def calculate_gradients(v_query_points, v_min_dis, v_resolution):
     interpolator = scipy.interpolate.RegularGridInterpolator((np.arange(v_resolution), np.arange(v_resolution)), g)
 
     coords_g = coords + gd
-    valid_mask = np.logical_and(coords_g > 0, coords_g < v_resolution-1)
+    valid_mask = np.logical_and(coords_g > 0, coords_g < v_resolution - 1)
     valid_mask = np.all(valid_mask, axis=2)
     valid_mask[0] = valid_mask[-1] = valid_mask[:, 0] = valid_mask[:, -1] = False
-    coords_g = np.clip(coords_g, 0, v_resolution-1)
+    coords_g = np.clip(coords_g, 0, v_resolution - 1)
 
     gn1 = interpolator(coords_g[:, :, ::-1])
     gn1[~valid_mask] = 0
     gn1 = normalize(gn1, v_axis=-1)
 
     coords_g = coords - gd
-    valid_mask = np.logical_and(coords_g > 0, coords_g < v_resolution-1)
+    valid_mask = np.logical_and(coords_g > 0, coords_g < v_resolution - 1)
     valid_mask = np.all(valid_mask, axis=2)
     valid_mask[0] = valid_mask[-1] = valid_mask[:, 0] = valid_mask[:, -1] = False
-    coords_g = np.clip(coords_g, 0, v_resolution-1)
+    coords_g = np.clip(coords_g, 0, v_resolution - 1)
 
     gn2 = interpolator(coords_g[:, :, ::-1])
     gn2[~valid_mask] = 0
@@ -259,6 +293,8 @@ if __name__ == '__main__':
 
     g, gn1, gn2, gd = calculate_gradients(query_points, udf, resolution)
 
+    visualize_gradient_direction(query_points, target_vertices, g, True)
+
     #
     visualize_raw_data(query_points, target_vertices, False)
     #
@@ -275,13 +311,13 @@ if __name__ == '__main__':
     input_features = np.concatenate((udf.reshape(-1, 1), g.reshape(-1, 2)), axis=1)
 
     np.save("output/edges", {
-        "resolution":resolution,
-        "input_features":input_features,
-        "all_edges":all_edges,
-        "valid_flags":valid_flag,
-        "consistent_flags":consistent_flag,
-        "target_vertices":target_vertices,
-        "query_points":query_points,
+        "resolution": resolution,
+        "input_features": input_features,
+        "all_edges": all_edges,
+        "valid_flags": valid_flag,
+        "consistent_flags": consistent_flag,
+        "target_vertices": target_vertices,
+        "query_points": query_points,
     })
 
     exit(0)

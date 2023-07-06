@@ -868,12 +868,9 @@ def generate_training_data():
     #                     labelbottom=False, bottom=False)
     # plt.show(block=True)
 
-    # nearest_points_for_target_points_ = kdtree.search(target_vertices, 10)
-    # nearest_points_for_target_points = target_vertices[nearest_points_for_target_points_[1]]
-    # abcs = fit_segment_torch(nearest_points_for_target_points)
-
     num_nodes = graphs[0].number_of_nodes()
-    all_combinations = torch.combinations(torch.arange(num_nodes),r=2).numpy()
+    all_combinations = torch.stack(
+        torch.meshgrid(torch.arange(num_nodes), torch.arange(num_nodes)), dim=2).view(-1,2).numpy()
 
     # Only for test
     # compute_fitness(all_combinations[147075:147629, ], graphs[0])
@@ -898,7 +895,7 @@ def generate_training_data():
     else:
         results=np.load("output/lsp.npy")
 
-    # Visualize
+    # Visualize a particular point
     if False:
         for _ in tqdm(range(100)):
             id_visualize = np.random.randint(0, all_points[0].shape[0])
@@ -941,7 +938,7 @@ def generate_training_data():
     if True:
         similarity_matrix = np.zeros((num_nodes,num_nodes),dtype=np.float32)
         similarity_matrix[all_combinations[:, 1], all_combinations[:, 0]] = results
-        similarity_matrix = np.maximum(similarity_matrix, similarity_matrix.transpose())
+        similarity_matrix = (similarity_matrix+similarity_matrix.transpose()) / 2
         similarity_matrix = 1-similarity_matrix
 
         from sklearn.cluster import SpectralClustering
@@ -966,7 +963,7 @@ def generate_training_data():
         labels=kmeans.labels_
 
     # Print the cluster labels
-    plt.scatter(all_points[0][:,0],all_points[0][:,1],s=1,c=labels,cmap="tab10")
+    plt.scatter(all_points[0][:,0],all_points[0][:,1],s=3,c=labels,cmap="tab10")
     plt.xlim(-0.5, 0.5)
     plt.ylim(-0.5, 0.5)
     plt.tick_params(left=False, right=False, labelleft=False,

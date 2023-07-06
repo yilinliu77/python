@@ -1,10 +1,12 @@
+import os
+import shutil
 import time
 from typing import List
 
 import cv2
 import numpy as np
 import torch
-
+import open3d as o3d
 
 def debug_imgs(v_imgs: List[np.ndarray]) -> None:
     if not isinstance(v_imgs, List):
@@ -21,6 +23,10 @@ def debug_imgs(v_imgs: List[np.ndarray]) -> None:
     cv2.waitKey()
     # cv2.destroyWindow("test")
 
+def check_dir(v_path):
+    if os.path.exists(v_path):
+        shutil.rmtree(v_path)
+    os.mkdir(v_path)
 
 def refresh_timer(a):
     delta = time.time() - a
@@ -247,3 +253,11 @@ def ray_line_intersection2(v_plane_abcd, v_ray_origin, v_ray_direction):
     # Compute the intersection point
     intersection_point = v_ray_origin + t[:,None] * v_ray_direction
     return intersection_point
+
+def sigmoid(z):
+    return 1/(1 + np.exp(-z))
+
+def export_point_cloud(v_file_path, v_pcs):
+    pc = o3d.geometry.PointCloud()
+    pc.points = o3d.utility.Vector3dVector(v_pcs)
+    o3d.io.write_point_cloud(v_file_path, pc)

@@ -76,7 +76,7 @@ class Base_model(nn.Module):
             nn.Linear(128, 1),
         )
         self.num_freq = 8
-        self.pos_linear = nn.Linear(self.num_freq * 3 * 2, 256)
+        self.pos_linear = nn.Linear(self.num_freq * 2 * 2, 256)
 
     def pos_encoding(self, v_points):
         freq = 2 ** torch.arange(self.num_freq, dtype=torch.float32, device=v_points.device) * torch.pi  # [L]
@@ -252,6 +252,46 @@ class Base_model_plane_roi_soft(Base_model):
 
         return loss + sparsity_loss
 
+class Model1(Base_model):
+    def __init__(self, v_num_plane=8):
+        super(Model1, self).__init__(v_num_plane)
+        self.num_plane = v_num_plane
+        self.z_vector = nn.Parameter(torch.rand(v_num_plane, 256))
+        self.to_distance = nn.Sequential(
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1),
+        )
+        self.to_region = nn.Sequential(
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1),
+            nn.Sigmoid(),
+        )
+
+
+    def forward(self, v_data, v_training=False):
+        points, sdfs = v_data
+
+        pos_encoding = self.pos_encoding(points[0, :,:2])
+
+        fused_features = self.z_vector[None, :] + pos_encoding[:,None]
+        fused_distances = self.to_distance(fused_features)
+        fused_regions = self.to_region(fused_features)
+
+        return single_distance, plane_parameters.permute(0,2,1), distance_weights
+
+    def loss(self, v_predictions, v_input):
+        points, sdfs = v_input
+        pred_udf = v_predictions[0]
+        distance_weights = v_predictions[2]
+        loss = F.l1_loss(pred_udf, sdfs)
+
+        sparsity_loss = (-torch.max(distance_weights, dim=2)[0]
+                         + torch.sum(torch.pow(distance_weights, 2), dim=2)).mean() * 0.1
+
+        return loss + sparsity_loss
+
 
 class Base_phase(pl.LightningModule):
     def __init__(self, hparams, v_data):
@@ -271,7 +311,7 @@ class Base_phase(pl.LightningModule):
         # self.model = Base_model()
         # self.model = Base_model_plane()
         # self.model = Base_model_plane_roi()
-        self.model = Base_model_plane_roi_soft()
+        self.model = Model1()
 
         # Used for visualizing during the training
         self.viz_data = {}
@@ -317,7 +357,7 @@ class Base_phase(pl.LightningModule):
 
         return total_loss
 
-    def training_epoch_end(self, outputs) -> None:
+    def on_train_epoch_end(self, outputs) -> None:
         # self.model.sample_mask()
         pass
 
@@ -331,7 +371,7 @@ class Base_phase(pl.LightningModule):
 
         return batch[0], batch[1], outputs[0], outputs[1]
 
-    def validation_epoch_end(self, result) -> None:
+    def on_validation_epoch_end(self, result) -> None:
         if self.global_rank != 0:
             return
 
@@ -428,7 +468,7 @@ def prepare_dataset():
     # plt.plot(query_points[shortest_distances>0.1,0],query_points[shortest_distances>0.1,1],'ro', markersize=2)
     # plt.plot(vertices[:, 0], vertices[:, 1], 'b-')
     # plt.plot(np.roll(vertices,1,axis=0)[:, 0], np.roll(vertices,1,axis=0)[:, 1], 'b-')
-    # plt.show()
+    # plt.show(block=True)
 
     print("Done")
     print("{} points and values;".format(

@@ -38,6 +38,8 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import mcubes
 
+from src.neural_bsp.generate_2d_dataset import generate_test_shape1
+
 
 class BSP_dataset_single_object(torch.utils.data.Dataset):
     def __init__(self, v_data, v_training_mode):
@@ -243,6 +245,8 @@ class Base_phase(pl.LightningModule):
 
 def prepare_dataset():
     print("Start to construct dataset")
+
+    surface_points = generate_test_shape1()
 
     query_points = np.load("output/1.npy", allow_pickle=True).item()
 

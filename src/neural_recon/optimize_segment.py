@@ -46,9 +46,9 @@ def sample_img(v_rgb, v_coor_2d):
     for i in range(ceil(coor_2d.shape[1] / MAX_ITEM_PER_BATCH)):
         sampled_pixels_flatten = torch.nn.functional.grid_sample(v_rgb,
             coor_2d[:,i * MAX_ITEM_PER_BATCH:min(coor_2d.shape[1], (i + 1) * MAX_ITEM_PER_BATCH)].unsqueeze(1) * 2 - 1,
-                                                                 align_corners=True)[:,0,0]
+                                                                 align_corners=True)[0,:,0]
         results.append(sampled_pixels_flatten)
-    sampled_pixels = torch.cat(results,dim=1).reshape(v_coor_2d.shape[:2] + (1,))
+    sampled_pixels = torch.cat(results,dim=1).permute(1,0)
 
     return sampled_pixels
 

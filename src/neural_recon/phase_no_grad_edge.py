@@ -3,7 +3,7 @@ import sys, os
 import time
 from copy import copy
 from typing import List
-
+import pickle
 import scipy.spatial
 from torch.distributions import Binomial
 from torch.nn.utils.rnn import pad_sequence
@@ -61,6 +61,7 @@ from math import ceil
 from src.neural_recon.collision_checker import Collision_checker
 from src.neural_recon.sample_utils import sample_points_2d
 from src.neural_recon.optimize_planes_batch import optimize_planes_batch
+from src.neural_recon.optimize_planes_batch import local_assemble
 
 
 def dilate_edge(v_gradient_img, v_num_iter=0):
@@ -310,21 +311,25 @@ def optimize_plane(v_data, v_log_root):
         initialized_planes = initialize_patches(rays_c, ray_distances_c, vertex_id_per_face)  # (num_patch, 4)
 
         # 3. Optimize
-        optimized_abcd_list = optimize_planes_batch(initialized_planes, rays_c, centroid_rays_c, dual_graph,
-                                                    imgs, dilated_gradients1, dilated_gradients2,
-                                                    transformation,
-                                                    intrinsic,
-                                                    c1_2_c2,
-                                                    v_log_root
-                                                    )
+        if os.path.exists("output/optimized_abcd_list.pkl"):
+            optimized_abcd_list = pickle.load(open("output/optimized_abcd_list.pkl", "rb"))
+        else:
+            optimized_abcd_list = optimize_planes_batch(initialized_planes, rays_c, centroid_rays_c, dual_graph,
+                                                        imgs, dilated_gradients1, dilated_gradients2,
+                                                        transformation,
+                                                        intrinsic,
+                                                        c1_2_c2,
+                                                        v_log_root
+                                                        )
+
         # 4. Local assemble
-        optimized_abcd_list = local_assemble(initialized_planes, rays_c, centroid_rays_c, dual_graph,
-                                                    imgs, dilated_gradients1, dilated_gradients2,
-                                                    transformation,
-                                                    intrinsic,
-                                                    c1_2_c2,
-                                                    v_log_root
-                                                    )
+        optimized_abcd_list = local_assemble(optimized_abcd_list, rays_c, centroid_rays_c, dual_graph,
+                                             imgs, dilated_gradients1, dilated_gradients2,
+                                             transformation,
+                                             intrinsic,
+                                             c1_2_c2,
+                                             v_log_root
+                                             )
 
         exit()
 

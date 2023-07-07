@@ -126,7 +126,7 @@ def sample_points_2d(v_edge_points, v_num_horizontal,
 
 # v_original_distances: (M, 1) M original samples
 def sample_new_distance(v_original_distances,
-                        num_sample=100, scale_factor=1.6,
+                        num_sample=100, scale_factor=1.0,
                         v_max=10., v_min=0., v_random_g=None):
     num_vertices = v_original_distances.shape[0]
     device = v_original_distances.device
@@ -158,12 +158,16 @@ def sample_depth_and_angle(depth, angle, num_sample=100, v_random_g=None):
     return sample_depths, sample_angles.permute(0, 2, 1)
 
 
-def sample_new_planes(v_original_parameters, v_centroid_rays_c, v_dual_graph, v_random_g=None):
+def sample_new_planes(v_original_parameters, v_centroid_rays_c, v_dual_graph=None, v_random_g=None):
     plane_angles = vectors_to_angles(v_original_parameters[:, :3])
     initial_centroids = intersection_of_ray_and_plane(v_original_parameters, v_centroid_rays_c)[1]
     init_depth = torch.linalg.norm(initial_centroids, dim=-1)
 
     sample_depth, sample_angle = sample_depth_and_angle(init_depth, plane_angles, 100, v_random_g=v_random_g)
+
+    if v_dual_graph is None:
+        return sample_depth.contiguous(), sample_angle.contiguous()
+
     id_neighbour_patches = [list(v_dual_graph[id_node].keys()) for id_node in v_dual_graph.nodes]
     for patch_id in range(len(id_neighbour_patches)):
         # propagation from neighbour, do not sample depth!

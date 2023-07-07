@@ -423,7 +423,7 @@ if __name__ == '__main__':
     # data_root = r"E:\DATASET\SIGA2023\Mechanism\ABC_NEF_obj"
     # output_root = r"G:\Dataset\GSP"
 
-    assert len(sys.argv)==3
+    assert len(sys.argv)==4
     data_root = sys.argv[1]
     output_root = sys.argv[2]
 
@@ -434,7 +434,7 @@ if __name__ == '__main__':
 
     files = [item for item in os.listdir(os.path.join(data_root, "obj"))]
 
-    num_cores = 8
+    num_cores = int(sys.argv[3])
     num_task_per_core = len(files) // num_cores + 1
 
     ray.init(

@@ -72,17 +72,16 @@ class ABC_dataset(torch.utils.data.Dataset):
 
         input_features = torch.stack(input_features, dim=0).permute(0, 4, 1, 2, 3)
         consistent_flags = torch.stack(consistent_flags, dim=0).permute(0, 4, 1, 2, 3)
-        consistent_flags = torch.max_pool3d(consistent_flags.to(torch.float32), 4, 4)
 
-        return input_features.to(torch.float32), consistent_flags
+        return input_features.to(torch.float32), consistent_flags.to(torch.float32)
 
 
 class Base_model(nn.Module):
     def __init__(self, v_phase=0):
         super(Base_model, self).__init__()
         self.phase = v_phase
-        # self.encoder = U_Net_3D(img_ch=4, output_ch=1)
-        self.encoder = AttU_Net_3D(img_ch=4, output_ch=1)
+        self.encoder = U_Net_3D(img_ch=4, output_ch=1)
+        # self.encoder = AttU_Net_3D(img_ch=4, output_ch=1)
 
     def forward(self, v_data, v_training=False):
         features, labels = v_data
@@ -159,6 +158,8 @@ class Base_phase(pl.LightningModule):
         }
 
     def training_step(self, batch, batch_idx):
+        batch = (batch[0] ,torch.max_pool3d(batch[1], 4, 4))
+
         outputs = self.model(batch, True)
         loss = self.model.loss(outputs, batch)
 
@@ -169,6 +170,8 @@ class Base_phase(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        batch = (batch[0] ,torch.max_pool3d(batch[1], 4, 4))
+
         outputs = self.model(batch, False)
         loss = self.model.loss(outputs, batch)
         self.viz_data["loss"].append(loss.item())

@@ -263,15 +263,17 @@ def calculate_indices(curves, surfaces, vertices, faces, v_is_log=""):
 @ray.remote
 def process_item(v_root, v_output_root, v_files,
                  source_coords_ref, target_coords_ref, valid_flag_ref, v_resolution, v_is_log=False):
-    for obj_file in v_files:
-        prefix = "_".join(obj_file.split("_")[:2])
+    for prefix in v_files:
+        # prefix = "_".join(obj_file.split("_")[:2])
         # 1. Setup file path
         prefix_path = os.path.join(v_output_root, prefix)
         os.makedirs(os.path.join(v_output_root, prefix), exist_ok=True)
-        feature_file = obj_file.replace("trimesh", "features")
-        feature_file = feature_file.replace("obj", "yml")
-        feature_file = os.path.join(v_root, "feat", feature_file)
-        obj_file = os.path.join(v_root, "obj", obj_file)
+        feature_file=obj_file=None
+        for file in os.listdir(os.path.join(v_root, prefix)):
+            if "features" in file:
+                feature_file = os.path.join(v_root, prefix, file)
+            elif "trimesh" in file:
+                obj_file = os.path.join(v_root, prefix, file)
 
         # 2. Read obj
         with open(obj_file) as f:
@@ -432,7 +434,7 @@ if __name__ == '__main__':
 
     source_coords, target_coords, valid_flag = construct_graph_3d(resolution)
 
-    files = [item for item in os.listdir(os.path.join(data_root, "obj"))]
+    files = [item for item in os.listdir(data_root)]
 
     num_cores = int(sys.argv[3])
     num_task_per_core = len(files) // num_cores + 1

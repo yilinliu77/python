@@ -260,7 +260,7 @@ def calculate_indices(curves, surfaces, vertices, faces, v_is_log=""):
     return surface_id_to_primitives, face_edge_indicator, id_corner_points
 
 
-@ray.remote(num_gpus=1, num_cpus=1)
+@ray.remote(num_gpus=0.1, num_cpus=1)
 def process_item(v_root, v_output_root, v_files,
                  source_coords_ref, target_coords_ref, valid_flag_ref, v_resolution, v_is_log=False):
     for prefix in v_files:

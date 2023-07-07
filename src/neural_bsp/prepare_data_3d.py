@@ -274,7 +274,8 @@ def process_item(v_root, v_output_root, v_files,
                 feature_file = os.path.join(v_root, prefix, file)
             elif "trimesh" in file:
                 obj_file = os.path.join(v_root, prefix, file)
-
+        if feature_file is None or obj_file is None:
+            continue
         # 2. Read obj
         with open(obj_file) as f:
             vertices = []

@@ -1,4 +1,5 @@
 import os.path
+import sys
 import shutil
 import time
 from collections import OrderedDict
@@ -419,8 +420,12 @@ if __name__ == '__main__':
     np.random.seed(0)
 
     resolution = 256
-    data_root = r"E:\DATASET\SIGA2023\Mechanism\ABC_NEF_obj"
-    output_root = r"G:\Dataset\GSP"
+    # data_root = r"E:\DATASET\SIGA2023\Mechanism\ABC_NEF_obj"
+    # output_root = r"G:\Dataset\GSP"
+
+    assert len(sys.argv)==3
+    data_root = sys.argv[1]
+    output_root = sys.argv[2]
 
     check_dir(output_root)
     check_dir(os.path.join(output_root, "training"))

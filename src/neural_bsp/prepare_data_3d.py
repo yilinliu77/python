@@ -174,7 +174,7 @@ def filter_primitives(primitive_dict, v_faces):
                     "vert_indices": set(primitive["vert_indices"])
                 })
         else:
-            raise
+            return None, None
 
     # Detect sharp edges
     corner_points = []
@@ -311,6 +311,9 @@ def process_item(v_root, v_output_root, v_files,
 
         # 4. Extract and merge the same curves
         curves, surfaces = filter_primitives(primitive_dict, mesh_faces)
+
+        if curves is None:
+            continue
 
         num_curves = len(curves)
         num_surfaces = len(surfaces)

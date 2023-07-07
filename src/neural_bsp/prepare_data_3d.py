@@ -381,8 +381,8 @@ def process_item(v_root, v_output_root, v_files,
         np.save(
             os.path.join(
                 v_output_root,
-                prefix,
-                "data"),
+                "training",
+                "{}".format(prefix)),
             {
                 "resolution": resolution,
                 "input_features": input_features.astype(np.float16),
@@ -418,15 +418,12 @@ if __name__ == '__main__':
     print("Start to construct dataset")
     np.random.seed(0)
 
-    log_root = "output/grid_clustering_3d"
-    if not os.path.exists(log_root):
-        os.mkdir(log_root)
-
     resolution = 256
     data_root = r"E:\DATASET\SIGA2023\Mechanism\ABC_NEF_obj"
     output_root = r"G:\Dataset\GSP"
 
     check_dir(output_root)
+    check_dir(os.path.join(output_root, "training"))
 
     source_coords, target_coords, valid_flag = construct_graph_3d(resolution)
 

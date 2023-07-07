@@ -444,7 +444,7 @@ if __name__ == '__main__':
         # local_mode=True,
         # num_cpus=0,
         num_cpus=num_cores,
-        num_gpus=1
+        # num_gpus=1
     )
     tasks = []
     source_coords_ref = ray.put(source_coords)

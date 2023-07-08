@@ -24,7 +24,7 @@ def normalize(v, v_axis=-1):
     return new_v
 
 
-@ray.remote(num_gpus=0.5)
+# @ray.remote(num_gpus=0.5)
 def calculate_distance_gpu(vertices, faces, query_points):
     device = torch.device('cuda')
 
@@ -47,53 +47,54 @@ def calculate_distance_gpu(vertices, faces, query_points):
     return distances, closest_faces, closest_bcs
 
 
+def calculate_distance_cpu(vertices, faces, query_points):
+    mesh = o3d.geometry.TriangleMesh(
+        o3d.utility.Vector3dVector(vertices),
+        o3d.utility.Vector3iVector(faces),
+    )
+    scene = o3d.t.geometry.RaycastingScene()
+    scene.add_triangles(o3d.t.geometry.TriangleMesh.from_legacy(mesh))
+
+    results = scene.compute_closest_points(
+        o3d.core.Tensor.from_numpy(query_points)
+    )
+    uvs = results["primitive_uvs"].numpy()
+    closest_points = results["points"].numpy()
+    distances = np.linalg.norm(closest_points - query_points, axis=-1)
+    closest_faces = results["primitive_ids"].numpy()
+
+    uvs = np.concatenate((1 - uvs[:, 0:1] - uvs[:, 1:2], uvs), axis=1)
+
+    return distances, closest_faces, uvs
+
+
 def calculate_distance(query_points, vertices, faces,
                        surface_id_to_primitives, face_edge_indicator,
                        num_curves,
                        use_cpu=True):
     if use_cpu:
-        mesh = o3d.geometry.TriangleMesh(
-            o3d.utility.Vector3dVector(vertices),
-            o3d.utility.Vector3iVector(faces),
-        )
-        scene = o3d.t.geometry.RaycastingScene()
-        scene.add_triangles(o3d.t.geometry.TriangleMesh.from_legacy(mesh))
-
-        results = scene.compute_closest_points(
-            o3d.core.Tensor.from_numpy(query_points)
-        )
-
-        closest_points = results["points"].numpy()
-        distances = np.linalg.norm(closest_points - query_points, axis=-1)
-        closest_faces = results["primitive_ids"].numpy()
-
-        # test_results = scene.compute_closest_points(
-        #     o3d.core.Tensor.from_numpy(np.array([
-        #         [1, -0.129412, 0.639216],
-        #         [0.615686, -0.00392157, 0.670588],
-        #     ], dtype=np.float32))
-        # )
-        # print(test_results["primitive_ids"])
+        distances, closest_faces, closest_bcs = calculate_distance_cpu(
+            vertices, faces, query_points)
     else:
-        distances, closest_faces, closest_bcs = ray.get(calculate_distance_gpu.remote(
-            vertices, faces, query_points))
-        #
-        closest_primitive = surface_id_to_primitives[closest_faces]
-        face_edge_indicator_expanded = face_edge_indicator[closest_faces]
+        distances, closest_faces, closest_bcs = calculate_distance_gpu(
+            vertices, faces, query_points)
+    #
+    closest_primitive = surface_id_to_primitives[closest_faces]
+    face_edge_indicator_expanded = face_edge_indicator[closest_faces]
 
-        all_mask = np.any(face_edge_indicator_expanded >= 0, axis=-1)
-        all_mask = np.logical_and(all_mask, np.any(closest_bcs < 1e-2, axis=-1))
+    all_mask = np.any(face_edge_indicator_expanded >= 0, axis=-1)
+    all_mask = np.logical_and(all_mask, np.any(closest_bcs < 1e-2, axis=-1))
 
-        corner_points_mask = np.any(
-            np.logical_and(face_edge_indicator_expanded > num_curves, closest_bcs > 1 - 1e-2),
-            axis=-1
-        )
-        closest_primitive[corner_points_mask] = np.max(face_edge_indicator_expanded[corner_points_mask], axis=-1)
+    corner_points_mask = np.any(
+        np.logical_and(face_edge_indicator_expanded > num_curves, closest_bcs > 1 - 1e-2),
+        axis=-1
+    )
+    closest_primitive[corner_points_mask] = np.max(face_edge_indicator_expanded[corner_points_mask], axis=-1)
 
-        edge_mask = np.logical_and(all_mask, np.all(face_edge_indicator_expanded < num_curves, axis=-1))
-        closest_primitive[edge_mask] = np.max(face_edge_indicator_expanded[edge_mask], axis=-1)
+    edge_mask = np.logical_and(all_mask, np.all(face_edge_indicator_expanded < num_curves, axis=-1))
+    closest_primitive[edge_mask] = np.max(face_edge_indicator_expanded[edge_mask], axis=-1)
 
-        pass
+    pass
 
     if False:
         for test_distance in [0.01, 0.1, 0.5]:
@@ -341,7 +342,7 @@ def process_item(v_root, v_output_root, v_files,
         udf, closest_primitives = calculate_distance(query_points, mesh_vertices, mesh_faces,
                                                      surface_id_to_primitives, face_edge_indicator,
                                                      num_curves,
-                                                     use_cpu=False)
+                                                     use_cpu=True)
 
         # 6. Calculate the input features: gradient and udf
         gx, gy, gz = np.gradient(udf.reshape((v_resolution, v_resolution, v_resolution)))
@@ -367,7 +368,7 @@ def process_item(v_root, v_output_root, v_files,
             test_distance = 0.05
             selected_points = query_points[udf < test_distance]
 
-            if selected_points.shape[0]==0:
+            if selected_points.shape[0] == 0:
                 print("{} don't have levelset_005 points".format(prefix))
             else:
                 export_point_cloud(os.path.join(prefix_path, "levelset_005.ply"), selected_points)
@@ -387,7 +388,7 @@ def process_item(v_root, v_output_root, v_files,
             # 3. Visualize the boundary points
             consistent_flag_ = consistent_flag.reshape(-1)
             s_p = query_points[consistent_flag_]
-            if s_p.shape[0]==0:
+            if s_p.shape[0] == 0:
                 print("{} don't have boundary points".format(prefix))
             else:
                 export_point_cloud(os.path.join(prefix_path, "boundary.ply"), s_p)
@@ -400,7 +401,7 @@ def process_item(v_root, v_output_root, v_files,
                 mesh.triangles = o3d.utility.Vector3iVector(mesh_faces[np.any(face_edge_indicator == i, axis=-1)])
                 mesh.remove_unreferenced_vertices()
                 edge_mesh += mesh.remove_unreferenced_vertices()
-            if np.asarray(edge_mesh.triangles).shape[0]==0:
+            if np.asarray(edge_mesh.triangles).shape[0] == 0:
                 print("{} don't have curves".format(prefix))
             else:
                 o3d.io.write_triangle_mesh(os.path.join(prefix_path, "edges.ply"), edge_mesh)
@@ -465,7 +466,7 @@ if __name__ == '__main__':
 
     num_cores = int(sys.argv[3])
     num_gpus = int(sys.argv[4])
-    num_task_per_core = len(files) // num_cores + 1
+    num_task_per_core = len(files) // max(1, num_cores) + 1
 
     ray.init(
         # local_mode=True,

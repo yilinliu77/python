@@ -11,7 +11,7 @@ from tqdm import tqdm
 # pip install py7zr bs4 requests tqdm
 urllib3.disable_warnings()
 
-id_start = 5
+id_start = 0
 
 s = requests.Session()
 s.headers.update({

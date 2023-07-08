@@ -24,12 +24,34 @@ def normalize(v, v_axis=-1):
     return new_v
 
 
+@ray.remote(num_gpus=0.5)
+def calculate_distance_gpu(vertices, faces, query_points):
+    device = torch.device('cuda')
+
+    with torch.no_grad():
+        m = bvh_distance_queries.BVH()
+
+        distances, closest_points, closest_faces, closest_bcs = m(
+            torch.from_numpy(vertices[faces].copy()).to(device).unsqueeze(0),
+            torch.from_numpy(query_points.copy()).to(device).unsqueeze(0))
+        # torch.cuda.synchronize()
+        distances = torch.sqrt(distances).detach().cpu().numpy()[0]
+        # distances = distances.detach().cpu().numpy()[0]
+        closest_points = closest_points.detach().cpu().numpy()[0]
+        closest_faces = closest_faces[0].cpu().numpy()
+        closest_bcs = closest_bcs[0].cpu().numpy()
+
+    print(distances.shape[0])
+    print(closest_faces.shape[0])
+    print(closest_bcs.shape[0])
+    return distances, closest_faces, closest_bcs
+
+
 def calculate_distance(query_points, vertices, faces,
                        surface_id_to_primitives, face_edge_indicator,
                        num_curves,
                        use_cpu=True):
     if use_cpu:
-        raise "not support"
         mesh = o3d.geometry.TriangleMesh(
             o3d.utility.Vector3dVector(vertices),
             o3d.utility.Vector3iVector(faces),
@@ -53,37 +75,25 @@ def calculate_distance(query_points, vertices, faces,
         # )
         # print(test_results["primitive_ids"])
     else:
-        with torch.no_grad():
-            device = torch.device('cuda')
+        distances, closest_faces, closest_bcs = ray.get(calculate_distance_gpu.remote(
+            vertices, faces, query_points))
+        #
+        closest_primitive = surface_id_to_primitives[closest_faces]
+        face_edge_indicator_expanded = face_edge_indicator[closest_faces]
 
-            m = bvh_distance_queries.BVH()
+        all_mask = np.any(face_edge_indicator_expanded >= 0, axis=-1)
+        all_mask = np.logical_and(all_mask, np.any(closest_bcs < 1e-2, axis=-1))
 
-            distances, closest_points, closest_faces, closest_bcs = m(
-                torch.from_numpy(vertices).to(device)[faces].unsqueeze(0),
-                torch.from_numpy(query_points).to(device).unsqueeze(0))
-            # torch.cuda.synchronize()
-            distances = torch.sqrt(distances).detach().cpu().numpy()[0]
-            # distances = distances.detach().cpu().numpy()[0]
-            closest_points = closest_points.detach().cpu().numpy()[0]
-            closest_faces = closest_faces[0].cpu().numpy()
-            closest_bcs = closest_bcs[0].cpu().numpy()
+        corner_points_mask = np.any(
+            np.logical_and(face_edge_indicator_expanded > num_curves, closest_bcs > 1 - 1e-2),
+            axis=-1
+        )
+        closest_primitive[corner_points_mask] = np.max(face_edge_indicator_expanded[corner_points_mask], axis=-1)
 
-            closest_primitive = surface_id_to_primitives[closest_faces]
-            face_edge_indicator_expanded = face_edge_indicator[closest_faces]
+        edge_mask = np.logical_and(all_mask, np.all(face_edge_indicator_expanded < num_curves, axis=-1))
+        closest_primitive[edge_mask] = np.max(face_edge_indicator_expanded[edge_mask], axis=-1)
 
-            all_mask = np.any(face_edge_indicator_expanded >= 0, axis=-1)
-            all_mask = np.logical_and(all_mask, np.any(closest_bcs < 1e-2, axis=-1))
-
-            corner_points_mask = np.any(
-                np.logical_and(face_edge_indicator_expanded > num_curves, closest_bcs > 1-1e-2),
-                axis=-1
-            )
-            closest_primitive[corner_points_mask] = np.max(face_edge_indicator_expanded[corner_points_mask],axis=-1)
-
-            edge_mask = np.logical_and(all_mask, np.all(face_edge_indicator_expanded < num_curves, axis=-1))
-            closest_primitive[edge_mask] = np.max(face_edge_indicator_expanded[edge_mask], axis=-1)
-
-            pass
+        pass
 
     if False:
         for test_distance in [0.01, 0.1, 0.5]:
@@ -241,7 +251,10 @@ def calculate_indices(curves, surfaces, vertices, faces, v_is_log=""):
     # surfaces: [num_curves, num_curves+num_surfaces]
     # corner points: [num_curves+num_surfaces, num_primitives]
     if v_is_log != "":
-        export_point_cloud("{}/corner_points.ply".format(v_is_log), vertices[list(id_corner_points.keys())])
+        if len(list(id_corner_points.keys())) == 0:
+            print("{} don't have corner points".format(v_is_log))
+        else:
+            export_point_cloud("{}/corner_points.ply".format(v_is_log), vertices[list(id_corner_points.keys())])
 
     # Each face has three flags for each vertex. 0 is normal face, negative is edges, positive is corner points
     face_edge_indicator = -np.ones((faces.shape[0], 3), np.int64)
@@ -260,7 +273,7 @@ def calculate_indices(curves, surfaces, vertices, faces, v_is_log=""):
     return surface_id_to_primitives, face_edge_indicator, id_corner_points
 
 
-@ray.remote(num_gpus=0.1, num_cpus=1)
+@ray.remote(num_cpus=1)
 def process_item(v_root, v_output_root, v_files,
                  source_coords_ref, target_coords_ref, valid_flag_ref, v_resolution, v_is_log=False):
     for prefix in v_files:
@@ -268,7 +281,7 @@ def process_item(v_root, v_output_root, v_files,
         # 1. Setup file path
         prefix_path = os.path.join(v_output_root, prefix)
         os.makedirs(os.path.join(v_output_root, prefix), exist_ok=True)
-        feature_file=obj_file=None
+        feature_file = obj_file = None
         for file in os.listdir(os.path.join(v_root, prefix)):
             if "features" in file:
                 feature_file = os.path.join(v_root, prefix, file)
@@ -354,9 +367,10 @@ def process_item(v_root, v_output_root, v_files,
             test_distance = 0.05
             selected_points = query_points[udf < test_distance]
 
-            pc = o3d.geometry.PointCloud()
-            pc.points = o3d.utility.Vector3dVector(selected_points)
-            o3d.io.write_point_cloud(os.path.join(prefix_path, "levelset_005.ply"), pc)
+            if selected_points.shape[0]==0:
+                print("{} don't have levelset_005 points".format(prefix))
+            else:
+                export_point_cloud(os.path.join(prefix_path, "levelset_005.ply"), selected_points)
 
             # 2. Visualize the nearest point for each primitive
             is_viz_details = False
@@ -373,17 +387,23 @@ def process_item(v_root, v_output_root, v_files,
             # 3. Visualize the boundary points
             consistent_flag_ = consistent_flag.reshape(-1)
             s_p = query_points[consistent_flag_]
-            export_point_cloud(os.path.join(prefix_path, "boundary.ply"), s_p)
+            if s_p.shape[0]==0:
+                print("{} don't have boundary points".format(prefix))
+            else:
+                export_point_cloud(os.path.join(prefix_path, "boundary.ply"), s_p)
 
             # 4. Visualize the edges
             edge_mesh = o3d.geometry.TriangleMesh()
             for i in range(num_curves):
                 mesh = o3d.geometry.TriangleMesh()
                 mesh.vertices = o3d.utility.Vector3dVector(mesh_vertices)
-                mesh.triangles = o3d.utility.Vector3iVector(mesh_faces[np.any(face_edge_indicator==i, axis=-1)])
+                mesh.triangles = o3d.utility.Vector3iVector(mesh_faces[np.any(face_edge_indicator == i, axis=-1)])
                 mesh.remove_unreferenced_vertices()
                 edge_mesh += mesh.remove_unreferenced_vertices()
-            o3d.io.write_triangle_mesh(os.path.join(prefix_path, "edges.ply"), edge_mesh)
+            if np.asarray(edge_mesh.triangles).shape[0]==0:
+                print("{} don't have curves".format(prefix))
+            else:
+                o3d.io.write_triangle_mesh(os.path.join(prefix_path, "edges.ply"), edge_mesh)
 
         np.save(
             os.path.join(
@@ -429,10 +449,13 @@ if __name__ == '__main__':
     # data_root = r"E:\DATASET\SIGA2023\Mechanism\ABC_NEF_obj"
     # output_root = r"G:\Dataset\GSP"
 
-    assert len(sys.argv)==4
+    assert len(sys.argv) == 5
     data_root = sys.argv[1]
     output_root = sys.argv[2]
 
+    # if os.path.exists(output_root):
+    #     print("Output directory already exists")
+    #     exit()
     check_dir(output_root)
     check_dir(os.path.join(output_root, "training"))
 
@@ -441,13 +464,14 @@ if __name__ == '__main__':
     files = [item for item in os.listdir(data_root)]
 
     num_cores = int(sys.argv[3])
+    num_gpus = int(sys.argv[4])
     num_task_per_core = len(files) // num_cores + 1
 
     ray.init(
         # local_mode=True,
-        # num_cpus=0,
+        # num_cpus=1,
         num_cpus=num_cores,
-        num_gpus=1
+        num_gpus=num_gpus
     )
     tasks = []
     source_coords_ref = ray.put(source_coords)

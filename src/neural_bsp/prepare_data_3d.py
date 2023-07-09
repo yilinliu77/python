@@ -41,9 +41,9 @@ def calculate_distance_gpu(vertices, faces, query_points):
         closest_faces = closest_faces[0].cpu().numpy()
         closest_bcs = closest_bcs[0].cpu().numpy()
 
-    print(distances.shape[0])
-    print(closest_faces.shape[0])
-    print(closest_bcs.shape[0])
+    # print(distances.shape[0])
+    # print(closest_faces.shape[0])
+    # print(closest_bcs.shape[0])
     return distances, closest_faces, closest_bcs
 
 
@@ -253,7 +253,8 @@ def calculate_indices(curves, surfaces, vertices, faces, v_is_log=""):
     # corner points: [num_curves+num_surfaces, num_primitives]
     if v_is_log != "":
         if len(list(id_corner_points.keys())) == 0:
-            print("{} don't have corner points".format(v_is_log))
+            # print("{} don't have corner points".format(v_is_log))
+            pass
         else:
             export_point_cloud("{}/corner_points.ply".format(v_is_log), vertices[list(id_corner_points.keys())])
 
@@ -278,6 +279,8 @@ def calculate_indices(curves, surfaces, vertices, faces, v_is_log=""):
 def process_item(v_root, v_output_root, v_files,
                  source_coords_ref, target_coords_ref, valid_flag_ref, v_resolution, v_is_log=False):
     for prefix in v_files:
+        times = [0] * 10
+        cur_time = time.time()
         # prefix = "_".join(obj_file.split("_")[:2])
         # 1. Setup file path
         prefix_path = os.path.join(v_output_root, prefix)
@@ -313,21 +316,27 @@ def process_item(v_root, v_output_root, v_files,
         # Normalize the vertices
         mesh_vertices = ((mesh_vertices - vcenter) / diag) * 2
         query_points = source_coords_ref.astype(np.float32) / (resolution - 1) * 2 - 1
-        mesh = o3d.geometry.TriangleMesh(
-            o3d.utility.Vector3dVector(mesh_vertices),
-            o3d.utility.Vector3iVector(mesh_faces),
-        )
-        o3d.io.write_triangle_mesh(os.path.join(prefix_path, "normalized_mesh.ply"), mesh)
-
+        if v_is_log:
+            mesh = o3d.geometry.TriangleMesh(
+                o3d.utility.Vector3dVector(mesh_vertices),
+                o3d.utility.Vector3iVector(mesh_faces),
+            )
+            o3d.io.write_triangle_mesh(os.path.join(prefix_path, "normalized_mesh.ply"), mesh)
+        times[0] += time.time() - cur_time
+        cur_time = time.time()
         # 3. Read primitives
         with open(feature_file) as f:
+            # primitive_dict = yaml.load(f, yaml.CSafeLoader)
             primitive_dict = yaml.load(f, yaml.CLoader)
-
+        times[1] += time.time() - cur_time
+        cur_time = time.time()
         # 4. Extract and merge the same curves
         curves, surfaces = filter_primitives(primitive_dict, mesh_faces)
 
         if curves is None:
             continue
+        times[2] += time.time() - cur_time
+        cur_time = time.time()
 
         num_curves = len(curves)
         num_surfaces = len(surfaces)
@@ -335,15 +344,17 @@ def process_item(v_root, v_output_root, v_files,
 
         # 5. Calculate the primitive id for each surface
         surface_id_to_primitives, face_edge_indicator, id_corner_points = calculate_indices(
-            curves, surfaces, mesh_vertices, mesh_faces, prefix_path)
+            curves, surfaces, mesh_vertices, mesh_faces, prefix_path if v_is_log else "")
         num_corner_points = len(id_corner_points)
         num_primitives = num_primitives + num_corner_points
-
+        times[3] += time.time() - cur_time
+        cur_time = time.time()
         udf, closest_primitives = calculate_distance(query_points, mesh_vertices, mesh_faces,
                                                      surface_id_to_primitives, face_edge_indicator,
                                                      num_curves,
                                                      use_cpu=True)
-
+        times[4] += time.time() - cur_time
+        cur_time = time.time()
         # 6. Calculate the input features: gradient and udf
         gx, gy, gz = np.gradient(udf.reshape((v_resolution, v_resolution, v_resolution)))
         g = -np.stack((gx, gy, gz), axis=-1)
@@ -352,7 +363,8 @@ def process_item(v_root, v_output_root, v_files,
         input_features = np.concatenate((
             udf.reshape((v_resolution, v_resolution, v_resolution, 1)),
             g), axis=-1)
-
+        times[5] += time.time() - cur_time
+        cur_time = time.time()
         # 7. Calculate the consistency
         consistent_flag = np.zeros((resolution, resolution, resolution, 26), dtype=bool)
         valid_flag_3 = valid_flag_ref.reshape((resolution, resolution, resolution, 26))
@@ -361,7 +373,8 @@ def process_item(v_root, v_output_root, v_files,
             closest_primitives[target_coords_ref[valid_flag_ref]]
 
         consistent_flag = np.any(consistent_flag, axis=3)
-
+        times[6] += time.time() - cur_time
+        cur_time = time.time()
         # Visualization
         if v_is_log:
             # 1. Visualize udf
@@ -418,6 +431,8 @@ def process_item(v_root, v_output_root, v_files,
                 "consistent_flags": np.packbits(consistent_flag, axis=None),
                 # "query_points": query_points,
             })
+        times[7] += time.time() - cur_time
+        cur_time = time.time()
     pass
 
 
@@ -450,7 +465,7 @@ if __name__ == '__main__':
     # data_root = r"E:\DATASET\SIGA2023\Mechanism\ABC_NEF_obj"
     # output_root = r"G:\Dataset\GSP"
 
-    assert len(sys.argv) == 5
+    assert len(sys.argv) == 5 or len(sys.argv) == 7
     data_root = sys.argv[1]
     output_root = sys.argv[2]
 
@@ -462,7 +477,15 @@ if __name__ == '__main__':
 
     source_coords, target_coords, valid_flag = construct_graph_3d(resolution)
 
-    files = [item for item in os.listdir(data_root)]
+    if len(sys.argv) > 5:
+        id_start = int(sys.argv[5])
+        id_end = int(sys.argv[6])
+    else:
+        id_start = 0
+        id_end = 1000000
+    assert id_end>=id_start
+
+    files = [item for item in os.listdir(data_root) if int(item)>id_start and int(item) < id_end]
 
     num_cores = int(sys.argv[3])
     num_gpus = int(sys.argv[4])
@@ -486,7 +509,7 @@ if __name__ == '__main__':
                                          # files[2:3],
                                          # files[240:241],
                                          source_coords_ref, target_coords_ref, valid_flag_ref,
-                                         resolution, True))
+                                         resolution, False))
     results = ray.get(tasks)
     ray.shutdown()
 

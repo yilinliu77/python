@@ -223,7 +223,7 @@ def filter_primitives(primitive_dict, v_faces):
 
 
 # 2. Calculate the index of primitives for each vertex and face
-def calculate_indices(curves, surfaces, vertices, faces, v_is_log=""):
+def calculate_indices(curves, surfaces, vertices, faces):
     num_faces = faces.shape[0]
     num_vertices = vertices.shape[0]
     num_curves = len(curves)
@@ -251,12 +251,6 @@ def calculate_indices(curves, surfaces, vertices, faces, v_is_log=""):
     # curves: [0, num_curves]
     # surfaces: [num_curves, num_curves+num_surfaces]
     # corner points: [num_curves+num_surfaces, num_primitives]
-    if v_is_log != "":
-        if len(list(id_corner_points.keys())) == 0:
-            # print("{} don't have corner points".format(v_is_log))
-            pass
-        else:
-            export_point_cloud("{}/corner_points.ply".format(v_is_log), vertices[list(id_corner_points.keys())])
 
     # Each face has three flags for each vertex. 0 is normal face, negative is edges, positive is corner points
     face_edge_indicator = -np.ones((faces.shape[0], 3), np.int64)
@@ -272,7 +266,7 @@ def calculate_indices(curves, surfaces, vertices, faces, v_is_log=""):
 
             surface_id_to_primitives[id_face] = id_surface + num_curves
 
-    return surface_id_to_primitives, face_edge_indicator, id_corner_points
+    return surface_id_to_primitives, face_edge_indicator, id_corner_points, vertices[list(id_corner_points.keys())]
 
 
 @ray.remote(num_cpus=1)
@@ -284,7 +278,6 @@ def process_item(v_root, v_output_root, v_files,
         # prefix = "_".join(obj_file.split("_")[:2])
         # 1. Setup file path
         prefix_path = os.path.join(v_output_root, prefix)
-        os.makedirs(os.path.join(v_output_root, prefix), exist_ok=True)
         feature_file = obj_file = None
         for file in os.listdir(os.path.join(v_root, prefix)):
             if "features" in file:
@@ -316,12 +309,10 @@ def process_item(v_root, v_output_root, v_files,
         # Normalize the vertices
         mesh_vertices = ((mesh_vertices - vcenter) / diag) * 2
         query_points = source_coords_ref.astype(np.float32) / (resolution - 1) * 2 - 1
-        if v_is_log:
-            mesh = o3d.geometry.TriangleMesh(
-                o3d.utility.Vector3dVector(mesh_vertices),
-                o3d.utility.Vector3iVector(mesh_faces),
-            )
-            o3d.io.write_triangle_mesh(os.path.join(prefix_path, "normalized_mesh.ply"), mesh)
+        normalized_mesh = o3d.geometry.TriangleMesh(
+            o3d.utility.Vector3dVector(mesh_vertices),
+            o3d.utility.Vector3iVector(mesh_faces),
+        )
         times[0] += time.time() - cur_time
         cur_time = time.time()
         # 3. Read primitives
@@ -343,8 +334,8 @@ def process_item(v_root, v_output_root, v_files,
         num_primitives = num_curves + num_surfaces
 
         # 5. Calculate the primitive id for each surface
-        surface_id_to_primitives, face_edge_indicator, id_corner_points = calculate_indices(
-            curves, surfaces, mesh_vertices, mesh_faces, prefix_path if v_is_log else "")
+        surface_id_to_primitives, face_edge_indicator, id_corner_points, corner_points_mesh = calculate_indices(
+            curves, surfaces, mesh_vertices, mesh_faces)
         num_corner_points = len(id_corner_points)
         num_primitives = num_primitives + num_corner_points
         times[3] += time.time() - cur_time
@@ -375,8 +366,17 @@ def process_item(v_root, v_output_root, v_files,
         consistent_flag = np.any(consistent_flag, axis=3)
         times[6] += time.time() - cur_time
         cur_time = time.time()
+
+        if num_curves==0 or consistent_flag.max() is False:
+            continue
+        os.makedirs(os.path.join(v_output_root, prefix), exist_ok=True)
+        o3d.io.write_triangle_mesh(os.path.join(prefix_path, "normalized_mesh.ply"), normalized_mesh)
+
         # Visualization
         if v_is_log:
+            if corner_points_mesh.shape[0] != 0:
+                export_point_cloud("{}/corner_points.ply".format(v_is_log), corner_points_mesh)
+
             # 1. Visualize udf
             test_distance = 0.05
             selected_points = query_points[udf < test_distance]

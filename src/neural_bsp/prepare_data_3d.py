@@ -349,7 +349,7 @@ def process_item(v_root, v_output_root, v_files,
         # 6. Calculate the input features: gradient and udf
         gx, gy, gz = np.gradient(udf.reshape((v_resolution, v_resolution, v_resolution)))
         g = -np.stack((gx, gy, gz), axis=-1)
-        g = normalize(g, v_axis=-1)
+        # g = normalize(g, v_axis=-1)
 
         input_features = np.concatenate((
             udf.reshape((v_resolution, v_resolution, v_resolution, 1)),
@@ -357,11 +357,16 @@ def process_item(v_root, v_output_root, v_files,
         times[5] += time.time() - cur_time
         cur_time = time.time()
         # 7. Calculate the consistency
-        consistent_flag = np.zeros((resolution, resolution, resolution, 26), dtype=bool)
-        valid_flag_3 = valid_flag_ref.reshape((resolution, resolution, resolution, 26))
-        consistent_flag[valid_flag_3] = \
-            np.tile(closest_primitives[:, None], (1, 26))[valid_flag_ref] != \
-            closest_primitives[target_coords_ref[valid_flag_ref]]
+        # consistent_flag = np.zeros((resolution, resolution, resolution, 26), dtype=bool)
+        # valid_flag_3 = valid_flag_ref.reshape((resolution, resolution, resolution, 26))
+        # consistent_flag[valid_flag_3] = \
+        #     np.tile(closest_primitives[:, None], (1, 26))[valid_flag_ref] != \
+        #     closest_primitives[target_coords_ref[valid_flag_ref]]
+
+        target_coords_ref=np.clip(target_coords_ref,0,valid_flag_ref.shape[0]-1)
+        consistent_flag = closest_primitives[:, None] == closest_primitives[target_coords_ref]
+        consistent_flag[~valid_flag_ref] = False
+        consistent_flag = consistent_flag.reshape((resolution, resolution, resolution, 26))
 
         consistent_flag = np.any(consistent_flag, axis=3)
         times[6] += time.time() - cur_time
@@ -375,7 +380,7 @@ def process_item(v_root, v_output_root, v_files,
         # Visualization
         if v_is_log:
             if corner_points_mesh.shape[0] != 0:
-                export_point_cloud("{}/corner_points.ply".format(v_is_log), corner_points_mesh)
+                export_point_cloud("{}/corner_points.ply".format(prefix_path), corner_points_mesh)
 
             # 1. Visualize udf
             test_distance = 0.05
@@ -433,6 +438,7 @@ def process_item(v_root, v_output_root, v_files,
             })
         times[7] += time.time() - cur_time
         cur_time = time.time()
+        # print(sum(times))
     pass
 
 
@@ -465,9 +471,10 @@ if __name__ == '__main__':
     # data_root = r"E:\DATASET\SIGA2023\Mechanism\ABC_NEF_obj"
     # output_root = r"G:\Dataset\GSP"
 
-    assert len(sys.argv) == 5 or len(sys.argv) == 7
+    assert len(sys.argv) == 6 or len(sys.argv) == 8
     data_root = sys.argv[1]
     output_root = sys.argv[2]
+    log_details = bool(int(sys.argv[5]))
 
     # if os.path.exists(output_root):
     #     print("Output directory already exists")
@@ -477,9 +484,9 @@ if __name__ == '__main__':
 
     source_coords, target_coords, valid_flag = construct_graph_3d(resolution)
 
-    if len(sys.argv) > 5:
-        id_start = int(sys.argv[5])
-        id_end = int(sys.argv[6])
+    if len(sys.argv) > 6:
+        id_start = int(sys.argv[6])
+        id_end = int(sys.argv[7])
     else:
         id_start = 0
         id_end = 1000000
@@ -509,7 +516,7 @@ if __name__ == '__main__':
                                          # files[2:3],
                                          # files[240:241],
                                          source_coords_ref, target_coords_ref, valid_flag_ref,
-                                         resolution, False))
+                                         resolution, log_details))
     results = ray.get(tasks)
     ray.shutdown()
 

@@ -26,7 +26,7 @@ def debug_imgs(v_imgs: List[np.ndarray]) -> None:
 def check_dir(v_path):
     if os.path.exists(v_path):
         shutil.rmtree(v_path)
-    os.mkdir(v_path)
+    os.makedirs(v_path)
 
 def refresh_timer(a):
     delta = time.time() - a

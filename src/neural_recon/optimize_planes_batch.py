@@ -1,6 +1,7 @@
+import copy
 import os
 import random
-
+import copy
 import cv2
 import networkx as nx
 import numpy as np
@@ -13,7 +14,7 @@ from src.neural_recon.geometric_util import angles_to_vectors, compute_plane_abc
     intersection_of_ray_and_plane
 from src.neural_recon.io_utils import generate_random_color, save_plane
 from src.neural_recon.loss_utils import compute_regularization, Glue_loss_computer, \
-    Bilateral_ncc_computer, Edge_loss_computer
+    Bilateral_ncc_computer, Edge_loss_computer, Regularization_loss_computer
 from src.neural_recon.collision_checker import Collision_checker
 from src.neural_recon.sample_utils import sample_new_planes, sample_triangles
 from src.neural_recon.geometric_util import fit_plane_svd
@@ -37,11 +38,12 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
     cur_iter = [0] * patch_num
     best_loss = [None] * patch_num
     delta = [None] * patch_num
+    MAX_ITER = 1000
     MAX_TOLERENCE = 500
     num_tolerence = [MAX_TOLERENCE] * patch_num
 
     num_plane_sample = 100
-    img_src_id = 0
+    img_src_id = 2
 
     v_img1 = imgs[0]
     v_img2 = imgs[img_src_id + 1]
@@ -55,8 +57,10 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
     edge_loss_weight = 10
     reg_loss_weight = 1
     glue_loss_weight = 1
+    regularization_loss_weight = 0.01
     edge_loss_computer = Edge_loss_computer(v_sample_density=0.001)
     glue_loss_computer = Glue_loss_computer(dual_graph, v_rays_c)
+    regularization_loss_computer = Regularization_loss_computer(dual_graph)
     ncc_loss_computer = Bilateral_ncc_computer(
         v_enable_spatial_weights=True,
         v_enable_color_weights=True,
@@ -132,7 +136,7 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
 
                 id_end = num_sample_points[:num_vertex].sum()
                 local_flag = collision_flag[:id_end].cpu().numpy()
-                p2 = (transformation[0] @ to_homogeneous_tensor(
+                p2 = (transformation[img_src_id] @ to_homogeneous_tensor(
                     sample_points_on_face[:id_end]).T).T[:, :3]
                 p2 = p2[:, :2] / p2[:, 2:3]
                 p2 = torch.round(p2 * 800).cpu().numpy().astype(np.int64)
@@ -171,11 +175,16 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
             # 4) Glue loss
             glue_loss = glue_loss_computer.compute(v_patch_id, optimized_abcd_list, local_vertex_pos)
 
+            # 5) Regularization loss
+            regularization_loss = regularization_loss_computer.compute(v_patch_id, optimized_abcd_list)
+
             # Final loss
             final_loss = ncc_loss * ncc_loss_weight \
                          + edge_loss * edge_loss_weight \
                          + reg_loss * reg_loss_weight \
-                         + glue_loss * glue_loss_weight
+                         + glue_loss * glue_loss_weight \
+                         + regularization_loss * regularization_loss_weight
+
             # final_loss = weighted_triangle_loss
 
             # 6. Select the best and update `optimized_abcd_list`
@@ -200,20 +209,20 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
                     src_imgs = imgs[1:].cpu().numpy() * 255
                     img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
                     img12 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
-                    img21 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
-                    img22 = cv2.cvtColor(src_imgs[0], cv2.COLOR_GRAY2BGR)
+                    img21 = cv2.cvtColor(src_imgs[img_src_id], cv2.COLOR_GRAY2BGR)
+                    img22 = cv2.cvtColor(src_imgs[img_src_id], cv2.COLOR_GRAY2BGR)
 
                     shape = img11.shape[:2][::-1]
                     # vertex
                     p_2d1 = (intrinsic @ all_points_c_.T).T.cpu().numpy()
-                    p_2d2 = (transformation[0] @ to_homogeneous_tensor(all_points_c_).T).T.cpu().numpy()
+                    p_2d2 = (transformation[img_src_id] @ to_homogeneous_tensor(all_points_c_).T).T.cpu().numpy()
                     p_2d1 = p_2d1[:, :2] / p_2d1[:, 2:3]
                     p_2d2 = p_2d2[:, :2] / p_2d2[:, 2:3]
                     p_2d1 = np.around(p_2d1 * shape).astype(np.int64)
                     p_2d2 = np.around(p_2d2 * shape).astype(np.int64)
                     # sample points
                     s_2d1 = (intrinsic @ sample_points_c_.T).T.cpu().numpy()
-                    s_2d2 = (transformation[0] @ to_homogeneous_tensor(sample_points_c_).T).T.cpu().numpy()
+                    s_2d2 = (transformation[img_src_id] @ to_homogeneous_tensor(sample_points_c_).T).T.cpu().numpy()
                     s_2d1 = s_2d1[:, :2] / s_2d1[:, 2:3]
                     s_2d2 = s_2d2[:, :2] / s_2d2[:, 2:3]
                     s_2d1 = np.around(s_2d1 * shape).astype(np.int64)
@@ -273,7 +282,7 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
                     best_loss[v_patch_id],
                     delta[v_patch_id])
                 )
-                if delta[v_patch_id] < 1e-4:
+                if abs(delta[v_patch_id]) < 1e-3:
                     num_tolerence[v_patch_id] -= 1
                 else:
                     num_tolerence[v_patch_id] = MAX_TOLERENCE
@@ -285,6 +294,9 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
                 best_loss[v_patch_id] = cur_loss
 
             cur_iter[v_patch_id] += 1
+
+            if cur_iter[v_patch_id] >= MAX_ITER:
+                end_flag[v_patch_id] = 1
 
         # Update triangles
         final_triangles_list = []
@@ -331,7 +343,7 @@ def local_assemble(v_planes, v_rays_c, v_centroid_rays_c, dual_graph,
     patch_vertexes_id = [patches_list[i]['id_vertex'] for i in range(len(patches_list))]
 
     num_plane_sample = 1000
-    img_src_id = 0
+    img_src_id = 2
 
     v_img1 = imgs[0]
     v_img2 = imgs[img_src_id + 1]
@@ -343,8 +355,10 @@ def local_assemble(v_planes, v_rays_c, v_centroid_rays_c, dual_graph,
     edge_loss_weight = 10
     reg_loss_weight = 1
     glue_loss_weight = 1
+    regularization_loss_weight = 0.01
     edge_loss_computer = Edge_loss_computer(v_sample_density=0.001)
     glue_loss_computer = Glue_loss_computer(dual_graph, v_rays_c)
+    regularization_loss_computer = Regularization_loss_computer(dual_graph)
     ncc_loss_computer = Bilateral_ncc_computer(
         v_enable_spatial_weights=True,
         v_enable_color_weights=True,
@@ -411,14 +425,14 @@ def local_assemble(v_planes, v_rays_c, v_centroid_rays_c, dual_graph,
 
             # vertex
             p_2d1 = (intrinsic @ all_points_c.T).T.cpu().numpy()
-            p_2d2 = (transformation[0] @ to_homogeneous_tensor(all_points_c).T).T.cpu().numpy()
+            p_2d2 = (transformation[img_src_id] @ to_homogeneous_tensor(all_points_c).T).T.cpu().numpy()
             p_2d1 = p_2d1[:, :2] / p_2d1[:, 2:3]
             p_2d2 = p_2d2[:, :2] / p_2d2[:, 2:3]
             p_2d1 = np.around(p_2d1 * shape).astype(np.int64)
             p_2d2 = np.around(p_2d2 * shape).astype(np.int64)
             # sample points
             s_2d1 = (intrinsic @ sample_points_c.T).T.cpu().numpy()
-            s_2d2 = (transformation[0] @ to_homogeneous_tensor(sample_points_c).T).T.cpu().numpy()
+            s_2d2 = (transformation[img_src_id] @ to_homogeneous_tensor(sample_points_c).T).T.cpu().numpy()
             s_2d1 = s_2d1[:, :2] / s_2d1[:, 2:3]
             s_2d2 = s_2d2[:, :2] / s_2d2[:, 2:3]
             s_2d1 = np.around(s_2d1 * shape).astype(np.int64)
@@ -462,7 +476,7 @@ def local_assemble(v_planes, v_rays_c, v_centroid_rays_c, dual_graph,
         for i in range(samples_abcd_.shape[0]):
             vis_megred_patch(merged_patch_id_list, samples_abcd_[i], i)
 
-    # eval src plane parameter of a patch
+    # eval plane parameter of a patch
     def eval_parameter(v_patch_id, local_plane_parameter, v_planes_, shared_edge=None):
         # 2. Get some variables
         num_plane_sample_ = local_plane_parameter.shape[0]
@@ -475,8 +489,7 @@ def local_assemble(v_planes, v_rays_c, v_centroid_rays_c, dual_graph,
         local_edge_pos = local_vertex_pos[:, edges_idx]
         local_centroid = intersection_of_ray_and_all_plane(local_plane_parameter,
                                                            v_centroid_rays_c[v_patch_id:v_patch_id + 1])[:, 0]
-        triangles_pos = torch.cat((local_edge_pos, local_centroid[:, None, None, :].tile(1, num_vertex, 1, 1)),
-                                  dim=2)
+        triangles_pos = torch.cat((local_edge_pos, local_centroid[:, None, None, :].tile(1, num_vertex, 1, 1)), dim=2)
         triangles_pos = triangles_pos.view(-1, 3, 3)  # (100*num_tri,3,3)
 
         # 4. Sample points in this plane
@@ -501,7 +514,7 @@ def local_assemble(v_planes, v_rays_c, v_centroid_rays_c, dual_graph,
 
             id_end = num_sample_points[:num_vertex].sum()
             local_flag = collision_flag[:id_end].cpu().numpy()
-            p2 = (transformation[0] @ to_homogeneous_tensor(
+            p2 = (transformation[img_src_id] @ to_homogeneous_tensor(
                 sample_points_on_face[:id_end]).T).T[:, :3]
             p2 = p2[:, :2] / p2[:, 2:3]
             p2 = torch.round(p2 * 800).cpu().numpy().astype(np.int64)
@@ -549,15 +562,19 @@ def local_assemble(v_planes, v_rays_c, v_centroid_rays_c, dual_graph,
         # 4) Glue loss
         glue_loss = glue_loss_computer.compute(v_patch_id, v_planes_, local_vertex_pos)
 
+        # 5) Regularization loss
+        regularization_loss = regularization_loss_computer.compute(v_patch_id, v_planes_)
+
         # Final loss
         final_loss = ncc_loss * ncc_loss_weight \
                      + edge_loss * edge_loss_weight \
                      + reg_loss * reg_loss_weight \
-                     + glue_loss * glue_loss_weight
+                     + glue_loss * glue_loss_weight \
+                     + regularization_loss * regularization_loss_weight
 
         return final_loss
 
-    def merge_muti_plane(merged_patch_id_list: list, dual_graph_, patch_vertexes_id_, v_planes_):
+    def merge_muti_plane(merged_patch_id_list: list, dual_graph_, patch_vertexes_id_, v_planes_, phase=1):
         # adj_edge = dual_graph_[src_patch_id][adj_patch_id]['adjacent_vertices']
         # merged_patch = init_merged_patch(patch_vertexes_id_[src_patch_id],
         #                                  patch_vertexes_id_[adj_patch_id],
@@ -566,10 +583,6 @@ def local_assemble(v_planes, v_rays_c, v_centroid_rays_c, dual_graph,
         merged_patch_abcd = v_planes_[merged_patch_id_list].mean(dim=0)
 
         # eval src parameter of the two patch to be merged
-        # for i in range(10000):
-        #     patch_id = 0
-        #     print(eval_parameter(patch_id, v_planes[patch_id].unsqueeze(0), v_planes_).item())
-
         sum_loss = 0
         for patch_id in merged_patch_id_list:
             sum_loss += eval_parameter(patch_id, v_planes_[patch_id].unsqueeze(0), v_planes_)
@@ -587,15 +600,22 @@ def local_assemble(v_planes, v_rays_c, v_centroid_rays_c, dual_graph,
 
         while True:
             # sample new planes
-            samples_depth, samples_angle = sample_new_planes(merged_patch_abcd.unsqueeze(0),
-                                                             v_centroid_rays_c[merged_patch_id_list[0]].unsqueeze(0),
-                                                             v_random_g=sample_g)
-            samples_abc = angles_to_vectors(samples_angle)  # 1 * 100 * 3
-            _, samples_abcd = compute_plane_abcd(v_centroid_rays_c[merged_patch_id_list[0]].unsqueeze(0),
-                                                 samples_depth,
-                                                 samples_abc)
-            samples_abcd = samples_abcd.squeeze(0)
-
+            if phase == 1:
+                samples_depth, samples_angle = sample_new_planes(merged_patch_abcd.unsqueeze(0),
+                                                                 v_centroid_rays_c[merged_patch_id_list[0]].unsqueeze(
+                                                                     0),
+                                                                 v_random_g=sample_g)
+                samples_abc = angles_to_vectors(samples_angle)  # 1 * 100 * 3
+                _, samples_abcd = compute_plane_abcd(v_centroid_rays_c[merged_patch_id_list[0]].unsqueeze(0),
+                                                     samples_depth,
+                                                     samples_abc)
+                samples_abcd = samples_abcd.squeeze(0)
+            else:
+                pass
+                # samples_abcd = sample_new_planes2(merged_patch_abcd.unsqueeze(0),
+                #                                   v_centroid_rays_c[merged_patch_id_list[0]].unsqueeze(0),
+                #                                   v_random_g=sample_g)
+                # samples_abcd = samples_abcd.squeeze(0)
             # vis_all_sample(samples_abcd)
 
             merged_patch_loss = torch.zeros(1, 100).to(device)
@@ -633,20 +653,13 @@ def local_assemble(v_planes, v_rays_c, v_centroid_rays_c, dual_graph,
 
             if local_iter % 100 == 0:
                 vis_megred_patch(merged_patch_id_list,
-                                 merged_patch_abcd.tile(len(merged_patch_id_list),1),
+                                 merged_patch_abcd.tile(len(merged_patch_id_list), 1),
                                  cur_iter_=local_iter,
-                                 text=str(best_loss_.cpu())+str(sum_loss.cpu()))
+                                 text=str(best_loss_.cpu()) + str(sum_loss.cpu()))
                 print(local_iter, id_best, best_loss_)
 
-            if local_iter == 0 and sum_loss == best_loss_:
-                print('debug')
             local_iter += 1
 
-    # g = nx.Graph()
-    # node
-    # - boundary:
-    # - id_source_patch:
-    import random
     def bfs_merge_planes(dual_graph_, patch_vertexes_id_, v_planes_, init_start_patch_id=2):
         # graph_adj = dual_graph_.copy()
         # for node in graph_adj.nodes:
@@ -661,9 +674,6 @@ def local_assemble(v_planes, v_rays_c, v_centroid_rays_c, dual_graph,
         vis_megred_patch(list(dual_graph_.nodes), v_planes_, cur_iter_=-1)
 
         visited = [False] * len(dual_graph_.nodes)
-
-        merged_plane_list = torch.arange(patch_num)
-        merged_record = [-1] * patch_num
 
         new_graph = [[] for _ in range(15)]
 
@@ -686,8 +696,6 @@ def local_assemble(v_planes, v_rays_c, v_centroid_rays_c, dual_graph,
 
                 # check merge
                 print("Trying to merge {} to {}".format(neighbour_plane, new_graph[start_patch_id]))
-                if int(neighbour_plane) == 6:
-                    print("debug")
                 is_merge_success, merged_patch_abcd = \
                     merge_muti_plane(new_graph[start_patch_id] + [neighbour_plane],
                                      dual_graph, patch_vertexes_id, v_planes_.clone())
@@ -705,26 +713,100 @@ def local_assemble(v_planes, v_rays_c, v_centroid_rays_c, dual_graph,
                         if not visited[n]:
                             queue.append(n)
                 print(new_graph)
-        #   Construct graph adj
+
         return new_graph, v_planes_
 
-    #optimized_abcd_list = pickle.load(open("output/optimized_abcd_list_merged.pkl", "rb"))
-    #optimized_abcd_list = torch.from_numpy(optimized_abcd_list).to(device)
-
-    merged_graph, optimized_abcd_list = bfs_merge_planes(dual_graph, patch_vertexes_id, v_planes.clone(), 2)
-
-    save_plane(optimized_abcd_list, v_rays_c, patch_vertexes_id,
-               file_path=os.path.join(v_log_root, "optimized.ply"))
-
-    return
-
-    # bfs_merge_planes(dual_graph, patch_vertexes_id, v_planes)
-    temp, merged_patch_parameter = merge_two_plane(2, 3, dual_graph, patch_vertexes_id, v_planes)
-    if temp:
-        print("merge success")
+    # 1. try to optimize the merged plane parameters, then they are assembled naturally
+    if not os.path.exists("output/optimized_abcd_list_merged.pkl"):
+        merged_graph, optimized_abcd_list = bfs_merge_planes(dual_graph, patch_vertexes_id, v_planes.clone(), 2)
+        pickle.dump(optimized_abcd_list.cpu().numpy(), open("output/optimized_abcd_list_merged.pkl", "wb"))
+        pickle.dump(merged_graph, open("output/merged_graph.pkl", "wb"))
+        save_plane(optimized_abcd_list, v_rays_c, patch_vertexes_id, os.path.join(v_log_root, "merged.ply"))
     else:
-        print("merge failed")
+        optimized_abcd_list = pickle.load(open("output/optimized_abcd_list_merged.pkl", "rb"))
+        merged_graph = pickle.load(open("output/merged_graph.pkl", "rb"))
+        optimized_abcd_list = torch.from_numpy(optimized_abcd_list).to(device)
 
+    # get the vertexes id list of each new merged patches
+    def merge_patches_vertexes(merged_graph_, patch_vertexes_id_, dual_graph_):
+        def merge_one_patch(merged_patch_id_list_):
+            shared_edges = set()
+            for i in range(len(merged_patch_id_list_)):
+                for j in range(i + 1, len(merged_patch_id_list_)):
+                    if dual_graph_.has_edge(merged_patch_id_list_[i], merged_patch_id_list_[j]):
+                        shared_edge = dual_graph_[merged_patch_id_list_[i]][merged_patch_id_list_[j]][
+                            'adjacent_vertices']
+                        shared_edges.add(tuple(sorted(shared_edge)))
+
+            merged_polygon_edges = []
+            for i in range(len(merged_patch_id_list_)):
+                patch_vertexes_id_c = patch_vertexes_id_[merged_patch_id_list_[i]]
+                for j in range(len(patch_vertexes_id_c)):
+                    edge = [patch_vertexes_id_c[j], patch_vertexes_id_c[(j + 1) % len(patch_vertexes_id_c)]]
+                    if tuple(sorted(edge)) not in shared_edges:
+                        merged_polygon_edges.append(edge)
+
+            merged_polygon_vertexes_id = []
+            start_edge = merged_polygon_edges.pop(0)
+            merged_polygon_vertexes_id.extend(start_edge)
+            while merged_polygon_edges:
+                for i, edge in enumerate(merged_polygon_edges):
+                    if edge[0] == merged_polygon_vertexes_id[-1]:
+                        merged_polygon_vertexes_id.append(edge[1])
+                        merged_polygon_edges.pop(i)
+                        break
+                    elif edge[1] == merged_polygon_vertexes_id[-1]:
+                        merged_polygon_vertexes_id.append(edge[0])
+                        merged_polygon_edges.pop(i)
+                        break
+            assert (merged_polygon_vertexes_id[0] == merged_polygon_vertexes_id[-1])
+            merged_polygon_vertexes_id.pop(-1)
+            return merged_polygon_vertexes_id
+
+        merged_patch_vertexes_id_ = []
+        for merged_patch_id_list in merged_graph_:
+            if len(merged_patch_id_list) == 0:
+                continue
+            elif len(merged_patch_id_list) == 1:
+                merged_patch_vertexes_id_.append(patch_vertexes_id_[merged_patch_id_list[0]])
+            else:
+                merged_patch_vertexes_id_.append(merge_one_patch(merged_patch_id_list))
+        return merged_patch_vertexes_id_
+
+    # merge the planes, get the new graph
+    merged_patch_vertexes_id = merge_patches_vertexes(merged_graph, patch_vertexes_id, dual_graph)
+    valid_idx = [i for i in range(len(merged_graph)) if len(merged_graph[i]) != 0]
+    merged_graph = [merged_graph[i] for i in valid_idx]
+    optimized_abcd_list = optimized_abcd_list[valid_idx]
+
+    # create the new graph
+    def create_graph(merged_graph_, merged_patch_vertexes_id_, dual_graph_):
+        graph = nx.Graph()
+
+        # 以每个多边形为节点，节点属性是多边形的顶点列表
+        for i, merged_patch in enumerate(merged_patch_vertexes_id_):
+            graph.add_node(i, id_vertex=merged_patch,
+                           id_in_original_array=merged_graph_[i],
+                           face_center=dual_graph_.nodes[merged_graph_[i][0]]['face_center'],
+                           ray_c=dual_graph_.nodes[merged_graph_[i][0]]['ray_c'])
+
+        # 查找相邻多边形并创建边，边的属性是它们共享的节点
+        for i, merged_patch1 in enumerate(merged_patch_vertexes_id_):
+            for j, merged_patch2 in enumerate(merged_patch_vertexes_id_[i + 1:], i + 1):
+                adjacent_vertices = list(set(merged_patch1) & set(merged_patch2))
+                if len(adjacent_vertices) > 0:
+                    graph.add_edge(i, j, adjacent_vertices=adjacent_vertices)
+        return graph
+
+    merged_dual_graph = create_graph(merged_graph, merged_patch_vertexes_id, dual_graph)
+
+    # 2. assemble the unmerged planes
+    # 修改eval_parameter，有两种情况，一种是合并平面，一种是组装平面
+    # 组装平面需要sample两个平面的法向，然后sample两个点深度
+    def bfs_assemble_planes(dual_graph_, patch_vertexes_id_, v_planes_, new_graph_):
+        new_graph_ = [item for item in new_graph_ if len(item) > 0]
+        # merged_graph[1], merged_graph[3]
         pass
 
-    return
+    bfs_assemble_planes(dual_graph, patch_vertexes_id, v_planes.clone(), merged_graph)
+    return merged_dual_graph, optimized_abcd_list

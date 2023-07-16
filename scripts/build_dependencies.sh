@@ -1,6 +1,11 @@
 #!/bin/bash
 
-git submodule update --remote
+read -p "Windows? (Y/N): " confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]] || exit 1
+read -p "CUDA_ARCHITECTURES(86)? (Y/N): " CUDA_ARCHITECTURES
+
+with_windows=${confirm}
+
+git submodule update
 
 multi_thread="-j20"
 
@@ -13,7 +18,7 @@ pip install torch_scatter torch_sparse torch_cluster torch_spline_conv -f https:
 echo "======================================"
 echo "Start to build tiny-cuda-nn"
 echo "======================================"
-cd thirdparty/tiny-cuda-nn && export TCNN_CUDA_ARCHITECTURES=86 && cmake . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release ${multi_thread} && cd bindings/torch && python setup.py install && cd ../../../../
+cd thirdparty/tiny-cuda-nn && export TCNN_CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES} && cmake . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release ${multi_thread} && cd bindings/torch && python setup.py install && cd ../../../../
 
 echo "======================================"
 echo "Start to build sdf_computer"

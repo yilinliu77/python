@@ -68,7 +68,8 @@ class ABC_dataset(torch.utils.data.Dataset):
             input_features.append(item[0])
             consistent_flags.append(item[1])
 
-        input_features = torch.from_numpy(np.stack(input_features,axis=0).astype(np.float32)).permute(0, 4, 1, 2, 3)
+        input_features = np.stack(input_features,axis=0)
+        # input_features = torch.from_numpy(np.stack(input_features,axis=0).astype(np.float32)).permute(0, 4, 1, 2, 3)
         consistent_flags = torch.from_numpy(np.stack(consistent_flags, axis=0))
 
         return input_features, consistent_flags
@@ -179,10 +180,10 @@ class Base_phase(pl.LightningModule):
         }
 
     def denormalize(self, v_batch):
-        feature = v_batch[0]
         flags = v_batch[1]
+        feature = v_batch[0]
 
-        feature = feature.to(torch.float32)/65535
+        feature = (torch.from_numpy(feature.astype(np.float32)).to(flags.device)/65535).permute(0,4,1,2,3)
         flags = torch.max_pool3d(flags.to(torch.float32)[:,None,:,:], 4, 4)
 
         return (feature, flags)

@@ -55,8 +55,8 @@ class ABC_dataset(torch.utils.data.Dataset):
         flag_data = np.load(self.objects[idx+id_dummy]+"_flag.npy")
         times[0] += time.time() - cur_time
         cur_time = time.time()
-        feat_data = feat_data.astype(np.float32)/65535
-        flag_data = flag_data.astype(np.float32)[:,:,:,None]
+        # feat_data = feat_data.astype(np.float32)/65535
+        # flag_data = flag_data.astype(np.float32)[:,:,:,None]
         times[1] += time.time() - cur_time
         return feat_data, flag_data
 
@@ -68,8 +68,8 @@ class ABC_dataset(torch.utils.data.Dataset):
             input_features.append(item[0])
             consistent_flags.append(item[1])
 
-        input_features = torch.from_numpy(np.stack(input_features,axis=0)).permute(0, 4, 1, 2, 3)
-        consistent_flags = torch.from_numpy(np.stack(consistent_flags, axis=0)).permute(0, 4, 1, 2, 3)
+        input_features = torch.from_numpy(np.stack(input_features,axis=0).astype(np.float32)).permute(0, 4, 1, 2, 3)
+        consistent_flags = torch.from_numpy(np.stack(consistent_flags, axis=0))
 
         return input_features, consistent_flags
 
@@ -178,8 +178,17 @@ class Base_phase(pl.LightningModule):
             'monitor': 'Validation_Loss'
         }
 
+    def denormalize(self, v_batch):
+        feature = v_batch[0]
+        flags = v_batch[1]
+
+        feature = feature.to(torch.float32)/65535
+        flags = torch.max_pool3d(flags.to(torch.float32)[:,None,:,:], 4, 4)
+
+        return (feature, flags)
+
     def training_step(self, batch, batch_idx):
-        batch = (batch[0] ,torch.max_pool3d(batch[1], 4, 4))
+        batch = self.denormalize(batch)
 
         outputs = self.model(batch, True)
         loss = self.model.loss(outputs, batch)
@@ -191,7 +200,7 @@ class Base_phase(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        batch = (batch[0] ,torch.max_pool3d(batch[1], 4, 4))
+        batch = self.denormalize(batch)
 
         outputs = self.model(batch, False)
         loss = self.model.loss(outputs, batch)

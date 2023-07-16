@@ -267,7 +267,7 @@ def optimize_plane(v_data, v_log_root):
         transformation = projection2 @ np.linalg.inv(v_img_database[id_img1].extrinsic)
         transformation = torch.from_numpy(transformation).to(device).to(torch.float32)
         c1_2_c2 = torch.from_numpy(
-            v_img_database[int(id_src_imgs[0])].extrinsic @ np.linalg.inv(v_img_database[id_img1].extrinsic)
+            v_img_database[int(id_src_imgs[2])].extrinsic @ np.linalg.inv(v_img_database[id_img1].extrinsic)
         ).to(device).to(torch.float32)
         intrinsic = torch.from_numpy(intrinsic).to(device).to(torch.float32)
 
@@ -275,7 +275,7 @@ def optimize_plane(v_data, v_log_root):
         # Do not normalize!
         gy, gx = torch.gradient(imgs[0])
         gradients1 = torch.stack((gx, gy), dim=-1)
-        gy, gx = torch.gradient(imgs[0 + 1])
+        gy, gx = torch.gradient(imgs[2 + 1])
         gradients2 = torch.stack((gx, gy), dim=-1)
 
         dilated_gradients1 = torch.from_numpy(dilate_edge(gradients1)).to(device)
@@ -323,13 +323,21 @@ def optimize_plane(v_data, v_log_root):
                                                         )
 
         # 4. Local assemble
-        optimized_abcd_list = local_assemble(optimized_abcd_list, rays_c, centroid_rays_c, dual_graph,
-                                             imgs, dilated_gradients1, dilated_gradients2,
-                                             transformation,
-                                             intrinsic,
-                                             c1_2_c2,
-                                             v_log_root
-                                             )
+        merged_dual_graph, optimized_abcd_list = local_assemble(optimized_abcd_list, rays_c, centroid_rays_c,
+                                                                dual_graph, imgs, dilated_gradients1,
+                                                                dilated_gradients2, transformation, intrinsic,
+                                                                c1_2_c2, v_log_root)
+
+        centroid_rays_c_new = [merged_dual_graph.nodes[i]['ray_c'].tolist() for i in range(len(merged_dual_graph.nodes))]
+        centroid_rays_c_new = torch.from_numpy(np.stack(centroid_rays_c_new)).to(device).to(torch.float32)
+
+        optimized_abcd_list = optimize_planes_batch(copy(optimized_abcd_list), rays_c, centroid_rays_c_new,
+                                                    merged_dual_graph, imgs, dilated_gradients1, dilated_gradients2,
+                                                    transformation,
+                                                    intrinsic,
+                                                    c1_2_c2,
+                                                    v_log_root
+                                                    )
 
         exit()
 

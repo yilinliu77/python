@@ -272,3 +272,33 @@ class Glue_loss_computer:
         delta_distances = (delta_distances_ ** 2).sum(dim=2).mean(dim=1)
 
         return delta_distances
+
+
+class Regularization_loss_computer:
+    def __init__(self, v_dual_graph: nx.Graph):
+        self.dual_graph = v_dual_graph
+        num_patch = v_dual_graph.number_of_nodes()
+        self.vertical_weight = 0.5
+        self.parallel_weight = 0.5
+
+        # Prepare the index of planes and vertex in advance to avoid the for-loop when computing the glue loss
+        self.nearby_plane_idx = [[] for _ in range(num_patch)]
+        for id_patch in range(num_patch):
+            self.nearby_plane_idx[id_patch] = list(v_dual_graph[id_patch].keys())
+
+    def compute(self, v_patch_id, v_optimized_abcd_list):
+        cur_plane_abcd = v_optimized_abcd_list[v_patch_id]
+        n1, d1 = cur_plane_abcd[0:3], cur_plane_abcd[3]
+        nearby_plane_abcd = v_optimized_abcd_list[self.nearby_plane_idx[v_patch_id]]
+        n2, d2 = nearby_plane_abcd[:, 0:3], nearby_plane_abcd[:, 3]
+        # 计算点积，形状为 (num_nearby_plane,)
+        dot_product = torch.matmul(n1, n2.T)
+
+        # 正则化项1: 垂直约束 (n1与n2的点积接近0)
+        vertical_constraint = torch.abs(dot_product)
+
+        # 正则化项2: 平行约束 (n1与n2的点积接近1或-1)
+        parallel_constraint = torch.abs(torch.abs(dot_product) - 1)
+
+        regularization_loss = torch.min(vertical_constraint,parallel_constraint)
+        return regularization_loss.sum().squeeze()

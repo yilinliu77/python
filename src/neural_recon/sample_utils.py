@@ -81,6 +81,7 @@ def sample_triangles(num_per_m, p1, p2, p3, num_max_sample=500, v_sample_edge=Tr
     else:
         return num_tri_samples, sampled_polygon_points
 
+
 # v_edge_points: (M, 2, 3) M end points pairs
 # v_num_horizontal: (M, 1) The number of the horizontal points for each edge
 def sample_points_2d(v_edge_points, v_num_horizontal,
@@ -123,6 +124,7 @@ def sample_points_2d(v_edge_points, v_num_horizontal,
         v_edge_points[:, 0].repeat_interleave(num_coordinates_per_edge, dim=0)
 
     return num_coordinates_per_edge, interpolated_coordinates
+
 
 # v_original_distances: (M, 1) M original samples
 def sample_new_distance(v_original_distances,
@@ -174,4 +176,31 @@ def sample_new_planes(v_original_parameters, v_centroid_rays_c, v_dual_graph=Non
         id_neighbour = id_neighbour_patches[patch_id]
         sample_depth[patch_id, 1:1 + len(id_neighbour)] = init_depth[torch.tensor(id_neighbour)]
         sample_angle[patch_id, 1:1 + len(id_neighbour)] = plane_angles[torch.tensor(id_neighbour)].clone()
+    return sample_depth.contiguous(), sample_angle.contiguous()
+
+
+def sample_new_planes2(v_original_parameters1, v_original_parameters2, v_rays_c1, v_rays_c2, v_random_g=None):
+    plane_angles = vectors_to_angles(v_original_parameters[:, :3])
+    initial_centroids = intersection_of_ray_and_plane(v_original_parameters, v_centroid_rays_c)[1]
+    init_depth = torch.linalg.norm(initial_centroids, dim=-1)
+
+    # sample two depth
+    num_sample = 100
+    sample_depths1 = sample_new_distance(depth, num_sample, v_random_g=v_random_g)
+    sample_depths2 = sample_new_distance(depth, num_sample, v_random_g=v_random_g)
+
+
+
+    # sample two angles
+    # sample_angles1 = sample_new_distance(angle.reshape(-1), num_sample, scale_factor=torch.pi / 3, v_max=100,
+    #                                     v_min=-100, v_random_g=v_random_g)
+    # sample_angles1 = sample_angles1.reshape(depth.shape[0], 2, num_sample) % (2 * torch.pi)
+    # sample_angles1 = sample_angles1.permute(0, 2, 1)
+    #
+    # sample_angles2 = sample_new_distance(angle.reshape(-1), num_sample, scale_factor=torch.pi / 3, v_max=100,
+    #                                      v_min=-100, v_random_g=v_random_g)
+    # sample_angles2 = sample_angles2.reshape(depth.shape[0], 2, num_sample) % (2 * torch.pi)
+    # sample_angles2 = sample_angles2.permute(0, 2, 1)
+
+
     return sample_depth.contiguous(), sample_angle.contiguous()

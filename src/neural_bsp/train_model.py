@@ -161,7 +161,9 @@ class Base_phase(pl.LightningModule):
                           # collate_fn=ABC_dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
-                          persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False)
+                          persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
+                          prefetch_factor=5,
+                          )
 
     def val_dataloader(self):
         self.valid_dataset = ABC_dataset(
@@ -170,7 +172,10 @@ class Base_phase(pl.LightningModule):
         )
         return DataLoader(self.valid_dataset, batch_size=self.batch_size,
                           # collate_fn=ABC_dataset.collate_fn,
-                          num_workers=self.hydra_conf["trainer"]["num_worker"])
+                          num_workers=self.hydra_conf["trainer"]["num_worker"],
+                          persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
+                          prefetch_factor=5,
+                          )
 
     def configure_optimizers(self):
         optimizer = Adam(self.parameters(), lr=self.learning_rate, )

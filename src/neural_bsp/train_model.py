@@ -35,7 +35,9 @@ class ABC_dataset(torch.utils.data.Dataset):
     def __init__(self, v_data_root, v_training_mode):
         super(ABC_dataset, self).__init__()
         self.data_root = v_data_root
-        self.objects = os.listdir(v_data_root)
+        self.objects = set([item[:8] for item in os.listdir(v_data_root)])
+        self.objects = [os.path.join(v_data_root,item) for item in self.objects]
+
         self.num_items = len(self.objects)
 
         self.mode = v_training_mode
@@ -49,18 +51,14 @@ class ABC_dataset(torch.utils.data.Dataset):
         id_dummy = 0 if self.mode=="training" else self.num_items // 4 * 3
         times = [0] * 10
         cur_time = time.time()
-        data = np.load(os.path.join(self.data_root, self.objects[idx+id_dummy], "data.npy"), allow_pickle=True).item()
+        feat_data = np.load(self.objects[idx+id_dummy]+"_feat.npy")
+        flag_data = np.load(self.objects[idx+id_dummy]+"_flag.npy")
         times[0] += time.time() - cur_time
         cur_time = time.time()
-        resolution = data["resolution"]
-        input_features = torch.from_numpy(data["input_features"])
+        feat_data = feat_data.astype(np.float32)/65535
+        flag_data = flag_data.astype(np.float32)[:,:,:,None]
         times[1] += time.time() - cur_time
-        cur_time = time.time()
-        consistent_flags = torch.from_numpy(np.unpackbits(
-            data["consistent_flags"]).reshape(resolution, resolution, resolution, 1))
-        times[2] += time.time() - cur_time
-        cur_time = time.time()
-        return input_features, consistent_flags
+        return feat_data, flag_data
 
     @staticmethod
     def collate_fn(v_batches):
@@ -70,18 +68,41 @@ class ABC_dataset(torch.utils.data.Dataset):
             input_features.append(item[0])
             consistent_flags.append(item[1])
 
-        input_features = torch.stack(input_features, dim=0).permute(0, 4, 1, 2, 3)
-        consistent_flags = torch.stack(consistent_flags, dim=0).permute(0, 4, 1, 2, 3)
+        input_features = torch.from_numpy(np.stack(input_features,axis=0)).permute(0, 4, 1, 2, 3)
+        consistent_flags = torch.from_numpy(np.stack(consistent_flags, axis=0)).permute(0, 4, 1, 2, 3)
 
-        return input_features.to(torch.float32), consistent_flags.to(torch.float32)
+        return input_features, consistent_flags
 
 
 class Base_model(nn.Module):
     def __init__(self, v_phase=0):
         super(Base_model, self).__init__()
         self.phase = v_phase
-        self.encoder = U_Net_3D(img_ch=4, output_ch=1)
+        self.encoder = U_Net_3D(img_ch=3, output_ch=1)
         # self.encoder = AttU_Net_3D(img_ch=4, output_ch=1)
+
+    def forward(self, v_data, v_training=False):
+        features, labels = v_data
+        prediction = self.encoder(features)
+
+        return prediction
+
+    def loss(self, v_predictions, v_input):
+        features, labels = v_input
+
+        loss = sigmoid_focal_loss(v_predictions, labels,
+                                  alpha=0.75,
+                                  reduction="mean"
+                                  )
+
+        return loss
+
+
+class Atten_model(nn.Module):
+    def __init__(self, v_phase=0):
+        super(Atten_model, self).__init__()
+        self.phase = v_phase
+        self.encoder = AttU_Net_3D(img_ch=3, output_ch=1)
 
     def forward(self, v_data, v_training=False):
         features, labels = v_data
@@ -115,7 +136,7 @@ class Base_phase(pl.LightningModule):
 
         self.data = v_data
         self.phase = self.hydra_conf["model"]["phase"]
-        self.model = Base_model(self.phase)
+        self.model = globals()[self.hydra_conf["model"]["model_name"]](self.phase)
 
         # Used for visualizing during the training
         resolution = 64
@@ -202,7 +223,7 @@ class Base_phase(pl.LightningModule):
         # num_items = gt_labels.shape[0]
         # valid_gt_labels = gt_labels.reshape(num_items, -1, 26)[:, valid_flags]
 
-        id_viz = 1
+        id_viz = 0
         predicted_labels = sigmoid(self.viz_data["prediction"][id_viz][0].transpose((1,2,3,0))) > 0.5
         mask = predicted_labels.any(axis=3).reshape(-1)
         export_point_cloud(os.path.join(self.log_root, "{}_pred.ply".format(idx)), query_points[mask])

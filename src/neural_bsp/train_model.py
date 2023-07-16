@@ -55,8 +55,8 @@ class ABC_dataset(torch.utils.data.Dataset):
         flag_data = np.load(self.objects[idx+id_dummy]+"_flag.npy")
         times[0] += time.time() - cur_time
         cur_time = time.time()
-        # feat_data = feat_data.astype(np.float32)/65535
-        # flag_data = flag_data.astype(np.float32)[:,:,:,None]
+        feat_data = np.transpose(feat_data.astype(np.float32)/65535, (3,0,1,2))
+        flag_data = flag_data.astype(np.float32)[None,:,:,:]
         times[1] += time.time() - cur_time
         return feat_data, flag_data
 
@@ -158,7 +158,7 @@ class Base_phase(pl.LightningModule):
             "training",
         )
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
-                          collate_fn=ABC_dataset.collate_fn,
+                          # collate_fn=ABC_dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False)
@@ -169,7 +169,7 @@ class Base_phase(pl.LightningModule):
             "validation"
         )
         return DataLoader(self.valid_dataset, batch_size=self.batch_size,
-                          collate_fn=ABC_dataset.collate_fn,
+                          # collate_fn=ABC_dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"])
 
     def configure_optimizers(self):
@@ -180,6 +180,7 @@ class Base_phase(pl.LightningModule):
         }
 
     def denormalize(self, v_batch):
+        return (v_batch[0], torch.max_pool3d(v_batch[1], 4, 4))
         flags = v_batch[1]
         feature = v_batch[0]
 

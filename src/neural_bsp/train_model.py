@@ -28,6 +28,7 @@ from torch.utils.data import DataLoader
 from torchvision.ops import sigmoid_focal_loss
 from tqdm import tqdm
 
+from shared.fast_dataloader import FastDataLoader
 from src.neural_bsp.model import AttU_Net_3D, U_Net_3D
 from shared.common_utils import export_point_cloud, sigmoid
 
@@ -162,7 +163,7 @@ class Base_phase(pl.LightningModule):
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
-                          prefetch_factor=5,
+                          prefetch_factor=1,
                           )
 
     def val_dataloader(self):
@@ -174,7 +175,7 @@ class Base_phase(pl.LightningModule):
                           # collate_fn=ABC_dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
-                          prefetch_factor=5,
+                          prefetch_factor=1,
                           )
 
     def configure_optimizers(self):
@@ -201,7 +202,7 @@ class Base_phase(pl.LightningModule):
         loss = self.model.loss(outputs, batch)
 
         self.log("Training_Loss", loss.detach(), prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                 # sync_dist=True,
+                 sync_dist=True,
                  batch_size=batch[0].shape[0])
 
         return loss
@@ -215,7 +216,7 @@ class Base_phase(pl.LightningModule):
         self.viz_data["prediction"].append(outputs.cpu().numpy())
         self.viz_data["gt"].append(batch[1].cpu().numpy())
         self.log("Validation_Loss", loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                 # sync_dist=True,
+                 sync_dist=True,
                  batch_size=batch[0].shape[0])
         return
 

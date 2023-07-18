@@ -28,6 +28,10 @@ def check_dir(v_path):
         shutil.rmtree(v_path)
     os.makedirs(v_path)
 
+def safe_check_dir(v_path):
+    if not os.path.exists(v_path):
+        os.makedirs(v_path)
+
 def refresh_timer(a):
     delta = time.time() - a
     return delta, time.time()

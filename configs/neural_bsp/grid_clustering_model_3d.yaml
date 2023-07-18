@@ -1,12 +1,13 @@
 dataset:
-  root: F:\GSP\training
+  root: F:\GSP\GSP_v2\training
+#  root: F:\GSP\training
 
 trainer:
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 0
+  num_worker: 4
 
-  batch_size: 1
+  batch_size: 2
   resume_from_checkpoint:
   evaluate: false
   output: .

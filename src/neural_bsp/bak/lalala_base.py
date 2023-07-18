@@ -481,7 +481,7 @@ def prepare_dataset():
     }
 
 
-@hydra.main(config_name="lalala.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
+@hydra.main(config_name="lalala.yaml", config_path="../../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(v_cfg["trainer"]["random"])
     print(OmegaConf.to_yaml(v_cfg))

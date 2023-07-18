@@ -1,31 +1,19 @@
 import os.path
-import time
 
 import hydra
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import ray
-import scipy
-import torch
 from lightning_fabric import seed_everything
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Trainer
-from scipy.sparse import csr_matrix
-from scipy.sparse.csgraph import minimum_spanning_tree
-from sklearn.cluster import KMeans
-import networkx as nx
-import matplotlib
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import pytorch_lightning as pl
-import faiss
 import torch
 from torch import nn
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torchvision.ops import sigmoid_focal_loss
-from tqdm import tqdm
 
 from src.neural_bsp.attention_unet import AttU_Net
 
@@ -207,7 +195,7 @@ class Base_phase(pl.LightningModule):
         return
 
 
-@hydra.main(config_name="grid_clustering_model.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
+@hydra.main(config_name="grid_clustering_model.yaml", config_path="../../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
     print(OmegaConf.to_yaml(v_cfg))

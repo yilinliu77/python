@@ -1,35 +1,26 @@
-import itertools, sys, os, time, platform, shutil
-from typing import List
+import os
 
 import h5py
 
-sys.path.append("thirdparty/sdf_computer/build/")
-import pysdf
-
-import math
+# sys.path.append("thirdparty/sdf_computer/build/")
+# import pysdf
 
 import torch
 from torch import nn
-from torch.optim import Adam, SGD
+from torch.optim import Adam
 from torch.utils.data import DataLoader
-from torch.distributions.utils import _standard_normal
 import torch.nn.functional as F
-from torch.distributions import Binomial
-from torch.nn.utils.rnn import pad_sequence
 
-import mcubes
-import cv2
 import numpy as np
 import open3d as o3d
-from tqdm import tqdm, trange
-import ray
 
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
 import hydra
 from omegaconf import DictConfig, OmegaConf
+import mcubes
+from src.neural_bsp.bak.bspt import get_mesh_watertight
 
-from src.neural_bsp.bspt import get_mesh_watertight
 
 def write_ply_polygon(name, vertices, polygons):
     fout = open(name, 'w')
@@ -52,27 +43,24 @@ def write_ply_polygon(name, vertices, polygons):
     fout.close()
 
 
-class BSP_dataset_single_scene(torch.utils.data.Dataset):
-    def __init__(self, v_data, v_batch_size, v_training_mode):
-        super(BSP_dataset_single_scene, self).__init__()
-        self.points = torch.from_numpy(v_data["points"]) - 0.5
-        self.points = torch.cat((self.points, torch.ones_like(self.points[:, 0:1])), dim=1)
+class BSP_dataset_single_object(torch.utils.data.Dataset):
+    def __init__(self, v_data, v_id, v_training_mode):
+        super(BSP_dataset_single_object, self).__init__()
+        self.points = torch.from_numpy(v_data["points"])
+        self.points = torch.cat((self.points, torch.ones_like(self.points[:, :, 0:1])), dim=2)
         self.sdfs = torch.from_numpy(v_data["sdfs"])
-
-        mask = self.sdfs > 0
-        self.sdfs[mask] = 0
-        self.sdfs[~mask] = 1
+        self.voxels = torch.from_numpy(v_data["voxels"]).permute(0, 4, 1, 2, 3)
 
         self.mode = v_training_mode
-        self.batch_size = v_batch_size
+        self.id = v_id
         pass
 
     def __len__(self):
-        return 10000 if self.mode=="training" else 1
+        return 100
 
     def __getitem__(self, idx):
-        which_point = torch.randint(0, self.points.shape[0], (self.batch_size,))
-        return self.points[which_point], self.sdfs[which_point]
+        which_point = torch.randint(0, self.points.shape[1], (4096,))
+        return self.points[self.id, which_point], self.sdfs[self.id, which_point], self.voxels[self.id]
 
 
 class generator(nn.Module):
@@ -135,44 +123,70 @@ class generator(nn.Module):
             return h2, h3, self.convex_layer_weights, self.concave_layer_weights
 
 
-class encoder(nn.Module):
-    def __init__(self, ef_dim=32):
-        super(encoder, self).__init__()
-        self.ef_dim = ef_dim
-        self.conv_1 = nn.Conv3d(1, self.ef_dim, 4, stride=2, padding=1, bias=True)
-        self.conv_2 = nn.Conv3d(self.ef_dim, self.ef_dim * 2, 4, stride=2, padding=1, bias=True)
-        self.conv_3 = nn.Conv3d(self.ef_dim * 2, self.ef_dim * 4, 4, stride=2, padding=1, bias=True)
-        self.conv_4 = nn.Conv3d(self.ef_dim * 4, self.ef_dim * 8, 4, stride=2, padding=1, bias=True)
-        self.conv_5 = nn.Conv3d(self.ef_dim * 8, self.ef_dim * 8, 4, stride=1, padding=0, bias=True)
-        nn.init.xavier_uniform_(self.conv_1.weight)
-        nn.init.constant_(self.conv_1.bias, 0)
-        nn.init.xavier_uniform_(self.conv_2.weight)
-        nn.init.constant_(self.conv_2.bias, 0)
-        nn.init.xavier_uniform_(self.conv_3.weight)
-        nn.init.constant_(self.conv_3.bias, 0)
-        nn.init.xavier_uniform_(self.conv_4.weight)
-        nn.init.constant_(self.conv_4.bias, 0)
-        nn.init.xavier_uniform_(self.conv_5.weight)
-        nn.init.constant_(self.conv_5.bias, 0)
+class generator1(nn.Module):
+    def __init__(self, phase, p_dim=4096, c_dim=256):
+        super(generator, self).__init__()
+        self.phase = phase
+        self.p_dim = p_dim
+        self.c_dim = c_dim
+        convex_layer_weights = torch.rand((self.p_dim, self.c_dim))
+        concave_layer_weights = torch.rand((self.c_dim, 1))
+        self.convex_layer_weights = nn.Parameter(convex_layer_weights)
+        self.concave_layer_weights = nn.Parameter(concave_layer_weights)
+        # nn.init.normal_(self.convex_layer_weights, mean=0.0, std=0.02)
+        # nn.init.normal_(self.concave_layer_weights, mean=1e-5, std=0.02)
 
-    def forward(self, inputs, is_training=False):
-        d_1 = self.conv_1(inputs)
-        d_1 = F.leaky_relu(d_1, negative_slope=0.01, inplace=True)
+    def forward(self, points, plane_m, convex_mask=None, is_training=False):
+        if self.phase == 0:
+            # level 1
+            h1 = torch.matmul(points, plane_m)
+            # h1 = torch.clamp(h1, min=0)
+            h1 = F.leaky_relu(h1, negative_slope=0.00001)
 
-        d_2 = self.conv_2(d_1)
-        d_2 = F.leaky_relu(d_2, negative_slope=0.01, inplace=True)
+            # level 2
+            h2 = torch.matmul(h1, (self.convex_layer_weights>0).float())
+            # h2 = torch.clamp(1 - h2, min=0, max=1)
+            h2 = F.leaky_relu(h2, negative_slope=0.00001)
+            h2 = 1 - F.leaky_relu(1 - h2, negative_slope=0.00001)
 
-        d_3 = self.conv_3(d_2)
-        d_3 = F.leaky_relu(d_3, negative_slope=0.01, inplace=True)
+            # level 3
+            # h3 = torch.matmul(h2, self.concave_layer_weights)
+            # # h3 = torch.clamp(h3, min=0, max=1)
+            # h3 = 1 - F.leaky_relu(1 - h3, negative_slope=0.00001)
+            # h3 = F.leaky_relu(h3, negative_slope=0.00001)
+            h3 = torch.min(h2, dim=2, keepdim=True)[0]
 
-        d_4 = self.conv_4(d_3)
-        d_4 = F.leaky_relu(d_4, negative_slope=0.01, inplace=True)
+            return h2, h3, self.convex_layer_weights, self.concave_layer_weights
+        elif self.phase == 1 or self.phase == 2:
+            # level 1
+            h1 = torch.matmul(points, plane_m)
+            h1 = torch.clamp(h1, min=0)
 
-        d_5 = self.conv_5(d_4)
-        d_5 = d_5.view(-1, self.ef_dim * 8)
-        d_5 = torch.sigmoid(d_5)
+            # level 2
+            h2 = torch.matmul(h1, (self.convex_layer_weights > 0.01).float())
 
-        return d_5
+            # level 3
+            if convex_mask is None:
+                h3 = torch.min(h2, dim=2, keepdim=True)[0]
+            else:
+                h3 = torch.min(h2 + convex_mask, dim=2, keepdim=True)[0]
+
+            return h2, h3, self.convex_layer_weights, self.concave_layer_weights
+        elif self.phase == 3 or self.phase == 4:
+            # level 1
+            h1 = torch.matmul(points, plane_m)
+            h1 = torch.clamp(h1, min=0)
+
+            # level 2
+            h2 = torch.matmul(h1, self.convex_layer_weights)
+
+            # level 3
+            if convex_mask is None:
+                h3 = torch.min(h2, dim=2, keepdim=True)[0]
+            else:
+                h3 = torch.min(h2 + convex_mask, dim=2, keepdim=True)[0]
+
+            return h2, h3, self.convex_layer_weights, self.concave_layer_weights
 
 
 class decoder(nn.Module):
@@ -210,14 +224,14 @@ class decoder(nn.Module):
 
 
 class Base_model(nn.Module):
-    def __init__(self, v_phase=0, p_dim=4096, c_dim=256):
+    def __init__(self, v_phase=0):
         super(Base_model, self).__init__()
         self.phase = v_phase
         # self.decoder = decoder()
-        plane_m = torch.rand((4,p_dim), dtype=torch.float32)
-        # plane_m = plane_m / 100
+        plane_m = torch.rand((4,4096), dtype=torch.float32)
+        plane_m = plane_m / 100
         self.plane_m = nn.Parameter(plane_m)
-        self.generator = generator(self.phase, p_dim, c_dim)
+        self.generator = generator(self.phase, )
 
         self.test_resolution = 64
         self.test_coords = torch.stack(torch.meshgrid(
@@ -228,14 +242,69 @@ class Base_model(nn.Module):
         self.test_coords = torch.cat((self.test_coords, torch.ones_like(self.test_coords[:, 0:1])), dim=1)
 
     def forward(self, v_data, v_training=False):
-        points, sdfs = v_data
+        points, sdfs, voxels = v_data
         plane_m = self.plane_m.unsqueeze(0)
         net_out_convexes, net_out, convex_layer_weights, concave_layer_weights = self.generator(points, plane_m, )
 
         return None, plane_m, net_out_convexes, net_out, convex_layer_weights, concave_layer_weights
 
+    def loss1(self, v_predictions, v_input):
+        points, sdfs, voxels = v_input
+        z_vector, plane_m, net_out_convexes, net_out, convex_layer_weights, concave_layer_weights = v_predictions
+        if self.phase == 0:
+            # phase 0 continuous for better convergence
+            # L_recon + L_W + L_T
+            # net_out_convexes - network output (convex layer), the last dim is the number of convexes
+            # net_out - network output (final output)
+            # point_value - ground truth inside-outside value for each point
+            # convex_layer_weights - connections T
+            # concave_layer_weights - auxiliary weights W
+            loss_sp = torch.mean((sdfs - net_out) ** 2)
+            loss = loss_sp
+            return loss_sp, loss
+        elif self.phase == 1:
+            # phase 1 hard discrete for bsp
+            # L_recon
+            loss_sp = torch.mean((1 - sdfs) * (1 - torch.clamp(net_out, max=1)) + \
+                                 sdfs * (torch.clamp(net_out, min=0)))
+            loss = loss_sp
+            return loss_sp, loss
+        elif self.phase == 2:
+            # phase 2 hard discrete for bsp with L_overlap
+            # L_recon + L_overlap
+            loss_sp = torch.mean((1 - sdfs) * (1 - torch.clamp(net_out, max=1)) + \
+                                 sdfs * (torch.clamp(net_out, min=0)))
+            G2_inside = (net_out_convexes < 0.01).float()
+            bmask = G2_inside * (torch.sum(G2_inside, dim=2, keepdim=True) > 1).float()
+            loss = loss_sp - torch.mean(net_out_convexes * sdfs * bmask)
+            return loss_sp, loss
+        elif self.phase == 3:
+            # phase 3 soft discrete for bsp
+            # L_recon + L_T
+            # soft cut with loss L_T: gradually move the values in T (cw2) to either 0 or 1
+            loss_sp = torch.mean((1 - sdfs) * (1 - torch.clamp(net_out, max=1)) + \
+                                 sdfs * (torch.clamp(net_out, min=0)))
+            loss = loss_sp + \
+                   torch.sum((convex_layer_weights < 0.01).float() * torch.abs(convex_layer_weights)) + \
+                   torch.sum((convex_layer_weights >= 0.01).float() * torch.abs(convex_layer_weights - 1))
+            return loss_sp, loss
+        elif self.phase == 4:
+            # phase 4 soft discrete for bsp with L_overlap
+            # L_recon + L_T + L_overlap
+            # soft cut with loss L_T: gradually move the values in T (cw2) to either 0 or 1
+            loss_sp = torch.mean((1 - sdfs) * (1 - torch.clamp(net_out, max=1)) + \
+                                 sdfs * (torch.clamp(net_out, min=0)))
+            G2_inside = (net_out_convexes < 0.01).float()
+            bmask = G2_inside * (torch.sum(G2_inside, dim=2, keepdim=True) > 1).float()
+            loss = loss_sp + \
+                   torch.sum((convex_layer_weights < 0.01).float() * torch.abs(convex_layer_weights)) + \
+                   torch.sum((convex_layer_weights >= 0.01).float() * torch.abs(convex_layer_weights - 1)) - \
+                   torch.mean(net_out_convexes * sdfs * bmask)
+            return loss_sp, loss
+        return
+
     def loss(self, v_predictions, v_input):
-        points, sdfs = v_input
+        points, sdfs, voxels = v_input
         z_vector, plane_m, net_out_convexes, net_out, convex_layer_weights, concave_layer_weights = v_predictions
         if self.phase == 0:
             # phase 0 continuous for better convergence
@@ -369,9 +438,9 @@ class Base_model(nn.Module):
         pass
 
 
-class Scene_phase(pl.LightningModule):
+class Base_phase(pl.LightningModule):
     def __init__(self, hparams, v_data):
-        super(Scene_phase, self).__init__()
+        super(Base_phase, self).__init__()
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
@@ -384,34 +453,38 @@ class Scene_phase(pl.LightningModule):
 
         self.data = v_data
         self.phase = self.hydra_conf["model"]["phase"]
-        self.model = Base_model(self.phase,
-                                self.hydra_conf["model"]["pdim"],
-                                self.hydra_conf["model"]["cdim"])
+        self.model = Base_model(self.phase)
 
         # Used for visualizing during the training
         self.viz_data = {}
 
     def train_dataloader(self):
-        self.train_dataset = BSP_dataset_single_scene(
+        self.train_dataset = BSP_dataset_single_object(
             self.data,
-            self.batch_size,
+            self.hydra_conf["dataset"]["id"],
             "training",
         )
-        return DataLoader(self.train_dataset, batch_size=1, shuffle=True,
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False)
 
     def val_dataloader(self):
-        self.valid_dataset = BSP_dataset_single_scene(
+        self.valid_dataset = BSP_dataset_single_object(
             self.data,
-            self.batch_size,
+            self.hydra_conf["dataset"]["id"],
             "validation"
         )
-        return DataLoader(self.valid_dataset, batch_size=1, num_workers=0)
+        return DataLoader(self.valid_dataset, batch_size=self.batch_size, num_workers=0)
 
     def configure_optimizers(self):
+        # grouped_parameters = [
+        #     {"params": [self.model.seg_distance], 'lr': self.learning_rate},
+        #     {"params": [self.model.v_up], 'lr': 1e-2},
+        # ]
+
         optimizer = Adam(self.parameters(), lr=self.learning_rate, )
+        # optimizer = SGD(grouped_parameters, lr=self.learning_rate, )
 
         return {
             'optimizer': optimizer,
@@ -425,7 +498,7 @@ class Scene_phase(pl.LightningModule):
         self.log("Training_Loss", total_loss.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True,
                  batch_size=batch[0].shape[0])
-        self.log("Training_Loss_SP", loss_sp.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
+        self.log("Training_Loss_SP", loss_sp.detach(), prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True,
                  batch_size=batch[0].shape[0])
 
@@ -435,13 +508,13 @@ class Scene_phase(pl.LightningModule):
         outputs = self.model(batch, False)
         loss_sp, total_loss = self.model.loss(outputs, batch)
 
-        self.log("Validation_Loss", total_loss.detach(), prog_bar=False, logger=True, on_step=False, on_epoch=True,
+        self.log("Validation_Loss", total_loss.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True,
                  batch_size=batch[0].shape[0])
 
         if self.global_rank == 0 and batch_idx == 0:
             self.viz_data["planes"] = outputs[1][0:1]
-            # self.viz_data["gt"] = batch[2][0,0]
+            self.viz_data["gt"] = batch[2][0,0]
 
         return total_loss
 
@@ -462,59 +535,40 @@ class Scene_phase(pl.LightningModule):
                                   10000)
 
 
-def prepare_dataset(v_root, v_rebuild_data = False):
-    cache_file_name = "output/neural_bsp/bsp_data.npy"
-    if os.path.exists(cache_file_name) and not v_rebuild_data:
-        print("Start to read cache: {}".format(cache_file_name))
-        data = np.load(cache_file_name,allow_pickle=True).item()
-        print("{} points and values;".format(
-            data["points"].shape[0],
-        ))
+def prepare_dataset(v_root):
+    print("Start to read dataset: {}".format(v_root))
 
-    else:
-        print("Start to read dataset: {}".format(v_root))
+    file = h5py.File(v_root)
+    points = np.asarray(file["points_64"], dtype=np.float32) / 255. - 0.5  # [0,1]
+    sdfs = np.asarray(file["values_64"], dtype=np.float32)  # [0,1]
+    voxels = np.asarray(file["voxels"], dtype=np.float32)  # [0,1]
+    file.close()
 
-        mesh = o3d.io.read_triangle_mesh(v_root)
-        vertices = np.asarray(mesh.vertices)
-        faces = np.asarray(mesh.triangles)
+    print("Done")
+    print("{} items; {} points and values; voxel size {}^3".format(
+        points.shape[0], points.shape[1], voxels.shape[1]
+    ))
 
-        sdf_computer = pysdf.PYSDF_computer()
-        sdf_computer.setup_mesh(vertices[faces], True)
-        scale = sdf_computer.m_scale
-        center = sdf_computer.m_center
-        sdf = sdf_computer.compute_sdf(0, int(2e8), int(1e8), False)
-
-        sampled_points = sdf[:,:3].astype(np.float32)
-        sdf = sdf[:,3].astype(np.float32)
-
-        print("Done")
-        print("{} points and values;".format(
-            sampled_points.shape[0],
-        ))
-        os.makedirs("output/neural_bsp",exist_ok=True)
-        data = {
-            "points": sampled_points,
-            "sdfs": sdf,
-            "scale": np.insert(center,3, scale)
-        }
-        np.save(cache_file_name,data,allow_pickle=True)
-    return data
+    return {
+        "points": points,
+        "sdfs": sdfs,
+        "voxels": voxels,
+    }
 
 
-@hydra.main(config_name="optimized_scene.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
+@hydra.main(config_name="optimized_bsp_shapenet.yaml", config_path="../../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
     print(OmegaConf.to_yaml(v_cfg))
     data = prepare_dataset(
         v_cfg["dataset"]["root"],
-        v_cfg["dataset"]["rebuild_data"],
     )
 
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir']
     v_cfg["trainer"]["output"] = os.path.join(log_dir, v_cfg["trainer"]["output"])
 
-    model = Scene_phase(v_cfg, data)
+    model = Base_phase(v_cfg, data)
 
     trainer = Trainer(
         accelerator='gpu' if v_cfg["trainer"].gpu != 0 else None,

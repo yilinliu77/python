@@ -1,13 +1,15 @@
 dataset:
-  root: F:\GSP\GSP_v3\training
-  dataset_name: ABC_dataset_patch
+  root: C:\repo\python\src\neural_bsp\train.hdf5
+#  root: F:\GSP\GSP_v3\training
+  dataset_name: ABC_dataset_patch_hdf5
+#  dataset_name: ABC_dataset_patch
 
 trainer:
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 0
+  num_worker: 2
 
-  batch_size: 128
+  batch_size: 160
   resume_from_checkpoint:
   evaluate: false
   output: .

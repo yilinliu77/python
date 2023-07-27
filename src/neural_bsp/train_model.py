@@ -35,9 +35,11 @@ from shared.common_utils import export_point_cloud, sigmoid
 
 
 class ABC_dataset(torch.utils.data.Dataset):
-    def __init__(self, v_data_root, v_training_mode):
+    def __init__(self, v_data_root=None, v_training_mode=None):
         super(ABC_dataset, self).__init__()
         self.data_root = v_data_root
+        if v_data_root is None:
+            return
         self.names = list(set([item[:8] for item in os.listdir(v_data_root)]))
         self.names = sorted(self.names, key=lambda x: int(x))
         self.objects = [os.path.join(v_data_root, item) for item in self.names]
@@ -64,12 +66,7 @@ class ABC_dataset(torch.utils.data.Dataset):
         flags = flags.reshape(8, 8, 8, 32, 32, 32).transpose((0, 3, 1, 4, 2, 5)).reshape(256, 256, 256)
         return features, flags
 
-    def get_patch(self, v_id_item, v_id_patch):
-        features = np.memmap(self.objects[v_id_item] + "_feat.npy", shape=(512,32,32,32,3), dtype=np.uint16, mode="r")
-        features = features[v_id_patch]
-        flags = np.memmap(self.objects[v_id_item] + "_flag.npy", shape=(512,32,32,32), dtype=np.uint8, mode="r")
-        flags = flags[v_id_patch]
-        return features, flags
+
 
     def __getitem__(self, idx):
         if self.mode == "training" or self.mode == "testing":
@@ -128,7 +125,7 @@ class ABC_dataset_patch(ABC_dataset):
         feat_data = np.transpose(feat_data.astype(np.float32)/65535, (3,0,1,2))
         flag_data = flag_data.astype(np.float32)[None,:,:,:]
         times[1] += time.time() - cur_time
-        return feat_data, flag_data, self.names[(idx+id_dummy)//512]
+        return feat_data, flag_data, self.names[(idx+id_dummy)]
 
 
 class Base_model(nn.Module):

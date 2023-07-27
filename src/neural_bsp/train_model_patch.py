@@ -2,6 +2,7 @@ import os.path
 import random
 import time
 
+import h5py
 import hydra
 import numpy as np
 # import matplotlib
@@ -32,73 +33,7 @@ from tqdm import tqdm
 from shared.fast_dataloader import FastDataLoader
 from src.neural_bsp.model import AttU_Net_3D, U_Net_3D
 from shared.common_utils import export_point_cloud, sigmoid
-
-
-class ABC_dataset(torch.utils.data.Dataset):
-    def __init__(self, v_data_root, v_training_mode):
-        super(ABC_dataset, self).__init__()
-        self.data_root = v_data_root
-        self.names = list(set([item[:8] for item in os.listdir(v_data_root)]))
-        self.names = sorted(self.names, key=lambda x: int(x))
-        self.objects = [os.path.join(v_data_root, item) for item in self.names]
-
-        self.num_items = len(self.objects)
-
-        self.mode = v_training_mode
-
-        pass
-
-    def __len__(self):
-        if self.mode == "training":
-            return self.num_items // 4 * 3
-        elif self.mode == "validation":
-            return self.num_items // 4
-        elif self.mode == "testing":
-            return self.num_items
-        raise
-
-    def get_total(self, v_idx):
-        features = np.load(self.objects[v_idx] + "_feat.npy")
-        features = features.reshape(8, 8, 8, 32, 32, 32, 3).transpose((0, 3, 1, 4, 2, 5, 6)).reshape(256, 256, 256, 3)
-        flags = np.load(self.objects[v_idx] + "_flag.npy")
-        flags = flags.reshape(8, 8, 8, 32, 32, 32).transpose((0, 3, 1, 4, 2, 5)).reshape(256, 256, 256)
-        return features, flags
-
-    def get_patch(self, v_id_item, v_id_patch):
-        features = np.load(self.objects[v_id_item] + "_feat.npy",mmap_mode="r")
-        features = features[v_id_patch]
-        flags = np.load(self.objects[v_id_item] + "_flag.npy",mmap_mode="r")
-        flags = flags[v_id_patch]
-        return features, flags
-
-    def __getitem__(self, idx):
-        if self.mode == "training" or self.mode == "testing":
-            id_dummy = 0
-        else:
-            id_dummy = self.num_items // 4 * 3
-        times = [0] * 10
-        cur_time = time.time()
-        feat_data, flag_data = self.get_total(idx + id_dummy)
-        times[0] += time.time() - cur_time
-        cur_time = time.time()
-        feat_data = np.transpose(feat_data.astype(np.float32) / 65535, (3, 0, 1, 2))
-        flag_data = flag_data.astype(np.float32)[None, :, :, :]
-        times[1] += time.time() - cur_time
-        return feat_data, flag_data, self.names[idx + id_dummy]
-
-    @staticmethod
-    def collate_fn(v_batches):
-        input_features = []
-        consistent_flags = []
-        for item in v_batches:
-            input_features.append(item[0])
-            consistent_flags.append(item[1])
-
-        input_features = np.stack(input_features, axis=0)
-        # input_features = torch.from_numpy(np.stack(input_features,axis=0).astype(np.float32)).permute(0, 4, 1, 2, 3)
-        consistent_flags = torch.from_numpy(np.stack(consistent_flags, axis=0))
-
-        return input_features, consistent_flags
+from src.neural_bsp.train_model import ABC_dataset, Base_model
 
 
 class ABC_dataset_patch(ABC_dataset):
@@ -113,6 +48,14 @@ class ABC_dataset_patch(ABC_dataset):
         elif self.mode == "testing":
             return self.num_items * 512
         raise
+
+    def get_patch(self, v_id_item, v_id_patch):
+        features = np.memmap(self.objects[v_id_item] + "_feat.npy", shape=(512, 32, 32, 32, 3), dtype=np.uint16,
+                             mode="r")
+        features = features[v_id_patch]
+        flags = np.memmap(self.objects[v_id_item] + "_flag.npy", shape=(512, 32, 32, 32), dtype=np.uint8, mode="r")
+        flags = flags[v_id_patch]
+        return features, flags
 
     def __getitem__(self, idx):
         if self.mode == "training" or self.mode == "testing":
@@ -131,51 +74,20 @@ class ABC_dataset_patch(ABC_dataset):
         return feat_data, flag_data, self.names[(idx + id_dummy) // 512]
 
 
-class Base_model(nn.Module):
-    def __init__(self, v_phase=0):
-        super(Base_model, self).__init__()
-        self.phase = v_phase
-        self.encoder = U_Net_3D(img_ch=3, output_ch=1)
-        # self.encoder = AttU_Net_3D(img_ch=4, output_ch=1)
+class ABC_dataset_patch_hdf5(ABC_dataset_patch):
+    def __init__(self, v_data_root, v_training_mode):
+        super(ABC_dataset_patch_hdf5, self).__init__(None,None)
+        self.data_root = v_data_root
+        with h5py.File(self.data_root, "r") as f:
+            self.num_items = f["features"].shape[0]
+            self.names = ["{:08d}".format(item) for item in np.asarray(f["names"])]
+        self.mode = v_training_mode
 
-    def forward(self, v_data, v_training=False):
-        features, labels = v_data
-        prediction = self.encoder(features)
-
-        return prediction
-
-    def loss(self, v_predictions, v_input):
-        features, labels = v_input
-
-        loss = sigmoid_focal_loss(v_predictions, labels,
-                                  alpha=0.75,
-                                  reduction="mean"
-                                  )
-
-        return loss
-
-
-class Atten_model(nn.Module):
-    def __init__(self, v_phase=0):
-        super(Atten_model, self).__init__()
-        self.phase = v_phase
-        self.encoder = AttU_Net_3D(img_ch=3, output_ch=1)
-
-    def forward(self, v_data, v_training=False):
-        features, labels = v_data
-        prediction = self.encoder(features)
-
-        return prediction
-
-    def loss(self, v_predictions, v_input):
-        features, labels = v_input
-
-        loss = sigmoid_focal_loss(v_predictions, labels,
-                                  alpha=0.75,
-                                  reduction="mean"
-                                  )
-
-        return loss
+    def get_patch(self, v_id_item, v_id_patch):
+        with h5py.File(self.data_root, "r") as f:
+            features = f["features"][v_id_item, v_id_patch]
+            flags = f["flags"][v_id_item, v_id_patch]
+        return features, flags
 
 
 class Base_model_full(Base_model):
@@ -186,9 +98,9 @@ class Base_model_full(Base_model):
         # self.encoder = AttU_Net_3D(img_ch=4, output_ch=1)
 
 
-class Base_phase(pl.LightningModule):
+class Patch_phase(pl.LightningModule):
     def __init__(self, hparams, v_data):
-        super(Base_phase, self).__init__()
+        super(Patch_phase, self).__init__()
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
@@ -389,7 +301,7 @@ def main(v_cfg: DictConfig):
     log_dir = hydra_cfg['runtime']['output_dir']
     v_cfg["trainer"]["output"] = os.path.join(log_dir, v_cfg["trainer"]["output"])
 
-    model = Base_phase(v_cfg, v_cfg["dataset"]["root"])
+    model = Patch_phase(v_cfg, v_cfg["dataset"]["root"])
 
     mc = ModelCheckpoint(monitor="Validation_Loss", )
 

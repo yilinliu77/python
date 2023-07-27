@@ -101,7 +101,7 @@ def writer(v_queue: Queue, v_num_files):
         id_consumer -= 1
 
         num_finished+=1
-        if num_finished%(v_num_files//10)==0:
+        if num_finished%(v_num_files//100)==0:
             print("{}/{}".format(num_finished,v_num_files))
 
     output_file.close()

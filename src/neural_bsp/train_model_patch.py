@@ -380,7 +380,7 @@ class Base_phase(pl.LightningModule):
         pass
 
 
-@hydra.main(config_name="train_model_global.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
+@hydra.main(config_name="train_model_patch.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
     print(OmegaConf.to_yaml(v_cfg))

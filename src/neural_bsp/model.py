@@ -122,7 +122,7 @@ class AttU_Net_3D(nn.Module):
 
 
 class U_Net_3D(nn.Module):
-    def __init__(self, img_ch=3, output_ch=1, v_depth=5):
+    def __init__(self, img_ch=3, output_ch=1, v_depth=5, v_pool_first=True):
         super(U_Net_3D, self).__init__()
 
         self.Maxpool = nn.MaxPool3d(kernel_size=2, stride=2)
@@ -133,11 +133,18 @@ class U_Net_3D(nn.Module):
         self.up = nn.ModuleList()
         self.up_conv = nn.ModuleList()
         base_channel = 16
-        self.conv1 = nn.Sequential(
-            conv_block(ch_in=img_ch, ch_out=base_channel),
-            nn.MaxPool3d(kernel_size=4, stride=4),
-            conv_block(ch_in=base_channel, ch_out=base_channel),
-        )
+        if v_pool_first:
+            self.conv1 = nn.Sequential(
+                conv_block(ch_in=img_ch, ch_out=base_channel),
+                nn.MaxPool3d(kernel_size=4, stride=4),
+                conv_block(ch_in=base_channel, ch_out=base_channel),
+            )
+        else:
+            self.conv1 = nn.Sequential(
+                nn.Conv3d(img_ch, base_channel, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm3d(base_channel),
+                nn.ReLU(inplace=True),
+            )
         cur_channel = base_channel
         for i in range(v_depth):
             self.conv.append(conv_block(ch_in=cur_channel, ch_out=cur_channel * 2))
@@ -166,3 +173,4 @@ class U_Net_3D(nn.Module):
         d1 = self.Conv_1x1(up_x[-1])
 
         return d1
+

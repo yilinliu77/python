@@ -65,9 +65,9 @@ class ABC_dataset(torch.utils.data.Dataset):
         return features, flags
 
     def get_patch(self, v_id_item, v_id_patch):
-        features = np.memmap(self.objects[v_id_item] + "_feat.npy", shape=(512,32,32,32,3), dtype=np.uint16, mode="r")
+        features = np.load(self.objects[v_id_item] + "_feat.npy",mmap_mode="r")
         features = features[v_id_patch]
-        flags = np.memmap(self.objects[v_id_item] + "_flag.npy", shape=(512,32,32,32), dtype=np.uint8, mode="r")
+        flags = np.load(self.objects[v_id_item] + "_flag.npy",mmap_mode="r")
         flags = flags[v_id_patch]
         return features, flags
 
@@ -106,16 +106,16 @@ class ABC_dataset_patch(ABC_dataset):
         super(ABC_dataset_patch, self).__init__(v_data_root, v_training_mode)
 
     def __len__(self):
-        if self.mode=="training":
+        if self.mode == "training":
             return self.num_items // 4 * 3 * 512
-        elif self.mode=="validation":
+        elif self.mode == "validation":
             return self.num_items // 4 * 512
-        elif self.mode=="testing":
+        elif self.mode == "testing":
             return self.num_items * 512
         raise
 
     def __getitem__(self, idx):
-        if self.mode=="training" or self.mode=="testing":
+        if self.mode == "training" or self.mode == "testing":
             id_dummy = 0
         else:
             id_dummy = self.num_items // 4 * 3
@@ -125,10 +125,10 @@ class ABC_dataset_patch(ABC_dataset):
         feat_data, flag_data = self.get_patch(idx // 512, idx % 512)
         times[0] += time.time() - cur_time
         cur_time = time.time()
-        feat_data = np.transpose(feat_data.astype(np.float32)/65535, (3,0,1,2))
-        flag_data = flag_data.astype(np.float32)[None,:,:,:]
+        feat_data = np.transpose(feat_data.astype(np.float32) / 65535, (3, 0, 1, 2))
+        flag_data = flag_data.astype(np.float32)[None, :, :, :]
         times[1] += time.time() - cur_time
-        return feat_data, flag_data, self.names[(idx+id_dummy)//512]
+        return feat_data, flag_data, self.names[(idx + id_dummy) // 512]
 
 
 class Base_model(nn.Module):
@@ -185,6 +185,7 @@ class Base_model_full(Base_model):
         self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=4)
         # self.encoder = AttU_Net_3D(img_ch=4, output_ch=1)
 
+
 class Base_phase(pl.LightningModule):
     def __init__(self, hparams, v_data):
         super(Base_phase, self).__init__()
@@ -204,11 +205,11 @@ class Base_phase(pl.LightningModule):
         self.dataset_name = globals()[self.hydra_conf["dataset"]["dataset_name"]]
 
         # Used for visualizing during the training
-        resolution = 64
+        resolution = 256
         source_coords = np.stack(np.meshgrid(
-                np.arange(resolution), np.arange(resolution), np.arange(resolution), indexing="ij"),
-                axis=3).reshape(-1, 3)
-        source_coords = ((source_coords / (resolution-1)) * 2 - 1).astype(np.float32)
+            np.arange(resolution), np.arange(resolution), np.arange(resolution), indexing="ij"),
+            axis=3).reshape(-1, 3)
+        source_coords = ((source_coords / (resolution - 1)) * 2 - 1).astype(np.float32)
         self.viz_data = {
             "query_points": source_coords,
             "loss": [],
@@ -237,6 +238,7 @@ class Base_phase(pl.LightningModule):
         return DataLoader(self.valid_dataset, batch_size=self.batch_size,
                           # collate_fn=ABC_dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
+                          pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
                           )
@@ -253,8 +255,8 @@ class Base_phase(pl.LightningModule):
         flags = v_batch[1]
         feature = v_batch[0]
 
-        feature = (torch.from_numpy(feature.astype(np.float32)).to(flags.device)/65535).permute(0,4,1,2,3)
-        flags = torch.max_pool3d(flags.to(torch.float32)[:,None,:,:], 4, 4)
+        feature = (torch.from_numpy(feature.astype(np.float32)).to(flags.device) / 65535).permute(0, 4, 1, 2, 3)
+        flags = torch.max_pool3d(flags.to(torch.float32)[:, None, :, :], 4, 4)
 
         return (feature, flags)
 
@@ -288,15 +290,16 @@ class Base_phase(pl.LightningModule):
         return
 
     def on_validation_epoch_end(self):
-        if self.global_rank != 0:
-            return
-
-        if self.trainer.sanity_checking:
+        if self.global_rank != 0 or self.trainer.sanity_checking:
+            self.viz_data["gt"].clear()
+            self.viz_data["prediction"].clear()
+            self.viz_data["loss"].clear()
             return
 
         idx = self.trainer.current_epoch + 1 if not self.trainer.sanity_checking else 0
 
         num_items = sum([item.shape[0] for item in self.viz_data["gt"]])
+        assert num_items % 512 == 0
         query_points = self.viz_data["query_points"]
         # valid_flags = self.viz_data["valid_flags"]
         # valid_query_points = np.tile(query_points[:, None], (1, 26, 1))[valid_flags]
@@ -308,11 +311,18 @@ class Base_phase(pl.LightningModule):
         # valid_gt_labels = gt_labels.reshape(num_items, -1, 26)[:, valid_flags]
 
         id_viz = 0
-        predicted_labels = sigmoid(self.viz_data["prediction"][id_viz][0].transpose((1,2,3,0))) > 0.5
+        predicted_labels = np.concatenate(
+            self.viz_data["prediction"], axis=0).reshape(
+            (-1, 8, 8, 8, 32, 32, 32, 3)).transpose((0, 1, 4, 2, 5, 3, 6, 7)).reshape(-1, 256, 256, 256, 3)
+        gt_labels = np.concatenate(
+            self.viz_data["gt"], axis=0).reshape(
+            (-1, 8, 8, 8, 32, 32, 32)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(-1, 256, 256, 256, 3)
+
+        predicted_labels = sigmoid(predicted_labels[id_viz]) > 0.5
         mask = predicted_labels.any(axis=3).reshape(-1)
         export_point_cloud(os.path.join(self.log_root, "{}_pred.ply".format(idx)), query_points[mask])
 
-        gt_labels = sigmoid(self.viz_data["gt"][id_viz][0].transpose((1, 2, 3, 0))) > 0.5
+        gt_labels = sigmoid(gt_labels[id_viz]) > 0.5
         mask = gt_labels.any(axis=3).reshape(-1)
         export_point_cloud(os.path.join(self.log_root, "{}_gt.ply".format(idx)), query_points[mask])
 
@@ -341,25 +351,27 @@ class Base_phase(pl.LightningModule):
         loss = self.model.loss(outputs, data)
         self.viz_data["loss"].append(loss.item())
 
-        features = (data[0].permute(0,2,3,4,1).cpu().numpy() * 65535).astype(np.uint16)
+        features = (data[0].permute(0, 2, 3, 4, 1).cpu().numpy() * 65535).astype(np.uint16)
         outputs = torch.nn.functional.interpolate(torch.sigmoid(outputs), scale_factor=4) > 0.5
-        prediction = (outputs.cpu().permute(0,2,3,4,1).numpy()).astype(np.ubyte)
+        prediction = (outputs.cpu().permute(0, 2, 3, 4, 1).numpy()).astype(np.ubyte)
         gt = torch.nn.functional.interpolate(data[1], scale_factor=4) > 0.5
-        gt = gt.cpu().permute(0,2,3,4,1).numpy().astype(np.ubyte)
+        gt = gt.cpu().permute(0, 2, 3, 4, 1).numpy().astype(np.ubyte)
         self.viz_data["prediction"].append(prediction)
         self.viz_data["gt"].append(gt)
+
         def wrap_data(v_data):
             resolution = v_data.shape[0]
             chunk = 32
             num_chunk = resolution // chunk
             t = v_data.reshape(num_chunk, chunk, num_chunk, chunk, num_chunk, chunk, v_data.shape[-1])
-            t = t.transpose((0,2,4,1,3,5,6)).reshape(-1, chunk, chunk, chunk, v_data.shape[-1])
+            t = t.transpose((0, 2, 4, 1, 3, 5, 6)).reshape(-1, chunk, chunk, chunk, v_data.shape[-1])
             return t
 
         for id_batch in range(data[0].shape[0]):
             np.save(os.path.join(self.log_root, "{}_feat.npy".format(name[id_batch])), wrap_data(features[id_batch]))
-            np.save(os.path.join(self.log_root, "{}_pred.npy".format(name[id_batch])), wrap_data(prediction[id_batch,...,0:1]))
-            np.save(os.path.join(self.log_root, "{}_gt.npy".format(name[id_batch])), wrap_data(gt[id_batch,...,0:1]))
+            np.save(os.path.join(self.log_root, "{}_pred.npy".format(name[id_batch])),
+                    wrap_data(prediction[id_batch, ..., 0:1]))
+            np.save(os.path.join(self.log_root, "{}_gt.npy".format(name[id_batch])), wrap_data(gt[id_batch, ..., 0:1]))
         self.log("Test_Loss", loss, prog_bar=True, logger=False, on_step=True, on_epoch=True,
                  sync_dist=True,
                  batch_size=data[0].shape[0])
@@ -379,7 +391,7 @@ def main(v_cfg: DictConfig):
 
     model = Base_phase(v_cfg, v_cfg["dataset"]["root"])
 
-    mc = ModelCheckpoint(monitor="Validation_Loss",)
+    mc = ModelCheckpoint(monitor="Validation_Loss", )
 
     trainer = Trainer(
         accelerator='gpu' if v_cfg["trainer"].gpu != 0 else None,

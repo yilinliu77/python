@@ -1,20 +1,20 @@
 dataset:
-  root: F:\GSP\GSP_v2\training
-#  root: F:\GSP\training
+  root: F:\GSP\GSP_v3\training
+  dataset_name: ABC_dataset_patch
 
 trainer:
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 4
+  num_worker: 0
 
-  batch_size: 2
+  batch_size: 128
   resume_from_checkpoint:
   evaluate: false
   output: .
-  check_val_every_n_epoch: 10000000
+  check_val_every_n_epoch: 1
 
 model:
-  model_name: Base_model
+  model_name: Base_model_full
   phase: 0
 
 hydra:

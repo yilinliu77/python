@@ -43,7 +43,7 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
     num_tolerence = [MAX_TOLERENCE] * patch_num
 
     num_plane_sample = 100
-    img_src_id = 2
+    img_src_id = 0
 
     v_img1 = imgs[0]
     v_img2 = imgs[img_src_id + 1]
@@ -127,12 +127,16 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
 
             # Collision
             # Viz
-            test_collision = False
+            test_collision = True
             if test_collision and cur_iter[v_patch_id] > 20 and v_patch_id == 8:
                 collision_checker.save_ply(os.path.join(v_log_root, "collision_test.ply"))
                 sample_points_on_face_c2 = (v_c1_2_c2 @ to_homogeneous_tensor(sample_points_on_face).T).T[:, :3]
-                collision_flag = collision_checker.check_ray(torch.zeros_like(sample_points_on_face_c2),
-                                                             sample_points_on_face_c2)
+                # collision_flag = collision_checker.check_ray(torch.zeros_like(sample_points_on_face_c2),
+                #                                              sample_points_on_face_c2)
+                test_pos = torch.linalg.inv(v_c1_2_c2)[None,:3,-1]
+                # test_pos = v_c1_2_c2[None,:3,-1]
+                collision_flag = collision_checker.check_ray(test_pos.tile((sample_points_on_face.shape[0],1)),
+                                                             sample_points_on_face-test_pos.tile((sample_points_on_face.shape[0],1)))
 
                 id_end = num_sample_points[:num_vertex].sum()
                 local_flag = collision_flag[:id_end].cpu().numpy()
@@ -313,10 +317,10 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
                 local_edge_pos, local_centroid[:, None, :].tile(num_vertex, 1, 1)), dim=1)
             final_triangles_list.append(triangles_pos)
         final_triangles = torch.cat(final_triangles_list, dim=0)
-        final_triangles_c2 = (v_c1_2_c2 @ to_homogeneous_tensor(
-            final_triangles).transpose(1, 2)).transpose(1, 2)[:, :, :3]
+        # final_triangles_c2 = (v_c1_2_c2 @ to_homogeneous_tensor(
+        #     final_triangles).transpose(1, 2)).transpose(1, 2)[:, :, :3]
         collision_checker.clear()
-        collision_checker.add_triangles(final_triangles_c2)
+        collision_checker.add_triangles(final_triangles)
         continue
 
     save_plane(optimized_abcd_list, v_rays_c, patch_vertexes_id,

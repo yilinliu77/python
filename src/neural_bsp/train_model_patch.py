@@ -117,6 +117,7 @@ class Patch_phase(pl.LightningModule):
         self.dataset_name = globals()[self.hydra_conf["dataset"]["dataset_name"]]
 
         # Used for visualizing during the training
+        self.id_viz = 0
         resolution = 256
         source_coords = np.stack(np.meshgrid(
             np.arange(resolution), np.arange(resolution), np.arange(resolution), indexing="ij"),
@@ -193,9 +194,11 @@ class Patch_phase(pl.LightningModule):
 
         outputs = self.model(data, False)
         loss = self.model.loss(outputs, data)
-        self.viz_data["loss"].append(loss.item())
-        self.viz_data["prediction"].append(outputs.cpu().numpy())
-        self.viz_data["gt"].append(data[1].cpu().numpy())
+        if batch_idx//512 == 0:
+            self.viz_data["loss"].append(loss.item())
+            self.viz_data["prediction"].append(outputs.cpu().numpy())
+            self.viz_data["gt"].append(data[1].cpu().numpy())
+            self.viz_name = name[0]
         self.log("Validation_Loss", loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True,
                  batch_size=data[0].shape[0])
@@ -213,16 +216,7 @@ class Patch_phase(pl.LightningModule):
         num_items = sum([item.shape[0] for item in self.viz_data["gt"]])
         assert num_items % 512 == 0
         query_points = self.viz_data["query_points"]
-        # valid_flags = self.viz_data["valid_flags"]
-        # valid_query_points = np.tile(query_points[:, None], (1, 26, 1))[valid_flags]
-        # valid_target_points = query_points[self.viz_data["target_vertices"][valid_flags]]
-        #
-        # # 1 indicates non consistent
-        # gt_labels = np.concatenate(self.viz_data["gt"], axis=0).transpose((0, 2, 3, 4, 1)).astype(bool)
-        # num_items = gt_labels.shape[0]
-        # valid_gt_labels = gt_labels.reshape(num_items, -1, 26)[:, valid_flags]
 
-        id_viz = 0
         predicted_labels = np.concatenate(
             self.viz_data["prediction"], axis=0).reshape(
             (-1, 8, 8, 8, 32, 32, 32, 3)).transpose((0, 1, 4, 2, 5, 3, 6, 7)).reshape(-1, 256, 256, 256, 3)
@@ -230,11 +224,11 @@ class Patch_phase(pl.LightningModule):
             self.viz_data["gt"], axis=0).reshape(
             (-1, 8, 8, 8, 32, 32, 32)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(-1, 256, 256, 256, 3)
 
-        predicted_labels = sigmoid(predicted_labels[id_viz]) > 0.5
+        predicted_labels = sigmoid(predicted_labels[0]) > 0.5
         mask = predicted_labels.any(axis=3).reshape(-1)
         export_point_cloud(os.path.join(self.log_root, "{}_pred.ply".format(idx)), query_points[mask])
 
-        gt_labels = sigmoid(gt_labels[id_viz]) > 0.5
+        gt_labels = sigmoid(gt_labels[0]) > 0.5
         mask = gt_labels.any(axis=3).reshape(-1)
         export_point_cloud(os.path.join(self.log_root, "{}_gt.ply".format(idx)), query_points[mask])
 

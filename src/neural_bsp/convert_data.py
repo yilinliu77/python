@@ -1,15 +1,20 @@
 import pathlib
 import time
-from random import shuffle
+from random import shuffle, seed
 
 import numpy as np
-import h5py
 
 import os, sys
 
 from tqdm import tqdm
 
 from multiprocessing import Process, Queue
+
+from mpi4py import MPI
+import h5py
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+num_processes = MPI.COMM_WORLD.size
 
 def test():
     root_dir = r"F:\GSP\GSP_v3\training"
@@ -50,9 +55,9 @@ def test():
     return
 
 def reader(v_queue: Queue, v_features, v_flags):
-    cur_id = 0
+    cur_id = rank
     while True:
-        if len(v_features) == cur_id+1:
+        if len(v_features) <= cur_id+1:
             v_queue.put((-1, None, None, None))
             return
 
@@ -62,13 +67,13 @@ def reader(v_queue: Queue, v_features, v_flags):
         feat = np.load(v_features[cur_id])
         flag = np.load(v_flags[cur_id])
         v_queue.put((cur_id, prefix, feat, flag))
-        cur_id += 1
+        cur_id += num_processes
 
 def writer(v_queue: Queue, v_num_files):
     MAX_CONSUMER = 10
     id_consumer = MAX_CONSUMER
 
-    output_file = h5py.File(sys.argv[2], "w")
+    output_file = h5py.File(sys.argv[2], "w", driver='mpio', comm=comm)
 
     output_file.create_dataset("features", shape=(id_consumer, 512, 32, 32, 32, 3), dtype=np.uint16,
                                maxshape=(v_num_files, 512, 32, 32, 32, 3),
@@ -95,13 +100,15 @@ def writer(v_queue: Queue, v_num_files):
         idx, prefix, feat, flag = v_queue.get()
         if idx==-1:
             break
+        print("Attempt write {} in worker {}".format(idx,rank))
         output_file["features"][idx] = feat
         output_file["flags"][idx] = flag
         output_file["names"][idx] = int(prefix)
+        print("Done write {} in worker {}".format(idx,rank))
         id_consumer -= 1
 
         num_finished+=1
-        if num_finished%(v_num_files//100)==0:
+        if num_finished%(v_num_files//100)==0 and rank == 0:
             print("{}/{}".format(num_finished,v_num_files))
 
     output_file.close()
@@ -109,12 +116,12 @@ def writer(v_queue: Queue, v_num_files):
 
 if __name__ == '__main__':
     # test()
-
     is_shuffle = True
     root_dir = sys.argv[1]
     feature_files = [os.path.join(root_dir, item) for item in os.listdir(root_dir) if item.endswith("_feat.npy")]
     flag_files = [os.path.join(root_dir, item) for item in os.listdir(root_dir) if item.endswith("_flag.npy")]
 
+    seed(0)
     if is_shuffle:
         shuffle(feature_files)
         shuffle(flag_files)

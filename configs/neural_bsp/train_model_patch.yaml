@@ -1,8 +1,8 @@
 dataset:
-  root: C:\repo\python\src\neural_bsp\train.hdf5
-#  root: F:\GSP\GSP_v3\training
-  dataset_name: ABC_dataset_patch_hdf5
-#  dataset_name: ABC_dataset_patch
+#  root: C:\repo\python\src\neural_bsp\train.hdf5
+  root: F:\GSP\GSP_v3\training
+#  dataset_name: ABC_dataset_patch_hdf5
+  dataset_name: ABC_dataset_patch
 
 trainer:
   learning_rate: 1e-4

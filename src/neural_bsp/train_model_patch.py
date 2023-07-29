@@ -313,7 +313,6 @@ def main(v_cfg: DictConfig):
         check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
         # precision=16,
         # gradient_clip_val=0.5,
-        find_unused_parameters=False
     )
     torch.find_unused_parameters = False
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":

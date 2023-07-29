@@ -25,7 +25,7 @@ import pytorch_lightning as pl
 import faiss
 import torch
 from torch import nn
-from torch.distributed import all_gather_object
+from torch.distributed import all_gather_object, all_gather
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torchvision.ops import sigmoid_focal_loss
@@ -40,7 +40,9 @@ from src.neural_bsp.train_model import ABC_dataset, Base_model
 class ABC_dataset_patch(ABC_dataset):
     def __init__(self, v_data_root, v_training_mode):
         super(ABC_dataset_patch, self).__init__(v_data_root, v_training_mode)
-        self.validation_start = self.num_items // 4 * 3
+        self.num_objects = self.num_items
+        self.num_patches = self.num_objects * 512
+        self.validation_start = self.num_objects // 4 * 3
 
     def __len__(self):
         return 3 * 512
@@ -63,17 +65,20 @@ class ABC_dataset_patch(ABC_dataset):
         if self.mode == "training" or self.mode == "testing":
             id_dummy = 0
         else:
-            id_dummy = self.validation_start
+            id_dummy = self.validation_start * 512
+
+        id_object = (idx+id_dummy) // 512
+        id_patch = (idx+id_dummy) % 512
 
         times = [0] * 10
         cur_time = time.time()
-        feat_data, flag_data = self.get_patch(idx // 512, idx % 512)
+        feat_data, flag_data = self.get_patch(id_object, id_patch)
         times[0] += time.time() - cur_time
         cur_time = time.time()
         feat_data = np.transpose(feat_data.astype(np.float32) / 65535, (3, 0, 1, 2))
         flag_data = flag_data.astype(np.float32)[None, :, :, :]
         times[1] += time.time() - cur_time
-        return feat_data, flag_data, self.names[(idx + id_dummy) // 512]
+        return feat_data, flag_data, self.names[id_object]
 
 
 class ABC_dataset_patch_hdf5(ABC_dataset_patch):
@@ -150,7 +155,7 @@ class Patch_phase(pl.LightningModule):
             self.data,
             "validation"
         )
-        self.target_viz_name = self.valid_dataset.names[self.id_viz + self.validation_start]
+        self.target_viz_name = self.valid_dataset.names[self.id_viz + self.valid_dataset.validation_start]
         return DataLoader(self.valid_dataset, batch_size=self.batch_size,
                           # collate_fn=ABC_dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
@@ -199,23 +204,28 @@ class Patch_phase(pl.LightningModule):
         loss = self.model.loss(outputs, data)
         for idx, name_item in enumerate(name):
             if name_item == self.target_viz_name:
-                self.viz_data["loss"].append(loss[idx].item())
-                self.viz_data["prediction"].append(outputs[idx].cpu().numpy())
-                self.viz_data["gt"].append(data[1][idx].cpu().numpy())
+                self.viz_data["loss"].append(loss.item())
+                self.viz_data["prediction"].append(outputs[idx])
+                self.viz_data["gt"].append(data[1][idx])
         self.log("Validation_Loss", loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True,
                  batch_size=data[0].shape[0])
         return
 
     def on_validation_epoch_end(self):
+        prediction = torch.cat(self.viz_data["prediction"], dim=0)
+        gt = torch.cat(self.viz_data["gt"], dim=0)
+        gathered_prediction = [None for i in range(self.trainer.world_size)]
+        gathered_gt = [None for i in range(self.trainer.world_size)]
+        all_gather(gathered_prediction, prediction)
+        all_gather(gathered_gt, gt)
+
         if self.global_rank != 0 or self.trainer.sanity_checking:
             self.viz_data["gt"].clear()
             self.viz_data["prediction"].clear()
             self.viz_data["loss"].clear()
             return
         # Gather the "self.viz_data" along all the gpu
-        gathered_data = [self.viz_data for i in range(self.trainer.world_size)]
-        all_gather_object(gathered_data, self.viz_data)
         idx = self.trainer.current_epoch + 1 if not self.trainer.sanity_checking else 0
 
         num_items = sum([item.shape[0] for item in self.viz_data["gt"]])

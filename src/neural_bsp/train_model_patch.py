@@ -25,6 +25,7 @@ import pytorch_lightning as pl
 import faiss
 import torch
 from torch import nn
+from torch.distributed import all_gather_object
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torchvision.ops import sigmoid_focal_loss
@@ -41,6 +42,7 @@ class ABC_dataset_patch(ABC_dataset):
         super(ABC_dataset_patch, self).__init__(v_data_root, v_training_mode)
 
     def __len__(self):
+        return 3 * 512
         if self.mode == "training":
             return self.num_items // 4 * 3 * 512
         elif self.mode == "validation":
@@ -147,6 +149,7 @@ class Patch_phase(pl.LightningModule):
             self.data,
             "validation"
         )
+        self.target_viz_name = self.valid_dataset.names[self.id_viz]
         return DataLoader(self.valid_dataset, batch_size=self.batch_size,
                           # collate_fn=ABC_dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
@@ -193,11 +196,11 @@ class Patch_phase(pl.LightningModule):
 
         outputs = self.model(data, False)
         loss = self.model.loss(outputs, data)
-        if batch_idx//512 == 0:
-            self.viz_data["loss"].append(loss.item())
-            self.viz_data["prediction"].append(outputs.cpu().numpy())
-            self.viz_data["gt"].append(data[1].cpu().numpy())
-            self.viz_name = name[0]
+        for idx, name_item in enumerate(name):
+            if name_item == self.target_viz_name:
+                self.viz_data["loss"].append(loss[idx].item())
+                self.viz_data["prediction"].append(outputs[idx].cpu().numpy())
+                self.viz_data["gt"].append(data[1][idx].cpu().numpy())
         self.log("Validation_Loss", loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True,
                  batch_size=data[0].shape[0])
@@ -209,7 +212,9 @@ class Patch_phase(pl.LightningModule):
             self.viz_data["prediction"].clear()
             self.viz_data["loss"].clear()
             return
-
+        # Gather the "self.viz_data" along all the gpu
+        gathered_data = [self.viz_data for i in range(self.trainer.world_size)]
+        all_gather_object(gathered_data, self.viz_data)
         idx = self.trainer.current_epoch + 1 if not self.trainer.sanity_checking else 0
 
         num_items = sum([item.shape[0] for item in self.viz_data["gt"]])
@@ -303,7 +308,7 @@ def main(v_cfg: DictConfig):
         default_root_dir=log_dir,
 
         accelerator='gpu',
-        strategy = "ddp_find_unused_parameters_false" if v_cfg["trainer"].gpu > 1 else None,
+        strategy = "ddp_find_unused_parameters_false" if v_cfg["trainer"].gpu > 1 else "auto",
         devices=v_cfg["trainer"].gpu,
 
         enable_model_summary=False,

@@ -50,10 +50,9 @@ class ABC_dataset_patch(ABC_dataset):
         raise
 
     def get_patch(self, v_id_item, v_id_patch):
-        features = np.memmap(self.objects[v_id_item] + "_feat.npy", shape=(512, 32, 32, 32, 3), dtype=np.uint16,
-                             mode="r")
+        features = np.load(self.objects[v_id_item] + "_feat.npy", mmap_mode="r")
         features = features[v_id_patch]
-        flags = np.memmap(self.objects[v_id_item] + "_flag.npy", shape=(512, 32, 32, 32), dtype=np.uint8, mode="r")
+        flags = np.load(self.objects[v_id_item] + "_flag.npy", mmap_mode="r")
         flags = flags[v_id_patch]
         return features, flags
 
@@ -299,19 +298,24 @@ def main(v_cfg: DictConfig):
 
     mc = ModelCheckpoint(monitor="Validation_Loss", )
 
+
     trainer = Trainer(
-        accelerator='gpu' if v_cfg["trainer"].gpu != 0 else None,
-        # strategy = "ddp",
+        default_root_dir=log_dir,
+
+        accelerator='gpu',
+        strategy = "ddp_find_unused_parameters_false" if v_cfg["trainer"].gpu > 1 else None,
+        devices=v_cfg["trainer"].gpu,
+
+        enable_model_summary=False,
         callbacks=[mc],
-        devices=v_cfg["trainer"].gpu, enable_model_summary=False,
         max_epochs=int(1e8),
         num_sanity_val_steps=2,
         check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
-        default_root_dir=log_dir,
         # precision=16,
-        # gradient_clip_val=0.5
+        # gradient_clip_val=0.5,
+        find_unused_parameters=False
     )
-
+    torch.find_unused_parameters = False
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
         state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
         model.load_state_dict(state_dict, strict=True)

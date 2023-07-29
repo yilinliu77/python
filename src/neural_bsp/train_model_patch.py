@@ -40,6 +40,7 @@ from src.neural_bsp.train_model import ABC_dataset, Base_model
 class ABC_dataset_patch(ABC_dataset):
     def __init__(self, v_data_root, v_training_mode):
         super(ABC_dataset_patch, self).__init__(v_data_root, v_training_mode)
+        self.validation_start = self.num_items // 4 * 3
 
     def __len__(self):
         return 3 * 512
@@ -62,7 +63,7 @@ class ABC_dataset_patch(ABC_dataset):
         if self.mode == "training" or self.mode == "testing":
             id_dummy = 0
         else:
-            id_dummy = self.num_items // 4 * 3
+            id_dummy = self.validation_start
 
         times = [0] * 10
         cur_time = time.time()
@@ -149,7 +150,7 @@ class Patch_phase(pl.LightningModule):
             self.data,
             "validation"
         )
-        self.target_viz_name = self.valid_dataset.names[self.id_viz]
+        self.target_viz_name = self.valid_dataset.names[self.id_viz + self.validation_start]
         return DataLoader(self.valid_dataset, batch_size=self.batch_size,
                           # collate_fn=ABC_dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],

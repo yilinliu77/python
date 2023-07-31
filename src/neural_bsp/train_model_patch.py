@@ -25,7 +25,6 @@ import pytorch_lightning as pl
 import faiss
 import torch
 from torch import nn
-from torch.distributed import all_gather_object, all_gather
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torchvision.ops import sigmoid_focal_loss
@@ -213,14 +212,22 @@ class Patch_phase(pl.LightningModule):
         return
 
     def on_validation_epoch_end(self):
+        if self.trainer.sanity_checking:
+            self.viz_data["gt"].clear()
+            self.viz_data["prediction"].clear()
+            self.viz_data["loss"].clear()
+            return
+
         prediction = torch.cat(self.viz_data["prediction"], dim=0)
         gt = torch.cat(self.viz_data["gt"], dim=0)
-        gathered_prediction = [None for i in range(self.trainer.world_size)]
-        gathered_gt = [None for i in range(self.trainer.world_size)]
-        all_gather(gathered_prediction, prediction)
-        all_gather(gathered_gt, gt)
+        # gathered_prediction = [None for i in range(self.trainer.world_size)]
+        # gathered_gt = [None for i in range(self.trainer.world_size)]
+        gathered_prediction = self.all_gather(prediction)
+        gathered_gt = self.all_gather(gt)
+        # all_gather(gathered_prediction, prediction)
+        # all_gather(gathered_gt, gt)
 
-        if self.global_rank != 0 or self.trainer.sanity_checking:
+        if self.global_rank != 0:
             self.viz_data["gt"].clear()
             self.viz_data["prediction"].clear()
             self.viz_data["loss"].clear()

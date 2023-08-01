@@ -34,6 +34,7 @@ from shared.fast_dataloader import FastDataLoader
 from src.neural_bsp.model import AttU_Net_3D, U_Net_3D
 from shared.common_utils import export_point_cloud, sigmoid
 from src.neural_bsp.train_model import ABC_dataset, Base_model
+import torch.distributed as dist
 
 
 class ABC_dataset_patch(ABC_dataset):
@@ -44,7 +45,6 @@ class ABC_dataset_patch(ABC_dataset):
         self.validation_start = self.num_objects // 4 * 3
 
     def __len__(self):
-        return 3 * 512
         if self.mode == "training":
             return self.num_items // 4 * 3 * 512
         elif self.mode == "validation":
@@ -77,7 +77,7 @@ class ABC_dataset_patch(ABC_dataset):
         feat_data = np.transpose(feat_data.astype(np.float32) / 65535, (3, 0, 1, 2))
         flag_data = flag_data.astype(np.float32)[None, :, :, :]
         times[1] += time.time() - cur_time
-        return feat_data, flag_data, self.names[id_object]
+        return feat_data, flag_data, self.names[id_object], id_patch
 
 
 class ABC_dataset_patch_hdf5(ABC_dataset_patch):
@@ -134,6 +134,7 @@ class Patch_phase(pl.LightningModule):
             "loss": [],
             "prediction": [],
             "gt": [],
+            "id_patch": [],
         }
 
     def train_dataloader(self):
@@ -198,12 +199,14 @@ class Patch_phase(pl.LightningModule):
         # data = self.denormalize(batch[:2])
         data = batch[:2]
         name = batch[2]
+        id_patch = batch[3]
 
         outputs = self.model(data, False)
         loss = self.model.loss(outputs, data)
         for idx, name_item in enumerate(name):
             if name_item == self.target_viz_name:
                 self.viz_data["loss"].append(loss.item())
+                self.viz_data["id_patch"].append(id_patch[idx])
                 self.viz_data["prediction"].append(outputs[idx])
                 self.viz_data["gt"].append(data[1][idx])
         self.log("Validation_Loss", loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
@@ -216,47 +219,72 @@ class Patch_phase(pl.LightningModule):
             self.viz_data["gt"].clear()
             self.viz_data["prediction"].clear()
             self.viz_data["loss"].clear()
+            self.viz_data["id_patch"].clear()
             return
 
+        id_patch = torch.stack(self.viz_data["id_patch"], dim=0)
         prediction = torch.cat(self.viz_data["prediction"], dim=0)
         gt = torch.cat(self.viz_data["gt"], dim=0)
-        # gathered_prediction = [None for i in range(self.trainer.world_size)]
-        # gathered_gt = [None for i in range(self.trainer.world_size)]
-        gathered_prediction = self.all_gather(prediction)
-        gathered_gt = self.all_gather(gt)
-        # all_gather(gathered_prediction, prediction)
+        if self.trainer.world_size!=1:
+            device = prediction.device
+            dtype = prediction.dtype
+            size = torch.tensor([prediction.shape[0]], device=device, dtype=torch.int64)
+            gathered_size = [torch.zeros(1, device=device, dtype=torch.int64) for _ in range(self.trainer.world_size)]
+            dist.all_gather(gathered_size, size)
+
+            gathered_id_patch = [torch.zeros((item.item(), ), dtype=torch.int64, device=device) for item in gathered_size]
+            dist.all_gather(gathered_id_patch, id_patch)
+            gathered_id_patch = torch.cat(gathered_id_patch, dim=0)
+            
+            gathered_prediction_list = [torch.zeros((item.item(), 32, 32, 32), dtype=dtype, device=device) for item in gathered_size]
+            gathered_gt_list = [torch.zeros((item.item(), 32, 32, 32), dtype=dtype, device=device) for item in gathered_size]
+
+            dist.all_gather(gathered_prediction_list, prediction)
+            dist.all_gather(gathered_gt_list, gt)
+            gathered_prediction_list = torch.cat(gathered_prediction_list, dim=0)
+            gathered_gt_list = torch.cat(gathered_gt_list, dim=0)
+            
+            total_size = sum(gathered_size).item()
+            gathered_prediction = torch.zeros((total_size, 32, 32, 32), dtype=dtype, device=device)
+            gathered_prediction[gathered_id_patch] = gathered_prediction_list
+            gathered_gt = torch.zeros((total_size, 32, 32, 32), dtype=dtype, device=device)
+            gathered_gt[gathered_id_patch] = gathered_gt_list
+            gathered_prediction = gathered_prediction.cpu().numpy()
+            gathered_gt = gathered_gt.cpu().numpy()
+        else:
+            gathered_prediction = prediction.cpu().numpy()
+            gathered_gt = gt.cpu().numpy()
         # all_gather(gathered_gt, gt)
 
         if self.global_rank != 0:
             self.viz_data["gt"].clear()
             self.viz_data["prediction"].clear()
             self.viz_data["loss"].clear()
+            self.viz_data["id_patch"].clear()
             return
         # Gather the "self.viz_data" along all the gpu
         idx = self.trainer.current_epoch + 1 if not self.trainer.sanity_checking else 0
 
-        num_items = sum([item.shape[0] for item in self.viz_data["gt"]])
-        assert num_items % 512 == 0
+        assert gathered_prediction.shape[0] % 512 == 0
         query_points = self.viz_data["query_points"]
 
-        predicted_labels = np.concatenate(
-            self.viz_data["prediction"], axis=0).reshape(
-            (-1, 8, 8, 8, 32, 32, 32, 3)).transpose((0, 1, 4, 2, 5, 3, 6, 7)).reshape(-1, 256, 256, 256, 3)
-        gt_labels = np.concatenate(
-            self.viz_data["gt"], axis=0).reshape(
-            (-1, 8, 8, 8, 32, 32, 32)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(-1, 256, 256, 256, 3)
+        predicted_labels = gathered_prediction.reshape(
+            (-1, 8, 8, 8, 32, 32, 32)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(-1, 256, 256, 256)
+        gt_labels = gathered_gt.reshape(
+            (-1, 8, 8, 8, 32, 32, 32)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(-1, 256, 256, 256)
 
         predicted_labels = sigmoid(predicted_labels[0]) > 0.5
-        mask = predicted_labels.any(axis=3).reshape(-1)
+        mask = predicted_labels.reshape(-1)
         export_point_cloud(os.path.join(self.log_root, "{}_pred.ply".format(idx)), query_points[mask])
 
         gt_labels = sigmoid(gt_labels[0]) > 0.5
-        mask = gt_labels.any(axis=3).reshape(-1)
+        mask = gt_labels.reshape(-1)
         export_point_cloud(os.path.join(self.log_root, "{}_gt.ply".format(idx)), query_points[mask])
 
         self.viz_data["gt"].clear()
         self.viz_data["prediction"].clear()
         self.viz_data["loss"].clear()
+        self.viz_data["id_patch"].clear()
         return
 
     def test_dataloader(self):

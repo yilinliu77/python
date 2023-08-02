@@ -37,9 +37,54 @@ from src.neural_bsp.train_model import ABC_dataset, Base_model
 import torch.distributed as dist
 
 
-class ABC_dataset_patch(ABC_dataset):
+class ABC_dataset_patch_train(ABC_dataset):
+    def __init__(self, v_data_root, v_training_mode, v_batch_size):
+        super(ABC_dataset_patch_train, self).__init__(v_data_root, v_training_mode)
+        self.batch_size = v_batch_size
+        self.num_objects = self.num_items
+        self.num_patches = self.num_objects
+        self.validation_start = self.num_objects // 4 * 3
+
+    def __len__(self):
+        if self.mode == "training":
+            return self.num_items // 4 * 3
+        elif self.mode == "validation":
+            return self.num_items // 4
+        elif self.mode == "testing":
+            return self.num_items
+        raise
+
+    def get_patch(self, v_id_item, v_id_patch):
+        features = np.load(self.objects[v_id_item] + "_feat.npy")
+        choice = np.random.choice(features.shape[0], self.batch_size)
+        features = features[choice]
+        flags = np.load(self.objects[v_id_item] + "_flag.npy")
+        flags = flags[choice]
+        return features, flags
+
+    def __getitem__(self, idx):
+        if self.mode == "training" or self.mode == "testing":
+            id_dummy = 0
+        else:
+            id_dummy = self.validation_start
+
+        id_object = (idx+id_dummy)
+        id_patch = (idx+id_dummy)
+
+        times = [0] * 10
+        cur_time = time.time()
+        feat_data, flag_data = self.get_patch(id_object, id_patch)
+        times[0] += time.time() - cur_time
+        cur_time = time.time()
+        feat_data = np.transpose(feat_data.astype(np.float32) / 65535, (0, 4, 1, 2, 3))
+        flag_data = flag_data.astype(np.float32)[:, None, :, :, :]
+        times[1] += time.time() - cur_time
+        return feat_data, flag_data, self.names[id_object], id_patch
+
+
+class ABC_dataset_patch_test(ABC_dataset):
     def __init__(self, v_data_root, v_training_mode):
-        super(ABC_dataset_patch, self).__init__(v_data_root, v_training_mode)
+        super(ABC_dataset_patch_test, self).__init__(v_data_root, v_training_mode)
         self.num_objects = self.num_items
         self.num_patches = self.num_objects * 512
         self.validation_start = self.num_objects // 4 * 3
@@ -80,7 +125,7 @@ class ABC_dataset_patch(ABC_dataset):
         return feat_data, flag_data, self.names[id_object], id_patch
 
 
-class ABC_dataset_patch_hdf5(ABC_dataset_patch):
+class ABC_dataset_patch_hdf5(ABC_dataset_patch_train):
     def __init__(self, v_data_root, v_training_mode):
         super(ABC_dataset_patch_hdf5, self).__init__(None,None)
         self.data_root = v_data_root
@@ -120,7 +165,7 @@ class Patch_phase(pl.LightningModule):
         self.data = v_data
         self.phase = self.hydra_conf["model"]["phase"]
         self.model = globals()[self.hydra_conf["model"]["model_name"]](self.phase)
-        self.dataset_name = globals()[self.hydra_conf["dataset"]["dataset_name"]]
+        # self.dataset_name = globals()[self.hydra_conf["dataset"]["dataset_name"]]
 
         # Used for visualizing during the training
         self.id_viz = 0
@@ -138,11 +183,12 @@ class Patch_phase(pl.LightningModule):
         }
 
     def train_dataloader(self):
-        self.train_dataset = self.dataset_name(
+        self.train_dataset = ABC_dataset_patch_train(
             self.data,
             "training",
+            self.batch_size
         )
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
+        return DataLoader(self.train_dataset, batch_size=1, shuffle=True,
                           # collate_fn=ABC_dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
@@ -151,7 +197,7 @@ class Patch_phase(pl.LightningModule):
                           )
 
     def val_dataloader(self):
-        self.valid_dataset = self.dataset_name(
+        self.valid_dataset = ABC_dataset_patch_test(
             self.data,
             "validation"
         )
@@ -183,7 +229,7 @@ class Patch_phase(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         # data = self.denormalize(batch[:2])
-        data = batch[:2]
+        data = [batch[0][0],batch[1][0]]
         name = batch[2]
 
         outputs = self.model(data, True)

@@ -295,8 +295,8 @@ class Patch_phase(pl.LightningModule):
             gathered_prediction[gathered_id_patch] = gathered_prediction_list
             gathered_gt = torch.zeros((total_size, 32, 32, 32), dtype=dtype, device=device)
             gathered_gt[gathered_id_patch] = gathered_gt_list
-            gathered_prediction = gathered_prediction.cpu().numpy()
-            gathered_gt = gathered_gt.cpu().numpy()
+            gathered_prediction = gathered_prediction.cpu().numpy()[:512]
+            gathered_gt = gathered_gt.cpu().numpy()[:512]
         else:
             gathered_prediction = prediction.cpu().numpy()
             gathered_gt = gt.cpu().numpy()

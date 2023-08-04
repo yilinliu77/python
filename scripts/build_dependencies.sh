@@ -1,9 +1,21 @@
 #!/bin/bash
 
-read -p "Windows? (Y/N): " confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]] || exit 1
-read -p "CUDA_ARCHITECTURES(86)? (Y/N): " CUDA_ARCHITECTURES
-
-with_windows=${confirm}
+read -p "Windows? (Y/N): " -n 1 -r
+echo
+if [[ $REPLY =~ ^[yY]$ ]]
+then
+    with_windows=true
+else
+    with_windows=false
+fi
+read -p "CUDA_ARCHITECTURES(86)? (Y/N): " -n 1 -r
+echo
+if [[ $REPLY =~ ^[yY]$ ]]
+then
+    CUDA_ARCHITECTURES=86
+else
+    CUDA_ARCHITECTURES=""
+fi
 
 git submodule update
 
@@ -11,7 +23,13 @@ multi_thread="-j20"
 
 ROOT_DIR=$PWD
 
-conda install -c conda-forge -c intel -c pyg -c pytorch -c nvidia mkl mkl-devel mkl-static mkl-include pyg faiss-gpu pytorch torchvision torchaudio pytorch-cuda=11.8
+# Miniconda3
+#https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-Linux-x86_64.sh
+
+conda install -c intel mkl mkl-devel mkl-static mkl-include -y
+conda install -c pytorch -c nvidia pytorch torchvision torchaudio pytorch-cuda=11.8 -y
+conda install -c pyg pyg -y
+conda install -c conda-forge faiss-gpu -y
 pip install numba PyMCubes pytorch-lightning hydra-core shapely scikit-image matplotlib tensorboard plyfile opencv-python opencv-contrib-python ternausnet inplace_abn einops open3d ray[default]
 pip install torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cu118.html
 

@@ -31,6 +31,7 @@ from torchvision.ops import sigmoid_focal_loss
 from tqdm import tqdm
 
 from shared.fast_dataloader import FastDataLoader
+from src.neural_bsp.abc_hdf5_dataset import ABC_dataset_patch_hdf5, ABC_dataset_patch_hdf5_sample
 from src.neural_bsp.model import AttU_Net_3D, U_Net_3D
 from shared.common_utils import export_point_cloud, sigmoid
 from src.neural_bsp.train_model import ABC_dataset, Base_model
@@ -125,22 +126,6 @@ class ABC_dataset_patch_test(ABC_dataset):
         return feat_data, flag_data, self.names[id_object], id_patch
 
 
-class ABC_dataset_patch_hdf5(ABC_dataset_patch_train):
-    def __init__(self, v_data_root, v_training_mode):
-        super(ABC_dataset_patch_hdf5, self).__init__(None,None)
-        self.data_root = v_data_root
-        with h5py.File(self.data_root, "r") as f:
-            self.num_items = f["features"].shape[0]
-            self.names = ["{:08d}".format(item) for item in np.asarray(f["names"])]
-        self.mode = v_training_mode
-
-    def get_patch(self, v_id_item, v_id_patch):
-        with h5py.File(self.data_root, "r") as f:
-            features = f["features"][v_id_item, v_id_patch]
-            flags = f["flags"][v_id_item, v_id_patch]
-        return features, flags
-
-
 class Base_model_full(Base_model):
     def __init__(self, v_phase=0):
         super(Base_model_full, self).__init__()
@@ -183,13 +168,13 @@ class Patch_phase(pl.LightningModule):
         }
 
     def train_dataloader(self):
-        self.train_dataset = ABC_dataset_patch_train(
+        self.train_dataset = ABC_dataset_patch_hdf5_sample(
             self.data,
             "training",
             self.batch_size
         )
         return DataLoader(self.train_dataset, batch_size=1, shuffle=True,
-                          # collate_fn=ABC_dataset.collate_fn,
+                          collate_fn=ABC_dataset_patch_hdf5_sample.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
@@ -197,13 +182,14 @@ class Patch_phase(pl.LightningModule):
                           )
 
     def val_dataloader(self):
-        self.valid_dataset = ABC_dataset_patch_test(
+        self.valid_dataset = ABC_dataset_patch_hdf5_sample(
             self.data,
-            "validation"
+            "validation",
+            self.batch_size
         )
         self.target_viz_name = self.valid_dataset.names[self.id_viz + self.valid_dataset.validation_start]
-        return DataLoader(self.valid_dataset, batch_size=self.batch_size,
-                          # collate_fn=ABC_dataset.collate_fn,
+        return DataLoader(self.valid_dataset, batch_size=1,
+                          collate_fn=ABC_dataset_patch_hdf5_sample.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
@@ -229,7 +215,8 @@ class Patch_phase(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         # data = self.denormalize(batch[:2])
-        data = [batch[0][0],batch[1][0]]
+        data = batch[:2]
+        # data = [batch[0][0],batch[1][0]]
         name = batch[2]
 
         outputs = self.model(data, True)
@@ -395,6 +382,7 @@ def main(v_cfg: DictConfig):
 
     mc = ModelCheckpoint(monitor="Validation_Loss", )
 
+    # torch.set_float32_matmul_precision('medium')
 
     trainer = Trainer(
         default_root_dir=log_dir,
@@ -408,7 +396,7 @@ def main(v_cfg: DictConfig):
         max_epochs=int(1e8),
         num_sanity_val_steps=2,
         check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
-        # precision=16,
+        precision="16-mixed",
         # gradient_clip_val=0.5,
     )
     torch.find_unused_parameters = False

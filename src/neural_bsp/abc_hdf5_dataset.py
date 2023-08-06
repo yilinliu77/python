@@ -38,49 +38,6 @@ from src.neural_bsp.train_model import ABC_dataset, Base_model
 import torch.distributed as dist
 
 
-class ABC_dataset_patch_test(ABC_dataset):
-    def __init__(self, v_data_root, v_training_mode):
-        super(ABC_dataset_patch_test, self).__init__(v_data_root, v_training_mode)
-        self.num_objects = self.num_items
-        self.num_patches = self.num_objects * 512
-        self.validation_start = self.num_objects // 4 * 3
-
-    def __len__(self):
-        if self.mode == "training":
-            return self.num_items // 4 * 3 * 512
-        elif self.mode == "validation":
-            return self.num_items // 4 * 512
-        elif self.mode == "testing":
-            return self.num_items * 512
-        raise
-
-    def get_patch(self, v_id_item, v_id_patch):
-        features = np.load(self.objects[v_id_item] + "_feat.npy", mmap_mode="r")
-        features = features[v_id_patch]
-        flags = np.load(self.objects[v_id_item] + "_flag.npy", mmap_mode="r")
-        flags = flags[v_id_patch]
-        return features, flags
-
-    def __getitem__(self, idx):
-        if self.mode == "training" or self.mode == "testing":
-            id_dummy = 0
-        else:
-            id_dummy = self.validation_start * 512
-
-        id_object = (idx + id_dummy) // 512
-        id_patch = (idx + id_dummy) % 512
-
-        times = [0] * 10
-        cur_time = time.time()
-        feat_data, flag_data = self.get_patch(id_object, id_patch)
-        times[0] += time.time() - cur_time
-        cur_time = time.time()
-        feat_data = np.transpose(feat_data.astype(np.float32) / 65535, (3, 0, 1, 2))
-        flag_data = flag_data.astype(np.float32)[None, :, :, :]
-        times[1] += time.time() - cur_time
-        return feat_data, flag_data, self.names[id_object], id_patch
-
-
 class ABC_dataset_patch_hdf5(ABC_dataset):
     def __init__(self, v_data_root, v_training_mode, v_batch_size):
         super(ABC_dataset_patch_hdf5, self).__init__(None, None)
@@ -311,3 +268,17 @@ class ABC_dataset_patch_train(ABC_dataset):
                 torch.from_numpy(v_batches[0][1]),
                 v_batches[0][2],
                 torch.from_numpy(v_batches[0][3])]
+
+
+class ABC_dataset_patch_test(ABC_dataset_patch_train):
+    def __init__(self, v_data_root, v_training_mode, v_batch_size):
+        super(ABC_dataset_patch_test, self).__init__(v_data_root, "training", v_batch_size)
+        assert v_batch_size == self.num_patches_per_item
+        self.num_objects = len(self.names)
+
+    def get_patch(self, v_id_item):
+        features = np.load(self.objects[v_id_item] + "_feat.npy")
+        features = features
+        flags = np.load(self.objects[v_id_item] + "_flag.npy")
+        flags = flags
+        return np.asarray([v_id_item] * self.batch_size), np.arange(self.num_patches_per_item), features, flags

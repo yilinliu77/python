@@ -148,7 +148,6 @@ class Base_model(nn.Module):
                                   alpha=0.75,
                                   reduction="mean"
                                   )
-
         return loss
 
 

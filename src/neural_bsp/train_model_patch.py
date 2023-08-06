@@ -1,3 +1,4 @@
+import importlib
 import os.path
 import random
 import time
@@ -150,7 +151,9 @@ class Patch_phase(pl.LightningModule):
         self.data = v_data
         self.phase = self.hydra_conf["model"]["phase"]
         self.model = globals()[self.hydra_conf["model"]["model_name"]](self.phase)
-        # self.dataset_name = globals()[self.hydra_conf["dataset"]["dataset_name"]]
+        # Import module according to the dataset_name
+        mod = importlib.import_module('src.neural_bsp.abc_hdf5_dataset')
+        self.dataset_name = getattr(mod, self.hydra_conf["dataset"]["dataset_name"])
 
         # Used for visualizing during the training
         self.id_viz = 0
@@ -167,14 +170,16 @@ class Patch_phase(pl.LightningModule):
             "id_patch": [],
         }
 
+        self.target_viz_name = "00015724"
+
     def train_dataloader(self):
-        self.train_dataset = ABC_dataset_patch_hdf5_sample(
+        self.train_dataset = self.dataset_name(
             self.data,
             "training",
             self.batch_size
         )
         return DataLoader(self.train_dataset, batch_size=1, shuffle=True,
-                          collate_fn=ABC_dataset_patch_hdf5_sample.collate_fn,
+                          collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
@@ -182,14 +187,14 @@ class Patch_phase(pl.LightningModule):
                           )
 
     def val_dataloader(self):
-        self.valid_dataset = ABC_dataset_patch_hdf5_sample(
+        self.valid_dataset = self.dataset_name(
             self.data,
             "validation",
             self.batch_size
         )
         self.target_viz_name = self.valid_dataset.names[self.id_viz + self.valid_dataset.validation_start]
         return DataLoader(self.valid_dataset, batch_size=1,
-                          collate_fn=ABC_dataset_patch_hdf5_sample.collate_fn,
+                          collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
@@ -323,10 +328,11 @@ class Patch_phase(pl.LightningModule):
     def test_dataloader(self):
         self.test_dataset = self.dataset_name(
             self.data,
-            "testing"
+            "testing",
+            self.batch_size
         )
-        return DataLoader(self.test_dataset, batch_size=self.batch_size,
-                          # collate_fn=ABC_dataset.collate_fn,
+        return DataLoader(self.test_dataset, batch_size=1,
+                          collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           )
@@ -334,44 +340,45 @@ class Patch_phase(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         # data = self.denormalize(batch[:2])
         data = batch[:2]
-        name = batch[2]
+        name = batch[2][0]
+        id_patch = batch[3]
 
         outputs = self.model(data, False)
         loss = self.model.loss(outputs, data)
-        self.viz_data["loss"].append(loss.item())
 
-        features = (data[0].permute(0, 2, 3, 4, 1).cpu().numpy() * 65535).astype(np.uint16)
-        outputs = torch.nn.functional.interpolate(torch.sigmoid(outputs), scale_factor=4) > 0.5
-        prediction = (outputs.cpu().permute(0, 2, 3, 4, 1).numpy()).astype(np.ubyte)
-        gt = torch.nn.functional.interpolate(data[1], scale_factor=4) > 0.5
-        gt = gt.cpu().permute(0, 2, 3, 4, 1).numpy().astype(np.ubyte)
-        self.viz_data["prediction"].append(prediction)
-        self.viz_data["gt"].append(gt)
+        # PR
+        threshold = 0.3
+        b_labels = batch[1] > threshold
+        predicted_positive = torch.sigmoid(outputs) > threshold
+        predicted_negative = torch.logical_not(predicted_positive)
+        num_precision = torch.sum(torch.logical_and(predicted_positive, b_labels)) / torch.sum(predicted_positive)
+        num_recall = torch.sum(torch.logical_and(predicted_positive, b_labels)) / torch.sum(b_labels)
 
-        def wrap_data(v_data):
-            resolution = v_data.shape[0]
-            chunk = 32
-            num_chunk = resolution // chunk
-            t = v_data.reshape(num_chunk, chunk, num_chunk, chunk, num_chunk, chunk, v_data.shape[-1])
-            t = t.transpose((0, 2, 4, 1, 3, 5, 6)).reshape(-1, chunk, chunk, chunk, v_data.shape[-1])
-            return t
-
-        for id_batch in range(data[0].shape[0]):
-            np.save(os.path.join(self.log_root, "{}_feat.npy".format(name[id_batch])), wrap_data(features[id_batch]))
-            np.save(os.path.join(self.log_root, "{}_pred.npy".format(name[id_batch])),
-                    wrap_data(prediction[id_batch, ..., 0:1]))
-            np.save(os.path.join(self.log_root, "{}_gt.npy".format(name[id_batch])), wrap_data(gt[id_batch, ..., 0:1]))
         self.log("Test_Loss", loss, prog_bar=True, logger=False, on_step=True, on_epoch=True,
                  sync_dist=True,
                  batch_size=data[0].shape[0])
 
+        if name not in ["00015724"]:
+            return
+
+        # Save
+        predicted_labels = (torch.sigmoid(outputs[:,0]) > threshold).cpu().numpy().astype(np.ubyte)
+        gt_labels = (torch.sigmoid(data[1][:,0]) > threshold).cpu().numpy().astype(np.ubyte)
+        features = (data[0].permute(0, 2, 3, 4, 1).cpu().numpy() * 65535).astype(np.uint16)
+
+        np.save(os.path.join(self.log_root, "{}_feat.npy".format(name)), features)
+        np.save(os.path.join(self.log_root, "{}_pred.npy".format(name)),predicted_labels)
+        np.save(os.path.join(self.log_root, "{}_gt.npy".format(name)), gt_labels)
+
+        return
+
     def on_test_end(self):
         pass
-
 
 @hydra.main(config_name="train_model_patch.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
+    torch.set_float32_matmul_precision("medium")
     print(OmegaConf.to_yaml(v_cfg))
 
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()

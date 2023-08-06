@@ -10,6 +10,7 @@ trainer:
   num_worker: 0
 
   batch_size: 128
+  validation_batch_size: 512
   resume_from_checkpoint:
   evaluate: false
   output: .

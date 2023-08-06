@@ -141,6 +141,7 @@ class Patch_phase(pl.LightningModule):
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
+        self.validation_batch_size = self.hydra_conf["trainer"]["validation_batch_size"]
         self.num_worker = self.hydra_conf["trainer"]["num_worker"]
         self.save_hyperparameters(hparams)
 
@@ -190,7 +191,7 @@ class Patch_phase(pl.LightningModule):
         self.valid_dataset = self.dataset_name(
             self.data,
             "validation",
-            self.batch_size
+            self.validation_batch_size
         )
         self.target_viz_name = self.valid_dataset.names[self.id_viz + self.valid_dataset.validation_start]
         return DataLoader(self.valid_dataset, batch_size=1,

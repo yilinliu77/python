@@ -84,7 +84,7 @@ class Collision_checker:
             ray_direction_ = (v_direction / original_distance)[:, None]  # N,1,3
             ray_origin = v_origin[:, None]  # N,1,3
 
-            pvec = torch.cross(ray_direction_, v0v2)
+            pvec = torch.cross(ray_direction_, v0v2, dim=-1)
             det = torch.sum(v0v1 * pvec, dim=-1)
 
             # Check parallel
@@ -96,7 +96,7 @@ class Collision_checker:
 
             final_flag[torch.logical_or(u < 0, u > 1)] = 0
 
-            qvec = torch.cross(tvec, v0v1)
+            qvec = torch.cross(tvec, v0v1, dim=-1)
             v = torch.sum(ray_direction_ * qvec, dim=-1) * invDet
 
             final_flag[torch.logical_or(v < 0, u + v > 1)] = 0

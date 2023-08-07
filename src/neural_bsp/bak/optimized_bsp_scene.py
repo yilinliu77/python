@@ -1,41 +1,24 @@
-import itertools
 import sys, os
-import time
-from typing import List
 
-import h5py
-from torch.distributions import Binomial
-from torch.nn.utils.rnn import pad_sequence
-
-# sys.path.append("thirdparty/sdf_computer/build/")
-# import pysdf
-
-import math
+sys.path.append("thirdparty/sdf_computer/build/")
+import pysdf
 
 import torch
 from torch import nn
-from torch.optim import Adam, SGD
+from torch.optim import Adam
 from torch.utils.data import DataLoader
-from torch.distributions.utils import _standard_normal
 import torch.nn.functional as F
 
 import mcubes
-import cv2
 import numpy as np
 import open3d as o3d
-
-from tqdm import tqdm, trange
-import ray
-import platform
-import shutil
 
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
 import hydra
 from omegaconf import DictConfig, OmegaConf
-import mcubes
-from src.neural_bsp.bspt import get_mesh_watertight
 
+from src.neural_bsp.bak.bspt import get_mesh_watertight
 
 def write_ply_polygon(name, vertices, polygons):
     fout = open(name, 'w')
@@ -58,24 +41,27 @@ def write_ply_polygon(name, vertices, polygons):
     fout.close()
 
 
-class BSP_dataset(torch.utils.data.Dataset):
-    def __init__(self, v_data, v_training_mode):
-        super(BSP_dataset, self).__init__()
-        self.points = torch.from_numpy(v_data["points"])
-        self.points = torch.cat((self.points, torch.ones_like(self.points[:, :, 0:1])), dim=2)
+class BSP_dataset_single_scene(torch.utils.data.Dataset):
+    def __init__(self, v_data, v_batch_size, v_training_mode):
+        super(BSP_dataset_single_scene, self).__init__()
+        self.points = torch.from_numpy(v_data["points"]) - 0.5
+        self.points = torch.cat((self.points, torch.ones_like(self.points[:, 0:1])), dim=1)
         self.sdfs = torch.from_numpy(v_data["sdfs"])
-        self.voxels = torch.from_numpy(v_data["voxels"]).permute(0, 4, 1, 2, 3)
+
+        mask = self.sdfs > 0
+        self.sdfs[mask] = 0
+        self.sdfs[~mask] = 1
 
         self.mode = v_training_mode
-
+        self.batch_size = v_batch_size
         pass
 
     def __len__(self):
-        return self.points.shape[0]
+        return 10000 if self.mode=="training" else 1
 
     def __getitem__(self, idx):
-        which_point = torch.randint(0, self.points.shape[1], (4096,))
-        return self.points[idx, which_point], self.sdfs[idx, which_point], self.voxels[idx]
+        which_point = torch.randint(0, self.points.shape[0], (self.batch_size,))
+        return self.points[which_point], self.sdfs[which_point]
 
 
 class generator(nn.Module):
@@ -213,12 +199,14 @@ class decoder(nn.Module):
 
 
 class Base_model(nn.Module):
-    def __init__(self, v_phase=0):
+    def __init__(self, v_phase=0, p_dim=4096, c_dim=256):
         super(Base_model, self).__init__()
         self.phase = v_phase
-        self.encoder = encoder()
-        self.decoder = decoder()
-        self.generator = generator(self.phase, )
+        # self.decoder = decoder()
+        plane_m = torch.rand((4,p_dim), dtype=torch.float32)
+        # plane_m = plane_m / 100
+        self.plane_m = nn.Parameter(plane_m)
+        self.generator = generator(self.phase, p_dim, c_dim)
 
         self.test_resolution = 64
         self.test_coords = torch.stack(torch.meshgrid(
@@ -229,15 +217,14 @@ class Base_model(nn.Module):
         self.test_coords = torch.cat((self.test_coords, torch.ones_like(self.test_coords[:, 0:1])), dim=1)
 
     def forward(self, v_data, v_training=False):
-        points, sdfs, voxels = v_data
-        z_vector = self.encoder(voxels)
-        plane_m = self.decoder(z_vector)
+        points, sdfs = v_data
+        plane_m = self.plane_m.unsqueeze(0)
         net_out_convexes, net_out, convex_layer_weights, concave_layer_weights = self.generator(points, plane_m, )
 
-        return z_vector, plane_m, net_out_convexes, net_out, convex_layer_weights, concave_layer_weights
+        return None, plane_m, net_out_convexes, net_out, convex_layer_weights, concave_layer_weights
 
     def loss(self, v_predictions, v_input):
-        points, sdfs, voxels = v_input
+        points, sdfs = v_input
         z_vector, plane_m, net_out_convexes, net_out, convex_layer_weights, concave_layer_weights = v_predictions
         if self.phase == 0:
             # phase 0 continuous for better convergence
@@ -315,8 +302,8 @@ class Base_model(nn.Module):
         o3d.io.write_triangle_mesh(v_output_file, mesh)
 
     def extract_fi(self, v_plane_m, v_output_file, v_batch_size=10000):
-        points = self.test_coords.to(v_plane_m.device)
         plane_m = v_plane_m.cpu().numpy()
+        points = self.test_coords.to(v_plane_m.device)
         num_batch = self.test_coords.shape[0] // v_batch_size + 1
         net_out_convexes = []
         net_outs = []
@@ -371,9 +358,9 @@ class Base_model(nn.Module):
         pass
 
 
-class Base_phase(pl.LightningModule):
+class Scene_phase(pl.LightningModule):
     def __init__(self, hparams, v_data):
-        super(Base_phase, self).__init__()
+        super(Scene_phase, self).__init__()
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
@@ -386,36 +373,34 @@ class Base_phase(pl.LightningModule):
 
         self.data = v_data
         self.phase = self.hydra_conf["model"]["phase"]
-        self.model = Base_model(self.phase)
+        self.model = Base_model(self.phase,
+                                self.hydra_conf["model"]["pdim"],
+                                self.hydra_conf["model"]["cdim"])
 
         # Used for visualizing during the training
         self.viz_data = {}
 
     def train_dataloader(self):
-        self.train_dataset = BSP_dataset(
+        self.train_dataset = BSP_dataset_single_scene(
             self.data,
+            self.batch_size,
             "training",
         )
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
+        return DataLoader(self.train_dataset, batch_size=1, shuffle=True,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False)
 
     def val_dataloader(self):
-        self.valid_dataset = BSP_dataset(
+        self.valid_dataset = BSP_dataset_single_scene(
             self.data,
+            self.batch_size,
             "validation"
         )
-        return DataLoader(self.valid_dataset, batch_size=self.batch_size, num_workers=0)
+        return DataLoader(self.valid_dataset, batch_size=1, num_workers=0)
 
     def configure_optimizers(self):
-        # grouped_parameters = [
-        #     {"params": [self.model.seg_distance], 'lr': self.learning_rate},
-        #     {"params": [self.model.v_up], 'lr': 1e-2},
-        # ]
-
         optimizer = Adam(self.parameters(), lr=self.learning_rate, )
-        # optimizer = SGD(grouped_parameters, lr=self.learning_rate, )
 
         return {
             'optimizer': optimizer,
@@ -429,7 +414,7 @@ class Base_phase(pl.LightningModule):
         self.log("Training_Loss", total_loss.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True,
                  batch_size=batch[0].shape[0])
-        self.log("Training_Loss_SP", loss_sp.detach(), prog_bar=True, logger=True, on_step=False, on_epoch=True,
+        self.log("Training_Loss_SP", loss_sp.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True,
                  batch_size=batch[0].shape[0])
 
@@ -439,13 +424,13 @@ class Base_phase(pl.LightningModule):
         outputs = self.model(batch, False)
         loss_sp, total_loss = self.model.loss(outputs, batch)
 
-        self.log("Validation_Loss", total_loss.detach(), prog_bar=True, logger=True, on_step=True, on_epoch=True,
+        self.log("Validation_Loss", total_loss.detach(), prog_bar=False, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True,
                  batch_size=batch[0].shape[0])
 
         if self.global_rank == 0 and batch_idx == 0:
             self.viz_data["planes"] = outputs[1][0:1]
-            self.viz_data["gt"] = batch[2][0,0]
+            # self.viz_data["gt"] = batch[2][0,0]
 
         return total_loss
 
@@ -466,40 +451,59 @@ class Base_phase(pl.LightningModule):
                                   10000)
 
 
-def prepare_dataset(v_root):
-    print("Start to read dataset: {}".format(v_root))
+def prepare_dataset(v_root, v_rebuild_data = False):
+    cache_file_name = "output/neural_bsp/bsp_data.npy"
+    if os.path.exists(cache_file_name) and not v_rebuild_data:
+        print("Start to read cache: {}".format(cache_file_name))
+        data = np.load(cache_file_name,allow_pickle=True).item()
+        print("{} points and values;".format(
+            data["points"].shape[0],
+        ))
 
-    file = h5py.File(v_root)
-    points = np.asarray(file["points_64"], dtype=np.float32) / 255. - 0.5  # [0,1]
-    sdfs = np.asarray(file["values_64"], dtype=np.float32)  # [0,1]
-    voxels = np.asarray(file["voxels"], dtype=np.float32)  # [0,1]
-    file.close()
+    else:
+        print("Start to read dataset: {}".format(v_root))
 
-    print("Done")
-    print("{} items; {} points and values; voxel size {}^3".format(
-        points.shape[0], points.shape[1], voxels.shape[1]
-    ))
+        mesh = o3d.io.read_triangle_mesh(v_root)
+        vertices = np.asarray(mesh.vertices)
+        faces = np.asarray(mesh.triangles)
 
-    return {
-        "points": points,
-        "sdfs": sdfs,
-        "voxels": voxels,
-    }
+        sdf_computer = pysdf.PYSDF_computer()
+        sdf_computer.setup_mesh(vertices[faces], True)
+        scale = sdf_computer.m_scale
+        center = sdf_computer.m_center
+        sdf = sdf_computer.compute_sdf(0, int(2e8), int(1e8), False)
+
+        sampled_points = sdf[:,:3].astype(np.float32)
+        sdf = sdf[:,3].astype(np.float32)
+
+        print("Done")
+        print("{} points and values;".format(
+            sampled_points.shape[0],
+        ))
+        os.makedirs("output/neural_bsp",exist_ok=True)
+        data = {
+            "points": sampled_points,
+            "sdfs": sdf,
+            "scale": np.insert(center,3, scale)
+        }
+        np.save(cache_file_name,data,allow_pickle=True)
+    return data
 
 
-@hydra.main(config_name="base.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
+@hydra.main(config_name="optimized_scene.yaml", config_path="../../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
     print(OmegaConf.to_yaml(v_cfg))
     data = prepare_dataset(
         v_cfg["dataset"]["root"],
+        v_cfg["dataset"]["rebuild_data"],
     )
 
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir']
     v_cfg["trainer"]["output"] = os.path.join(log_dir, v_cfg["trainer"]["output"])
 
-    model = Base_phase(v_cfg, data)
+    model = Scene_phase(v_cfg, data)
 
     trainer = Trainer(
         accelerator='gpu' if v_cfg["trainer"].gpu != 0 else None,

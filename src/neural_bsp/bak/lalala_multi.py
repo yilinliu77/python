@@ -1,13 +1,7 @@
-import itertools
-import sys, os
-import time
-from typing import List
+import os
 
-import h5py
 import matplotlib
 import matplotlib.pyplot as plt
-from torch.distributions import Binomial
-from torch.nn.utils.rnn import pad_sequence
 
 # sys.path.append("thirdparty/sdf_computer/build/")
 # import pysdf
@@ -16,27 +10,18 @@ import math
 
 import torch
 from torch import nn
-from torch.optim import Adam, SGD
+from torch.optim import Adam
 from torch.utils.data import DataLoader
-from torch.distributions.utils import _standard_normal
 import torch.nn.functional as F
 
-import mcubes
-import cv2
 import numpy as np
-import open3d as o3d
 
-from tqdm import tqdm, trange
-import ray
-import platform
-import shutil
 # import torchsort
 
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
 import hydra
 from omegaconf import DictConfig, OmegaConf
-import mcubes
 
 from src.neural_bsp.generate_2d_dataset import generate_test_shape1
 
@@ -259,7 +244,7 @@ def prepare_dataset():
     return query_points
 
 
-@hydra.main(config_name="lalala.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
+@hydra.main(config_name="lalala.yaml", config_path="../../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
     print(OmegaConf.to_yaml(v_cfg))

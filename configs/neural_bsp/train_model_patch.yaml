@@ -1,19 +1,23 @@
 dataset:
-  root: G:\Dataset\GSP_v1
+  root: G:\Dataset\GSP_v3_part\total_1k.hdf5
+#  root: F:\GSP\GSP_v3\training
+#  dataset_name: ABC_dataset_patch_hdf5
+  dataset_name: ABC_dataset_patch
 
 trainer:
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 0
+  num_worker: 4
 
-  batch_size: 2
+  batch_size: 16
+  validation_batch_size: 512
   resume_from_checkpoint:
   evaluate: false
   output: .
   check_val_every_n_epoch: 1
 
 model:
-  model_name: BSP_base_model
+  model_name: Base_patch_model_BCE_deeper
   phase: 0
 
 hydra:

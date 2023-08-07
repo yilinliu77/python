@@ -3,22 +3,33 @@ from torch.nn import functional as F
 import torch
 from torchvision import models
 import torchvision
+from torchvision.ops import sigmoid_focal_loss
 
 
 class conv_block(nn.Module):
-    def __init__(self, ch_in, ch_out):
+    def __init__(self, ch_in, ch_out, with_bn=True):
         super(conv_block, self).__init__()
-        self.conv1 = nn.Sequential(
-            nn.Conv3d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
-            nn.BatchNorm3d(ch_out),
-            nn.ReLU(inplace=True),
+        if with_bn:
+            self.conv1 = nn.Sequential(
+                nn.Conv3d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+                nn.BatchNorm3d(ch_out),
+                nn.ReLU(inplace=True),
 
-        )
-        self.conv2 = nn.Sequential(
-            nn.Conv3d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
-            nn.BatchNorm3d(ch_out),
-            nn.ReLU(inplace=True)
-        )
+            )
+            self.conv2 = nn.Sequential(
+                nn.Conv3d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+                nn.BatchNorm3d(ch_out),
+                nn.ReLU(inplace=True)
+            )
+        else:
+            self.conv1 = nn.Sequential(
+                nn.Conv3d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+                nn.ReLU(inplace=True),
+            )
+            self.conv2 = nn.Sequential(
+                nn.Conv3d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+                nn.ReLU(inplace=True)
+            )
 
     def forward(self, x):
         x = self.conv1(x)
@@ -122,7 +133,7 @@ class AttU_Net_3D(nn.Module):
 
 
 class U_Net_3D(nn.Module):
-    def __init__(self, img_ch=3, output_ch=1, v_depth=5):
+    def __init__(self, img_ch=3, output_ch=1, v_depth=5, v_pool_first=True, base_channel=16, with_bn=True):
         super(U_Net_3D, self).__init__()
 
         self.Maxpool = nn.MaxPool3d(kernel_size=2, stride=2)
@@ -132,18 +143,24 @@ class U_Net_3D(nn.Module):
         self.conv = nn.ModuleList()
         self.up = nn.ModuleList()
         self.up_conv = nn.ModuleList()
-        base_channel = 16
-        self.conv1 = nn.Sequential(
-            conv_block(ch_in=img_ch, ch_out=base_channel),
-            nn.MaxPool3d(kernel_size=4, stride=4),
-            conv_block(ch_in=base_channel, ch_out=base_channel),
-        )
+        if v_pool_first:
+            self.conv1 = nn.Sequential(
+                conv_block(ch_in=img_ch, ch_out=base_channel, with_bn=with_bn),
+                nn.MaxPool3d(kernel_size=4, stride=4),
+                conv_block(ch_in=base_channel, ch_out=base_channel, with_bn=with_bn),
+            )
+        else:
+            self.conv1 = nn.Sequential(
+                nn.Conv3d(img_ch, base_channel, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm3d(base_channel),
+                nn.ReLU(inplace=True),
+            )
         cur_channel = base_channel
         for i in range(v_depth):
-            self.conv.append(conv_block(ch_in=cur_channel, ch_out=cur_channel * 2))
+            self.conv.append(conv_block(ch_in=cur_channel, ch_out=cur_channel * 2, with_bn=with_bn))
 
             self.up.append(up_conv(ch_in=cur_channel * 2, ch_out=cur_channel))
-            self.up_conv.append(conv_block(ch_in=cur_channel * 2, ch_out=cur_channel))
+            self.up_conv.append(conv_block(ch_in=cur_channel * 2, ch_out=cur_channel, with_bn=with_bn))
 
             cur_channel = cur_channel * 2
 
@@ -166,3 +183,86 @@ class U_Net_3D(nn.Module):
         d1 = self.Conv_1x1(up_x[-1])
 
         return d1
+
+
+class Base_model(nn.Module):
+    def __init__(self, v_phase=0):
+        super(Base_model, self).__init__()
+        self.phase = v_phase
+        self.encoder = U_Net_3D(img_ch=3, output_ch=1)
+        # self.encoder = AttU_Net_3D(img_ch=4, output_ch=1)
+
+    def forward(self, v_data, v_training=False):
+        features, labels = v_data
+        prediction = self.encoder(features)
+
+        return prediction
+
+    def loss(self, v_predictions, v_input):
+        features, labels = v_input
+
+        loss = sigmoid_focal_loss(v_predictions, labels,
+                                  alpha=0.75,
+                                  reduction="mean"
+                                  )
+        return loss
+
+
+class Atten_model(nn.Module):
+    def __init__(self, v_phase=0):
+        super(Atten_model, self).__init__()
+        self.phase = v_phase
+        self.encoder = AttU_Net_3D(img_ch=3, output_ch=1)
+
+    def forward(self, v_data, v_training=False):
+        features, labels = v_data
+        prediction = self.encoder(features)
+
+        return prediction
+
+    def loss(self, v_predictions, v_input):
+        features, labels = v_input
+
+        loss = sigmoid_focal_loss(v_predictions, labels,
+                                  alpha=0.75,
+                                  reduction="mean"
+                                  )
+
+        return loss
+
+
+class Base_patch_model_focal(Base_model):
+    def __init__(self, v_phase=0):
+        super(Base_patch_model_focal, self).__init__()
+        self.phase = v_phase
+        self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=4)
+
+
+class Base_patch_model_BCE(Base_model):
+    def __init__(self, v_phase=0):
+        super(Base_patch_model_BCE, self).__init__()
+        self.phase = v_phase
+        self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=4)
+
+    def loss(self, v_predictions, v_input):
+        features, labels = v_input
+
+        loss = nn.functional.binary_cross_entropy_with_logits(v_predictions, labels,
+                                                              reduction="mean"
+                                                              )
+        return loss
+
+
+class Base_patch_model_BCE_deeper(Base_model):
+    def __init__(self, v_phase=0):
+        super(Base_patch_model_BCE_deeper, self).__init__()
+        self.phase = v_phase
+        self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=5, base_channel=32)
+
+    def loss(self, v_predictions, v_input):
+        features, labels = v_input
+
+        loss = nn.functional.binary_cross_entropy_with_logits(v_predictions, labels,
+                                                              reduction="mean"
+                                                              )
+        return loss

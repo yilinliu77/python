@@ -12,6 +12,7 @@ from tqdm import tqdm
 urllib3.disable_warnings()
 
 id_start = 0
+id_end = 1000000
 
 s = requests.Session()
 s.headers.update({
@@ -179,7 +180,7 @@ def process(v_item):
 
 
 if __name__ == '__main__':
-    for i_link, link in enumerate(abc_links[id_start:]):
+    for i_link, link in enumerate(abc_links[id_start:id_end]):
         prefix = "{:04d}".format(i_link+id_start)
         print("Start to process {}".format(prefix))
         while True:

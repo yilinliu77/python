@@ -201,6 +201,9 @@ def filter_primitives(primitive_dict, v_faces):
             else:
                 id_primitive_per_vertex[vert_id] = set()
 
+    if min(corner_points)<0:
+        return None, None
+
     for id_surface, surface in enumerate(primitive_dict["surfaces"]):
         for id_face in surface["face_indices"]:
             vert_ids = v_faces[id_face]
@@ -343,7 +346,7 @@ def process_item(v_root, v_output_root, v_files,
         udf, closest_primitives = calculate_distance(query_points, mesh_vertices, mesh_faces,
                                                      surface_id_to_primitives, face_edge_indicator,
                                                      num_curves,
-                                                     use_cpu=True)
+                                                     use_cpu=False)
         times[4] += time.time() - cur_time
         cur_time = time.time()
         # 6. Calculate the input features: gradient and udf
@@ -392,13 +395,13 @@ def process_item(v_root, v_output_root, v_files,
                 export_point_cloud(os.path.join(prefix_path, "levelset_005.ply"), selected_points)
 
             # 2. Visualize the nearest point for each primitive
-            is_viz_details = False
+            is_viz_details = True
             if is_viz_details:
                 for i in range(num_primitives):
-                    # out_mesh = o3d.geometry.TriangleMesh()
-                    # out_mesh.vertices = o3d.utility.Vector3dVector(mesh_vertices)
-                    # out_mesh.triangles = o3d.utility.Vector3iVector(mesh_faces[surface_id_to_primitives == i])
-                    # o3d.io.write_triangle_mesh("{}/{}.ply".format(v_output_root, i), out_mesh)
+                    out_mesh = o3d.geometry.TriangleMesh()
+                    out_mesh.vertices = o3d.utility.Vector3dVector(mesh_vertices)
+                    out_mesh.triangles = o3d.utility.Vector3iVector(mesh_faces[surface_id_to_primitives == i])
+                    o3d.io.write_triangle_mesh("{}/{}.ply".format(v_output_root, i), out_mesh)
 
                     mask = closest_primitives == i
                     export_point_cloud("{}/p_{}.ply".format(v_output_root, i), query_points[mask])
@@ -493,13 +496,13 @@ if __name__ == '__main__':
     assert id_end>=id_start
 
     files = [item for item in os.listdir(data_root) if int(item)>id_start and int(item) < id_end]
-
+    sorted(files, key=lambda item: int(item))
     num_cores = int(sys.argv[3])
     num_gpus = int(sys.argv[4])
     num_task_per_core = len(files) // max(1, num_cores) + 1
 
     ray.init(
-        # local_mode=True,
+        local_mode=True,
         # num_cpus=1,
         num_cpus=num_cores,
         num_gpus=num_gpus

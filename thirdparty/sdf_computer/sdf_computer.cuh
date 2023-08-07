@@ -230,7 +230,7 @@ public:
             triangles_gpu.data(),
             visibility.data(),
             stream);
-
+        triangle_bvh->cl
         CUDA_CHECK_THROW(cudaStreamSynchronize(stream));
 
         std::vector<short> results(num_camera * num_point);

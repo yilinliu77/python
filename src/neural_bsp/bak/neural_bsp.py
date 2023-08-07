@@ -1,40 +1,25 @@
-import itertools
-import sys, os
-import time
-from typing import List
+import os
 
 import h5py
-from torch.distributions import Binomial
-from torch.nn.utils.rnn import pad_sequence
 
 # sys.path.append("thirdparty/sdf_computer/build/")
 # import pysdf
 
-import math
-
 import torch
 from torch import nn
-from torch.optim import Adam, SGD
+from torch.optim import Adam
 from torch.utils.data import DataLoader
-from torch.distributions.utils import _standard_normal
 import torch.nn.functional as F
 
-import mcubes
-import cv2
 import numpy as np
 import open3d as o3d
-
-from tqdm import tqdm, trange
-import ray
-import platform
-import shutil
 
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
 import hydra
 from omegaconf import DictConfig, OmegaConf
 import mcubes
-from src.neural_bsp.bspt import get_mesh_watertight
+from src.neural_bsp.bak.bspt import get_mesh_watertight
 
 
 def write_ply_polygon(name, vertices, polygons):
@@ -58,24 +43,24 @@ def write_ply_polygon(name, vertices, polygons):
     fout.close()
 
 
-class BSP_dataset_single_object(torch.utils.data.Dataset):
-    def __init__(self, v_data, v_id, v_training_mode):
-        super(BSP_dataset_single_object, self).__init__()
+class BSP_dataset(torch.utils.data.Dataset):
+    def __init__(self, v_data, v_training_mode):
+        super(BSP_dataset, self).__init__()
         self.points = torch.from_numpy(v_data["points"])
         self.points = torch.cat((self.points, torch.ones_like(self.points[:, :, 0:1])), dim=2)
         self.sdfs = torch.from_numpy(v_data["sdfs"])
         self.voxels = torch.from_numpy(v_data["voxels"]).permute(0, 4, 1, 2, 3)
 
         self.mode = v_training_mode
-        self.id = v_id
+
         pass
 
     def __len__(self):
-        return 100
+        return self.points.shape[0]
 
     def __getitem__(self, idx):
         which_point = torch.randint(0, self.points.shape[1], (4096,))
-        return self.points[self.id, which_point], self.sdfs[self.id, which_point], self.voxels[self.id]
+        return self.points[idx, which_point], self.sdfs[idx, which_point], self.voxels[idx]
 
 
 class generator(nn.Module):
@@ -138,70 +123,44 @@ class generator(nn.Module):
             return h2, h3, self.convex_layer_weights, self.concave_layer_weights
 
 
-class generator1(nn.Module):
-    def __init__(self, phase, p_dim=4096, c_dim=256):
-        super(generator, self).__init__()
-        self.phase = phase
-        self.p_dim = p_dim
-        self.c_dim = c_dim
-        convex_layer_weights = torch.rand((self.p_dim, self.c_dim))
-        concave_layer_weights = torch.rand((self.c_dim, 1))
-        self.convex_layer_weights = nn.Parameter(convex_layer_weights)
-        self.concave_layer_weights = nn.Parameter(concave_layer_weights)
-        # nn.init.normal_(self.convex_layer_weights, mean=0.0, std=0.02)
-        # nn.init.normal_(self.concave_layer_weights, mean=1e-5, std=0.02)
+class encoder(nn.Module):
+    def __init__(self, ef_dim=32):
+        super(encoder, self).__init__()
+        self.ef_dim = ef_dim
+        self.conv_1 = nn.Conv3d(1, self.ef_dim, 4, stride=2, padding=1, bias=True)
+        self.conv_2 = nn.Conv3d(self.ef_dim, self.ef_dim * 2, 4, stride=2, padding=1, bias=True)
+        self.conv_3 = nn.Conv3d(self.ef_dim * 2, self.ef_dim * 4, 4, stride=2, padding=1, bias=True)
+        self.conv_4 = nn.Conv3d(self.ef_dim * 4, self.ef_dim * 8, 4, stride=2, padding=1, bias=True)
+        self.conv_5 = nn.Conv3d(self.ef_dim * 8, self.ef_dim * 8, 4, stride=1, padding=0, bias=True)
+        nn.init.xavier_uniform_(self.conv_1.weight)
+        nn.init.constant_(self.conv_1.bias, 0)
+        nn.init.xavier_uniform_(self.conv_2.weight)
+        nn.init.constant_(self.conv_2.bias, 0)
+        nn.init.xavier_uniform_(self.conv_3.weight)
+        nn.init.constant_(self.conv_3.bias, 0)
+        nn.init.xavier_uniform_(self.conv_4.weight)
+        nn.init.constant_(self.conv_4.bias, 0)
+        nn.init.xavier_uniform_(self.conv_5.weight)
+        nn.init.constant_(self.conv_5.bias, 0)
 
-    def forward(self, points, plane_m, convex_mask=None, is_training=False):
-        if self.phase == 0:
-            # level 1
-            h1 = torch.matmul(points, plane_m)
-            # h1 = torch.clamp(h1, min=0)
-            h1 = F.leaky_relu(h1, negative_slope=0.00001)
+    def forward(self, inputs, is_training=False):
+        d_1 = self.conv_1(inputs)
+        d_1 = F.leaky_relu(d_1, negative_slope=0.01, inplace=True)
 
-            # level 2
-            h2 = torch.matmul(h1, (self.convex_layer_weights>0).float())
-            # h2 = torch.clamp(1 - h2, min=0, max=1)
-            h2 = F.leaky_relu(h2, negative_slope=0.00001)
-            h2 = 1 - F.leaky_relu(1 - h2, negative_slope=0.00001)
+        d_2 = self.conv_2(d_1)
+        d_2 = F.leaky_relu(d_2, negative_slope=0.01, inplace=True)
 
-            # level 3
-            # h3 = torch.matmul(h2, self.concave_layer_weights)
-            # # h3 = torch.clamp(h3, min=0, max=1)
-            # h3 = 1 - F.leaky_relu(1 - h3, negative_slope=0.00001)
-            # h3 = F.leaky_relu(h3, negative_slope=0.00001)
-            h3 = torch.min(h2, dim=2, keepdim=True)[0]
+        d_3 = self.conv_3(d_2)
+        d_3 = F.leaky_relu(d_3, negative_slope=0.01, inplace=True)
 
-            return h2, h3, self.convex_layer_weights, self.concave_layer_weights
-        elif self.phase == 1 or self.phase == 2:
-            # level 1
-            h1 = torch.matmul(points, plane_m)
-            h1 = torch.clamp(h1, min=0)
+        d_4 = self.conv_4(d_3)
+        d_4 = F.leaky_relu(d_4, negative_slope=0.01, inplace=True)
 
-            # level 2
-            h2 = torch.matmul(h1, (self.convex_layer_weights > 0.01).float())
+        d_5 = self.conv_5(d_4)
+        d_5 = d_5.view(-1, self.ef_dim * 8)
+        d_5 = torch.sigmoid(d_5)
 
-            # level 3
-            if convex_mask is None:
-                h3 = torch.min(h2, dim=2, keepdim=True)[0]
-            else:
-                h3 = torch.min(h2 + convex_mask, dim=2, keepdim=True)[0]
-
-            return h2, h3, self.convex_layer_weights, self.concave_layer_weights
-        elif self.phase == 3 or self.phase == 4:
-            # level 1
-            h1 = torch.matmul(points, plane_m)
-            h1 = torch.clamp(h1, min=0)
-
-            # level 2
-            h2 = torch.matmul(h1, self.convex_layer_weights)
-
-            # level 3
-            if convex_mask is None:
-                h3 = torch.min(h2, dim=2, keepdim=True)[0]
-            else:
-                h3 = torch.min(h2 + convex_mask, dim=2, keepdim=True)[0]
-
-            return h2, h3, self.convex_layer_weights, self.concave_layer_weights
+        return d_5
 
 
 class decoder(nn.Module):
@@ -242,10 +201,8 @@ class Base_model(nn.Module):
     def __init__(self, v_phase=0):
         super(Base_model, self).__init__()
         self.phase = v_phase
-        # self.decoder = decoder()
-        plane_m = torch.rand((4,4096), dtype=torch.float32)
-        plane_m = plane_m / 100
-        self.plane_m = nn.Parameter(plane_m)
+        self.encoder = encoder()
+        self.decoder = decoder()
         self.generator = generator(self.phase, )
 
         self.test_resolution = 64
@@ -258,65 +215,11 @@ class Base_model(nn.Module):
 
     def forward(self, v_data, v_training=False):
         points, sdfs, voxels = v_data
-        plane_m = self.plane_m.unsqueeze(0)
+        z_vector = self.encoder(voxels)
+        plane_m = self.decoder(z_vector)
         net_out_convexes, net_out, convex_layer_weights, concave_layer_weights = self.generator(points, plane_m, )
 
-        return None, plane_m, net_out_convexes, net_out, convex_layer_weights, concave_layer_weights
-
-    def loss1(self, v_predictions, v_input):
-        points, sdfs, voxels = v_input
-        z_vector, plane_m, net_out_convexes, net_out, convex_layer_weights, concave_layer_weights = v_predictions
-        if self.phase == 0:
-            # phase 0 continuous for better convergence
-            # L_recon + L_W + L_T
-            # net_out_convexes - network output (convex layer), the last dim is the number of convexes
-            # net_out - network output (final output)
-            # point_value - ground truth inside-outside value for each point
-            # convex_layer_weights - connections T
-            # concave_layer_weights - auxiliary weights W
-            loss_sp = torch.mean((sdfs - net_out) ** 2)
-            loss = loss_sp
-            return loss_sp, loss
-        elif self.phase == 1:
-            # phase 1 hard discrete for bsp
-            # L_recon
-            loss_sp = torch.mean((1 - sdfs) * (1 - torch.clamp(net_out, max=1)) + \
-                                 sdfs * (torch.clamp(net_out, min=0)))
-            loss = loss_sp
-            return loss_sp, loss
-        elif self.phase == 2:
-            # phase 2 hard discrete for bsp with L_overlap
-            # L_recon + L_overlap
-            loss_sp = torch.mean((1 - sdfs) * (1 - torch.clamp(net_out, max=1)) + \
-                                 sdfs * (torch.clamp(net_out, min=0)))
-            G2_inside = (net_out_convexes < 0.01).float()
-            bmask = G2_inside * (torch.sum(G2_inside, dim=2, keepdim=True) > 1).float()
-            loss = loss_sp - torch.mean(net_out_convexes * sdfs * bmask)
-            return loss_sp, loss
-        elif self.phase == 3:
-            # phase 3 soft discrete for bsp
-            # L_recon + L_T
-            # soft cut with loss L_T: gradually move the values in T (cw2) to either 0 or 1
-            loss_sp = torch.mean((1 - sdfs) * (1 - torch.clamp(net_out, max=1)) + \
-                                 sdfs * (torch.clamp(net_out, min=0)))
-            loss = loss_sp + \
-                   torch.sum((convex_layer_weights < 0.01).float() * torch.abs(convex_layer_weights)) + \
-                   torch.sum((convex_layer_weights >= 0.01).float() * torch.abs(convex_layer_weights - 1))
-            return loss_sp, loss
-        elif self.phase == 4:
-            # phase 4 soft discrete for bsp with L_overlap
-            # L_recon + L_T + L_overlap
-            # soft cut with loss L_T: gradually move the values in T (cw2) to either 0 or 1
-            loss_sp = torch.mean((1 - sdfs) * (1 - torch.clamp(net_out, max=1)) + \
-                                 sdfs * (torch.clamp(net_out, min=0)))
-            G2_inside = (net_out_convexes < 0.01).float()
-            bmask = G2_inside * (torch.sum(G2_inside, dim=2, keepdim=True) > 1).float()
-            loss = loss_sp + \
-                   torch.sum((convex_layer_weights < 0.01).float() * torch.abs(convex_layer_weights)) + \
-                   torch.sum((convex_layer_weights >= 0.01).float() * torch.abs(convex_layer_weights - 1)) - \
-                   torch.mean(net_out_convexes * sdfs * bmask)
-            return loss_sp, loss
-        return
+        return z_vector, plane_m, net_out_convexes, net_out, convex_layer_weights, concave_layer_weights
 
     def loss(self, v_predictions, v_input):
         points, sdfs, voxels = v_input
@@ -397,8 +300,8 @@ class Base_model(nn.Module):
         o3d.io.write_triangle_mesh(v_output_file, mesh)
 
     def extract_fi(self, v_plane_m, v_output_file, v_batch_size=10000):
-        plane_m = v_plane_m.cpu().numpy()
         points = self.test_coords.to(v_plane_m.device)
+        plane_m = v_plane_m.cpu().numpy()
         num_batch = self.test_coords.shape[0] // v_batch_size + 1
         net_out_convexes = []
         net_outs = []
@@ -474,9 +377,8 @@ class Base_phase(pl.LightningModule):
         self.viz_data = {}
 
     def train_dataloader(self):
-        self.train_dataset = BSP_dataset_single_object(
+        self.train_dataset = BSP_dataset(
             self.data,
-            self.hydra_conf["dataset"]["id"],
             "training",
         )
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
@@ -485,9 +387,8 @@ class Base_phase(pl.LightningModule):
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False)
 
     def val_dataloader(self):
-        self.valid_dataset = BSP_dataset_single_object(
+        self.valid_dataset = BSP_dataset(
             self.data,
-            self.hydra_conf["dataset"]["id"],
             "validation"
         )
         return DataLoader(self.valid_dataset, batch_size=self.batch_size, num_workers=0)
@@ -571,7 +472,7 @@ def prepare_dataset(v_root):
     }
 
 
-@hydra.main(config_name="optimized_bsp_shapenet.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
+@hydra.main(config_name="base.yaml", config_path="../../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
     print(OmegaConf.to_yaml(v_cfg))

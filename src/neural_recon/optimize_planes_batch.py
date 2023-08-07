@@ -45,6 +45,13 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
     num_tolerence = [MAX_TOLERENCE] * patch_num
 
     num_plane_sample = 100
+<<<<<<< HEAD
+=======
+    img_src_id = 0
+
+    v_img1 = imgs[0]
+    v_img2 = imgs[img_src_id + 1]
+>>>>>>> fc54290f46d081399965b45f779c4f7711042f70
 
     tri_colors = [generate_random_color() for _ in range(100)]
     sample_g = torch.Generator(device)
@@ -138,6 +145,7 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
             triangle_normal_src = triangle_normal.repeat_interleave(num_sample_points, dim=0)
             points_to_tri_src = torch.arange(num_sample_points.shape[0]).to(device).repeat_interleave(num_sample_points)
 
+<<<<<<< HEAD
             # 4. transform the sample_points to src_imgs and compute the sum of losses
             final_loss_list = []
             for img_src_id in range(transformation.shape[0]):
@@ -150,6 +158,20 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
                 transformation_c = transformation[img_src_id]
                 #sample_points_on_face = sample_points_on_face_src.clone()
                 #triangle_normal = triangle_normal_src.clone()
+=======
+            # Collision
+            # Viz
+            test_collision = True
+            if test_collision and cur_iter[v_patch_id] > 20 and v_patch_id == 8:
+                collision_checker.save_ply(os.path.join(v_log_root, "collision_test.ply"))
+                sample_points_on_face_c2 = (v_c1_2_c2 @ to_homogeneous_tensor(sample_points_on_face).T).T[:, :3]
+                # collision_flag = collision_checker.check_ray(torch.zeros_like(sample_points_on_face_c2),
+                #                                              sample_points_on_face_c2)
+                test_pos = torch.linalg.inv(v_c1_2_c2)[None,:3,-1]
+                # test_pos = v_c1_2_c2[None,:3,-1]
+                collision_flag = collision_checker.check_ray(test_pos.tile((sample_points_on_face.shape[0],1)),
+                                                             sample_points_on_face-test_pos.tile((sample_points_on_face.shape[0],1)))
+>>>>>>> fc54290f46d081399965b45f779c4f7711042f70
 
                 # 2. check collision
                 origin_c2 = torch.linalg.inv(v_c1_2_c2)[:3, -1].tile(sample_points_on_face_src.shape[0], 1)
@@ -402,9 +424,12 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
         #     final_triangles).transpose(1, 2)).transpose(1, 2)[:, :, :3]
         collision_checker.clear()
         collision_checker.add_triangles(final_triangles)
+<<<<<<< HEAD
 
         te = time.time()
         print("Curiter Cost Time: {:.4f}\n\n".format(te - t0))
+=======
+>>>>>>> fc54290f46d081399965b45f779c4f7711042f70
         continue
 
     # save optimized_abcd_list

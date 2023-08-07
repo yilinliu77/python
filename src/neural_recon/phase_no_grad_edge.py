@@ -243,11 +243,18 @@ def optimize_plane(v_data, v_log_root):
 
         projection2 = np.stack([v_img_database[int(id_img)].projection for id_img in id_src_imgs], axis=0)
         intrinsic = v_img_database[id_img1].intrinsic
+
+        # pos_in_c1 = v_img_database[int(id_img1)].extrinsic @ v_img_database[1].pos[None, :]
+
         # transformation store the transformation matrix from ref_img to src_imgs
         transformation = projection2 @ np.linalg.inv(v_img_database[id_img1].extrinsic)
         transformation = torch.from_numpy(transformation).to(device).to(torch.float32)
         c1_2_c2 = torch.from_numpy(
+<<<<<<< HEAD
             v_img_database[int(id_src_imgs[img_src_id])].extrinsic @ np.linalg.inv(v_img_database[id_img1].extrinsic)
+=======
+            v_img_database[int(id_src_imgs[0])].extrinsic @ np.linalg.inv(v_img_database[id_img1].extrinsic)
+>>>>>>> fc54290f46d081399965b45f779c4f7711042f70
         ).to(device).to(torch.float32)
         intrinsic = torch.from_numpy(intrinsic).to(device).to(torch.float32)
 

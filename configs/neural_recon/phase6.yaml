@@ -6,6 +6,7 @@ dataset:
   only_train_target: true
   id_viz_face: [12,13,14,16,28,29,31,37,38,39,45,63,64,65,66,67,]
   id_viz_edge: [9118]
+  v_reconstruct_data: false
 
 trainer:
   check_val_every_n_epoch: 10

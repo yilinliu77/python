@@ -34,8 +34,69 @@ from tqdm import tqdm
 from shared.fast_dataloader import FastDataLoader
 from src.neural_bsp.model import AttU_Net_3D, U_Net_3D
 from shared.common_utils import export_point_cloud, sigmoid
-from src.neural_bsp.train_model import ABC_dataset, Base_model
 import torch.distributed as dist
+
+class ABC_dataset(torch.utils.data.Dataset):
+    def __init__(self, v_data_root=None, v_training_mode=None):
+        super(ABC_dataset, self).__init__()
+        self.data_root = v_data_root
+        if v_data_root is None:
+            return
+        self.names = list(set([item[:8] for item in os.listdir(v_data_root)]))
+        self.names = sorted(self.names, key=lambda x: int(x))
+        self.objects = [os.path.join(v_data_root, item) for item in self.names]
+
+        self.num_items = len(self.objects)
+
+        self.mode = v_training_mode
+
+        pass
+
+    def __len__(self):
+        if self.mode == "training":
+            return self.num_items // 4 * 3
+        elif self.mode == "validation":
+            return self.num_items // 4
+        elif self.mode == "testing":
+            return self.num_items
+        raise
+
+    def get_total(self, v_idx):
+        features = np.load(self.objects[v_idx] + "_feat.npy")
+        features = features.reshape(8, 8, 8, 32, 32, 32, 3).transpose((0, 3, 1, 4, 2, 5, 6)).reshape(256, 256, 256, 3)
+        flags = np.load(self.objects[v_idx] + "_flag.npy")
+        flags = flags.reshape(8, 8, 8, 32, 32, 32).transpose((0, 3, 1, 4, 2, 5)).reshape(256, 256, 256)
+        return features, flags
+
+    def __getitem__(self, idx):
+        if self.mode == "training" or self.mode == "testing":
+            id_dummy = 0
+        else:
+            id_dummy = self.num_items // 4 * 3
+        times = [0] * 10
+        cur_time = time.time()
+        feat_data, flag_data = self.get_total(idx + id_dummy)
+        times[0] += time.time() - cur_time
+        cur_time = time.time()
+        feat_data = np.transpose(feat_data.astype(np.float32) / 65535, (3, 0, 1, 2))
+        flag_data = flag_data.astype(np.float32)[None, :, :, :]
+        times[1] += time.time() - cur_time
+        return feat_data, flag_data, self.names[idx + id_dummy]
+
+    @staticmethod
+    def collate_fn(v_batches):
+        input_features = []
+        consistent_flags = []
+        for item in v_batches:
+            input_features.append(item[0])
+            consistent_flags.append(item[1])
+
+        input_features = np.stack(input_features, axis=0)
+        # input_features = torch.from_numpy(np.stack(input_features,axis=0).astype(np.float32)).permute(0, 4, 1, 2, 3)
+        consistent_flags = torch.from_numpy(np.stack(consistent_flags, axis=0))
+
+        return input_features, consistent_flags
+
 
 # Not used
 class ABC_dataset_patch_hdf5(ABC_dataset):

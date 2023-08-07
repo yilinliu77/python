@@ -1,7 +1,5 @@
 import importlib
 import os.path
-import random
-import time
 
 import h5py
 import hydra
@@ -9,47 +7,20 @@ import numpy as np
 # import matplotlib
 # matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import ray
-import scipy
-import torch
 from lightning_fabric import seed_everything
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
-from scipy.sparse import csr_matrix
-from scipy.sparse.csgraph import minimum_spanning_tree
-from sklearn.cluster import KMeans
-import networkx as nx
-import matplotlib
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import pytorch_lightning as pl
-import faiss
 import torch
-from torch import nn
 from torch.optim import Adam
 from torch.utils.data import DataLoader
-from torchmetrics import Precision, Recall, MetricCollection
-from torchvision.ops import sigmoid_focal_loss
-from tqdm import tqdm
+from torchmetrics import MetricCollection
 
-from shared.fast_dataloader import FastDataLoader
-from src.neural_bsp.abc_hdf5_dataset import ABC_dataset_patch_hdf5, ABC_dataset_patch_hdf5_sample
-from src.neural_bsp.model import AttU_Net_3D, U_Net_3D
 from shared.common_utils import export_point_cloud, sigmoid
-from src.neural_bsp.my_dataloader import MyDataLoader
-from src.neural_bsp.train_model import ABC_dataset, Base_model
 import torch.distributed as dist
 
-from torchmetrics.classification import BinaryAveragePrecision, BinaryPrecision, BinaryRecall
-
-
-class Base_model_full(Base_model):
-    def __init__(self, v_phase=0):
-        super(Base_model_full, self).__init__()
-        self.phase = v_phase
-        self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=4)
-        # self.encoder = AttU_Net_3D(img_ch=4, output_ch=1)
-
+from torchmetrics.classification import BinaryPrecision, BinaryRecall
 
 class Patch_phase(pl.LightningModule):
     def __init__(self, hparams, v_data):
@@ -67,7 +38,8 @@ class Patch_phase(pl.LightningModule):
 
         self.data = v_data
         self.phase = self.hydra_conf["model"]["phase"]
-        self.model = globals()[self.hydra_conf["model"]["model_name"]](self.phase)
+        mod = importlib.import_module('src.neural_bsp.model')
+        self.model = getattr(mod, self.hydra_conf["model"]["model_name"])(self.phase)
         # Import module according to the dataset_name
         mod = importlib.import_module('src.neural_bsp.abc_hdf5_dataset')
         self.dataset_name = getattr(mod, self.hydra_conf["dataset"]["dataset_name"])

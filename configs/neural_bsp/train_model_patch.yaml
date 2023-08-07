@@ -9,7 +9,7 @@ trainer:
   gpu: 1
   num_worker: 4
 
-  batch_size: 128
+  batch_size: 16
   validation_batch_size: 512
   resume_from_checkpoint:
   evaluate: false

@@ -28,6 +28,7 @@ import torch
 from torch import nn
 from torch.optim import Adam
 from torch.utils.data import DataLoader
+from torchmetrics import Precision, Recall
 from torchvision.ops import sigmoid_focal_loss
 from tqdm import tqdm
 
@@ -39,93 +40,7 @@ from src.neural_bsp.my_dataloader import MyDataLoader
 from src.neural_bsp.train_model import ABC_dataset, Base_model
 import torch.distributed as dist
 
-
-class ABC_dataset_patch_train(ABC_dataset):
-    def __init__(self, v_data_root, v_training_mode, v_batch_size):
-        super(ABC_dataset_patch_train, self).__init__(v_data_root, v_training_mode)
-        self.batch_size = v_batch_size
-        self.num_objects = self.num_items
-        self.num_patches = self.num_objects
-        self.validation_start = self.num_objects // 4 * 3
-
-    def __len__(self):
-        if self.mode == "training":
-            return self.num_items // 4 * 3
-        elif self.mode == "validation":
-            return self.num_items // 4
-        elif self.mode == "testing":
-            return self.num_items
-        raise
-
-    def get_patch(self, v_id_item, v_id_patch):
-        features = np.load(self.objects[v_id_item] + "_feat.npy")
-        choice = np.random.choice(features.shape[0], self.batch_size)
-        features = features[choice]
-        flags = np.load(self.objects[v_id_item] + "_flag.npy")
-        flags = flags[choice]
-        return features, flags
-
-    def __getitem__(self, idx):
-        if self.mode == "training" or self.mode == "testing":
-            id_dummy = 0
-        else:
-            id_dummy = self.validation_start
-
-        id_object = (idx+id_dummy)
-        id_patch = (idx+id_dummy)
-
-        times = [0] * 10
-        cur_time = time.time()
-        feat_data, flag_data = self.get_patch(id_object, id_patch)
-        times[0] += time.time() - cur_time
-        cur_time = time.time()
-        feat_data = np.transpose(feat_data.astype(np.float32) / 65535, (0, 4, 1, 2, 3))
-        flag_data = flag_data.astype(np.float32)[:, None, :, :, :]
-        times[1] += time.time() - cur_time
-        return feat_data, flag_data, self.names[id_object], id_patch
-
-
-class ABC_dataset_patch_test(ABC_dataset):
-    def __init__(self, v_data_root, v_training_mode):
-        super(ABC_dataset_patch_test, self).__init__(v_data_root, v_training_mode)
-        self.num_objects = self.num_items
-        self.num_patches = self.num_objects * 512
-        self.validation_start = self.num_objects // 4 * 3
-
-    def __len__(self):
-        if self.mode == "training":
-            return self.num_items // 4 * 3 * 512
-        elif self.mode == "validation":
-            return self.num_items // 4 * 512
-        elif self.mode == "testing":
-            return self.num_items * 512
-        raise
-
-    def get_patch(self, v_id_item, v_id_patch):
-        features = np.load(self.objects[v_id_item] + "_feat.npy", mmap_mode="r")
-        features = features[v_id_patch]
-        flags = np.load(self.objects[v_id_item] + "_flag.npy", mmap_mode="r")
-        flags = flags[v_id_patch]
-        return features, flags
-
-    def __getitem__(self, idx):
-        if self.mode == "training" or self.mode == "testing":
-            id_dummy = 0
-        else:
-            id_dummy = self.validation_start * 512
-
-        id_object = (idx+id_dummy) // 512
-        id_patch = (idx+id_dummy) % 512
-
-        times = [0] * 10
-        cur_time = time.time()
-        feat_data, flag_data = self.get_patch(id_object, id_patch)
-        times[0] += time.time() - cur_time
-        cur_time = time.time()
-        feat_data = np.transpose(feat_data.astype(np.float32) / 65535, (3, 0, 1, 2))
-        flag_data = flag_data.astype(np.float32)[None, :, :, :]
-        times[1] += time.time() - cur_time
-        return feat_data, flag_data, self.names[id_object], id_patch
+from torchmetrics.classification import BinaryAveragePrecision, BinaryPrecision, BinaryRecall
 
 
 class Base_model_full(Base_model):
@@ -173,6 +88,11 @@ class Patch_phase(pl.LightningModule):
         }
 
         self.target_viz_name = "00015724"
+        self.precision_computer=nn.ModuleList()
+        self.recall_computer=nn.ModuleList()
+        for i, thresh in enumerate([0.3, 0.5, 0.7, 0.9]):
+            self.precision_computer.append(BinaryPrecision(threshold=thresh))
+            self.recall_computer.append(BinaryRecall(threshold=thresh))
 
     def train_dataloader(self):
         self.train_dataset = self.dataset_name(
@@ -180,7 +100,7 @@ class Patch_phase(pl.LightningModule):
             "training",
             self.batch_size
         )
-        return MyDataLoader(self.train_dataset, batch_size=1, shuffle=True,
+        return DataLoader(self.train_dataset, batch_size=1, shuffle=True,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
@@ -195,12 +115,12 @@ class Patch_phase(pl.LightningModule):
             self.validation_batch_size
         )
         self.target_viz_name = self.valid_dataset.names[self.id_viz + self.valid_dataset.validation_start]
-        return MyDataLoader(self.valid_dataset, batch_size=1,
+        return DataLoader(self.valid_dataset, batch_size=1,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
-                          # pin_memory=True,
-                          # persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
-                          # prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
+                          pin_memory=True,
+                          persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
+                          prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
                           )
 
     def configure_optimizers(self):
@@ -252,6 +172,12 @@ class Patch_phase(pl.LightningModule):
         self.log("Validation_Loss", loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True,
                  batch_size=data[0].shape[0])
+
+        prob = torch.sigmoid(outputs)
+        gt = data[1].to(torch.long)
+        for i, _ in enumerate(self.precision_computer):
+            self.precision_computer[i].update(prob, gt)
+            self.recall_computer[i].update(prob, gt)
         return
 
     def on_validation_epoch_end(self):
@@ -260,7 +186,27 @@ class Patch_phase(pl.LightningModule):
             self.viz_data["prediction"].clear()
             self.viz_data["loss"].clear()
             self.viz_data["id_patch"].clear()
+            for i, _ in enumerate(self.precision_computer):
+                self.precision_computer[i].reset()
+                self.recall_computer[i].reset()
             return
+
+        self.log("P_3", self.precision_computer[0].compute(),
+                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("P_5", self.precision_computer[1].compute(),
+                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("P_7", self.precision_computer[2].compute(),
+                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("P_9", self.precision_computer[3].compute(),
+                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("R_3", self.recall_computer[0].compute(),
+                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("R_5", self.recall_computer[1].compute(),
+                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("R_7", self.recall_computer[2].compute(),
+                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("R_9", self.recall_computer[3].compute(),
+                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
 
         id_patch = torch.stack(self.viz_data["id_patch"], dim=0)
         prediction = torch.cat(self.viz_data["prediction"], dim=0)
@@ -301,6 +247,9 @@ class Patch_phase(pl.LightningModule):
             self.viz_data["prediction"].clear()
             self.viz_data["loss"].clear()
             self.viz_data["id_patch"].clear()
+            for i, _ in enumerate(self.precision_computer):
+                self.precision_computer[i].reset()
+                self.recall_computer[i].reset()
             return
         # Gather the "self.viz_data" along all the gpu
         idx = self.trainer.current_epoch + 1 if not self.trainer.sanity_checking else 0

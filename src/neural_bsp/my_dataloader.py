@@ -1294,6 +1294,13 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     return data
 
     def _next_data(self):
+        # if not self._persistent_workers:
+        #     self._shutdown_workers()
+        #     raise StopIteration
+        # idx, data = self._get_data()
+        # del self._task_info[idx]
+        # self._tasks_outstanding -= 1
+        # return self._process_data(data)
         while True:
             # If the worker responsible for `self._rcvd_idx` has already ended
             # and was unable to fulfill this task (due to exhausting an `IterableDataset`),
@@ -1334,8 +1341,6 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                         self._mark_worker_as_unavailable(data.worker_id)
                     self._try_put_index()
                     continue
-
-            return self._process_data(data)
 
             if idx != self._rcvd_idx:
                 # store out-of-order samples

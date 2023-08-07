@@ -3,9 +3,32 @@ import numpy as np
 import torch
 from torch_scatter import scatter_mean
 
-from shared.common_utils import normalize_tensor, to_homogeneous_tensor
+from shared.common_utils import normalize_tensor, normalize_vector, to_homogeneous_tensor
 from src.neural_recon.geometric_util import compute_area, intersection_of_ray_and_plane
 from src.neural_recon.optimize_segment import sample_img
+
+def dilate_edge(v_gradient_img, v_num_iter=0):
+    if isinstance(v_gradient_img, torch.Tensor):
+        v_gradient_img = v_gradient_img.cpu().numpy()
+    edge_field = np.linalg.norm(v_gradient_img, axis=-1) > 0.01
+    edge_pixels = np.column_stack(np.where(edge_field))[:, ::-1]
+    edge_gradients = v_gradient_img[edge_field]
+
+    gd = normalize_vector(edge_gradients)
+    dilate_edge_maps = v_gradient_img.copy()
+    for i in range(1, v_num_iter + 1):
+        related_pixels = np.round(edge_pixels + gd * i).astype(np.int64)
+        old_norm = np.linalg.norm(dilate_edge_maps[related_pixels[:, 1], related_pixels[:, 0]], axis=-1)
+        new_norm = np.linalg.norm(edge_gradients, axis=-1)
+        mask = new_norm > old_norm
+        dilate_edge_maps[related_pixels[mask, 1], related_pixels[mask, 0]] = edge_gradients[mask]
+        related_pixels = np.round(edge_pixels - gd * i).astype(np.int64)
+        old_norm = np.linalg.norm(dilate_edge_maps[related_pixels[:, 1], related_pixels[:, 0]], axis=-1)
+        new_norm = np.linalg.norm(edge_gradients, axis=-1)
+        mask = new_norm > old_norm
+        dilate_edge_maps[related_pixels[mask, 1], related_pixels[mask, 0]] = edge_gradients[mask]
+
+    return dilate_edge_maps
 
 
 # v_points: (M,3) M 3D points in the camera coordinate of image 1
@@ -302,3 +325,19 @@ class Regularization_loss_computer:
 
         regularization_loss = torch.min(vertical_constraint,parallel_constraint)
         return regularization_loss.sum().squeeze()
+
+class Mutex_loss_computer:
+    def __init__(self):
+        pass
+
+    def compute(self, v_patch_id, vertex_pos):
+        # Inner regularization distance
+        # diff = vertex_pos.unsqueeze(1) - vertex_pos.unsqueeze(0)
+        # distances = torch.sqrt((diff ** 2).sum(-1))
+        # std_mean_distances = distances.mean(dim=1) / distances.std(dim=1)
+        # regularization_loss = 1 - std_mean_distances.mean(dim=0) / std_mean_distances.max(dim=0)
+
+        # Mutex distance
+        centroid = vertex_pos.mean(dim=1)
+        dis2centroid = torch.sqrt(((vertex_pos - centroid.unsqueeze(1))**2).sum(-1))
+        return 1 - dis2centroid.min(dim=1)[0] / dis2centroid.max(dim=1)[0]

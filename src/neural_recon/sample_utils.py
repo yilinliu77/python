@@ -1,7 +1,7 @@
 import time
 
 import torch
-
+import numpy as np
 from shared.common_utils import normalize_tensor
 from src.neural_recon.geometric_util import vectors_to_angles, intersection_of_ray_and_plane
 
@@ -151,21 +151,33 @@ def sample_new_distance(v_original_distances,
     return new_distance
 
 
-def sample_depth_and_angle(depth, angle, num_sample=100, v_random_g=None):
+# def sample_depth_and_angle(depth, angle, num_sample=100, scale_factor=1.0, v_random_g=None):
+#     # sample depth
+#     sample_depths = sample_new_distance(depth, num_sample, scale_factor=scale_factor, v_random_g=v_random_g)
+#     sample_angles = sample_new_distance(angle.reshape(-1), num_sample,
+#                                         scale_factor=torch.pi / 3,
+#                                         v_max=100, v_min=-100, v_random_g=v_random_g)
+#     sample_angles = sample_angles.reshape(depth.shape[0], 2, num_sample) % (2 * torch.pi)
+#     return sample_depths, sample_angles.permute(0, 2, 1)
+
+
+def sample_depth_and_angle(depth, angle, num_sample=100, scale_factor=1.0, v_random_g=None):
     # sample depth
-    sample_depths = sample_new_distance(depth, num_sample, v_random_g=v_random_g)
-    sample_angles = sample_new_distance(angle.reshape(-1), num_sample, scale_factor=torch.pi / 3, v_max=100,
-                                        v_min=-100, v_random_g=v_random_g)
+    sample_depths = sample_new_distance(depth, num_sample, scale_factor=scale_factor, v_random_g=v_random_g)
+    sample_angles = sample_new_distance(angle.reshape(-1), num_sample,
+                                        scale_factor=scale_factor * np.random.standard_cauchy() * torch.pi / 3,
+                                        v_max=100, v_min=-100, v_random_g=v_random_g)
     sample_angles = sample_angles.reshape(depth.shape[0], 2, num_sample) % (2 * torch.pi)
     return sample_depths, sample_angles.permute(0, 2, 1)
 
 
-def sample_new_planes(v_original_parameters, v_centroid_rays_c, v_dual_graph=None, v_random_g=None):
+def sample_new_planes(v_original_parameters, v_centroid_rays_c, scale_factor=1.0, v_dual_graph=None, v_random_g=None):
     plane_angles = vectors_to_angles(v_original_parameters[:, :3])
     initial_centroids = intersection_of_ray_and_plane(v_original_parameters, v_centroid_rays_c)[1]
     init_depth = torch.linalg.norm(initial_centroids, dim=-1)
 
-    sample_depth, sample_angle = sample_depth_and_angle(init_depth, plane_angles, 100, v_random_g=v_random_g)
+    sample_depth, sample_angle = sample_depth_and_angle(init_depth, plane_angles,
+                                                        scale_factor=scale_factor,v_random_g=v_random_g)
 
     if v_dual_graph is None:
         return sample_depth.contiguous(), sample_angle.contiguous()

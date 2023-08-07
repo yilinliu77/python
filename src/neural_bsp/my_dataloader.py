@@ -36,7 +36,7 @@ from torch.utils.data import (
 from torch.utils.data import _utils
 
 __all__ = [
-    "DataLoader",
+    "MyDataLoader",
     "get_worker_info",
     "default_collate",
     "default_convert",
@@ -124,7 +124,7 @@ def _share_dist_seed(generator, pg):
     return _shared_seed.item()
 
 
-class DataLoader(Generic[T_co]):
+class MyDataLoader(Generic[T_co]):
     r"""
     Data loader. Combines a dataset and a sampler, and provides an iterable over
     the given dataset.
@@ -562,7 +562,7 @@ class DataLoader(Generic[T_co]):
 
 
 class _BaseDataLoaderIter:
-    def __init__(self, loader: DataLoader) -> None:
+    def __init__(self, loader: MyDataLoader) -> None:
         self._dataset = loader.dataset
         self._shared_seed = None
         self._pg = None
@@ -1334,6 +1334,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                         self._mark_worker_as_unavailable(data.worker_id)
                     self._try_put_index()
                     continue
+
+            return self._process_data(data)
 
             if idx != self._rcvd_idx:
                 # store out-of-order samples

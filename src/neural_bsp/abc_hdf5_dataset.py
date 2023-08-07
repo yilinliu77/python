@@ -37,7 +37,7 @@ from shared.common_utils import export_point_cloud, sigmoid
 from src.neural_bsp.train_model import ABC_dataset, Base_model
 import torch.distributed as dist
 
-
+# Not used
 class ABC_dataset_patch_hdf5(ABC_dataset):
     def __init__(self, v_data_root, v_training_mode, v_batch_size):
         super(ABC_dataset_patch_hdf5, self).__init__(None, None)
@@ -248,7 +248,7 @@ class ABC_dataset_patch_train(ABC_dataset):
         features = np.load(self.objects[id_object] + "_feat.npy", mmap_mode="r")
         choice = np.random.choice(features.shape[0], self.batch_size)
         features = features[choice]
-        flags = np.load(self.objects[id_object] + "_flag.npy")
+        flags = np.load(self.objects[id_object] + "_flag.npy", mmap_mode="r")
         flags = flags[choice]
         return np.asarray([id_object] * self.batch_size), id_patch, features, flags
 

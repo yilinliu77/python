@@ -35,6 +35,7 @@ from shared.fast_dataloader import FastDataLoader
 from src.neural_bsp.abc_hdf5_dataset import ABC_dataset_patch_hdf5, ABC_dataset_patch_hdf5_sample
 from src.neural_bsp.model import AttU_Net_3D, U_Net_3D
 from shared.common_utils import export_point_cloud, sigmoid
+from src.neural_bsp.my_dataloader import MyDataLoader
 from src.neural_bsp.train_model import ABC_dataset, Base_model
 import torch.distributed as dist
 
@@ -179,7 +180,7 @@ class Patch_phase(pl.LightningModule):
             "training",
             self.batch_size
         )
-        return DataLoader(self.train_dataset, batch_size=1, shuffle=True,
+        return MyDataLoader(self.train_dataset, batch_size=1, shuffle=True,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
@@ -194,12 +195,12 @@ class Patch_phase(pl.LightningModule):
             self.validation_batch_size
         )
         self.target_viz_name = self.valid_dataset.names[self.id_viz + self.valid_dataset.validation_start]
-        return DataLoader(self.valid_dataset, batch_size=1,
+        return MyDataLoader(self.valid_dataset, batch_size=1,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
-                          pin_memory=True,
-                          persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
-                          prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
+                          # pin_memory=True,
+                          # persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
+                          # prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
                           )
 
     def configure_optimizers(self):
@@ -224,7 +225,7 @@ class Patch_phase(pl.LightningModule):
         data = batch[:2]
         # data = [batch[0][0],batch[1][0]]
         name = batch[2]
-
+        print(name)
         outputs = self.model(data, True)
         loss = self.model.loss(outputs, data)
 

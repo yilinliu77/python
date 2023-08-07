@@ -28,7 +28,7 @@ import torch
 from torch import nn
 from torch.optim import Adam
 from torch.utils.data import DataLoader
-from torchmetrics import Precision, Recall
+from torchmetrics import Precision, Recall, MetricCollection
 from torchvision.ops import sigmoid_focal_loss
 from tqdm import tqdm
 
@@ -87,12 +87,22 @@ class Patch_phase(pl.LightningModule):
             "id_patch": [],
         }
 
-        self.target_viz_name = "00015724"
-        self.precision_computer=nn.ModuleList()
-        self.recall_computer=nn.ModuleList()
-        for i, thresh in enumerate([0.3, 0.5, 0.7, 0.9]):
-            self.precision_computer.append(BinaryPrecision(threshold=thresh))
-            self.recall_computer.append(BinaryRecall(threshold=thresh))
+        # self.target_viz_name = "00015724"
+        precision_computer={
+            "P_3": BinaryPrecision(threshold=0.3),
+            "P_5": BinaryPrecision(threshold=0.5),
+            "P_7": BinaryPrecision(threshold=0.7),
+            "P_9": BinaryPrecision(threshold=0.9),
+        }
+        recall_computer={
+            "R_3": BinaryRecall(threshold=0.3),
+            "R_5": BinaryRecall(threshold=0.5),
+            "R_7": BinaryRecall(threshold=0.7),
+            "R_9": BinaryRecall(threshold=0.9),
+        }
+
+        self.precision_computer = MetricCollection(precision_computer)
+        self.recall_computer = MetricCollection(recall_computer)
 
     def train_dataloader(self):
         self.train_dataset = self.dataset_name(
@@ -175,61 +185,36 @@ class Patch_phase(pl.LightningModule):
 
         prob = torch.sigmoid(outputs)
         gt = data[1].to(torch.long)
-        for i, _ in enumerate(self.precision_computer):
-            self.precision_computer[i].update(prob, gt)
-            self.recall_computer[i].update(prob, gt)
+        self.precision_computer.update(prob, gt)
+        self.recall_computer.update(prob, gt)
         return
 
-    def on_validation_epoch_end(self):
-        if self.trainer.sanity_checking:
-            self.viz_data["gt"].clear()
-            self.viz_data["prediction"].clear()
-            self.viz_data["loss"].clear()
-            self.viz_data["id_patch"].clear()
-            for i, _ in enumerate(self.precision_computer):
-                self.precision_computer[i].reset()
-                self.recall_computer[i].reset()
-            return
-
-        self.log("P_3", self.precision_computer[0].compute(),
-                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("P_5", self.precision_computer[1].compute(),
-                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("P_7", self.precision_computer[2].compute(),
-                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("P_9", self.precision_computer[3].compute(),
-                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("R_3", self.recall_computer[0].compute(),
-                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("R_5", self.recall_computer[1].compute(),
-                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("R_7", self.recall_computer[2].compute(),
-                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("R_9", self.recall_computer[3].compute(),
-                 prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
-
+    def gather_data(self):
         id_patch = torch.stack(self.viz_data["id_patch"], dim=0)
         prediction = torch.cat(self.viz_data["prediction"], dim=0)
         gt = torch.cat(self.viz_data["gt"], dim=0)
-        if self.trainer.world_size!=1:
+        if self.trainer.world_size != 1:
             device = prediction.device
             dtype = prediction.dtype
             size = torch.tensor([prediction.shape[0]], device=device, dtype=torch.int64)
             gathered_size = [torch.zeros(1, device=device, dtype=torch.int64) for _ in range(self.trainer.world_size)]
             dist.all_gather(gathered_size, size)
 
-            gathered_id_patch = [torch.zeros((item.item(), ), dtype=torch.int64, device=device) for item in gathered_size]
+            gathered_id_patch = [torch.zeros((item.item(),), dtype=torch.int64, device=device) for item in
+                                 gathered_size]
             dist.all_gather(gathered_id_patch, id_patch)
             gathered_id_patch = torch.cat(gathered_id_patch, dim=0)
-            
-            gathered_prediction_list = [torch.zeros((item.item(), 32, 32, 32), dtype=dtype, device=device) for item in gathered_size]
-            gathered_gt_list = [torch.zeros((item.item(), 32, 32, 32), dtype=dtype, device=device) for item in gathered_size]
+
+            gathered_prediction_list = [torch.zeros((item.item(), 32, 32, 32), dtype=dtype, device=device) for item in
+                                        gathered_size]
+            gathered_gt_list = [torch.zeros((item.item(), 32, 32, 32), dtype=dtype, device=device) for item in
+                                gathered_size]
 
             dist.all_gather(gathered_prediction_list, prediction)
             dist.all_gather(gathered_gt_list, gt)
             gathered_prediction_list = torch.cat(gathered_prediction_list, dim=0)
             gathered_gt_list = torch.cat(gathered_gt_list, dim=0)
-            
+
             total_size = sum(gathered_size).item()
             gathered_prediction = torch.zeros((total_size, 32, 32, 32), dtype=dtype, device=device)
             gathered_prediction[gathered_id_patch] = gathered_prediction_list
@@ -240,18 +225,35 @@ class Patch_phase(pl.LightningModule):
         else:
             gathered_prediction = prediction.cpu().numpy()
             gathered_gt = gt.cpu().numpy()
-        # all_gather(gathered_gt, gt)
 
-        if self.global_rank != 0:
+    def on_validation_epoch_end(self):
+        if self.trainer.sanity_checking:
             self.viz_data["gt"].clear()
             self.viz_data["prediction"].clear()
             self.viz_data["loss"].clear()
             self.viz_data["id_patch"].clear()
-            for i, _ in enumerate(self.precision_computer):
-                self.precision_computer[i].reset()
-                self.recall_computer[i].reset()
+            self.precision_computer.reset()
+            self.recall_computer.reset()
             return
-        # Gather the "self.viz_data" along all the gpu
+
+        self.log_dict(self.precision_computer.compute(), prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                        sync_dist=True)
+        self.log_dict(self.recall_computer.compute(), prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                        sync_dist=True)
+
+        self.precision_computer.reset()
+        self.recall_computer.reset()
+
+        if len(self.viz_data["id_patch"]) == 0:
+            return
+
+        id_patch = torch.stack(self.viz_data["id_patch"], dim=0)
+        prediction = torch.cat(self.viz_data["prediction"], dim=0)
+        gt = torch.cat(self.viz_data["gt"], dim=0)
+
+        gathered_prediction = prediction.cpu().numpy()
+        gathered_gt = gt.cpu().numpy()
+
         idx = self.trainer.current_epoch + 1 if not self.trainer.sanity_checking else 0
 
         assert gathered_prediction.shape[0] % 512 == 0
@@ -264,11 +266,11 @@ class Patch_phase(pl.LightningModule):
 
         predicted_labels = sigmoid(predicted_labels[0]) > 0.5
         mask = predicted_labels.reshape(-1)
-        export_point_cloud(os.path.join(self.log_root, "{}_pred.ply".format(idx)), query_points[mask])
+        export_point_cloud(os.path.join(self.log_root, "{}_{}_pred.ply".format(idx,self.target_viz_name)), query_points[mask])
 
         gt_labels = sigmoid(gt_labels[0]) > 0.5
         mask = gt_labels.reshape(-1)
-        export_point_cloud(os.path.join(self.log_root, "{}_gt.ply".format(idx)), query_points[mask])
+        export_point_cloud(os.path.join(self.log_root, "{}_{}_gt.ply".format(idx,self.target_viz_name)), query_points[mask])
 
         self.viz_data["gt"].clear()
         self.viz_data["prediction"].clear()

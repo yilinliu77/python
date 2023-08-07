@@ -58,7 +58,7 @@ import pysdf
 import open3d as o3d
 
 from src.neural_recon.models import Explorer, Segment_explorer, Point_explorer
-from src.neural_recon.phase1 import Phase1
+from src.neural_recon.bak.phase1 import Phase1
 
 
 class Phase2(pl.LightningModule):
@@ -334,7 +334,7 @@ class Phase2(pl.LightningModule):
                           os.path.join("outputs", "model_of_test.obj"))
 
 
-@hydra.main(config_name="phase2_annoying.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
+@hydra.main(config_name="phase2_annoying.yaml", config_path="../../../configs/neural_recon/", version_base="1.1")
 def main(v_cfg: DictConfig):
     print(OmegaConf.to_yaml(v_cfg))
     seed_everything(0)

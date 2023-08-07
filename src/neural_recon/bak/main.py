@@ -251,7 +251,7 @@ class img_pair_alignment(pl.LightningModule):
         return
 
 
-@hydra.main(config_name="test.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
+@hydra.main(config_name="test.yaml", config_path="../../../configs/neural_recon/", version_base="1.1")
 def main(v_cfg: DictConfig):
     print(OmegaConf.to_yaml(v_cfg))
     seed_everything(0)

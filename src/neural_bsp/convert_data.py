@@ -49,10 +49,10 @@ def test():
 
     return
 
-def reader(v_queue: Queue, v_features, v_flags):
+def reader(v_queue: Queue, v_features, v_flags, num_block):
     cur_id = 0
     while cur_id < len(v_features):
-        if v_queue.qsize() >= 200:
+        if v_queue.qsize() >= num_block * 4:
             time.sleep(1)
             continue
         prefix = pathlib.Path(v_features[cur_id]).name[:-9]
@@ -61,9 +61,7 @@ def reader(v_queue: Queue, v_features, v_flags):
         v_queue.put((cur_id, prefix, feat, flag))
         cur_id += 1
 
-def writer(v_queue: Queue, v_num_files, v_filename):
-    num_block = 100
-
+def writer(v_queue: Queue, v_num_files, v_filename, num_block):
     output_file = h5py.File(v_filename, "w",)
 
     output_file.create_dataset("features", shape=(num_block, 512, 32, 32, 32, 3), dtype=np.uint16,
@@ -126,13 +124,17 @@ if __name__ == '__main__':
     feature_files = [os.path.join(root_dir, item+"_feat.npy") for item in prefix]
     flag_files = [os.path.join(root_dir, item+"_flag.npy") for item in prefix]
 
+    num_block = 100
+    if len(sys.argv)==4:
+        num_block = int(sys.argv[3])
+
     num_files = len(feature_files)
 
     timer = time.time()
     q = Queue()
     hdf5_file = sys.argv[2]
-    p_reader = Process(target=reader, args=(q, feature_files, flag_files))
-    p_writer = Process(target=writer, args=(q, num_files, hdf5_file))
+    p_reader = Process(target=reader, args=(q, feature_files, flag_files, num_block))
+    p_writer = Process(target=writer, args=(q, num_files, hdf5_file, num_block))
     p_reader.start()
     p_writer.start()
 

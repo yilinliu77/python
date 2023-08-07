@@ -1,33 +1,22 @@
-from collections import OrderedDict
-
-import mcubes
 import tinycudann as tcnn
 import numpy as np
-import PIL.Image
-import open3d as o3d
 import torch
 from torch import nn
 import cv2
 
-import math
-import platform
-import shutil
 import sys, os
 
 import torch.nn.functional as F
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from torch.optim import Adam
-from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau, LinearLR, StepLR
 from torch.utils.data import DataLoader
 from pytorch_lightning import Trainer, seed_everything
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
 from shared.img_torch_tools import print_model_size
-from src.neural_recon.Image_dataset import Image_dataset, Images_dataset
+from src.neural_recon.Image_dataset import Images_dataset
 from src.neural_recon.colmap_io import read_dataset
-from src.neural_recon.phase1 import NGPModel
 
 
 class NGPModel1(nn.Module):
@@ -183,7 +172,7 @@ class Phase12(pl.LightningModule):
                                                      img, self.trainer.current_epoch, dataformats="HWC")
 
 
-@hydra.main(config_name="phase11_img.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
+@hydra.main(config_name="phase11_img.yaml", config_path="../../../configs/neural_recon/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
     print(OmegaConf.to_yaml(v_cfg))

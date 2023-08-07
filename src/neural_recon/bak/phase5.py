@@ -51,7 +51,7 @@ from shared.common_utils import debug_imgs, to_homogeneous, save_line_cloud, to_
     pad_and_enlarge_along_y, refresh_timer, get_line_mesh
 
 from src.neural_recon.colmap_io import read_dataset, Image, Point_3d, check_visibility
-from src.neural_recon.phase1 import NGPModel
+from src.neural_recon.bak.phase1 import NGPModel
 
 class Multi_node_single_img_dataset(torch.utils.data.Dataset):
     def __init__(self, v_data, v_is_one_target, v_id_target_face, v_training_mode, mul_number=1):
@@ -595,9 +595,9 @@ class LModel21(nn.Module):
         return len(self.graph1.graph["faces"])
 
 
-class Phase7(pl.LightningModule):
+class Phase5(pl.LightningModule):
     def __init__(self, hparams, v_data):
-        super(Phase7, self).__init__()
+        super(Phase5, self).__init__()
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
@@ -958,7 +958,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
     return img_database, graphs, camera_pair_data
 
 
-@hydra.main(config_name="phase5.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
+@hydra.main(config_name="phase5.yaml", config_path="../../../configs/neural_recon/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
     print(OmegaConf.to_yaml(v_cfg))
@@ -972,7 +972,7 @@ def main(v_cfg: DictConfig):
     log_dir = hydra_cfg['runtime']['output_dir']
     v_cfg["trainer"]["output"] = os.path.join(log_dir, v_cfg["trainer"]["output"])
 
-    model = Phase7(v_cfg, data)
+    model = Phase5(v_cfg, data)
 
     trainer = Trainer(
         accelerator='gpu' if v_cfg["trainer"].gpu != 0 else None,

@@ -151,7 +151,7 @@ class Phase1(pl.LightningModule):
                     cv2.cvtColor(predicted_pixel, cv2.COLOR_RGB2BGR))
 
 
-@hydra.main(config_name="phase1_img.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
+@hydra.main(config_name="phase1_img.yaml", config_path="../../../configs/neural_recon/", version_base="1.1")
 def main(v_cfg: DictConfig):
     print(OmegaConf.to_yaml(v_cfg))
     seed_everything(0)

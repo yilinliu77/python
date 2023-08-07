@@ -1,23 +1,11 @@
-import itertools
-import math
-import random
-import sys, os
+import os
 
-import open3d
 from torch.utils.data import DataLoader
-
-from shared.perspective_geometry import extract_fundamental_from_projection
-from src.neural_recon.colmap_io import read_dataset, Image, Point_3d
 
 import cv2
 import numpy as np
 import torch
-from tqdm import tqdm
-from shared.common_utils import to_homogeneous, save_line_cloud, normalize_vector, normalized_torch_img_to_numpy, \
-    to_homogeneous_tensor, pad_imgs
-from src.neural_recon.optimize_segment import optimize_single_segment, optimize_single_segment_tensor
-from src.neural_recon.phase1 import Phase1
-import faiss
+from shared.common_utils import to_homogeneous_tensor
 
 from src.neural_recon.phase5 import prepare_dataset_and_model, LModel21, Multi_node_single_img_dataset
 

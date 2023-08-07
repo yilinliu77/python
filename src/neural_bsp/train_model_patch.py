@@ -225,7 +225,7 @@ class Patch_phase(pl.LightningModule):
         data = batch[:2]
         # data = [batch[0][0],batch[1][0]]
         name = batch[2]
-        print(name)
+        # print(name[0])
         outputs = self.model(data, True)
         loss = self.model.loss(outputs, data)
 

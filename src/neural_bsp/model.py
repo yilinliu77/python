@@ -266,3 +266,17 @@ class Base_patch_model_BCE_deeper(Base_model):
                                                               reduction="mean"
                                                               )
         return loss
+
+class Base_patch_model_BCE_deeper_wo_bn(Base_model):
+    def __init__(self, v_phase=0):
+        super(Base_patch_model_BCE_deeper_wo_bn, self).__init__()
+        self.phase = v_phase
+        self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=5, base_channel=32, with_bn=False)
+
+    def loss(self, v_predictions, v_input):
+        features, labels = v_input
+
+        loss = nn.functional.binary_cross_entropy_with_logits(v_predictions, labels,
+                                                              reduction="mean"
+                                                              )
+        return loss

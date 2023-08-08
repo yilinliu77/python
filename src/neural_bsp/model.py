@@ -149,10 +149,15 @@ class U_Net_3D(nn.Module):
                 nn.MaxPool3d(kernel_size=4, stride=4),
                 conv_block(ch_in=base_channel, ch_out=base_channel, with_bn=with_bn),
             )
-        else:
+        elif with_bn:
             self.conv1 = nn.Sequential(
                 nn.Conv3d(img_ch, base_channel, kernel_size=1, stride=1, padding=0),
                 nn.BatchNorm3d(base_channel),
+                nn.ReLU(inplace=True),
+            )
+        else:
+            self.conv1 = nn.Sequential(
+                nn.Conv3d(img_ch, base_channel, kernel_size=1, stride=1, padding=0),
                 nn.ReLU(inplace=True),
             )
         cur_channel = base_channel

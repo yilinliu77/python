@@ -1,40 +1,11 @@
 import math
 import os.path
-import random
 import time
 
 import h5py
-import hydra
 import numpy as np
-# import matplotlib
-# matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import ray
-import scipy
 import torch
-from lightning_fabric import seed_everything
-from omegaconf import DictConfig, OmegaConf
-from pytorch_lightning import Trainer
-from pytorch_lightning.callbacks import ModelCheckpoint
-from scipy.sparse import csr_matrix
-from scipy.sparse.csgraph import minimum_spanning_tree
-from sklearn.cluster import KMeans
-import networkx as nx
-import matplotlib
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import pytorch_lightning as pl
-import faiss
-import torch
-from torch import nn
-from torch.optim import Adam
 from torch.utils.data import DataLoader
-from torchvision.ops import sigmoid_focal_loss
-from tqdm import tqdm
-
-from shared.fast_dataloader import FastDataLoader
-from src.neural_bsp.model import AttU_Net_3D, U_Net_3D
-from shared.common_utils import export_point_cloud, sigmoid
-import torch.distributed as dist
 
 class ABC_dataset(torch.utils.data.Dataset):
     def __init__(self, v_data_root=None, v_training_mode=None):

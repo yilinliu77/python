@@ -39,7 +39,11 @@ class Patch_phase(pl.LightningModule):
         self.data = v_data
         self.phase = self.hydra_conf["model"]["phase"]
         mod = importlib.import_module('src.neural_bsp.model')
-        self.model = getattr(mod, self.hydra_conf["model"]["model_name"])(self.phase)
+        self.model = getattr(mod, self.hydra_conf["model"]["model_name"])(
+            self.phase,
+            self.hydra_conf["model"]["loss"],
+            self.hydra_conf["model"]["loss_alpha"],
+        )
         # Import module according to the dataset_name
         mod = importlib.import_module('src.neural_bsp.abc_hdf5_dataset')
         self.dataset_name = getattr(mod, self.hydra_conf["dataset"]["dataset_name"])
@@ -60,21 +64,17 @@ class Patch_phase(pl.LightningModule):
         }
 
         # self.target_viz_name = "00015724"
-        precision_computer={
+        pr_computer={
             "P_3": BinaryPrecision(threshold=0.3),
             "P_5": BinaryPrecision(threshold=0.5),
             "P_7": BinaryPrecision(threshold=0.7),
             "P_9": BinaryPrecision(threshold=0.9),
-        }
-        recall_computer={
             "R_3": BinaryRecall(threshold=0.3),
             "R_5": BinaryRecall(threshold=0.5),
             "R_7": BinaryRecall(threshold=0.7),
             "R_9": BinaryRecall(threshold=0.9),
         }
-
-        self.precision_computer = MetricCollection(precision_computer)
-        self.recall_computer = MetricCollection(recall_computer)
+        self.pr_computer = MetricCollection(pr_computer)
 
     def train_dataloader(self):
         self.train_dataset = self.dataset_name(
@@ -157,8 +157,7 @@ class Patch_phase(pl.LightningModule):
 
         prob = torch.sigmoid(outputs)
         gt = data[1].to(torch.long)
-        self.precision_computer.update(prob, gt)
-        self.recall_computer.update(prob, gt)
+        self.pr_computer.update(prob, gt)
         return
 
     def gather_data(self):
@@ -204,17 +203,13 @@ class Patch_phase(pl.LightningModule):
             self.viz_data["prediction"].clear()
             self.viz_data["loss"].clear()
             self.viz_data["id_patch"].clear()
-            self.precision_computer.reset()
-            self.recall_computer.reset()
+            self.pr_computer.reset()
             return
 
-        self.log_dict(self.precision_computer.compute(), prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                        sync_dist=True)
-        self.log_dict(self.recall_computer.compute(), prog_bar=True, logger=True, on_step=False, on_epoch=True,
+        self.log_dict(self.pr_computer.compute(), prog_bar=True, logger=True, on_step=False, on_epoch=True,
                         sync_dist=True)
 
-        self.precision_computer.reset()
-        self.recall_computer.reset()
+        self.pr_computer.reset()
 
         if len(self.viz_data["id_patch"]) == 0:
             return
@@ -254,7 +249,7 @@ class Patch_phase(pl.LightningModule):
         self.test_dataset = self.dataset_name(
             self.data,
             "testing",
-            self.batch_size
+            self.hydra_conf["dataset"]["test_list"],
         )
         return DataLoader(self.test_dataset, batch_size=1,
                           collate_fn=self.dataset_name.collate_fn,
@@ -272,33 +267,28 @@ class Patch_phase(pl.LightningModule):
         loss = self.model.loss(outputs, data)
 
         # PR
-        threshold = 0.3
-        b_labels = batch[1] > threshold
-        predicted_positive = torch.sigmoid(outputs) > threshold
-        predicted_negative = torch.logical_not(predicted_positive)
-        num_precision = torch.sum(torch.logical_and(predicted_positive, b_labels)) / torch.sum(predicted_positive)
-        num_recall = torch.sum(torch.logical_and(predicted_positive, b_labels)) / torch.sum(b_labels)
+        self.pr_computer.update(torch.sigmoid(outputs), data[1].to(torch.long))
 
         self.log("Test_Loss", loss, prog_bar=True, logger=False, on_step=True, on_epoch=True,
                  sync_dist=True,
                  batch_size=data[0].shape[0])
 
-        if name not in ["00015724"]:
-            return
-
         # Save
-        predicted_labels = (torch.sigmoid(outputs[:,0]) > threshold).cpu().numpy().astype(np.ubyte)
-        gt_labels = (torch.sigmoid(data[1][:,0]) > threshold).cpu().numpy().astype(np.ubyte)
-        features = (data[0].permute(0, 2, 3, 4, 1).cpu().numpy() * 65535).astype(np.uint16)
+        if len(self.hydra_conf["dataset"]["test_list"]) > 0:
+            threshold = self.hydra_conf["model"]["test_threshold"]
+            predicted_labels = (torch.sigmoid(outputs[:,0]) > threshold).cpu().numpy().astype(np.ubyte)
+            gt_labels = (torch.sigmoid(data[1][:,0]) > threshold).cpu().numpy().astype(np.ubyte)
+            features = (data[0].permute(0, 2, 3, 4, 1).cpu().numpy() * 65535).astype(np.uint16)
 
-        np.save(os.path.join(self.log_root, "{}_feat.npy".format(name)), features)
-        np.save(os.path.join(self.log_root, "{}_pred.npy".format(name)),predicted_labels)
-        np.save(os.path.join(self.log_root, "{}_gt.npy".format(name)), gt_labels)
+            np.save(os.path.join(self.log_root, "{}_feat.npy".format(name)), features)
+            np.save(os.path.join(self.log_root, "{}_pred.npy".format(name)),predicted_labels)
+            np.save(os.path.join(self.log_root, "{}_gt.npy".format(name)), gt_labels)
 
         return
 
     def on_test_end(self):
-        pass
+        print(self.pr_computer.compute())
+        print("Loss: ", self.trainer.callback_metrics["Test_Loss_epoch"])
 
 @hydra.main(config_name="train_model_patch.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):

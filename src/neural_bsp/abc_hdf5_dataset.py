@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
+
 class ABC_dataset(torch.utils.data.Dataset):
     def __init__(self, v_data_root=None, v_training_mode=None):
         super(ABC_dataset, self).__init__()
@@ -189,10 +190,9 @@ class ABC_dataset_patch_hdf5_sample(ABC_dataset):
 
 
 class ABC_dataset_patch_hdf5_test(ABC_dataset):
-    def __init__(self, v_data_root, v_training_mode, v_batch_size):
+    def __init__(self, v_data_root, v_training_mode, v_test_list):
         super(ABC_dataset_patch_hdf5_test, self).__init__(None, None)
         self.data_root = v_data_root
-        self.batch_size = v_batch_size
         self.mode = v_training_mode
 
         with h5py.File(self.data_root, "r") as f:
@@ -200,7 +200,18 @@ class ABC_dataset_patch_hdf5_test(ABC_dataset):
             self.total_num_items = f["features"].shape[0]
             self.names = np.asarray(["{:08d}".format(item) for item in np.asarray(f["names"])])
 
-        assert v_batch_size == self.num_patches_per_item
+        self.idxs = np.arange(self.total_num_items)
+
+        if len(v_test_list) > 0:
+            self.idxs = np.zeros(len(v_test_list), dtype=np.int32)
+            for id, name in enumerate(v_test_list):
+                if name in self.names:
+                    self.idxs[id] = np.where(self.names == name)[0][0]
+                else:
+                    print("Cannot find ", name, " in the dataset")
+                    raise ""
+            self.names = np.asarray(v_test_list)
+            self.total_num_items = len(v_test_list)
 
         self.num_items = self.total_num_items
 
@@ -209,9 +220,10 @@ class ABC_dataset_patch_hdf5_test(ABC_dataset):
 
     def get_patch(self, idx):
         with h5py.File(self.data_root, "r") as f:
-            features = f["features"][idx, :]
-            flags = f["flags"][idx, :]
-        return np.asarray([idx] * self.batch_size), np.arange(self.num_patches_per_item), features, flags
+            features = f["features"][self.idxs[idx], :]
+            flags = f["flags"][self.idxs[idx], :]
+        return np.asarray(
+            [idx] * self.num_patches_per_item), np.arange(self.num_patches_per_item), features, flags
 
     def __getitem__(self, idx):
         times = [0] * 10

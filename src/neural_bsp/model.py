@@ -5,6 +5,18 @@ from torchvision import models
 import torchvision
 from torchvision.ops import sigmoid_focal_loss
 
+def focal_loss(v_predictions, labels, v_alpha=0.75):
+    loss = sigmoid_focal_loss(v_predictions, labels,
+                              alpha=v_alpha,
+                              reduction="mean"
+                              )
+    return loss
+
+def BCE_loss(v_predictions, labels, v_alpha=0.75):
+    loss = nn.functional.binary_cross_entropy_with_logits(v_predictions, labels,
+                                                          reduction="mean"
+                                                          )
+    return loss
 
 class conv_block(nn.Module):
     def __init__(self, ch_in, ch_out, with_bn=True):
@@ -191,10 +203,12 @@ class U_Net_3D(nn.Module):
 
 
 class Base_model(nn.Module):
-    def __init__(self, v_phase=0):
+    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
         super(Base_model, self).__init__()
         self.phase = v_phase
         self.encoder = U_Net_3D(img_ch=3, output_ch=1)
+        self.loss_func = globals()[v_loss_type]
+        self.loss_alpha = v_alpha
         # self.encoder = AttU_Net_3D(img_ch=4, output_ch=1)
 
     def forward(self, v_data, v_training=False):
@@ -206,16 +220,13 @@ class Base_model(nn.Module):
     def loss(self, v_predictions, v_input):
         features, labels = v_input
 
-        loss = sigmoid_focal_loss(v_predictions, labels,
-                                  alpha=0.75,
-                                  reduction="mean"
-                                  )
+        loss = self.loss_func(v_predictions, labels, self.loss_alpha)
         return loss
 
 
 class Atten_model(nn.Module):
-    def __init__(self, v_phase=0):
-        super(Atten_model, self).__init__()
+    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
+        super(Atten_model, self).__init__(v_phase, v_loss_type, v_alpha)
         self.phase = v_phase
         self.encoder = AttU_Net_3D(img_ch=3, output_ch=1)
 
@@ -225,16 +236,6 @@ class Atten_model(nn.Module):
 
         return prediction
 
-    def loss(self, v_predictions, v_input):
-        features, labels = v_input
-
-        loss = sigmoid_focal_loss(v_predictions, labels,
-                                  alpha=0.75,
-                                  reduction="mean"
-                                  )
-
-        return loss
-
 
 class Base_patch_model_focal(Base_model):
     def __init__(self, v_phase=0):
@@ -243,45 +244,22 @@ class Base_patch_model_focal(Base_model):
         self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=4)
 
 
-class Base_patch_model_BCE(Base_model):
-    def __init__(self, v_phase=0):
-        super(Base_patch_model_BCE, self).__init__()
-        self.phase = v_phase
-        self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=4)
-
-    def loss(self, v_predictions, v_input):
-        features, labels = v_input
-
-        loss = nn.functional.binary_cross_entropy_with_logits(v_predictions, labels,
-                                                              reduction="mean"
-                                                              )
-        return loss
-
-
 class Base_patch_model_BCE_deeper(Base_model):
-    def __init__(self, v_phase=0):
-        super(Base_patch_model_BCE_deeper, self).__init__()
+    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
+        super(Base_patch_model_BCE_deeper, self).__init__(v_phase, v_loss_type, v_alpha)
         self.phase = v_phase
         self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=5, base_channel=32)
 
-    def loss(self, v_predictions, v_input):
-        features, labels = v_input
-
-        loss = nn.functional.binary_cross_entropy_with_logits(v_predictions, labels,
-                                                              reduction="mean"
-                                                              )
-        return loss
 
 class Base_patch_model_BCE_deeper_wo_bn(Base_model):
-    def __init__(self, v_phase=0):
-        super(Base_patch_model_BCE_deeper_wo_bn, self).__init__()
+    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
+        super(Base_patch_model_BCE_deeper_wo_bn, self).__init__(v_phase, v_loss_type, v_alpha)
         self.phase = v_phase
         self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=5, base_channel=32, with_bn=False)
 
-    def loss(self, v_predictions, v_input):
-        features, labels = v_input
 
-        loss = nn.functional.binary_cross_entropy_with_logits(v_predictions, labels,
-                                                              reduction="mean"
-                                                              )
-        return loss
+class Base_patch_model_BCE_dir(Base_model):
+    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
+        super(Base_patch_model_BCE_dir, self).__init__(v_phase, v_loss_type, v_alpha)
+        self.phase = v_phase
+        self.encoder = U_Net_3D(img_ch=4, output_ch=1, v_pool_first=False, v_depth=4, base_channel=16)

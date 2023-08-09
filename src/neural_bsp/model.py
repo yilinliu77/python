@@ -244,22 +244,22 @@ class Base_patch_model_focal(Base_model):
         self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=4)
 
 
-class Base_patch_model_BCE_deeper(Base_model):
+class Base_patch_model_deeper(Base_model):
     def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
-        super(Base_patch_model_BCE_deeper, self).__init__(v_phase, v_loss_type, v_alpha)
+        super(Base_patch_model_deeper, self).__init__(v_phase, v_loss_type, v_alpha)
         self.phase = v_phase
         self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=5, base_channel=32)
 
 
-class Base_patch_model_BCE_deeper_wo_bn(Base_model):
+class Base_patch_model_deeper_wo_bn(Base_model):
     def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
-        super(Base_patch_model_BCE_deeper_wo_bn, self).__init__(v_phase, v_loss_type, v_alpha)
+        super(Base_patch_model_deeper_wo_bn, self).__init__(v_phase, v_loss_type, v_alpha)
         self.phase = v_phase
         self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=5, base_channel=32, with_bn=False)
 
 
-class Base_patch_model_BCE_dir(Base_model):
+class Base_patch_model_dir(Base_model):
     def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
-        super(Base_patch_model_BCE_dir, self).__init__(v_phase, v_loss_type, v_alpha)
+        super(Base_patch_model_dir, self).__init__(v_phase, v_loss_type, v_alpha)
         self.phase = v_phase
         self.encoder = U_Net_3D(img_ch=4, output_ch=1, v_pool_first=False, v_depth=4, base_channel=16)

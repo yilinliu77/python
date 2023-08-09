@@ -19,7 +19,7 @@ trainer:
   check_val_every_n_epoch: 1
 
 model:
-  model_name: Base_patch_model_BCE
+  model_name: Base_patch_model_dir
   phase: 0
   test_threshold: 0.3
   loss: BCE_loss

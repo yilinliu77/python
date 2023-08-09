@@ -238,8 +238,8 @@ class Atten_model(nn.Module):
 
 
 class Base_patch_model(Base_model):
-    def __init__(self, v_phase=0):
-        super(Base_patch_model, self).__init__()
+    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
+        super(Base_patch_model, self).__init__(v_phase, v_loss_type, v_alpha)
         self.phase = v_phase
         self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=4)
 

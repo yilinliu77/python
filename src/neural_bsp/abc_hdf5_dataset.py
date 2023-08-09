@@ -206,7 +206,7 @@ class ABC_dataset_patch_hdf5_dir(ABC_dataset_patch_hdf5_sample):
         feat_data = np.concatenate([dx[:,None], dy[:,None], dz[:,None], feat_data[:,0:1]], axis=1)
         flag_data = flag_data.astype(np.float32)[:, None, :, :, :]
         times[1] += time.time() - cur_time
-        return feat_data, flag_data, self.names[id_object], id_patch
+        return np.ascontiguousarray(feat_data), np.ascontiguousarray(flag_data), self.names[id_object], id_patch
 
     def collate_fn(v_batches):
         return [torch.from_numpy(v_batches[0][0]),

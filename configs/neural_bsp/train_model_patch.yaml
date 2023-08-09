@@ -23,7 +23,7 @@ model:
   phase: 0
   test_threshold: 0.3
   loss: BCE_loss
-  loss_alpha: 0.5
+  loss_alpha: 0.75
 
 hydra:
   run:

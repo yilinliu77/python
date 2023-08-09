@@ -318,7 +318,7 @@ def main(v_cfg: DictConfig):
         max_epochs=int(1e8),
         num_sanity_val_steps=2,
         check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
-        # precision="16-mixed",
+        precision="16-mixed",
         # gradient_clip_val=0.5,
     )
     torch.find_unused_parameters = False

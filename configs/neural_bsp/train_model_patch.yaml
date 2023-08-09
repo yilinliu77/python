@@ -9,14 +9,15 @@ dataset:
 trainer:
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 0
+  num_worker: 4
 
-  batch_size: 16
+  batch_size: 128
   validation_batch_size: 512
   resume_from_checkpoint:
   evaluate: false
   output: .
   check_val_every_n_epoch: 1
+  accelerator: "16-mixed"
 
 model:
   model_name: Base_patch_model_dir

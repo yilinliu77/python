@@ -200,10 +200,10 @@ class ABC_dataset_patch_hdf5_dir(ABC_dataset_patch_hdf5_sample):
         times[0] += time.time() - cur_time
         cur_time = time.time()
         feat_data = np.transpose(feat_data.astype(np.float32) / 65535, (0, 4, 1, 2, 3)) * np.pi * 2
-        dx = np.cos(feat_data[:,1]) * np.sin(feat_data[:,2])
-        dy = np.sin(feat_data[:,1]) * np.sin(feat_data[:,2])
-        dz = np.cos(feat_data[:,2])
-        feat_data = np.concatenate([dx[:,None], dy[:,None], dz[:,None], feat_data[:,0:1]], axis=1)
+        dx = np.cos(feat_data[:, 1]) * np.sin(feat_data[:, 2])
+        dy = np.sin(feat_data[:, 1]) * np.sin(feat_data[:, 2])
+        dz = np.cos(feat_data[:, 2])
+        feat_data = np.concatenate([dx[:, None], dy[:, None], dz[:, None], feat_data[:, 0:1]], axis=1)
         flag_data = flag_data.astype(np.float32)[:, None, :, :, :]
         times[1] += time.time() - cur_time
         return np.ascontiguousarray(feat_data), np.ascontiguousarray(flag_data), self.names[id_object], id_patch
@@ -338,6 +338,26 @@ class ABC_dataset_patch_train(ABC_dataset):
                 torch.from_numpy(v_batches[0][1]),
                 v_batches[0][2],
                 torch.from_numpy(v_batches[0][3])]
+
+
+class ABC_dataset_patch_train_dir(ABC_dataset_patch_train):
+    def __init__(self, v_data_root, v_training_mode, v_batch_size):
+        ABC_dataset_patch_train.__init__(self, v_data_root, v_training_mode, v_batch_size)
+
+    def __getitem__(self, idx):
+        times = [0] * 10
+        cur_time = time.time()
+        id_object, id_patch, feat_data, flag_data = self.get_patch(idx)
+        times[0] += time.time() - cur_time
+        cur_time = time.time()
+        feat_data = np.transpose(feat_data.astype(np.float32) / 65535, (0, 4, 1, 2, 3)) * np.pi * 2
+        dx = np.cos(feat_data[:, 1]) * np.sin(feat_data[:, 2])
+        dy = np.sin(feat_data[:, 1]) * np.sin(feat_data[:, 2])
+        dz = np.cos(feat_data[:, 2])
+        feat_data = np.concatenate([dx[:, None], dy[:, None], dz[:, None], feat_data[:, 0:1]], axis=1)
+        flag_data = flag_data.astype(np.float32)[:, None, :, :, :]
+        times[1] += time.time() - cur_time
+        return np.ascontiguousarray(feat_data), np.ascontiguousarray(flag_data), self.names[id_object], id_patch
 
 
 class ABC_dataset_patch_test(ABC_dataset_patch_train):

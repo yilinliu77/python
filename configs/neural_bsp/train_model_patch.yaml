@@ -1,8 +1,8 @@
 dataset:
-  root: G:\Dataset\GSP_v3_part\total_1k.hdf5
-#  root: F:\GSP\GSP_v3\training
+#  root: G:\Dataset\GSP_v3_part\total_1k.hdf5
+  root: F:\GSP\GSP_comparison_v4_4\training
 #  dataset_name: ABC_dataset_patch_hdf5
-  dataset_name: ABC_dataset_patch
+  dataset_name: ABC_dataset_patch_train_dir
 #  test_list: []
   test_list: ["00860128","00860559","00860889","00861617"]
 

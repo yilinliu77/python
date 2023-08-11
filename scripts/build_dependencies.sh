@@ -17,7 +17,7 @@ else
     CUDA_ARCHITECTURES=""
 fi
 
-git submodule update
+git submodule update --init
 
 multi_thread="-j20"
 

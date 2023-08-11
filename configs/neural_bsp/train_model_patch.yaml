@@ -21,7 +21,7 @@ trainer:
 
 model:
   model_name: TestNetResidualSE
-  phase: 0
+  phase: [16, 32, 64, 128, 256]
   test_threshold: 0.5
   loss: BCE_loss
   loss_alpha: 0.75

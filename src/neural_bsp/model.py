@@ -584,8 +584,7 @@ class NoUpsampling(AbstractUpsampling):
 class TestNetDoubleConv(nn.Module):
     def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
         super(TestNetDoubleConv, self).__init__()
-        self.phase = v_phase
-        self.f_maps = [16, 32, 64, 128, 256]
+        self.f_maps = v_phase
         self.encoders = create_encoders(
             4,
             self.f_maps,

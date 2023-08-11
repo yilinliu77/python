@@ -73,7 +73,7 @@ class Patch_phase(pl.LightningModule):
             "R_5": BinaryRecall(threshold=0.5),
             "R_7": BinaryRecall(threshold=0.7),
             "R_9": BinaryRecall(threshold=0.9),
-            "AP": BinaryAveragePrecision(threshold=[0.5,0.6,0.7,0.8,0.9]),
+            "AP": BinaryAveragePrecision(thresholds=[0.5,0.6,0.7,0.8,0.9]),
             "F1": BinaryF1Score(threshold=0.5),
         }
         self.pr_computer = MetricCollection(pr_computer)

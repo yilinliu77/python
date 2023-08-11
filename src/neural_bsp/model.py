@@ -581,6 +581,101 @@ class NoUpsampling(AbstractUpsampling):
         return x
 
 
+class TestNetDoubleConv(nn.Module):
+    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
+        super(TestNetDoubleConv, self).__init__()
+        self.phase = v_phase
+        self.f_maps = [16, 32, 64, 128, 256]
+        self.encoders = create_encoders(
+            4,
+            self.f_maps,
+            DoubleConv,
+            3,
+            1,
+            "cbr",
+            8,
+            2,
+            True)
+        self.decoders = create_decoders(
+            self.f_maps,
+            DoubleConv,
+            3,
+            1,
+            "cbr",
+            8,
+            True)
+        self.final_conv = nn.Conv3d(self.f_maps[0], 1, 1)
+        self.loss_func = globals()[v_loss_type]
+        self.loss_alpha = v_alpha
+
+    def forward(self, v_data, v_training=False):
+        x, labels = v_data
+        encoders_features = []
+        for encoder in self.encoders:
+            x = encoder(x)
+            encoders_features.insert(0, x)
+
+        encoders_features = encoders_features[1:]
+
+        # decoder part
+        for decoder, encoder_features in zip(self.decoders, encoders_features):
+            x = decoder(encoder_features, x)
+
+        prediction = self.final_conv(x)
+
+        return prediction
+
+    def loss(self, v_predictions, v_input):
+        features, labels = v_input
+
+        loss = self.loss_func(v_predictions, labels, self.loss_alpha)
+        return loss
+
+class TestNetResidual(TestNetDoubleConv):
+    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
+        super().__init__(v_phase, v_loss_type, v_alpha)
+        self.encoders = create_encoders(
+            4,
+            self.f_maps,
+            ResNetBlock,
+            3,
+            1,
+            "cbr",
+            8,
+            2,
+            True)
+        self.decoders = create_decoders(
+            self.f_maps,
+            ResNetBlock,
+            3,
+            1,
+            "cbr",
+            8,
+            True)
+
+class TestNetResidualSE(TestNetDoubleConv):
+    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
+        super().__init__(v_phase, v_loss_type, v_alpha)
+        self.encoders = create_encoders(
+            4,
+            self.f_maps,
+            ResNetBlockSE,
+            3,
+            1,
+            "cbr",
+            8,
+            2,
+            True)
+        self.decoders = create_decoders(
+            self.f_maps,
+            ResNetBlockSE,
+            3,
+            1,
+            "cbr",
+            8,
+            True)
+
+
 #################################################################################################################
 
 

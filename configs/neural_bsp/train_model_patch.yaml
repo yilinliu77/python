@@ -20,7 +20,7 @@ trainer:
   accelerator: "32-true"
 
 model:
-  model_name: Base_patch_model_dir
+  model_name: TestNetResidualSE
   phase: 0
   test_threshold: 0.5
   loss: BCE_loss

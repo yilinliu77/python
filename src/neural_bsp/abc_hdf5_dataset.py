@@ -297,7 +297,7 @@ class ABC_dataset_patch_train(ABC_dataset):
             self.id_object = self.id_object.reshape(-1)
             self.num_items = math.ceil(self.id_object.shape[0] / self.batch_size)
         else:
-            raise ""
+            pass
 
     def __len__(self):
         return self.num_items
@@ -341,10 +341,22 @@ class ABC_dataset_patch_train(ABC_dataset):
 
 
 class ABC_dataset_patch_test(ABC_dataset_patch_train):
-    def __init__(self, v_data_root, v_training_mode, v_batch_size):
-        super(ABC_dataset_patch_test, self).__init__(v_data_root, "training", v_batch_size)
-        assert v_batch_size == self.num_patches_per_item
-        self.num_objects = len(self.names)
+    def __init__(self, v_data_root, v_training_mode, v_test_list):
+        super(ABC_dataset_patch_test, self).__init__(v_data_root, v_training_mode, 512)
+        self.idxs = np.arange(self.total_num_items)
+
+        if len(v_test_list) > 0:
+            self.idxs = np.zeros(len(v_test_list), dtype=np.int32)
+            for id, name in enumerate(v_test_list):
+                if name in self.names:
+                    self.idxs[id] = np.where(self.names == name)[0][0]
+                else:
+                    print("Cannot find ", name, " in the dataset")
+                    raise ""
+            self.names = np.asarray(v_test_list)
+            self.total_num_items = len(v_test_list)
+
+        self.num_items = self.total_num_items
 
     def get_patch(self, v_id_item):
         features = np.load(self.objects[v_id_item] + "_feat.npy")

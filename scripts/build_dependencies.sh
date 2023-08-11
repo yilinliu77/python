@@ -29,20 +29,20 @@ ROOT_DIR=$PWD
 conda install -c intel mkl mkl-devel mkl-static mkl-include -y
 conda install -c pytorch -c nvidia conda==23.5.2 pytorch torchvision torchaudio pytorch-cuda=11.8 -y
 conda install -c pyg pyg -y
-conda install -c conda-forge faiss-gpu -y
+#conda install -c conda-forge faiss-gpu -y
 pip install numba PyMCubes pytorch-lightning hydra-core shapely scikit-image matplotlib tensorboard plyfile opencv-python opencv-contrib-python open3d ray[default] h5py
 # pip install ternausnet inplace_abn einops
 pip install torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cu118.html
 
-echo "======================================"
-echo "Start to build tiny-cuda-nn"
-echo "======================================"
-cd thirdparty/tiny-cuda-nn && export TCNN_CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES} && cmake . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release ${multi_thread} && cd bindings/torch && python setup.py install && cd ../../../../
-
-echo "======================================"
-echo "Start to build sdf_computer"
-echo "======================================"
-cd thirdparty/sdf_computer && cmake . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release ${multi_thread}  && cd ../../
+#echo "======================================"
+#echo "Start to build tiny-cuda-nn"
+#echo "======================================"
+#cd thirdparty/tiny-cuda-nn && export TCNN_CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES} && cmake . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release ${multi_thread} && cd bindings/torch && python setup.py install && cd ../../../../
+#
+#echo "======================================"
+#echo "Start to build sdf_computer"
+#echo "======================================"
+#cd thirdparty/sdf_computer && cmake . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release ${multi_thread}  && cd ../../
 
 # Not used
 #echo "======================================"

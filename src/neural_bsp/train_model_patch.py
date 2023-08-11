@@ -20,7 +20,7 @@ from torchmetrics import MetricCollection
 from shared.common_utils import export_point_cloud, sigmoid
 import torch.distributed as dist
 
-from torchmetrics.classification import BinaryPrecision, BinaryRecall
+from torchmetrics.classification import BinaryPrecision, BinaryRecall, BinaryAveragePrecision, BinaryF1Score
 
 class Patch_phase(pl.LightningModule):
     def __init__(self, hparams, v_data):
@@ -73,6 +73,8 @@ class Patch_phase(pl.LightningModule):
             "R_5": BinaryRecall(threshold=0.5),
             "R_7": BinaryRecall(threshold=0.7),
             "R_9": BinaryRecall(threshold=0.9),
+            "AP": BinaryAveragePrecision(threshold=[0.5,0.6,0.7,0.8,0.9]),
+            "F1": BinaryF1Score(threshold=0.5),
         }
         self.pr_computer = MetricCollection(pr_computer)
 
@@ -287,8 +289,10 @@ class Patch_phase(pl.LightningModule):
         return
 
     def on_test_end(self):
-        print(self.pr_computer.compute())
-        print("Loss: ", self.trainer.callback_metrics["Test_Loss_epoch"])
+        metrics = self.pr_computer.compute()
+        for key in metrics:
+            print("{:3}: {:.3f}".format(key, metrics[key].cpu().item()))
+        print("Loss: {:.3f}".format(self.trainer.callback_metrics["Test_Loss_epoch"].cpu().item()))
 
 @hydra.main(config_name="train_model_patch.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):

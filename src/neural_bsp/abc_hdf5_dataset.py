@@ -316,10 +316,9 @@ class ABC_dataset_patch_train(ABC_dataset):
         else:
             raise ""
         features = np.load(self.objects[id_object] + "_feat.npy", mmap_mode="r")
-        choice = np.random.choice(features.shape[0], self.batch_size)
-        features = features[choice]
+        features = features[id_patch]
         flags = np.load(self.objects[id_object] + "_flag.npy", mmap_mode="r")
-        flags = flags[choice]
+        flags = flags[id_patch]
         return np.asarray([id_object] * self.batch_size), id_patch, features, flags
 
     def __getitem__(self, idx):

@@ -217,8 +217,13 @@ class Patch_phase(pl.LightningModule):
             return
 
         id_patch = torch.stack(self.viz_data["id_patch"], dim=0)
-        prediction = torch.cat(self.viz_data["prediction"], dim=0)
-        gt = torch.cat(self.viz_data["gt"], dim=0)
+        prediction_ = torch.cat(self.viz_data["prediction"], dim=0)
+        gt_ = torch.cat(self.viz_data["gt"], dim=0)
+
+        prediction = torch.zeros_like(prediction_)
+        prediction[id_patch] = prediction_
+        gt = torch.zeros_like(gt_)
+        gt[id_patch] = gt_
 
         gathered_prediction = prediction.cpu().numpy()
         gathered_gt = gt.cpu().numpy()

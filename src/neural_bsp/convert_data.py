@@ -72,15 +72,15 @@ def writer(v_queue: Queue, v_num_files, v_filename, num_block):
                                maxshape=(v_num_files, 512, 32, 32, 32, 3),
                                chunks=(1, 1, 32, 32, 32, 3),
                                # compression="gzip", compression_opts=1,
-                               shuffle=True,
-                               compression="lzf"
+                               # shuffle=True,
+                               # compression="lzf"
                                )
     output_file.create_dataset("flags", shape=(0, 512, 32, 32, 32), dtype=np.uint8,
                                maxshape=(v_num_files, 512, 32, 32, 32),
                                chunks=(1, 1, 32, 32, 32),
                                # compression="gzip", compression_opts=1,
-                               shuffle=True,
-                               compression="lzf"
+                               # shuffle=True,
+                               # compression="lzf"
                                )
     output_file.create_dataset("names", shape=(v_num_files,), dtype=int, )
 

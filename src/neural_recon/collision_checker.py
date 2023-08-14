@@ -61,6 +61,7 @@ from math import ceil
 class Collision_checker:
     def __init__(self):
         self.triangles = None
+        self.tri_to_patch = None
         self.n_ = None
         self.d = None
 
@@ -70,15 +71,16 @@ class Collision_checker:
     # self.triangles: M,3,3
     # self.n_: M,3
     # self.d: M,
-    def check_ray(self, v_origin, v_direction):
+    def check_ray(self, patch_id_c, v_origin, v_direction):
         if self.triangles is None:
             return torch.zeros_like(v_origin[:, 0], dtype=torch.bool)
         else:
-            final_flag = torch.ones((v_origin.shape[0], self.triangles.shape[0]), dtype=torch.bool,
+            check_triangle = self.triangles[self.tri_to_patch != patch_id_c]
+            final_flag = torch.ones((v_origin.shape[0], check_triangle.shape[0]), dtype=torch.bool,
                                     device=v_origin.device)
 
-            v0v1 = (self.triangles[:, 1] - self.triangles[:, 0])[None, :]  # 1,M,3
-            v0v2 = (self.triangles[:, 2] - self.triangles[:, 0])[None, :]  # 1,M,3
+            v0v1 = (check_triangle[:, 1] - check_triangle[:, 0])[None, :]  # 1,M,3
+            v0v2 = (check_triangle[:, 2] - check_triangle[:, 0])[None, :]  # 1,M,3
 
             original_distance = torch.linalg.norm(v_direction, dim=-1, keepdim=True)
             ray_direction_ = (v_direction / original_distance)[:, None]  # N,1,3
@@ -91,7 +93,7 @@ class Collision_checker:
             final_flag[torch.abs(det) < 1e-8] = 0
 
             invDet = 1.0 / det
-            tvec = ray_origin - self.triangles[:, 0][None, :]
+            tvec = ray_origin - check_triangle[:, 0][None, :]
             u = torch.sum(tvec * pvec, dim=-1) * invDet
 
             final_flag[torch.logical_or(u < 0, u > 1)] = 0
@@ -107,11 +109,14 @@ class Collision_checker:
             # intersected_point = ray_origin + ray_direction_ * t
             return torch.max(final_flag, dim=-1)[0]
 
-    def add_triangles(self, v_triangles):
+    def add_triangles(self, v_triangles, tri_to_patch):
         if self.triangles is None:
             self.triangles = v_triangles
+            self.tri_to_patch = tri_to_patch
         else:
             self.triangles = torch.cat((self.triangles, v_triangles), dim=0)
+            # TODO update tri_to_patch
+            self.tri_to_patch = tri_to_patch
 
     def clear(self):
         self.triangles = None

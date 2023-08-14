@@ -165,7 +165,7 @@ def sample_depth_and_angle(depth, angle, num_sample=100, scale_factor=1.0, v_ran
     # sample depth
     sample_depths = sample_new_distance(depth, num_sample, scale_factor=scale_factor, v_random_g=v_random_g)
     sample_angles = sample_new_distance(angle.reshape(-1), num_sample,
-                                        scale_factor=scale_factor * np.random.standard_cauchy() * torch.pi / 3,
+                                        scale_factor=scale_factor * torch.pi / 3,
                                         v_max=100, v_min=-100, v_random_g=v_random_g)
     sample_angles = sample_angles.reshape(depth.shape[0], 2, num_sample) % (2 * torch.pi)
     return sample_depths, sample_angles.permute(0, 2, 1)

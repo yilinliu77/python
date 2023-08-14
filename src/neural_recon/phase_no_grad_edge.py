@@ -232,10 +232,11 @@ def optimize_plane(v_data, v_log_root):
     optimized_abcd_list_v = []
 
     for id_img1, graph in enumerate(v_graphs):
+        if id_img1 != 0:
+            continue
+
         # 1. Prepare data
         # prepare some data
-        # if id_img1 != 3:
-        #     continue
         id_src_imgs = (v_img_pairs[id_img1][:, 0]).astype(np.int64)
         ref_img = cv2.imread(v_img_database[id_img1].img_path, cv2.IMREAD_GRAYSCALE)
         src_imgs = [cv2.imread(v_img_database[int(item)].img_path, cv2.IMREAD_GRAYSCALE) for item in id_src_imgs]
@@ -250,11 +251,7 @@ def optimize_plane(v_data, v_log_root):
         transformation = projection2 @ np.linalg.inv(v_img_database[id_img1].extrinsic)
         transformation = torch.from_numpy(transformation).to(device).to(torch.float32)
         c1_2_c2 = torch.from_numpy(
-<<<<<<< HEAD
             v_img_database[int(id_src_imgs[img_src_id])].extrinsic @ np.linalg.inv(v_img_database[id_img1].extrinsic)
-=======
-            v_img_database[int(id_src_imgs[0])].extrinsic @ np.linalg.inv(v_img_database[id_img1].extrinsic)
->>>>>>> fc54290f46d081399965b45f779c4f7711042f70
         ).to(device).to(torch.float32)
         intrinsic = torch.from_numpy(intrinsic).to(device).to(torch.float32)
 
@@ -320,6 +317,8 @@ def optimize_plane(v_data, v_log_root):
             # save optimized_abcd_list
             # with open("output/init_optimized_abcd_list.pkl", "wb") as f:
             #     pickle.dump(optimized_abcd_list, f)
+
+        continue
 
         # 4. Local assemble
         merged_dual_graph, optimized_abcd_list = local_assemble(optimized_abcd_list, rays_c, centroid_rays_c,

@@ -48,10 +48,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from src.neural_recon.optimize_segment import compute_initial_normal, compute_roi, sample_img_prediction, \
     compute_initial_normal_based_on_pos, compute_initial_normal_based_on_camera, sample_img, sample_img_prediction2
-from shared.common_utils import debug_imgs, to_homogeneous, save_line_cloud, to_homogeneous_vector, normalize_tensor, \
-    to_homogeneous_mat_tensor, to_homogeneous_tensor, normalized_torch_img_to_numpy, padding, \
-    vector_to_sphere_coordinate, sphere_coordinate_to_vector, caculate_align_mat, normalize_vector, \
-    pad_and_enlarge_along_y, refresh_timer, get_line_mesh, ray_line_intersection1, ray_line_intersection2
+from shared.common_utils import *
 
 from src.neural_recon.colmap_io import read_dataset, Image, Point_3d, check_visibility
 # from src.neural_recon.phase1 import NGPModel
@@ -62,7 +59,6 @@ from src.neural_recon.collision_checker import Collision_checker
 from src.neural_recon.sample_utils import sample_points_2d
 from src.neural_recon.optimize_planes_batch import optimize_planes_batch, global_assemble, local_assemble
 from src.neural_recon.loss_utils import dilate_edge
-
 
 # Remove the redundant face and edges in the graph
 # And build the dual graph in order to navigate between patches
@@ -342,6 +338,9 @@ def optimize_plane(v_data, v_log_root):
     #global_assemble(optimized_abcd_list_v, transformation, intrinsic, c1_2_c2_list, v_log_root)
 
 
+###################################################################################################
+# 1. Input
+###################################################################################################
 @ray.remote
 def read_graph(v_filename, img_size):
     data = [item for item in open(v_filename).readlines()]
@@ -388,12 +387,12 @@ def read_graph(v_filename, img_size):
     return graph
 
 
-def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
+def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds, v_reconstruct_data=False):
     print("Start to prepare dataset")
     print("1. Read imgs")
 
     img_cache_name = "output/img_field_test/img_cache.npy"
-    if os.path.exists(img_cache_name):
+    if os.path.exists(img_cache_name) and not v_reconstruct_data:
         print("Found cache ", img_cache_name)
         img_database, points_3d = np.load(img_cache_name, allow_pickle=True)
     else:
@@ -409,7 +408,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
 
     graph_cache_name = "output/img_field_test/graph_cache.npy"
     print("2. Build graph")
-    if os.path.exists(graph_cache_name):
+    if os.path.exists(graph_cache_name) and not v_reconstruct_data:
         graphs = np.load(graph_cache_name, allow_pickle=True)
     else:
         ray.init(
@@ -425,7 +424,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
         np.save(graph_cache_name, graphs, allow_pickle=True)
 
     points_cache_name = "output/img_field_test/points_cache.npy"
-    if os.path.exists(points_cache_name):
+    if os.path.exists(points_cache_name) and not v_reconstruct_data:
         points_from_sfm = np.load(points_cache_name)
     else:
         preserved_points = []
@@ -571,11 +570,11 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
         return
 
     for id_img, img in enumerate(img_database):
-        points_from_sfm, points_from_sfm_2d = project_points(img.projection, points_from_sfm)
+        points_from_sfm_local, points_from_sfm_2d = project_points(img.projection, points_from_sfm)
         rgb = cv2.imread(img.img_path, cv2.IMREAD_UNCHANGED)[:, :, :3]
         rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)[:, :, None]
         # draw_initial(rgb, graphs[id_img], img)
-        compute_initial(graphs[id_img], points_from_sfm, points_from_sfm_2d, img.extrinsic, img.intrinsic)
+        compute_initial(graphs[id_img], points_from_sfm_local, points_from_sfm_2d, img.extrinsic, img.intrinsic)
     draw_initial(img_database[0], graphs[0])
 
     # Read camera pairs
@@ -588,6 +587,282 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
     return img_database, graphs, camera_pair_data, points_from_sfm
 
 
+
+# Remove the redundant face and edges in the graph
+# And build the dual graph in order to navigate between patches
+def fix_graph(v_graph, is_visualize=False):
+    dual_graph = nx.Graph()
+
+    id_original_to_current = {}
+    for id_face, face in enumerate(v_graph.graph["faces"]):
+        if not v_graph.graph["face_flags"][id_face]:
+            continue
+        has_black = False
+        for idx, id_start in enumerate(face):
+            id_end = face[(idx + 1) % len(face)]
+            if v_graph.edges[(id_start, id_end)]["is_black"]:
+                has_black = True
+                break
+        if has_black:
+            continue
+
+        id_original_to_current[id_face] = len(dual_graph.nodes)
+        dual_graph.add_node(len(dual_graph.nodes), id_vertex=face,
+                            id_in_original_array=id_face,
+                            face_center=v_graph.graph['face_center'][id_face],
+                            ray_c=v_graph.graph['ray_c'][id_face])
+
+    for node in dual_graph.nodes():
+        faces = dual_graph.nodes[node]["id_vertex"]
+        for idx, id_start in enumerate(faces):
+            id_end = faces[(idx + 1) % len(faces)]
+            t = copy(v_graph.edges[(id_start, id_end)]["id_face"])
+            t.remove(dual_graph.nodes[node]["id_in_original_array"])
+            if t[0] in id_original_to_current:
+                edge = (node, id_original_to_current[t[0]])
+                if edge not in dual_graph.edges():
+                    id_points_in_another_face = dual_graph.nodes[id_original_to_current[t[0]]]["id_vertex"]
+                    adjacent_vertices = []
+                    id_cur = idx
+                    while True:
+                        adjacent_vertices.append(id_start)
+                        id_cur += 1
+                        if id_cur >= len(faces):
+                            adjacent_vertices.append(id_end)
+                            break
+                        id_start = faces[id_cur]
+                        id_end = faces[(id_cur + 1) % len(faces)]
+                        if id_end not in id_points_in_another_face:
+                            adjacent_vertices.append(id_start)
+                            break
+
+                    # adjacent_vertices.append(id_start)
+                    dual_graph.add_edge(edge[0], edge[1], adjacent_vertices=adjacent_vertices)
+
+    v_graph.graph["dual_graph"] = dual_graph
+
+    # Visualize
+    if is_visualize:
+        for idx, id_face in enumerate(dual_graph.nodes):
+            print("{}/{}".format(idx, len(dual_graph.nodes)))
+            img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
+            shape = img11.shape[:2][::-1]
+            face = dual_graph.nodes[id_face]["id_vertex"]
+
+            for idx, id_start in enumerate(face):
+                id_end = face[(idx + 1) % len(face)]
+                pos1 = np.around(v_graph.nodes[id_start]["pos_2d"] * shape).astype(np.int64)
+                pos2 = np.around(v_graph.nodes[id_end]["pos_2d"] * shape).astype(np.int64)
+                cv2.line(img11, pos1, pos2, (0, 0, 255), 2)
+
+            for id_another_face in dual_graph[id_face]:
+                face = dual_graph.nodes[id_another_face]["id_vertex"]
+                for idx, id_start in enumerate(face):
+                    id_end = face[(idx + 1) % len(face)]
+                    pos1 = np.around(v_graph.nodes[id_start]["pos_2d"] * shape).astype(np.int64)
+                    pos2 = np.around(v_graph.nodes[id_end]["pos_2d"] * shape).astype(np.int64)
+                    cv2.line(img11, pos1, pos2, (0, 255, 255), 1)
+
+                for id_vertex in dual_graph[id_face][id_another_face]["adjacent_vertices"]:
+                    pos1 = np.around(v_graph.nodes[id_vertex]["pos_2d"] * shape).astype(np.int64)
+                    cv2.circle(img11, pos1, 2, (0, 255, 0), 2)
+
+            cv2.imshow("1", img11)
+            cv2.waitKey()
+    return
+
+
+def determine_valid_edges(v_graph, v_img, v_gradient):
+    for edge in v_graph.edges():
+        pos1 = v_graph.nodes[edge[0]]["pos_2d"]
+        pos2 = v_graph.nodes[edge[1]]["pos_2d"]
+        pos = torch.from_numpy(np.stack((pos1, pos2), axis=0).astype(np.float32)).to(v_img.device).unsqueeze(0)
+
+        ns, s = sample_points_2d(pos,
+                                 torch.tensor([100] * pos.shape[0], dtype=torch.long, device=pos.device),
+                                 v_img_width=v_img.shape[1], v_vertical_length=10)
+        pixels = sample_img(v_img[None, None, :, :], s[None, :])[0]
+
+        mean_pixels = scatter_mean(pixels,
+                                   torch.arange(ns.shape[0], device=pos.device).repeat_interleave(ns),
+                                   dim=0)
+        v_graph.edges[edge]["is_black"] = mean_pixels < 0.05
+        pass
+
+    return
+
+
+# wireframe src face
+def visualize_polygon(points, path):
+    with open(path, 'w') as f:
+        # 写入顶点
+        for point in points:
+            f.write(f'v {point[0]} {point[1]} {point[2]}\n')
+        # 写入多边形的面
+        f.write("f")
+        for i in range(1, len(points) + 1):
+            f.write(f" {i}")
+        f.write("\n")
+
+
+def visualize_polygon_with_normal(projected_points, normal, path, normal_seg_len=1):
+    with open(path, 'w') as f:
+        for p in projected_points:
+            f.write(f"v {p[0]} {p[1]} {p[2]}\n")
+
+        # 写入多边形
+        f.write("f")
+        for idx in range(len(projected_points)):
+            f.write(f" {idx + 1}")  # OBJ 索引从 1 开始
+        f.write("\n")
+
+    filename, file_extension = os.path.splitext(os.path.basename(path))
+    new_filename = filename + "_normal" + file_extension
+    new_path = os.path.join(os.path.dirname(path), new_filename)
+    with open(new_path, 'w') as f:
+        # normal start and end
+        normal = normal / np.linalg.norm(normal) * normal_seg_len
+        center = np.mean(projected_points, axis=0)
+        normal_end = center + normal
+        f.write(f"v {center[0]} {center[1]} {center[2]}\n")
+        f.write(f"v {normal_end[0]} {normal_end[1]} {normal_end[2]}\n")
+
+        # 写入法向量线段
+        f.write(f"l {1} {2}\n")
+
+
+def initialize_patches(rays_c, ray_distances_c, v_vertex_id_per_face):
+    initialized_vertices = rays_c * ray_distances_c[:, None]
+    # abcd
+    plane_parameters = []
+    for vertex_id in v_vertex_id_per_face:
+        pos_vertexes = initialized_vertices[vertex_id]
+        assert (len(pos_vertexes) >= 3)
+        # a) 3d vertexes of each patch -> fitting plane
+        p_abcd = fit_plane_svd(pos_vertexes)
+        plane_parameters.append(p_abcd)
+
+    return torch.stack(plane_parameters, dim=0)
+
+
+def optimize_plane(v_data, v_log_root):
+    v_img_database: list[Image] = v_data[0]
+    v_graphs: np.ndarray[nx.Graph] = v_data[1]
+    v_img_pairs: list[np.ndarray] = v_data[2]
+    v_points_sfm = v_data[3]
+    device = torch.device("cuda")
+    torch.set_grad_enabled(False)
+    img_src_id = 0
+    optimized_abcd_list_v = []
+
+    for id_img1, graph in enumerate(v_graphs):
+        # 1. Prepare data
+        # prepare some data
+        if id_img1 != 14:
+            continue
+        id_src_imgs = (v_img_pairs[id_img1][:, 0]).astype(np.int64)
+        ref_img = cv2.imread(v_img_database[id_img1].img_path, cv2.IMREAD_GRAYSCALE)
+        src_imgs = [cv2.imread(v_img_database[int(item)].img_path, cv2.IMREAD_GRAYSCALE) for item in id_src_imgs]
+        imgs = torch.from_numpy(np.concatenate(([ref_img], src_imgs), axis=0)).to(device).to(torch.float32) / 255.
+
+        projection2 = np.stack([v_img_database[int(id_img)].projection for id_img in id_src_imgs], axis=0)
+        intrinsic = v_img_database[id_img1].intrinsic
+
+        # pos_in_c1 = v_img_database[int(id_img1)].extrinsic @ v_img_database[1].pos[None, :]
+
+        # transformation store the transformation matrix from ref_img to src_imgs
+        transformation = projection2 @ np.linalg.inv(v_img_database[id_img1].extrinsic)
+        transformation = torch.from_numpy(transformation).to(device).to(torch.float32)
+        c1_2_c2 = torch.from_numpy(
+            v_img_database[int(id_src_imgs[img_src_id])].extrinsic @ np.linalg.inv(v_img_database[id_img1].extrinsic)
+        ).to(device).to(torch.float32)
+        intrinsic = torch.from_numpy(intrinsic).to(device).to(torch.float32)
+
+        c1_2_c2_list = []
+        for i in range(len(id_src_imgs)):
+            c1_2_c2_list.append(torch.from_numpy(
+                v_img_database[int(id_src_imgs[i])].extrinsic @ np.linalg.inv(v_img_database[id_img1].extrinsic)
+            ).to(device).to(torch.float32))
+
+        # Image gradients
+        # Do not normalize!
+        gy, gx = torch.gradient(imgs[0])
+        gradients1 = torch.stack((gx, gy), dim=-1)
+        gy, gx = torch.gradient(imgs[img_src_id + 1])
+        gradients2 = torch.stack((gx, gy), dim=-1)
+
+        dilated_gradients1 = torch.from_numpy(dilate_edge(gradients1)).to(device)
+        dilated_gradients2 = torch.from_numpy(dilate_edge(gradients2)).to(device)
+
+        determine_valid_edges(graph, imgs[0], dilated_gradients1)
+        fix_graph(graph)
+
+        # Visualize
+        if False:
+            mask1 = (torch.linalg.norm(gradients1, dim=-1))
+            mask2 = (torch.linalg.norm(dilated_gradients1, dim=-1))
+            cv2.imshow("1", torch.cat((mask1, mask2), dim=1).cpu().numpy().astype(np.float32))
+            cv2.waitKey()
+
+        # Rays
+        rays_c = [None] * len(graph.nodes)
+        ray_distances_c = [None] * len(graph.nodes)
+        for idx, id_points in enumerate(graph.nodes):
+            rays_c[idx] = graph.nodes[id_points]["ray_c"]
+            ray_distances_c[idx] = graph.nodes[id_points]["distance"]
+        rays_c = torch.from_numpy(np.stack(rays_c)).to(device).to(torch.float32)
+        ray_distances_c = torch.from_numpy(np.stack(ray_distances_c)).to(device).to(torch.float32)
+
+        dual_graph = graph.graph["dual_graph"]
+        vertex_id_per_face = [dual_graph.nodes[id_node]["id_vertex"] for id_node in dual_graph.nodes]
+        centroid_rays_c = torch.from_numpy(
+            np.stack([dual_graph.nodes[id_node]["ray_c"] for id_node in dual_graph], axis=0)).to(device)
+
+        # 2. Initialize planes for each patch
+        num_patch = len(dual_graph.nodes)
+
+        initialized_planes = initialize_patches(rays_c, ray_distances_c, vertex_id_per_face)  # (num_patch, 4)
+
+        # 3. Optimize to get abcd_list for current ref-src img pair
+        # v_log_root_c = os.path.join(os.path.normpath(v_log_root), str(id_img1))
+        # os.makedirs(v_log_root_c, exist_ok=True)
+        # optimized_abcd_list = optimize_planes_batch(initialized_planes, rays_c, centroid_rays_c, dual_graph,
+        #                                             imgs, transformation, intrinsic, c1_2_c2_list, v_log_root_c)
+        # optimized_abcd_list_v.append(optimized_abcd_list)
+
+        if os.path.exists("output/init_optimized_abcd_list.pkl"):
+            optimized_abcd_list = pickle.load(open("output/init_optimized_abcd_list.pkl", "rb"))
+        else:
+            #initialized_planes = pickle.load(open("output/bu2/optimized_abcd_list_merged.pkl", "rb"))
+            #initialized_planes = torch.from_numpy(initialized_planes).to(device)
+            optimized_abcd_list = optimize_planes_batch(initialized_planes, rays_c, centroid_rays_c, dual_graph,
+                                                        imgs, transformation, intrinsic, c1_2_c2_list, v_log_root)
+            # save optimized_abcd_list
+            # with open("output/init_optimized_abcd_list.pkl", "wb") as f:
+            #     pickle.dump(optimized_abcd_list, f)
+
+        # 4. Local assemble
+        merged_dual_graph, optimized_abcd_list = local_assemble(optimized_abcd_list, rays_c, centroid_rays_c,
+                                                                dual_graph, imgs, dilated_gradients1,
+                                                                dilated_gradients2, transformation, intrinsic,
+                                                                c1_2_c2, v_log_root)
+
+        centroid_rays_c_new = [merged_dual_graph.nodes[i]['ray_c'].tolist() for i in
+                               range(len(merged_dual_graph.nodes))]
+        centroid_rays_c_new = torch.from_numpy(np.stack(centroid_rays_c_new)).to(device).to(torch.float32)
+
+        optimized_abcd_list = optimize_planes_batch(copy(optimized_abcd_list), rays_c, centroid_rays_c_new,
+                                                    merged_dual_graph, imgs, dilated_gradients1, dilated_gradients2,
+                                                    transformation,
+                                                    intrinsic,
+                                                    c1_2_c2,
+                                                    v_log_root
+                                                    )
+
+    # 5. Global assemble
+    #global_assemble(optimized_abcd_list_v, transformation, intrinsic, c1_2_c2_list, v_log_root)
+
+
 @hydra.main(config_name="phase6.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
@@ -598,6 +873,7 @@ def main(v_cfg: DictConfig):
         v_cfg["dataset"]["colmap_dir"],
         v_cfg["dataset"]["id_viz_face"],
         v_cfg["dataset"]["scene_boundary"],
+        v_cfg["dataset"]["v_reconstruct_data"],
     )
 
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()

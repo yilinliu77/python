@@ -180,7 +180,7 @@ def read_dataset(v_colmap_dir, v_bounds):
             if line[0] == "#":
                 continue
             cam_id, camera_model, width, height = int(line[0]), line[1], int(line[2]), int(line[3])
-            if camera_model != "SIMPLE_PINHOLE":
+            if camera_model != "SIMPLE_PINHOLE" and camera_model != "SIMPLE_RADIAL":
                 raise "Unsupported camera model"
             fx, cx, cy = float(line[4]), float(line[5]), float(line[6])
             fy = fx

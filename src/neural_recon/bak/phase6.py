@@ -1,41 +1,29 @@
-import itertools
-import sys, os
+import os
 import time
 from typing import List
 
-from torch.distributions import Binomial
-from torch.nn.utils.rnn import pad_sequence
-
-from src.neural_recon.init_segments import compute_init_based_on_similarity
-from src.neural_recon.losses import loss1, loss2, loss4, loss5
+from src.neural_recon.losses import loss2, loss4, loss5
 
 # sys.path.append("thirdparty/sdf_computer/build/")
 # import pysdf
-from src.neural_recon.phase12 import Siren2
 
 import math
 
 import torch
 from torch import nn
-from torch.optim import Adam, SGD
+from torch.optim import SGD
 from torch.utils.data import DataLoader
 from torch.distributions.utils import _standard_normal
-import torch.nn.functional as F
 import networkx as nx
-from torch_scatter import scatter_add, scatter_min, scatter_mean
+from torch_scatter import scatter_min
 import faiss
-import torchsort
 
-import mcubes
 import cv2
 import numpy as np
 import open3d as o3d
-from scipy.spatial import ConvexHull
 
-from tqdm import tqdm, trange
+from tqdm import tqdm
 import ray
-import platform
-import shutil
 
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
@@ -43,15 +31,11 @@ from pytorch_lightning import Trainer, seed_everything
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from src.neural_recon.optimize_segment import compute_initial_normal, compute_roi, sample_img_prediction, \
-    compute_initial_normal_based_on_pos, compute_initial_normal_based_on_camera, sample_img, sample_img_prediction2
-from shared.common_utils import debug_imgs, to_homogeneous, save_line_cloud, to_homogeneous_vector, normalize_tensor, \
-    to_homogeneous_mat_tensor, to_homogeneous_tensor, normalized_torch_img_to_numpy, padding, \
-    vector_to_sphere_coordinate, sphere_coordinate_to_vector, caculate_align_mat, normalize_vector, \
-    pad_and_enlarge_along_y, refresh_timer, get_line_mesh
+from src.neural_recon.optimize_segment import sample_img
+from shared.common_utils import save_line_cloud, normalize_tensor, \
+    to_homogeneous_tensor
 
-from src.neural_recon.colmap_io import read_dataset, Image, Point_3d, check_visibility
-from src.neural_recon.phase1 import NGPModel
+from src.neural_recon.colmap_io import read_dataset, Image
 
 
 class Multi_edge_single_img_dataset(torch.utils.data.Dataset):
@@ -1304,7 +1288,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds):
     return img_database, graphs, camera_pair_data, points_from_sfm
 
 
-@hydra.main(config_name="phase6.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
+@hydra.main(config_name="phase6.yaml", config_path="../../../configs/neural_recon/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
     print(OmegaConf.to_yaml(v_cfg))

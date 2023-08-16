@@ -1,24 +1,11 @@
-import itertools
-import math
-import random
-import sys, os
-
-import open3d
-
-from shared.perspective_geometry import extract_fundamental_from_projection
-from src.neural_recon.colmap_io import read_dataset, Image, Point_3d
+import os
 
 import cv2
 import numpy as np
 import torch
-from tqdm import tqdm
-from shared.common_utils import to_homogeneous, save_line_cloud, normalize_vector, normalized_torch_img_to_numpy, \
-    to_homogeneous_tensor
-from src.neural_recon.optimize_segment import optimize_single_segment, optimize_single_segment_tensor
-from src.neural_recon.phase1 import Phase1
-import faiss
+from shared.common_utils import to_homogeneous_tensor
 
-from src.neural_recon.phase3 import prepare_dataset_and_model, LModel17, LModel18
+from src.neural_recon.bak.phase3 import prepare_dataset_and_model, LModel18
 
 if __name__ == '__main__':
     cv2.namedWindow("1", cv2.WINDOW_NORMAL)

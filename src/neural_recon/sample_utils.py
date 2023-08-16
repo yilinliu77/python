@@ -176,6 +176,8 @@ def sample_new_planes(v_original_parameters, v_centroid_rays_c, scale_factor=1.0
     initial_centroids = intersection_of_ray_and_plane(v_original_parameters, v_centroid_rays_c)[1]
     init_depth = torch.linalg.norm(initial_centroids, dim=-1)
 
+    #init_depth[init_depth > 10] = 10
+
     sample_depth, sample_angle = sample_depth_and_angle(init_depth, plane_angles,
                                                         scale_factor=scale_factor,v_random_g=v_random_g)
 

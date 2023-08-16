@@ -1,8 +1,6 @@
 import itertools
-import sys, os
+import os
 import time
-
-from torch.distributions import Binomial
 
 from src.neural_recon.init_segments import compute_init_based_on_similarity
 from src.neural_recon.losses import loss1
@@ -15,25 +13,19 @@ import math
 
 import torch
 from torch import nn
-from torch.optim import Adam, SGD
+from torch.optim import SGD
 from torch.utils.data import DataLoader
 from torch.distributions.utils import _standard_normal
-import torch.nn.functional as F
 import networkx as nx
 from torch_scatter import scatter_add, scatter_min, scatter_mean
 import faiss
-import torchsort
 
-import mcubes
 import cv2
 import numpy as np
 import open3d as o3d
-from scipy.spatial import ConvexHull
 
 from tqdm import tqdm, trange
 import ray
-import platform
-import shutil
 
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
@@ -41,15 +33,14 @@ from pytorch_lightning import Trainer, seed_everything
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from src.neural_recon.optimize_segment import compute_initial_normal, compute_roi, sample_img_prediction, \
-    compute_initial_normal_based_on_pos, compute_initial_normal_based_on_camera, sample_img, sample_img_prediction2
-from shared.common_utils import debug_imgs, to_homogeneous, save_line_cloud, to_homogeneous_vector, normalize_tensor, \
-    to_homogeneous_mat_tensor, to_homogeneous_tensor, normalized_torch_img_to_numpy, padding, \
-    vector_to_sphere_coordinate, sphere_coordinate_to_vector, caculate_align_mat, normalize_vector, \
-    pad_and_enlarge_along_y, refresh_timer, get_line_mesh
+from src.neural_recon.optimize_segment import sample_img_prediction, \
+    compute_initial_normal_based_on_camera, sample_img
+from shared.common_utils import to_homogeneous, save_line_cloud, to_homogeneous_vector, normalize_tensor, \
+    to_homogeneous_tensor, caculate_align_mat, normalize_vector, \
+    refresh_timer, get_line_mesh
 
-from src.neural_recon.colmap_io import read_dataset, Image, Point_3d, check_visibility
-from src.neural_recon.phase1 import NGPModel
+from src.neural_recon.colmap_io import read_dataset
+from src.neural_recon.bak.phase1 import NGPModel
 
 
 class Singel_node_dataset(torch.utils.data.Dataset):
@@ -2517,7 +2508,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_img_model_dir, v_viz_face):
     return data
 
 
-@hydra.main(config_name="phase3_l7.yaml", config_path="../../configs/neural_recon/", version_base="1.1")
+@hydra.main(config_name="phase3_l7.yaml", config_path="../../../configs/neural_recon/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
     print(OmegaConf.to_yaml(v_cfg))

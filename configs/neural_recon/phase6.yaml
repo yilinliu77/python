@@ -1,11 +1,17 @@
 dataset:
   scene_boundary: [0., 0., 0., 1., 1., 1.]
-  colmap_dir: "H:/Data/SIGA23/Baseline/data/00000077"
+  colmap_dir: "H:/Data/SIGA23/Baseline/data/Mechanism/00000952"
+  #colmap_dir: "H:/Data/SIGA23/Baseline/data/00000077"
+  #scene_boundary: [0.1186, -0.3080, -0.4349, 8.7124, 8.9280, 2.4062]
+  #colmap_dir: "H:/Data/SIGA23/Baseline/data/Scene1"
+#  colmap_dir: "H:/Data/SIGA23/Baseline/data/00000077"
+
 #  colmap_dir: "E:/DATASET/SIGA2023/Mechanism/ABC-NEF-COLMAP/00000077"
 #  colmap_dir: "G:/Dataset/00000077"
   only_train_target: true
-  id_viz_face: [12,13,14,16,28,29,31,37,38,39,45,63,64,65,66,67,]
+  id_viz_face: []
   id_viz_edge: [9118]
+  v_reconstruct_data: true
 
 trainer:
   check_val_every_n_epoch: 10

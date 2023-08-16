@@ -15,7 +15,7 @@ import torch
 from tqdm import tqdm
 from shared.common_utils import to_homogeneous, save_line_cloud, normalize_vector, normalized_torch_img_to_numpy
 from src.neural_recon.optimize_segment import optimize_single_segment, optimize_single_segment_tensor
-from src.neural_recon.phase1 import Phase1
+from src.neural_recon.bak.phase1 import Phase1
 import faiss
 
 if __name__ == '__main__1':

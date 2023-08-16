@@ -8,8 +8,9 @@ import os, sys
 
 from tqdm import tqdm
 
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Queue, Manager
 import h5py
+
 
 def test():
     root_dir = r"F:\GSP\GSP_v3\training"
@@ -49,10 +50,11 @@ def test():
 
     return
 
-def reader(v_queue: Queue, v_features, v_flags):
+
+def reader(v_queue: Queue, v_features, v_flags, num_block):
     cur_id = 0
     while cur_id < len(v_features):
-        if v_queue.qsize() >= 200:
+        if v_queue.qsize() >= num_block * 4:
             time.sleep(1)
             continue
         prefix = pathlib.Path(v_features[cur_id]).name[:-9]
@@ -60,25 +62,30 @@ def reader(v_queue: Queue, v_features, v_flags):
         flag = np.load(v_flags[cur_id])
         v_queue.put((cur_id, prefix, feat, flag))
         cur_id += 1
+    print("reader finished")
 
-def writer(v_queue: Queue, v_num_files, v_filename):
-    num_block = 100
 
-    output_file = h5py.File(v_filename, "w",)
+def writer(v_queue: Queue, v_num_files, v_filename, num_block):
+    output_file = h5py.File(v_filename, "w", )
 
-    output_file.create_dataset("features", shape=(num_block, 512, 32, 32, 32, 3), dtype=np.uint16,
+    output_file.create_dataset("features", shape=(0, 512, 32, 32, 32, 3), dtype=np.uint16,
                                maxshape=(v_num_files, 512, 32, 32, 32, 3),
                                chunks=(1, 1, 32, 32, 32, 3),
-                               compression="gzip", compression_opts=1,
+                               # compression="gzip", compression_opts=1,
+                               # shuffle=True,
                                # compression="lzf"
                                )
-    output_file.create_dataset("flags", shape=(num_block, 512, 32, 32, 32), dtype=np.uint8,
+    output_file.create_dataset("flags", shape=(0, 512, 32, 32, 32), dtype=np.uint8,
                                maxshape=(v_num_files, 512, 32, 32, 32),
                                chunks=(1, 1, 32, 32, 32),
+                               # compression="gzip", compression_opts=1,
+                               # shuffle=True,
+                               # compression="lzf"
                                )
-    output_file.create_dataset("names", shape=(v_num_files, ), dtype=int,)
+    output_file.create_dataset("names", shape=(v_num_files,), dtype=int, )
 
     num_finished = 0
+    progress_bar = tqdm(total=v_num_files)
     while True:
         if num_finished + num_block > v_num_files:
             num_block = v_num_files - num_finished
@@ -86,7 +93,7 @@ def writer(v_queue: Queue, v_num_files, v_filename):
         if v_queue.qsize() < num_block:
             time.sleep(1)
 
-        idx, prefix, feat, flag = [None]*num_block,[None]*num_block,[None]*num_block,[None]*num_block
+        idx, prefix, feat, flag = [None] * num_block, [None] * num_block, [None] * num_block, [None] * num_block
         for i in range(num_block):
             idx[i], prefix[i], feat[i], flag[i] = v_queue.get()
 
@@ -94,51 +101,59 @@ def writer(v_queue: Queue, v_num_files, v_filename):
         feat = np.stack(feat, axis=0)
         flag = np.stack(flag, axis=0)
 
-        output_file["features"][num_finished:num_finished+num_block] = feat
-        output_file["flags"][num_finished:num_finished+num_block] = flag
-        output_file["names"][num_finished:num_finished+num_block] = prefix
-
         target_shape = min(output_file["features"].shape[0] + num_block, v_num_files)
         output_file["features"].resize(target_shape, axis=0)
         output_file["flags"].resize(target_shape, axis=0)
 
-        num_finished+=num_block
+        cur_time = time.time()
+        output_file["features"][num_finished:num_finished + num_block] = feat
+        output_file["flags"][num_finished:num_finished + num_block] = flag
+        output_file["names"][num_finished:num_finished + num_block] = prefix
+        # print(time.time() - cur_time)
+
+        num_finished += num_block
         assert num_finished <= v_num_files
         if num_finished == v_num_files:
             break
-        if num_finished%(v_num_files//100)==0:
-            print("{}/{}".format(num_finished,v_num_files))
+        progress_bar.update(num_block)
 
     output_file.close()
     return
+
 
 if __name__ == '__main__':
     # test()
     is_shuffle = True
     root_dir = sys.argv[1]
     prefix = set([item[:-9] for item in os.listdir(root_dir) if item.endswith("_feat.npy")])
-    prefix = sorted(list(prefix),key=lambda item:int(item))
+    prefix = sorted(list(prefix), key=lambda item: int(item))
 
     seed(0)
     if is_shuffle:
         shuffle(prefix)
 
-    feature_files = [os.path.join(root_dir, item+"_feat.npy") for item in prefix]
-    flag_files = [os.path.join(root_dir, item+"_flag.npy") for item in prefix]
+    feature_files = [os.path.join(root_dir, item + "_feat.npy") for item in prefix]
+    flag_files = [os.path.join(root_dir, item + "_flag.npy") for item in prefix]
+
+    num_block = 100
+    if len(sys.argv) == 4:
+        num_block = int(sys.argv[3])
 
     num_files = len(feature_files)
 
     timer = time.time()
-    q = Queue()
+    q = Manager().Queue()
+    # q = Queue()
     hdf5_file = sys.argv[2]
-    p_reader = Process(target=reader, args=(q, feature_files, flag_files))
-    p_writer = Process(target=writer, args=(q, num_files, hdf5_file))
+    p_reader = Process(target=reader, args=(q, feature_files, flag_files, num_block))
+    p_writer = Process(target=writer, args=(q, num_files, hdf5_file, num_block))
     p_reader.start()
     p_writer.start()
 
     p_reader.join()
     p_writer.join()
-    print(time.time()-timer)
+    print(time.time() - timer)
+
 
     def single_thread_test():
         output_file = h5py.File("train.hdf5", "w")
@@ -174,5 +189,6 @@ if __name__ == '__main__':
             times[1] += time.time() - timer
 
         output_file.close()
-    pass
 
+
+    pass

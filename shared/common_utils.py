@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import open3d as o3d
 
+
 def debug_imgs(v_imgs: List[np.ndarray]) -> None:
     if not isinstance(v_imgs, List):
         print("Need to input a list of np.ndarray")
@@ -23,17 +24,26 @@ def debug_imgs(v_imgs: List[np.ndarray]) -> None:
     cv2.waitKey()
     # cv2.destroyWindow("test")
 
+
 def check_dir(v_path):
     if os.path.exists(v_path):
         shutil.rmtree(v_path)
     os.makedirs(v_path)
 
+
 def safe_check_dir(v_path):
     if not os.path.exists(v_path):
         os.makedirs(v_path)
 
-def refresh_timer(a):
+
+def record_time():
+    return time.time()
+
+
+def profile_time(a, v_tip="", v_print=True):
     delta = time.time() - a
+    if v_print:
+        print("{}: {}".format(v_tip, delta))
     return delta, time.time()
 
 
@@ -230,6 +240,7 @@ def get_line_mesh(v_path, v_points, v_lines):
         for item in v_lines:
             f.write("l {} {}\n".format(item[0] + 1, item[1] + 1))
 
+
 # Not verified
 def ray_line_intersection1(v_plane_normal, v_plane_point, v_ray_origin, v_ray_direction):
     t = torch.dot(v_plane_normal, (v_plane_point - v_ray_origin)) / torch.dot(v_plane_normal, v_ray_direction)
@@ -238,6 +249,7 @@ def ray_line_intersection1(v_plane_normal, v_plane_point, v_ray_origin, v_ray_di
     intersection_point = v_ray_origin + t * v_ray_direction
 
     return intersection_point
+
 
 def ray_line_intersection2(v_plane_abcd, v_ray_origin, v_ray_direction):
     plane_normal = v_plane_abcd[:3]
@@ -255,11 +267,13 @@ def ray_line_intersection2(v_plane_abcd, v_ray_origin, v_ray_direction):
     t = numerator / denominator
 
     # Compute the intersection point
-    intersection_point = v_ray_origin + t[:,None] * v_ray_direction
+    intersection_point = v_ray_origin + t[:, None] * v_ray_direction
     return intersection_point
 
+
 def sigmoid(z):
-    return 1/(1 + np.exp(-z))
+    return 1 / (1 + np.exp(-z))
+
 
 def export_point_cloud(v_file_path, v_pcs):
     pc = o3d.geometry.PointCloud()

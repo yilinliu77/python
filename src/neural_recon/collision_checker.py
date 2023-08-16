@@ -47,10 +47,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from src.neural_recon.optimize_segment import compute_initial_normal, compute_roi, sample_img_prediction, \
     compute_initial_normal_based_on_pos, compute_initial_normal_based_on_camera, sample_img, sample_img_prediction2
-from shared.common_utils import debug_imgs, to_homogeneous, save_line_cloud, to_homogeneous_vector, normalize_tensor, \
-    to_homogeneous_mat_tensor, to_homogeneous_tensor, normalized_torch_img_to_numpy, padding, \
-    vector_to_sphere_coordinate, sphere_coordinate_to_vector, caculate_align_mat, normalize_vector, \
-    pad_and_enlarge_along_y, refresh_timer, get_line_mesh, ray_line_intersection1, ray_line_intersection2
+from shared.common_utils import *
 
 from src.neural_recon.colmap_io import read_dataset, Image, Point_3d, check_visibility
 # from src.neural_recon.phase1 import NGPModel

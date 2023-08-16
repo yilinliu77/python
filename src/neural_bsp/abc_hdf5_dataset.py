@@ -1,40 +1,12 @@
 import math
 import os.path
-import random
 import time
 
 import h5py
-import hydra
 import numpy as np
-# import matplotlib
-# matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import ray
-import scipy
 import torch
-from lightning_fabric import seed_everything
-from omegaconf import DictConfig, OmegaConf
-from pytorch_lightning import Trainer
-from pytorch_lightning.callbacks import ModelCheckpoint
-from scipy.sparse import csr_matrix
-from scipy.sparse.csgraph import minimum_spanning_tree
-from sklearn.cluster import KMeans
-import networkx as nx
-import matplotlib
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import pytorch_lightning as pl
-import faiss
-import torch
-from torch import nn
-from torch.optim import Adam
 from torch.utils.data import DataLoader
-from torchvision.ops import sigmoid_focal_loss
-from tqdm import tqdm
 
-from shared.fast_dataloader import FastDataLoader
-from src.neural_bsp.model import AttU_Net_3D, U_Net_3D
-from shared.common_utils import export_point_cloud, sigmoid
-import torch.distributed as dist
 
 class ABC_dataset(torch.utils.data.Dataset):
     def __init__(self, v_data_root=None, v_training_mode=None):
@@ -217,11 +189,36 @@ class ABC_dataset_patch_hdf5_sample(ABC_dataset):
                 torch.from_numpy(v_batches[0][3])]
 
 
-class ABC_dataset_patch_hdf5_test(ABC_dataset):
+class ABC_dataset_patch_hdf5_dir(ABC_dataset_patch_hdf5_sample):
     def __init__(self, v_data_root, v_training_mode, v_batch_size):
+        ABC_dataset_patch_hdf5_sample.__init__(self, v_data_root, v_training_mode, v_batch_size)
+
+    def __getitem__(self, idx):
+        times = [0] * 10
+        cur_time = time.time()
+        id_object, id_patch, feat_data, flag_data = self.get_patch(idx)
+        times[0] += time.time() - cur_time
+        cur_time = time.time()
+        feat_data = np.transpose(feat_data.astype(np.float32) / 65535, (0, 4, 1, 2, 3)) * np.pi * 2
+        dx = np.cos(feat_data[:, 1]) * np.sin(feat_data[:, 2])
+        dy = np.sin(feat_data[:, 1]) * np.sin(feat_data[:, 2])
+        dz = np.cos(feat_data[:, 2])
+        feat_data = np.concatenate([dx[:, None], dy[:, None], dz[:, None], feat_data[:, 0:1]], axis=1)
+        flag_data = flag_data.astype(np.float32)[:, None, :, :, :]
+        times[1] += time.time() - cur_time
+        return np.ascontiguousarray(feat_data), np.ascontiguousarray(flag_data), self.names[id_object], id_patch
+
+    def collate_fn(v_batches):
+        return [torch.from_numpy(v_batches[0][0]),
+                torch.from_numpy(v_batches[0][1]),
+                v_batches[0][2],
+                torch.from_numpy(v_batches[0][3])]
+
+
+class ABC_dataset_patch_hdf5_test(ABC_dataset):
+    def __init__(self, v_data_root, v_training_mode, v_test_list):
         super(ABC_dataset_patch_hdf5_test, self).__init__(None, None)
         self.data_root = v_data_root
-        self.batch_size = v_batch_size
         self.mode = v_training_mode
 
         with h5py.File(self.data_root, "r") as f:
@@ -229,7 +226,18 @@ class ABC_dataset_patch_hdf5_test(ABC_dataset):
             self.total_num_items = f["features"].shape[0]
             self.names = np.asarray(["{:08d}".format(item) for item in np.asarray(f["names"])])
 
-        assert v_batch_size == self.num_patches_per_item
+        self.idxs = np.arange(self.total_num_items)
+
+        if len(v_test_list) > 0:
+            self.idxs = np.zeros(len(v_test_list), dtype=np.int32)
+            for id, name in enumerate(v_test_list):
+                if name in self.names:
+                    self.idxs[id] = np.where(self.names == name)[0][0]
+                else:
+                    print("Cannot find ", name, " in the dataset")
+                    raise ""
+            self.names = np.asarray(v_test_list)
+            self.total_num_items = len(v_test_list)
 
         self.num_items = self.total_num_items
 
@@ -238,9 +246,10 @@ class ABC_dataset_patch_hdf5_test(ABC_dataset):
 
     def get_patch(self, idx):
         with h5py.File(self.data_root, "r") as f:
-            features = f["features"][idx, :]
-            flags = f["flags"][idx, :]
-        return np.asarray([idx] * self.batch_size), np.arange(self.num_patches_per_item), features, flags
+            features = f["features"][self.idxs[idx], :]
+            flags = f["flags"][self.idxs[idx], :]
+        return np.asarray(
+            [idx] * self.num_patches_per_item), np.arange(self.num_patches_per_item), features, flags
 
     def __getitem__(self, idx):
         times = [0] * 10
@@ -288,7 +297,7 @@ class ABC_dataset_patch_train(ABC_dataset):
             self.id_object = self.id_object.reshape(-1)
             self.num_items = math.ceil(self.id_object.shape[0] / self.batch_size)
         else:
-            raise ""
+            pass
 
     def __len__(self):
         return self.num_items
@@ -307,10 +316,9 @@ class ABC_dataset_patch_train(ABC_dataset):
         else:
             raise ""
         features = np.load(self.objects[id_object] + "_feat.npy", mmap_mode="r")
-        choice = np.random.choice(features.shape[0], self.batch_size)
-        features = features[choice]
+        features = features[id_patch]
         flags = np.load(self.objects[id_object] + "_flag.npy", mmap_mode="r")
-        flags = flags[choice]
+        flags = flags[id_patch]
         return np.asarray([id_object] * self.batch_size), id_patch, features, flags
 
     def __getitem__(self, idx):
@@ -331,11 +339,43 @@ class ABC_dataset_patch_train(ABC_dataset):
                 torch.from_numpy(v_batches[0][3])]
 
 
-class ABC_dataset_patch_test(ABC_dataset_patch_train):
+class ABC_dataset_patch_train_dir(ABC_dataset_patch_train):
     def __init__(self, v_data_root, v_training_mode, v_batch_size):
-        super(ABC_dataset_patch_test, self).__init__(v_data_root, "training", v_batch_size)
-        assert v_batch_size == self.num_patches_per_item
-        self.num_objects = len(self.names)
+        ABC_dataset_patch_train.__init__(self, v_data_root, v_training_mode, v_batch_size)
+
+    def __getitem__(self, idx):
+        times = [0] * 10
+        cur_time = time.time()
+        id_object, id_patch, feat_data, flag_data = self.get_patch(idx)
+        times[0] += time.time() - cur_time
+        cur_time = time.time()
+        feat_data = np.transpose(feat_data.astype(np.float32) / 65535, (0, 4, 1, 2, 3)) * np.pi * 2
+        dx = np.cos(feat_data[:, 1]) * np.sin(feat_data[:, 2])
+        dy = np.sin(feat_data[:, 1]) * np.sin(feat_data[:, 2])
+        dz = np.cos(feat_data[:, 2])
+        feat_data = np.concatenate([dx[:, None], dy[:, None], dz[:, None], feat_data[:, 0:1]], axis=1)
+        flag_data = flag_data.astype(np.float32)[:, None, :, :, :]
+        times[1] += time.time() - cur_time
+        return np.ascontiguousarray(feat_data), np.ascontiguousarray(flag_data), self.names[id_object], id_patch
+
+
+class ABC_dataset_patch_test(ABC_dataset_patch_train):
+    def __init__(self, v_data_root, v_training_mode, v_test_list):
+        super(ABC_dataset_patch_test, self).__init__(v_data_root, v_training_mode, 512)
+        self.idxs = np.arange(self.total_num_items)
+
+        if len(v_test_list) > 0:
+            self.idxs = np.zeros(len(v_test_list), dtype=np.int32)
+            for id, name in enumerate(v_test_list):
+                if name in self.names:
+                    self.idxs[id] = np.where(self.names == name)[0][0]
+                else:
+                    print("Cannot find ", name, " in the dataset")
+                    raise ""
+            self.names = np.asarray(v_test_list)
+            self.total_num_items = len(v_test_list)
+
+        self.num_items = self.total_num_items
 
     def get_patch(self, v_id_item):
         features = np.load(self.objects[v_id_item] + "_feat.npy")

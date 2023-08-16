@@ -264,6 +264,7 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
 
                 samples_abcd[v_patch_id],
                 sample_points_on_face_src,
+                num_sample_points_per_tri,
 
                 remain_flag,
                 local_edge_pos,

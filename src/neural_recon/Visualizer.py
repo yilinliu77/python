@@ -95,6 +95,7 @@ class Visualizer:
 
                      samples_abcd,
                      sample_points_on_face_src,
+                     num_sample_points_per_tri,
 
                      remain_flag,
                      local_edge_pos,
@@ -107,33 +108,51 @@ class Visualizer:
 
                      ):
         num_sample = samples_abcd.shape[0]
+        num_triangles = num_sample_points_per_tri.shape[0] // num_sample
         num_img = len(self.imgs)-1
+
+        img_shape
+
+        input_imgs = [self.imgs[0].copy()] + [item.copy() for item in self.imgs[1:]]
+
+        points_ref = (self.intrinsic @ sample_points_on_face_src.T).T.cpu().numpy()
+        points_ref = points_ref[:, :2] / points_ref[:, 2:]
+        points_ref = np.around(points_ref * img_ref.shape[:2]).astype(np.int64)
+
+        points_src = (self.transformation[i_img] @ to_homogeneous_tensor(sample_points_on_face_src).T).T.cpu().numpy()
+        points_src = points_src[:, :2] / points_src[:, 2:3]
+        points_src = np.around(points_src * img_ref.shape[:2]).astype(np.int64)
+
         for i_img in range(num_img):
-            img_ref = self.imgs[0].copy()
-            imgs_src = [item.copy() for item in self.imgs[1:]]
+
 
             # Draw points
-            points_ref = (self.intrinsic @ sample_points_on_face_src.T).T.cpu().numpy()
-            points_ref = points_ref[:,:2] / points_ref[:, 2:]
-            points_ref = np.around(points_ref * img_ref.shape[:2]).astype(np.int64)
 
-            points_src = (self.transformation[i_img] @ to_homogeneous_tensor(sample_points_on_face_src).T).T.cpu().numpy()
-            points_src = points_src[:, :2] / points_src[:, 2:3]
-            points_src = np.around(points_src * img_ref.shape[:2]).astype(np.int64)
 
-            for i_point in range(points_ref.shape[0]):
-                cv2.circle(img_ref, points_ref[i_point], 1, (0, 255, 0), 1)
-                cv2.circle(imgs_src[i_img], points_src[i_point], 1, (0, 255, 0), 1)
+            id_points = num_sample_points_per_tri.cumsum(0)
+            id_points = torch.cat((torch.zeros_like(id_points[0:1]), id_points), dim=0)
 
-            cv2.putText(imgs_src[i_img],
-                        "NCC: {:.4f}; Edge: {:.4f}; Final: {:.4f}".format(
-                            ncc_loss[i_img, i_sample].item(), edge_loss[i_img, i_sample].item(), final_loss[i_img, i_sample].item()
-                        ),
-                        (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2, cv2.LINE_AA)
+            imgs = []
+            for i_sample in range(num_sample):
+                img = imgs_src[i_img].copy()
 
-            total_img = np.stack(
-                [img_ref] + imgs_src[:-1], axis=1).reshape(1600, 5, 800, 3).reshape(1600, 4000, 3)
-            total_img = np.concatenate([img_ref] + imgs_src[:-1], axis=1)
+                i_start = i_sample * num_triangles
+                i_end = (i_sample+1) * num_triangles
+                points_2d = points_src[id_points[i_start]:id_points[i_end]]
+
+                for i_point in range(points_2d.shape[0]):
+                    cv2.circle(img, points_2d[i_point], 1, (0, 255, 0), 1)
+
+                cv2.putText(img,
+                            "NCC: {:.4f}; Edge: {:.4f}; Final: {:.4f}".format(
+                                ncc_loss[i_img, i_sample].item(),
+                                edge_loss[i_img, i_sample].item(),
+                                final_loss[i_img, i_sample].item()
+                            ),
+                            (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2, cv2.LINE_AA)
+                imgs.append(img)
+            total_img = np.stack(imgs, axis=0).reshape(10, 10, 800, 800, 3)
+            total_img = np.transpose(total_img, (0,2,1,3,4)).reshape(8000,8000,3)
             cv2.imwrite(os.path.join(self.log_root, "patch_{}/{}.png".format(v_patch_id, v_iter)), total_img)
             pass
         pass

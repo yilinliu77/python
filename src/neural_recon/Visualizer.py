@@ -29,7 +29,7 @@ class Visualizer:
         self.transformation = transformation
         self.tri_colors = [generate_random_color() for _ in range(100)]
 
-        self.viz_interval = 100
+        self.viz_interval = 2000
 
         os.mkdir(os.path.join(self.log_root, "0total"))
         for i in range(self.num_patches):

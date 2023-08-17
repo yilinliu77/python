@@ -281,22 +281,6 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
                 id_best,
             )
 
-            if cur_iter[v_patch_id] % 500 == 0 and cur_iter[v_patch_id] != 0:
-                vis_best_num = 1
-                if vis_best_num > 1:
-                    _, sorted_indices = torch.sort(final_loss_sum)
-                    for i in range(vis_best_num):
-                        vis_idx = sorted_indices[i].item()
-                        loss_text = 'NccLoss:{:.4f} EdgeLoss:{:.4f} SumLoss:{:.4f}'.format(
-                            ncc_loss_sum[vis_idx].cpu().item(),
-                            edge_loss_sum[vis_idx].cpu().item(),
-                            final_loss_sum[vis_idx].cpu().item())
-                else:
-                    loss_text = 'NccLoss:{:.4f} EdgeLoss:{:.4f} SumLoss:{:.4f}'.format(
-                        ncc_loss_sum[id_best].cpu().item(),
-                        edge_loss_sum[id_best].cpu().item(),
-                        final_loss_sum[id_best].cpu().item())
-
             # 8. Control the end of the optimization
             cur_loss = final_loss_sum[id_best].cpu().item()
             if best_loss[v_patch_id] is not None:

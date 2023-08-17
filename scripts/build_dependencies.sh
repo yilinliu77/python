@@ -25,6 +25,7 @@ ROOT_DIR=$PWD
 
 # Miniconda3
 #https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-Linux-x86_64.sh
+# apt install libgl1-mesa-glx libegl1-mesa-dev
 
 conda install -c intel mkl mkl-devel mkl-static mkl-include -y
 conda install -c pytorch -c nvidia conda==23.5.2 pytorch torchvision torchaudio pytorch-cuda=11.8 -y

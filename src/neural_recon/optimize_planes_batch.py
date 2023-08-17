@@ -68,7 +68,7 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
             if cur_iter < milestones[i]:
                 scale_factor = scale_factors[i]
                 break
-        #return scale_factor
+        # return scale_factor
         return 1
         return np.clip(abs(np.random.standard_cauchy() * scale_factor), 0.001, 5.0)
 
@@ -98,7 +98,11 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
         intrinsic,
         transformation,
     )
-    visualizer.save_planes("init_plane.ply" ,initialized_planes, v_rays_c, patch_vertexes_id)
+    visualizer.save_planes("init_plane.ply", initialized_planes, v_rays_c, patch_vertexes_id)
+    visualizer.viz_results(
+        -1,
+        initialized_planes, v_rays_c, patch_vertexes_id,
+    )
 
     while True:
         visualizer.start_iter()
@@ -271,149 +275,11 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
                 local_centroid,
 
                 final_loss,
+                final_loss_sum,
                 ncc_loss,
                 edge_loss,
                 id_best,
             )
-
-            def vis_patch(patch_id_list, abcd_list, cur_iter_=0, best_count=0, text=None):
-                def draw_sample(v_patch_id, local_plane_parameter, img_src_id_, img11_, img21_, v_c1_2_c2_):
-                    # 2. Get some variables
-                    num_plane_sample_ = local_plane_parameter.shape[0]
-                    num_vertex = len(patch_vertexes_id[v_patch_id])
-                    local_vertex_pos = intersection_of_ray_and_all_plane(local_plane_parameter,
-                                                                         v_rays_c[patch_vertexes_id[
-                                                                             v_patch_id]])  # 100 * n * 3
-                    # 3. Construct the triangles
-                    edges_idx = [[i, (i + 1) % num_vertex] for i in range(num_vertex)]
-                    local_edge_pos = local_vertex_pos[:, edges_idx]
-                    local_centroid = intersection_of_ray_and_all_plane(local_plane_parameter,
-                                                                       v_centroid_rays_c[v_patch_id:v_patch_id + 1])[:,
-                                     0]
-                    triangles_pos = torch.cat(
-                        (local_edge_pos, local_centroid[:, None, None, :].tile(1, num_vertex, 1, 1)),
-                        dim=2)
-                    triangles_pos = triangles_pos.view(-1, 3, 3)  # (100*num_tri,3,3)
-
-                    # 4. Sample points in this plane
-                    # ncc_loss sample points
-                    num_sample_points, sample_points_on_face = sample_triangles(100, triangles_pos[:, 0, :],
-                                                                                triangles_pos[:, 1, :],
-                                                                                triangles_pos[:, 2, :],
-                                                                                v_sample_edge=False)
-
-                    origin_c2 = torch.linalg.inv(v_c1_2_c2_)[:3, -1].tile(sample_points_on_face.shape[0], 1)
-                    collision_flag = collision_checker.check_ray(v_patch_id,
-                                                                 origin_c2, sample_points_on_face - origin_c2)
-
-                    # sample_points_c = sample_points_on_face[~collision_flag]
-                    sample_points_c = sample_points_on_face
-                    all_points_c = local_vertex_pos[0].view(-1, 3)
-                    all_points_c = torch.cat((all_points_c, local_centroid[0].unsqueeze(0)), dim=0)
-
-                    shape = img11_.shape[:2][::-1]
-
-                    # vertex
-                    p_2d1 = (intrinsic @ all_points_c.T).T.cpu().numpy()
-                    p_2d2 = (transformation[img_src_id_] @ to_homogeneous_tensor(all_points_c).T).T.cpu().numpy()
-                    p_2d1 = p_2d1[:, :2] / p_2d1[:, 2:3]
-                    p_2d2 = p_2d2[:, :2] / p_2d2[:, 2:3]
-                    p_2d1 = np.around(p_2d1 * shape).astype(np.int64)
-                    p_2d2 = np.around(p_2d2 * shape).astype(np.int64)
-                    # sample points
-                    s_2d1 = (intrinsic @ sample_points_c.T).T.cpu().numpy()
-                    s_2d2 = (transformation[img_src_id_] @ to_homogeneous_tensor(sample_points_c).T).T.cpu().numpy()
-                    s_2d1 = s_2d1[:, :2] / s_2d1[:, 2:3]
-                    s_2d2 = s_2d2[:, :2] / s_2d2[:, 2:3]
-                    s_2d1 = np.around(s_2d1 * shape).astype(np.int64)
-                    s_2d2 = np.around(s_2d2 * shape).astype(np.int64)
-
-                    # edge_loss sample points
-                    # 1. Get the projected points in both images
-                    v_edge_points = local_edge_pos.view(-1, 2, 3)
-                    points_2d1, points_2d2, valid_mask = get_projections(v_edge_points.view(-1, 3),
-                                                                         intrinsic, transformation[img_src_id_])
-                    num_edge = num_vertex
-                    points_2d1 = points_2d1.reshape(num_edge, 2, 2)
-                    points_2d2 = points_2d2.reshape(num_edge, 2, 2)
-
-                    # 2. Sample the same number of points along the segments
-                    num_horizontal = torch.clamp(
-                        (torch.linalg.norm(v_edge_points[:, 0] - v_edge_points[:, 1], dim=-1) /
-                         edge_loss_computer.sample_density).to(torch.long), 2, 1000)
-
-                    begin_idxes = num_horizontal.cumsum(dim=0)
-                    begin_idxes = begin_idxes.roll(1)
-                    begin_idxes[0] = 0
-                    dx = torch.arange(num_horizontal.sum(), device=v_edge_points.device) - \
-                         begin_idxes.repeat_interleave(num_horizontal)
-                    dx = dx / (num_horizontal - 1).repeat_interleave(num_horizontal)
-                    dir1 = points_2d1[:, 1] - points_2d1[:, 0]
-                    sampled_points_on_edge1 = points_2d1[:, 0].repeat_interleave(num_horizontal, dim=0) \
-                                              + dx[:, None] * dir1.repeat_interleave(num_horizontal, dim=0)
-
-                    dir2 = points_2d2[:, 1] - points_2d2[:, 0]
-                    sampled_points_on_edge2 = points_2d2[:, 0].repeat_interleave(num_horizontal, dim=0) \
-                                              + dx[:, None] * dir2.repeat_interleave(num_horizontal, dim=0)
-
-                    sampled_points_on_edge1 = np.around(sampled_points_on_edge1.cpu().numpy() * shape).astype(np.int64)
-                    sampled_points_on_edge2 = np.around(sampled_points_on_edge2.cpu().numpy() * shape).astype(np.int64)
-
-                    vertex_point_color = (0, 0, 255)
-                    point_thickness = 3
-
-                    tri_c = 0
-                    tri_point_num = torch.cumsum(num_sample_points, dim=0)
-                    for i_point in range(s_2d1.shape[0]):
-                        if i_point >= tri_point_num[tri_c]:
-                            tri_c += 1
-                        sample_point_color = tri_colors[tri_c]
-                        if collision_flag[i_point]:
-                            sample_point_color = (0, 0, 0)
-                        cv2.circle(img11_, s_2d1[i_point], 1, sample_point_color, 1)
-                        cv2.circle(img21_, s_2d2[i_point], 1, sample_point_color, 1)
-
-                    for i_point in range(sampled_points_on_edge1.shape[0]):
-                        cv2.circle(img11_, sampled_points_on_edge1[i_point], 1, (0, 255, 0), 1)
-                        cv2.circle(img21_, sampled_points_on_edge2[i_point], 1, (0, 255, 0), 1)
-
-                    for i_point in range(p_2d1.shape[0]):
-                        cv2.circle(img11_, p_2d1[i_point], 1, vertex_point_color, point_thickness)
-                        cv2.circle(img21_, p_2d2[i_point], 1, vertex_point_color, point_thickness)
-
-                    return img11_, img21_
-
-                for img_src_id_c in range(transformation.shape[0]):
-                    if debug_srcimg_id is not None and debug_srcimg_id != img_src_id_c:
-                        continue
-
-                    ref_img = imgs[0].cpu().numpy() * 255
-                    src_imgs = imgs[img_src_id_c + 1].cpu().numpy() * 255
-                    img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
-                    img12 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
-                    img21 = cv2.cvtColor(src_imgs, cv2.COLOR_GRAY2BGR)
-                    img22 = cv2.cvtColor(src_imgs, cv2.COLOR_GRAY2BGR)
-
-                    for i in range(len(patch_id_list)):
-                        if debug_patch_id is not None and patch_id_list[i] not in debug_patch_id:
-                            continue
-                        img11, img21 = draw_sample(patch_id_list[i], abcd_list[i].unsqueeze(0),
-                                                   img_src_id_c, img11, img21, v_c1_2_c2_list[img_src_id_c])
-
-                    if text:
-                        cv2.putText(img21, text, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2, cv2.LINE_AA)
-
-                    cv2.imwrite(os.path.join(v_log_root, "iter{}_patch{}_srcimg{}_best{}.jpg").
-                                format(cur_iter_, patch_id_list, img_src_id_c, best_count),
-                                np.concatenate([
-                                    np.concatenate([img11, img21], axis=1),
-                                    np.concatenate([img12, img22], axis=1),
-                                ], axis=0)
-                                )
-
-            if cur_iter[v_patch_id] == 0:
-                vis_patch([v_patch_id], [initialized_planes[v_patch_id]],
-                          cur_iter_=-1, text=str(final_loss_sum[id_best].cpu()))
 
             if cur_iter[v_patch_id] % 500 == 0 and cur_iter[v_patch_id] != 0:
                 vis_best_num = 1
@@ -425,15 +291,11 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
                             ncc_loss_sum[vis_idx].cpu().item(),
                             edge_loss_sum[vis_idx].cpu().item(),
                             final_loss_sum[vis_idx].cpu().item())
-                        vis_patch([v_patch_id], [samples_abcd[v_patch_id][vis_idx]],
-                                  cur_iter_=cur_iter[v_patch_id], best_count=i, text=loss_text)
                 else:
                     loss_text = 'NccLoss:{:.4f} EdgeLoss:{:.4f} SumLoss:{:.4f}'.format(
                         ncc_loss_sum[id_best].cpu().item(),
                         edge_loss_sum[id_best].cpu().item(),
                         final_loss_sum[id_best].cpu().item())
-                    vis_patch([v_patch_id], [optimized_abcd_list[v_patch_id]],
-                              cur_iter_=cur_iter[v_patch_id], text=loss_text)
 
             # 8. Control the end of the optimization
             cur_loss = final_loss_sum[id_best].cpu().item()
@@ -486,6 +348,10 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
 
         collision_checker.add_triangles(final_triangles, tri_to_patch)
         visualizer.update_timer("Update2")
+        visualizer.viz_results(
+            cur_iter[0],
+            optimized_abcd_list, v_rays_c, patch_vertexes_id,
+        )
 
         continue
 

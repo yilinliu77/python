@@ -22,6 +22,7 @@ import torch.distributed as dist
 
 from torchmetrics.classification import BinaryPrecision, BinaryRecall, BinaryAveragePrecision, BinaryF1Score
 
+
 class Patch_phase(pl.LightningModule):
     def __init__(self, hparams, v_data):
         super(Patch_phase, self).__init__()
@@ -64,7 +65,7 @@ class Patch_phase(pl.LightningModule):
         }
 
         # self.target_viz_name = "00015724"
-        pr_computer={
+        pr_computer = {
             "P_3": BinaryPrecision(threshold=0.3),
             "P_5": BinaryPrecision(threshold=0.5),
             "P_7": BinaryPrecision(threshold=0.7),
@@ -73,7 +74,7 @@ class Patch_phase(pl.LightningModule):
             "R_5": BinaryRecall(threshold=0.5),
             "R_7": BinaryRecall(threshold=0.7),
             "R_9": BinaryRecall(threshold=0.9),
-            "AP": BinaryAveragePrecision(thresholds=[0.5,0.6,0.7,0.8,0.9]),
+            "AP": BinaryAveragePrecision(thresholds=[0.5, 0.6, 0.7, 0.8, 0.9]),
             "F1": BinaryF1Score(threshold=0.5),
         }
         self.pr_computer = MetricCollection(pr_computer)
@@ -89,7 +90,7 @@ class Patch_phase(pl.LightningModule):
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
-                          prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
+                          prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else 2,
                           )
 
     def val_dataloader(self):
@@ -104,7 +105,7 @@ class Patch_phase(pl.LightningModule):
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
-                          prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
+                          prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else 2,
                           )
 
     def configure_optimizers(self):
@@ -209,7 +210,7 @@ class Patch_phase(pl.LightningModule):
             return
 
         self.log_dict(self.pr_computer.compute(), prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                        sync_dist=True)
+                      sync_dist=True)
 
         self.pr_computer.reset()
 
@@ -240,11 +241,13 @@ class Patch_phase(pl.LightningModule):
 
         predicted_labels = sigmoid(predicted_labels[0]) > 0.5
         mask = predicted_labels.reshape(-1)
-        export_point_cloud(os.path.join(self.log_root, "{}_{}_pred.ply".format(idx,self.target_viz_name)), query_points[mask])
+        export_point_cloud(os.path.join(self.log_root, "{}_{}_pred.ply".format(idx, self.target_viz_name)),
+                           query_points[mask])
 
         gt_labels = sigmoid(gt_labels[0]) > 0.5
         mask = gt_labels.reshape(-1)
-        export_point_cloud(os.path.join(self.log_root, "{}_{}_gt.ply".format(idx,self.target_viz_name)), query_points[mask])
+        export_point_cloud(os.path.join(self.log_root, "{}_{}_gt.ply".format(idx, self.target_viz_name)),
+                           query_points[mask])
 
         self.viz_data["gt"].clear()
         self.viz_data["prediction"].clear()
@@ -283,12 +286,19 @@ class Patch_phase(pl.LightningModule):
         # Save
         if len(self.hydra_conf["dataset"]["test_list"]) > 0:
             threshold = self.hydra_conf["model"]["test_threshold"]
-            predicted_labels = (torch.sigmoid(outputs[:,0]) > threshold).cpu().numpy().astype(np.ubyte)
-            gt_labels = (torch.sigmoid(data[1][:,0]) > threshold).cpu().numpy().astype(np.ubyte)
-            features = (data[0].permute(0, 2, 3, 4, 1).cpu().numpy() * 65535).astype(np.uint16)
+            predicted_labels = (torch.sigmoid(outputs[:, 0]) > threshold).cpu().numpy().astype(np.ubyte)
+            predicted_labels = np.transpose(
+                predicted_labels.reshape((8, 8, 8, 32, 32, 32)), (0, 3, 1, 4, 2, 5)).reshape((256, 256, 256))
+            gt_labels = (torch.sigmoid(data[1][:, 0]) > threshold).cpu().numpy().astype(np.ubyte)
+            gt_labels = np.transpose(
+                gt_labels.reshape((8, 8, 8, 32, 32, 32)), (0, 3, 1, 4, 2, 5)).reshape((256, 256, 256))
+            features = (data[0].permute(0, 2, 3, 4, 1).cpu().numpy()).astype(np.float32)
+            features = np.transpose(
+                features.reshape((8, 8, 8, 32, 32, 32, 4)), (0, 3, 1, 4, 2, 5, 6)).reshape((256, 256, 256, 4))
+            features[:, :, :, 3] /= np.pi
 
             np.save(os.path.join(self.log_root, "{}_feat.npy".format(name)), features)
-            np.save(os.path.join(self.log_root, "{}_pred.npy".format(name)),predicted_labels)
+            np.save(os.path.join(self.log_root, "{}_pred.npy".format(name)), predicted_labels)
             np.save(os.path.join(self.log_root, "{}_gt.npy".format(name)), gt_labels)
 
         return
@@ -298,6 +308,7 @@ class Patch_phase(pl.LightningModule):
         for key in metrics:
             print("{:3}: {:.3f}".format(key, metrics[key].cpu().item()))
         print("Loss: {:.3f}".format(self.trainer.callback_metrics["Test_Loss_epoch"].cpu().item()))
+
 
 @hydra.main(config_name="train_model_patch.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
@@ -319,7 +330,7 @@ def main(v_cfg: DictConfig):
         default_root_dir=log_dir,
 
         accelerator='gpu',
-        strategy = "ddp_find_unused_parameters_false" if v_cfg["trainer"].gpu > 1 else "auto",
+        strategy="ddp_find_unused_parameters_false" if v_cfg["trainer"].gpu > 1 else "auto",
         devices=v_cfg["trainer"].gpu,
 
         enable_model_summary=False,

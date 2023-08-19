@@ -46,5 +46,25 @@ def generate_dataset():
         np.save(str(root_path/"npy"/"{}".format(i)), data)
         np.savez_compressed(str(root_path/"npy"/"{}_c".format(i)), data)
 
+    hdf1.close()
+    hdf2.close()
+    hdf3.close()
+    hdf4.close()
+
+
+def test_write_single():
+    hdf1_ = root_path / "test_compression.hdf5"
+    hdf2_ = root_path / "test_compression_shuffle"
+    hdf3_ = root_path / "test_vanilla.hdf5"
+    hdf4_ = root_path / "test_typed.hdf5"
+    npy_folder = root_path / "npy"
+
+    hdf1 = h5py.File(hdf1_, "w")
+    hdf2 = h5py.File(hdf2_, "w")
+    hdf3 = h5py.File(hdf3_, "w")
+    hdf4 = h5py.File(hdf4_, "w")
+
+
 if __name__ == '__main__':
-    generate_dataset()
+    # generate_dataset()
+    test_write_single()

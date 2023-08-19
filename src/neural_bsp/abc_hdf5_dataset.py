@@ -98,7 +98,7 @@ class ABC_dataset_patch_hdf5_dir(ABC_dataset):
                 np.arange(self.num_patches), indexing="ij"), axis=2)
         else:
             raise ""
-        self.index = self.index.reshape((-1, 2, self.batch_size, 2)).reshape((-1, self.batch_size, 2))
+        self.index = self.index.reshape((self.index.shape[0], -1, self.batch_size, 2)).reshape((-1, self.batch_size, 2))
 
     def __len__(self):
         return self.index.shape[0]

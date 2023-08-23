@@ -582,11 +582,13 @@ class NoUpsampling(AbstractUpsampling):
 
 
 class TestNetDoubleConv(nn.Module):
-    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
+    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5,
+                 v_input_channel=3, *kwargs
+                 ):
         super(TestNetDoubleConv, self).__init__()
         self.f_maps = v_phase
         self.encoders = create_encoders(
-            4,
+            v_input_channel,
             self.f_maps,
             DoubleConv,
             3,
@@ -630,11 +632,14 @@ class TestNetDoubleConv(nn.Module):
         loss = self.loss_func(v_predictions, labels, self.loss_alpha)
         return loss
 
+
 class TestNetResidual(TestNetDoubleConv):
-    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
+    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5,
+                 v_input_channel=3, *kwargs
+                 ):
         super().__init__(v_phase, v_loss_type, v_alpha)
         self.encoders = create_encoders(
-            4,
+            v_input_channel,
             self.f_maps,
             ResNetBlock,
             3,
@@ -652,11 +657,14 @@ class TestNetResidual(TestNetDoubleConv):
             8,
             True)
 
+
 class TestNetResidualSE(TestNetDoubleConv):
-    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
+    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5,
+                 v_input_channel=3, *kwargs
+                 ):
         super().__init__(v_phase, v_loss_type, v_alpha)
         self.encoders = create_encoders(
-            4,
+            v_input_channel,
             self.f_maps,
             ResNetBlockSE,
             3,
@@ -724,86 +732,6 @@ class up_conv(nn.Module):
         return x
 
 
-class Attention_block(nn.Module):
-    def __init__(self, F_g, F_l, F_int):
-        super(Attention_block, self).__init__()
-        self.W_g = nn.Sequential(
-            nn.Conv3d(F_g, F_int, kernel_size=1, stride=1, padding=0, bias=True),
-            nn.BatchNorm3d(F_int)
-        )
-
-        self.W_x = nn.Sequential(
-            nn.Conv3d(F_l, F_int, kernel_size=1, stride=1, padding=0, bias=True),
-            nn.BatchNorm3d(F_int)
-        )
-
-        self.psi = nn.Sequential(
-            nn.Conv3d(F_int, 1, kernel_size=1, stride=1, padding=0, bias=True),
-            nn.BatchNorm3d(1),
-            nn.Sigmoid()
-        )
-
-        self.relu = nn.ReLU(inplace=True)
-
-    def forward(self, g, x):
-        # down-sample
-        g1 = self.W_g(g)
-        # up-sample
-        x1 = self.W_x(x)
-        # concat + relu
-        psi = self.relu(g1 + x1)
-        # weight matrix
-        psi = self.psi(psi)
-        # weighted x
-        return x * psi
-
-
-class AttU_Net_3D(nn.Module):
-    def __init__(self, img_ch=3, output_ch=1, v_depth=4):
-        super(AttU_Net_3D, self).__init__()
-        self.depths = v_depth
-        self.Maxpool = nn.MaxPool3d(kernel_size=2, stride=2)
-        self.conv = nn.ModuleList()
-        self.up = nn.ModuleList()
-        self.att = nn.ModuleList()
-        self.up_conv = nn.ModuleList()
-        base_channel = 16
-        self.conv1 = nn.Sequential(
-            conv_block(ch_in=img_ch, ch_out=base_channel),
-            nn.MaxPool3d(kernel_size=4, stride=4),
-            conv_block(ch_in=base_channel, ch_out=base_channel),
-        )
-        cur_channel = base_channel
-        for i in range(v_depth):
-            self.conv.append(conv_block(ch_in=cur_channel, ch_out=cur_channel * 2))
-
-            self.up.append(up_conv(ch_in=cur_channel * 2, ch_out=cur_channel))
-            self.up_conv.append(conv_block(ch_in=cur_channel * 2, ch_out=cur_channel))
-            self.att.append(Attention_block(F_g=cur_channel, F_l=cur_channel, F_int=cur_channel // 2))
-
-            cur_channel = cur_channel * 2
-
-        self.Conv_1x1 = nn.Conv3d(base_channel, output_ch, kernel_size=1, stride=1, padding=0)
-
-    def forward(self, x):
-        # encoding path
-        x1 = self.conv1(x)
-
-        x = [x1, ]
-        for i in range(self.depths):
-            x.append(self.Maxpool(self.conv[i](x[-1])))
-
-        up_x = [x[-1]]
-        for i in range(self.depths - 1, -1, -1):
-            item = self.up[i](up_x[-1])
-            x_i = self.att[i](g=item, x=x[i])
-            item = torch.cat((item, x_i), dim=1)
-            up_x.append(self.up_conv[i](item))
-
-        d1 = self.Conv_1x1(up_x[-1])
-        return d1
-
-
 class U_Net_3D(nn.Module):
     def __init__(self, img_ch=3, output_ch=1, v_depth=5, v_pool_first=True, base_channel=16, with_bn=True):
         super(U_Net_3D, self).__init__()
@@ -863,13 +791,13 @@ class U_Net_3D(nn.Module):
 
 
 class Base_model(nn.Module):
-    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
+    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5, v_input_channel=3, v_depth=4, v_base_channel=16):
         super(Base_model, self).__init__()
         self.phase = v_phase
-        self.encoder = U_Net_3D(img_ch=3, output_ch=1)
+        self.encoder = U_Net_3D(
+            img_ch=v_input_channel, output_ch=1, v_pool_first=False, v_depth=v_depth, base_channel=v_base_channel)
         self.loss_func = globals()[v_loss_type]
         self.loss_alpha = v_alpha
-        # self.encoder = AttU_Net_3D(img_ch=4, output_ch=1)
 
     def forward(self, v_data, v_training=False):
         features, labels = v_data
@@ -884,42 +812,10 @@ class Base_model(nn.Module):
         return loss
 
 
-class Atten_model(nn.Module):
-    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
-        super(Atten_model, self).__init__(v_phase, v_loss_type, v_alpha)
-        self.phase = v_phase
-        self.encoder = AttU_Net_3D(img_ch=3, output_ch=1)
-
-    def forward(self, v_data, v_training=False):
-        features, labels = v_data
-        prediction = self.encoder(features)
-
-        return prediction
-
-
-class Base_patch_model(Base_model):
-    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
-        super(Base_patch_model, self).__init__(v_phase, v_loss_type, v_alpha)
-        self.phase = v_phase
-        self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=4)
-
-
-class Base_patch_model_deeper(Base_model):
-    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
-        super(Base_patch_model_deeper, self).__init__(v_phase, v_loss_type, v_alpha)
-        self.phase = v_phase
-        self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=5, base_channel=32)
-
-
 class Base_patch_model_deeper_wo_bn(Base_model):
-    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
+    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5, v_input_channel=3, v_depth=4, v_base_channel=16):
         super(Base_patch_model_deeper_wo_bn, self).__init__(v_phase, v_loss_type, v_alpha)
         self.phase = v_phase
-        self.encoder = U_Net_3D(img_ch=3, output_ch=1, v_pool_first=False, v_depth=5, base_channel=32, with_bn=False)
-
-
-class Base_patch_model_dir(Base_model):
-    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5):
-        super(Base_patch_model_dir, self).__init__(v_phase, v_loss_type, v_alpha)
-        self.phase = v_phase
-        self.encoder = U_Net_3D(img_ch=4, output_ch=1, v_pool_first=False, v_depth=4, base_channel=16)
+        self.encoder = U_Net_3D(
+            img_ch=v_input_channel, output_ch=1, v_pool_first=False,
+            v_depth=v_depth, base_channel=v_base_channel, with_bn=False)

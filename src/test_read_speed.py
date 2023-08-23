@@ -60,38 +60,59 @@ def test_write_single():
     npy_folder = root_path / "npy"
     length = 100
 
-    hdf1 = h5py.File(hdf1_, "w")
-    hdf2 = h5py.File(hdf2_, "w")
-    hdf3 = h5py.File(hdf3_, "w")
-    hdf4 = h5py.File(hdf4_, "w")
+    hdf1 = h5py.File(hdf1_, "r")
+    hdf2 = h5py.File(hdf2_, "r")
+    hdf3 = h5py.File(hdf3_, "r")
+    hdf4 = h5py.File(hdf4_, "r")
 
-    print("Compressed HDF5")
+    print("Compressed HDF5 sequential")
     for i in tqdm(range(length)):
-        np.asarray(hdf1["features"][i][:])
+        idx = np.random.randint(0, test_shape-1)
+        idy = np.random.randint(0, 255)
+        np.asarray(hdf1["features"][idx, idy:idy+256])
+
+    print("Compressed HDF5 sample")
+    for i in tqdm(range(length)):
+        idx = np.random.randint(0, test_shape-1)
+        idy = np.random.randint(0, 511, 256)
+        idy = np.sort(idy)
+        np.asarray(hdf1["features"][idx, idy])
 
     print("Typed Compressed HDF5")
     for i in tqdm(range(length)):
-        np.asarray(hdf1["features"][i][:]).astype(np.float32)
+        idx = np.random.randint(0, test_shape-1)
+        idy = np.random.randint(0, 255)
+        np.asarray(hdf1["features"][idx, idy:idy+256]).astype(np.float32)
 
     print("Compressed HDF5 with shuffle")
     for i in tqdm(range(length)):
-        np.asarray(hdf2["features"][i][:])
+        idx = np.random.randint(0, test_shape-1)
+        idy = np.random.randint(0, 255)
+        np.asarray(hdf1["features"][idx, idy:idy+256])
 
     print("Vanilla HDF5")
     for i in tqdm(range(length)):
-        np.asarray(hdf3["features"][i][:])
+        idx = np.random.randint(0, test_shape-1)
+        idy = np.random.randint(0, 255)
+        np.asarray(hdf1["features"][idx, idy:idy+256])
 
     print("Typed HDF5")
     for i in tqdm(range(length)):
-        np.asarray(hdf4["features"][i][:]).astype(np.float32)
+        idx = np.random.randint(0, test_shape-1)
+        idy = np.random.randint(0, 255)
+        np.asarray(hdf1["features"][idx, idy:idy+256]).astype(np.float32)
 
     print("NPY")
     for i in tqdm(range(length)):
-        np.load(str(npy_folder/"{}".format(i))+".npy")
+        idx = np.random.randint(0, test_shape-1)
+        idy = np.random.randint(0, 255)
+        np.load(str(npy_folder/"{}".format(i))+".npy", "r")[idx, idy:idy+256][:]
 
     print("Compressed NPY")
     for i in tqdm(range(length)):
-        np.load(str(npy_folder/"{}_c".format(i))+".npz")
+        idx = np.random.randint(0, test_shape-1)
+        idy = np.random.randint(0, 255)
+        np.load(str(npy_folder/"{}".format(i))+".npz", "r")[idx, idy:idy+256][:]
 
     hdf1.close()
     hdf2.close()

@@ -44,6 +44,9 @@ class Patch_phase(pl.LightningModule):
             self.phase,
             self.hydra_conf["model"]["loss"],
             self.hydra_conf["model"]["loss_alpha"],
+            self.hydra_conf["model"]["v_input_channel"],
+            self.hydra_conf["model"]["v_depth"],
+            self.hydra_conf["model"]["v_base_channel"],
         )
         # Import module according to the dataset_name
         mod = importlib.import_module('src.neural_bsp.abc_hdf5_dataset')
@@ -83,21 +86,23 @@ class Patch_phase(pl.LightningModule):
         self.train_dataset = self.dataset_name(
             self.data,
             "training",
-            self.batch_size
+            self.batch_size,
+            self.hydra_conf["dataset"]["v_output_features"],
         )
         return DataLoader(self.train_dataset, batch_size=1, shuffle=True,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
-                          prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else 2,
+                          prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
                           )
 
     def val_dataloader(self):
         self.valid_dataset = self.dataset_name(
             self.data,
             "validation",
-            self.validation_batch_size
+            self.validation_batch_size,
+            self.hydra_conf["dataset"]["v_output_features"],
         )
         self.target_viz_name = self.valid_dataset.names[self.id_viz + self.valid_dataset.validation_start]
         return DataLoader(self.valid_dataset, batch_size=1,
@@ -105,7 +110,7 @@ class Patch_phase(pl.LightningModule):
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
-                          prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else 2,
+                          prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
                           )
 
     def configure_optimizers(self):
@@ -259,6 +264,8 @@ class Patch_phase(pl.LightningModule):
         self.test_dataset = self.dataset_name(
             self.data,
             "testing",
+            self.validation_batch_size,
+            self.hydra_conf["dataset"]["v_output_features"],
             self.hydra_conf["dataset"]["test_list"],
         )
         return DataLoader(self.test_dataset, batch_size=1,

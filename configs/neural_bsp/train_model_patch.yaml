@@ -1,10 +1,12 @@
 dataset:
-#  root: G:\Dataset\GSP_v3_part\total_1k.hdf5
   root: G:\Dataset\ABC\GSP_v3_part_1k\training
-#  dataset_name: ABC_dataset_patch_hdf5
-  dataset_name: ABC_dataset_patch_train_dir
+#  root: F:/GSP/GSP_v3_part/training_1k.hdf5
+  dataset_name: ABC_dataset_patch_test
+  v_output_features: 4
 #  test_list: []
-  test_list: ["00860128","00860559","00860889","00861617"]
+  test_list: []
+#  test_list: ["00860128","00860559","00860889","00861617"]
+#  test_list: ["00015724"]
 
 trainer:
   learning_rate: 1e-4
@@ -14,17 +16,24 @@ trainer:
   batch_size: 128
   validation_batch_size: 256
   resume_from_checkpoint:
-  evaluate: false
+  evaluate: true
   output: .
   check_val_every_n_epoch: 1
-  accelerator: "32-true"
+  accelerator: "16-mixed"
 
 model:
   model_name: TestNetResidualSE
-  phase: [16, 32, 64, 128, 256]
-  test_threshold: 0.5
+  v_input_channel: 4
+  v_depth: 5
+  v_base_channel: 32
+  phase: [32, 64, 128, 256, 512, 1024]
+#  phase: [16, 32, 64, 128, 256]
+
   loss: BCE_loss
   loss_alpha: 0.75
+
+  test_threshold: 0.5
+
 
 hydra:
   run:

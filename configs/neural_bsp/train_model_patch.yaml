@@ -16,7 +16,7 @@ trainer:
   batch_size: 128
   validation_batch_size: 256
   resume_from_checkpoint:
-  evaluate: true
+  evaluate: false
   output: .
   check_val_every_n_epoch: 1
   accelerator: "16-mixed"

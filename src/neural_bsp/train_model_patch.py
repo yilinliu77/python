@@ -328,6 +328,7 @@ def main(v_cfg: DictConfig):
     v_cfg["trainer"]["output"] = os.path.join(log_dir, v_cfg["trainer"]["output"])
 
     model = Patch_phase(v_cfg, v_cfg["dataset"]["root"])
+    # model = torch.compile(model)
 
     mc = ModelCheckpoint(monitor="Validation_Loss", save_top_k=3)
 

@@ -1,9 +1,8 @@
 dataset:
-  root: G:\Dataset\ABC\GSP_v3_part_1k\training
-#  root: F:/GSP/GSP_v3_part/training_1k.hdf5
-  dataset_name: ABC_dataset_patch_test
+#  root: G:\Dataset\ABC\GSP_v3_part_1k\training
+  root: F:/GSP/GSP_v3_part/training_1k.hdf5
+  dataset_name: ABC_dataset_patch_hdf5
   v_output_features: 4
-#  test_list: []
   test_list: []
 #  test_list: ["00860128","00860559","00860889","00861617"]
 #  test_list: ["00015724"]
@@ -24,8 +23,10 @@ trainer:
 model:
   model_name: TestNetResidualSE
   v_input_channel: 4
+
   v_depth: 5
   v_base_channel: 32
+
   phase: [32, 64, 128, 256, 512, 1024]
 #  phase: [16, 32, 64, 128, 256]
 

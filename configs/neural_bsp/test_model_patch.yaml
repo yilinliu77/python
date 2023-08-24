@@ -1,23 +1,14 @@
 dataset:
-#  root: G:\Dataset\ABC\GSP_v3_part_1k\training
-  root: F:/GSP/GSP_v3_part/training_1k.hdf5
   dataset_name: ABC_dataset_patch_hdf5
   v_output_features: 4
-  test_list: []
-#  test_list: ["00860128","00860559","00860889","00861617"]
-#  test_list: ["00015724"]
+  test_list: ["G:/Dataset/ABC/GSP_comparison_4/00860128/00860128_656134f148f7f10848eaa437_trimesh_000.obj"]
 
 trainer:
-  learning_rate: 1e-4
   gpu: 1
-  num_worker: 0
 
   batch_size: 128
-  validation_batch_size: 256
-  resume_from_checkpoint:
-  evaluate: false
+  resume_from_checkpoint: output/neural_bsp/0815_26k_focal_residual.ckpt
   output: .
-  check_val_every_n_epoch: 1
   accelerator: "16-mixed"
 
 model:
@@ -33,7 +24,8 @@ model:
   loss: BCE_loss
   loss_alpha: 0.75
 
-  test_threshold: 0.5
+  test_threshold: 0.7
+  test_resolution: 256
 
 
 hydra:
@@ -41,6 +33,3 @@ hydra:
     dir: ./outputs/${now:%Y_%m_%d_%H_%M_%S}
   job:
     chdir: False
-#  output_subdir: null
-#  job_logging: disabled
-#  hydra_logging: disabled

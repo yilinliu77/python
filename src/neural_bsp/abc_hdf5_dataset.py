@@ -1,11 +1,20 @@
 import math
 import os.path
+import sys
 import time
 
 import h5py
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+from tqdm import tqdm
+
+try:
+    sys.path.append("thirdparty")
+    import cuda_distance
+    import open3d as o3d
+except:
+    print("Cannot import cuda_distance, ignore this if you don't use 'ABC_dataset_test_mesh'")
 
 
 class ABC_dataset_patch_hdf5(torch.utils.data.Dataset):
@@ -20,7 +29,7 @@ class ABC_dataset_patch_hdf5(torch.utils.data.Dataset):
             self.names = np.asarray(self.names)
             self.objects = [os.path.join(v_data_root, item) for item in self.names]
             self.num_items = len(self.objects)
-            self.num_patches = np.load(self.objects[0]+"_feat.npy").shape[0]
+            self.num_patches = np.load(self.objects[0] + "_feat.npy").shape[0]
         else:
             with h5py.File(self.data_root, "r") as f:
                 self.num_items = f["features"].shape[0]
@@ -235,3 +244,79 @@ class ABC_dataset_test_raw(torch.utils.data.Dataset):
         consistent_flags = torch.from_numpy(np.stack(consistent_flags, axis=0))
 
         return input_features, consistent_flags
+
+
+def generate_test_coords(v_resolution):
+    coords = np.meshgrid(np.arange(v_resolution), np.arange(v_resolution), np.arange(v_resolution), indexing="ij")
+    coords = np.stack(coords, axis=3)
+    coords = coords.reshape((-1, 3))
+    return coords
+
+
+class ABC_dataset_test_mesh(torch.utils.data.Dataset):
+    def __init__(self, v_data_root, v_batch_size, v_output_features=4, v_resolution=256):
+        super(ABC_dataset_test_mesh, self).__init__()
+        self.batch_size = v_batch_size
+        self.output_features = v_output_features
+        self.data_root = v_data_root
+
+        assert v_resolution % 32 == 0
+        num_patches_per_dim = v_resolution // 32
+        coords = generate_test_coords(v_resolution)
+        self.coords = coords / (v_resolution - 1) * 2 - 1
+        self.num_patches = (v_resolution // 32) ** 3
+        assert self.num_patches % v_resolution == 0
+
+        print("Prepare mesh data")
+        if not os.path.exists(v_data_root):
+            print("Cannot find ", v_data_root)
+        mesh = o3d.io.read_triangle_mesh(v_data_root)
+        points = np.asarray(mesh.vertices)
+        faces = np.asarray(mesh.triangles)
+        min_xyz = points.min(axis=0)
+        center_xyz = (min_xyz + points.max(axis=0)) / 2
+        bbox = points.max(axis=0) - min_xyz
+        diagonal = np.linalg.norm(bbox)
+        points = (points - center_xyz) / diagonal * 2
+        triangles = points[faces]
+        num_triangles = triangles.shape[0]
+        num_queries = self.coords.shape[0]
+        query_result = cuda_distance.query(triangles.reshape(-1), self.coords.reshape(-1), 512, 512**3)
+
+        udf = np.asarray(query_result[0]).astype(np.float32)
+        closest_points = np.asarray(query_result[1]).reshape((num_queries, 3)).astype(np.float32)
+        dir = closest_points - self.coords
+        dir = dir / np.linalg.norm(dir, axis=1, keepdims=True)
+
+        if self.output_features == 4:
+            feat_data = np.concatenate([dir, udf[:, None] * np.pi], axis=1)
+        elif self.output_features == 1:
+            feat_data = udf[:, None] * np.pi
+        else:
+            raise
+        feat_data = feat_data.reshape((v_resolution, v_resolution, v_resolution, self.output_features))
+        feat_data = feat_data.reshape(
+            (num_patches_per_dim, 32, num_patches_per_dim, 32, num_patches_per_dim, 32, self.output_features))
+        feat_data = np.transpose(feat_data,
+                                 (0, 2, 4, 1, 3, 5, 6)).reshape(
+            (num_patches_per_dim ** 3, 32, 32, 32, self.output_features))
+        self.feat_data = np.transpose(feat_data, (0, 4, 1, 2, 3)).astype(np.float32)
+
+        self.num_items = self.feat_data.shape[0] // self.batch_size
+        pass
+
+    def __len__(self):
+        return self.num_items
+
+    def __getitem__(self, idx):
+        id_start = idx * self.batch_size
+
+        times = [0] * 10
+        cur_time = time.time()
+        times[0] += time.time() - cur_time
+        cur_time = time.time()
+        feat_data = self.feat_data[id_start:id_start + self.batch_size]
+        flag_data = np.zeros_like(feat_data[:, 0:1])
+        times[1] += time.time() - cur_time
+        return feat_data, flag_data
+

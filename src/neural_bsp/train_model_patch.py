@@ -92,7 +92,7 @@ class Patch_phase(pl.LightningModule):
         return DataLoader(self.train_dataset, batch_size=1, shuffle=True,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
-                          pin_memory=True,
+                          pin_memory=False,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
                           )
@@ -108,7 +108,7 @@ class Patch_phase(pl.LightningModule):
         return DataLoader(self.valid_dataset, batch_size=1,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
-                          pin_memory=True,
+                          pin_memory=False,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
                           )

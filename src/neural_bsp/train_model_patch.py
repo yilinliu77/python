@@ -330,7 +330,7 @@ def main(v_cfg: DictConfig):
     model = Patch_phase(v_cfg, v_cfg["dataset"]["root"])
     # model = torch.compile(model)
 
-    mc = ModelCheckpoint(monitor="Validation_Loss", save_top_k=3)
+    mc = ModelCheckpoint(monitor="Validation_Loss", save_top_k=3, save_last=True)
 
     # torch.set_float32_matmul_precision('medium')
 

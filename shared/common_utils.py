@@ -272,7 +272,7 @@ def ray_line_intersection2(v_plane_abcd, v_ray_origin, v_ray_direction):
 
 
 def sigmoid(z):
-    return 1 / (1 + np.exp(-z))
+    return 1 / (1 + np.exp(-z+1e-16))
 
 
 def export_point_cloud(v_file_path, v_pcs):

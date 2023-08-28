@@ -308,6 +308,24 @@ class Patch_phase(pl.LightningModule):
             np.save(os.path.join(self.log_root, "{}_pred.npy".format(name)), predicted_labels)
             np.save(os.path.join(self.log_root, "{}_gt.npy".format(name)), gt_labels)
 
+            coords = np.stack(
+                np.meshgrid(np.arange(256), np.arange(256), np.arange(256), indexing="ij"), axis=3).reshape(
+                8,32,8,32,8,32,3).transpose(0,2,4,1,3,5,6).reshape(512,32,32,32,3)
+            coords = (coords / 255 - 0.5) * 2
+            pred_flags = (torch.sigmoid(outputs[:, 0]) > threshold).cpu().numpy()
+            gt_flags = (torch.sigmoid(data[1][:, 0]) > threshold).cpu().numpy()
+            for i_patch in range(outputs.shape[0]):
+                feat = data[0][i_patch].permute(1,2,3,0).cpu().numpy()
+                points = coords[i_patch] + feat[:,:,:,:3] * feat[:,:,:,3:4] / np.pi
+                points = points.reshape(-1,3)
+                export_point_cloud("output/mesh.ply", points)
+
+                points = coords[i_patch][pred_flags[i_patch]]
+                # points = coords[i_patch][gt_flags[i_patch]]
+                export_point_cloud("output/original.ply", points)
+
+                pass
+
         return
 
     def on_test_end(self):

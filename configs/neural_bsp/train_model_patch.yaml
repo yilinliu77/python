@@ -3,8 +3,8 @@ dataset:
   root: F:/GSP/GSP_v3_part/training_1k.hdf5
   dataset_name: ABC_dataset_patch_hdf5
   v_output_features: 4
-  test_list: []
-#  test_list: ["00860128","00860559","00860889","00861617"]
+#  test_list: []
+  test_list: ["00860128","00860559","00860889","00861617"]
 #  test_list: ["00015724"]
 
 trainer:

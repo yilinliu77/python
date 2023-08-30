@@ -40,7 +40,7 @@ def main(v_cfg: DictConfig):
     threshold = v_cfg["model"]["test_threshold"]
     res = v_cfg["model"]["test_resolution"]
     ps = 32  # Patch size
-    npd = res // ps  # Number of patches per dimension
+    warp = ps // 4
 
     for model_name in test_list:
         print("Start testing {}".format(model_name))
@@ -55,22 +55,48 @@ def main(v_cfg: DictConfig):
         features = []
         flags = []
         for idx in tqdm(range(len(dataset))):
-            data = [torch.from_numpy(item).cuda() for item in dataset[idx]]
+            data = dataset[idx]
+            feat = [torch.from_numpy(data[0]).cuda(), None]
 
-            prediction = model(data, False)
-            features.append(data[0].detach().cpu().numpy())
+            prediction = model(feat, False)
+            features.append(data[0])
             flags.append(prediction.detach().cpu().numpy())
 
         features = np.concatenate(features, axis=0)
         flags = np.concatenate(flags, axis=0)
 
         predicted_labels = (sigmoid(flags[:, 0]) > threshold).astype(np.ubyte)
-        predicted_labels = np.transpose(
-            predicted_labels.reshape((npd, npd, npd, ps, ps, ps)),
-            (0, 3, 1, 4, 2, 5)).reshape((res, res, res))
+
+        total_labels = np.zeros((res, res, res), dtype=np.ubyte)
+        total_features = np.zeros((4, res, res, res), dtype=np.float32)
+        for idx in range(predicted_labels.shape[0]):
+            x,y,z = dataset.patch_list[idx]
+            x_start = warp
+            x_end = ps - warp
+            y_start = warp
+            y_end = ps - warp
+            z_start = warp
+            z_end = ps - warp
+            if x==0:
+                x_start = 0
+            elif x == res - ps:
+                x_end = ps
+            if y==0:
+                y_start = 0
+            elif y == res - ps:
+                y_end = ps
+            if z==0:
+                z_start = 0
+            elif z == res - ps:
+                z_end = ps
+            total_labels[x+x_start:x+x_end, y+y_start:y+y_end, z+z_start:z+z_end] = \
+                predicted_labels[idx][x_start:x_end, y_start:y_end, z_start:z_end]
+            total_features[:, x+x_start:x+x_end, y+y_start:y+y_end, z+z_start:z+z_end] = \
+                features[idx][:, x_start:x_end, y_start:y_end, z_start:z_end]
+
+        predicted_labels = total_labels
         features = np.transpose(
-            features.reshape((npd, npd, npd, -1, ps, ps, ps)),
-            (0, 4, 1, 5, 2, 6, 3)).reshape((res, res, res, -1))
+            total_features,(1,2,3,0))
         features[:, :, :, 3] /= np.pi
 
         # Save

@@ -259,6 +259,7 @@ class ABC_dataset_test_mesh(torch.utils.data.Dataset):
         self.batch_size = v_batch_size
         self.output_features = v_output_features
         self.data_root = v_data_root
+        self.resolution = v_resolution
 
         assert v_resolution % 32 == 0
         num_patches_per_dim = v_resolution // 32
@@ -294,29 +295,35 @@ class ABC_dataset_test_mesh(torch.utils.data.Dataset):
             feat_data = udf[:, None] * np.pi
         else:
             raise
-        feat_data = feat_data.reshape((v_resolution, v_resolution, v_resolution, self.output_features))
-        feat_data = feat_data.reshape(
-            (num_patches_per_dim, 32, num_patches_per_dim, 32, num_patches_per_dim, 32, self.output_features))
-        feat_data = np.transpose(feat_data,
-                                 (0, 2, 4, 1, 3, 5, 6)).reshape(
-            (num_patches_per_dim ** 3, 32, 32, 32, self.output_features))
-        self.feat_data = np.transpose(feat_data, (0, 4, 1, 2, 3)).astype(np.float32)
+        self.feat_data = feat_data.reshape(
+            (v_resolution, v_resolution, v_resolution, self.output_features)).astype(np.float32)
 
-        self.num_items = self.feat_data.shape[0] // self.batch_size
+        self.patch_size = 32
+        self.patch_list = []
+        for x in range(0, v_resolution - self.patch_size + 1, self.patch_size // 2):
+            for y in range(0, v_resolution - self.patch_size + 1, self.patch_size // 2):
+                for z in range(0, v_resolution - self.patch_size + 1, self.patch_size // 2):
+                    self.patch_list.append((x, y, z))
+
         pass
 
     def __len__(self):
-        return self.num_items
+        return math.ceil(len(self.patch_list) / self.batch_size)
 
     def __getitem__(self, idx):
-        id_start = idx * self.batch_size
-
-        times = [0] * 10
-        cur_time = time.time()
-        times[0] += time.time() - cur_time
-        cur_time = time.time()
-        feat_data = self.feat_data[id_start:id_start + self.batch_size]
-        flag_data = np.zeros_like(feat_data[:, 0:1])
-        times[1] += time.time() - cur_time
-        return feat_data, flag_data
+        features = []
+        id_list = []
+        for i in range(self.batch_size):
+            id = idx * self.batch_size + i
+            if id >= len(self.patch_list):
+                break
+            feat_data = self.feat_data[
+                self.patch_list[id][0]:self.patch_list[id][0] + self.patch_size,
+                self.patch_list[id][1]:self.patch_list[id][1] + self.patch_size,
+                self.patch_list[id][2]:self.patch_list[id][2] + self.patch_size,
+            ]
+            features.append(np.transpose(feat_data, [3, 0, 1, 2]))
+            id_list.append(self.patch_list[id])
+        features = np.stack(features, axis=0)
+        return features, id_list
 

@@ -1,7 +1,7 @@
 dataset:
   dataset_name: ABC_dataset_patch_hdf5
   v_output_features: 4
-  test_list: ["G:/Dataset/ABC/GSP_comparison_4/00860128/00860128_656134f148f7f10848eaa437_trimesh_000.obj"]
+  test_list: ["G:/Dataset/ABC/GSP_comparison_4/00860889/00860889_843748a7e5a1c4dbfadf8c0d_trimesh_000.obj"]
 
 trainer:
   gpu: 1

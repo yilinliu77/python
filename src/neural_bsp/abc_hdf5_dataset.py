@@ -122,12 +122,14 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         self.num_patch = self.resolution // self.patch_size
         self.num_patches = self.num_patch ** 3
         assert self.resolution % self.patch_size == 0
-
         if self.mode == "training":
             self.index = np.stack(np.meshgrid(
                 np.arange(self.num_items)[:self.validation_start],
-                np.arange(self.num_patches), indexing="ij"), axis=2)
+                np.arange(1), indexing="ij"), axis=2)
         elif self.mode == "validation":
+            self.index = np.stack(np.meshgrid(
+                np.arange(self.num_items)[:self.validation_start],
+                np.arange(self.num_patches), indexing="ij"), axis=2)
             self.index = np.stack(np.meshgrid(
                 np.arange(self.num_items)[self.validation_start:],
                 np.arange(self.num_patches), indexing="ij"), axis=2)
@@ -143,6 +145,9 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         return self.index.shape[0]
 
     def get_patch(self, v_id_item, v_id_patch):
+        if self.mode == "training":
+            v_id_patch = np.random.randint(self.num_patches)
+
         x_start = v_id_patch // self.num_patch // self.num_patch * self.patch_size
         y_start = v_id_patch // self.num_patch % self.num_patch * self.patch_size
         z_start = v_id_patch % self.num_patch * self.patch_size
@@ -151,8 +156,8 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
                        v_id_item, x_start:x_start + self.patch_size,
                        y_start:y_start + self.patch_size, z_start:z_start + self.patch_size].astype(np.float32)
             flags = (f["flags"][
-                    v_id_item, x_start:x_start + self.patch_size,
-                    y_start:y_start + self.patch_size, z_start:z_start + self.patch_size]>0).astype(np.float32)
+                     v_id_item, x_start:x_start + self.patch_size,
+                     y_start:y_start + self.patch_size, z_start:z_start + self.patch_size] > 0).astype(np.float32)
             points = f["points"][v_id_item].astype(np.float32)
         coords = self.coords[
                  x_start:x_start + self.patch_size,

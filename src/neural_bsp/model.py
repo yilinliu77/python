@@ -133,7 +133,7 @@ class PVCNN(nn.Module):
         udf_loss = F.l1_loss(v_prediction[:,:,0:1], gt_udf, reduction="mean")
         gradient_loss = F.l1_loss(v_prediction[:,:,1:4], gt_gradient, reduction="mean")
         flag_loss = focal_loss(v_prediction[:,:,4:5], gt_flag, 0.75)
-        total_loss = udf_loss + gradient_loss + flag_loss * 100
+        total_loss = udf_loss + gradient_loss + flag_loss * 10
         return {
             "udf_loss": udf_loss,
             "gradient_loss": gradient_loss,

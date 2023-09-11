@@ -1,5 +1,13 @@
 from functools import partial
 
+import sys
+
+import numpy as np
+
+sys.path.append("thirdparty/pvcnn")
+from thirdparty.pvcnn.modules.pvconv import PVConv
+from thirdparty.pvcnn.modules.voxelization import Voxelization
+
 from torch import nn
 from torch.nn import functional as F
 import torch
@@ -21,6 +29,117 @@ def BCE_loss(v_predictions, labels, v_alpha=0.75):
                                                           reduction="mean"
                                                           )
     return loss
+
+
+class Residual_fc(nn.Module):
+    def __init__(self, v_input, v_output):
+        super().__init__()
+        self.fc = nn.Linear(v_input, v_output)
+        self.relu = nn.LeakyReLU()
+
+    def forward(self, v_data):
+        feature = self.relu(self.fc(v_data))
+        return feature + v_data
+
+#################################################################################################################
+
+class PVCNN(nn.Module):
+    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5,
+                 v_input_channel=3, *kwargs
+                 ):
+        super().__init__()
+        self.voxelizer = Voxelization(256, normalize=False, eps=0)
+        self.maxpool = nn.MaxPool3d(2)
+
+        cur_channels = 16
+        self.encoders = nn.ModuleList()
+        for i in range(5):
+            if i == 0:
+                self.encoders.append(nn.Sequential(
+                    nn.Conv3d(v_input_channel, cur_channels, 3, padding=1),
+                    nn.LeakyReLU(),
+                    nn.Conv3d(cur_channels, cur_channels, 3, padding=1),
+                    nn.LeakyReLU(),
+                    nn.BatchNorm3d(cur_channels)
+                ))
+            else:
+                target_channels = min(128, cur_channels * 2)
+                self.encoders.append(nn.Sequential(
+                    nn.Conv3d(cur_channels, target_channels, 3, padding=1),
+                    nn.LeakyReLU(),
+                    nn.Conv3d(target_channels, target_channels, 3, padding=1),
+                    nn.LeakyReLU(),
+                    nn.BatchNorm3d(target_channels)
+                ))
+                cur_channels = target_channels
+
+        self.udf_out = nn.Sequential(
+            nn.Linear(368, 256),
+            nn.LeakyReLU(),
+            Residual_fc(256,256),
+            Residual_fc(256,256),
+            nn.Linear(256,1),
+        )
+
+        self.gradient_out = nn.Sequential(
+            nn.Linear(368, 256),
+            nn.LeakyReLU(),
+            Residual_fc(256, 256),
+            Residual_fc(256, 256),
+            nn.Linear(256, 3),
+        )
+
+        self.flag_out = nn.Sequential(
+            nn.Linear(368, 256),
+            nn.LeakyReLU(),
+            Residual_fc(256, 256),
+            Residual_fc(256, 256),
+            nn.Linear(256, 1),
+        )
+
+    def forward(self, v_data, v_training=False):
+        x, labels = v_data
+
+        voxel_feature, voxel_coordinate = self.voxelizer(
+            x.permute(0,2,1),
+            x[:,:,:3].permute(0,2,1),
+        )
+        features= []
+        for layer in self.encoders:
+            voxel_feature = layer(voxel_feature)
+            features.append(voxel_feature)
+            voxel_feature = self.maxpool(voxel_feature)
+
+        sampled_feature = self.embedding(labels[:,:,:3], features)
+        pred_udf = self.udf_out(sampled_feature.permute(0,2,1))
+        pred_gradient = self.gradient_out(sampled_feature.permute(0,2,1))
+        pred_flag = self.flag_out(sampled_feature.permute(0,2,1))
+        return torch.cat((pred_udf, pred_gradient, pred_flag), dim=2)
+
+    def embedding(self, p, v_features):
+        sampled_features = []
+        for feature in v_features:
+            sampled_feature = F.grid_sample(feature, p.unsqueeze(1).unsqueeze(1), align_corners=True)[:,:,0,0]
+            sampled_features.append(sampled_feature)
+        sampled_features = torch.cat(sampled_features, dim=1)
+        return sampled_features
+
+    def loss(self, v_prediction, v_gt):
+        gt_labels = v_gt[1]
+        gt_gradient = gt_labels[:,:,3:6]
+        gt_udf = gt_labels[:,:,6:7]
+        gt_flag = (gt_labels[:,:,7:8] > 0).to(gt_gradient.dtype)
+
+        udf_loss = F.l1_loss(v_prediction[:,:,0:1], gt_udf, reduction="mean")
+        gradient_loss = F.l1_loss(v_prediction[:,:,1:4], gt_gradient, reduction="mean")
+        flag_loss = focal_loss(v_prediction[:,:,4:5], gt_flag, 0.75)
+        total_loss = udf_loss + gradient_loss + flag_loss * 100
+        return {
+            "udf_loss": udf_loss,
+            "gradient_loss": gradient_loss,
+            "flag_loss": flag_loss,
+            "total_loss": total_loss
+        }
 
 
 #################################################################################################################

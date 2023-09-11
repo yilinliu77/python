@@ -2,6 +2,7 @@ dataset:
   dataset_name: ABC_dataset_patch_hdf5
   v_output_features: 4
   test_list: ["G:/Dataset/ABC/GSP_comparison_4/00860889/00860889_843748a7e5a1c4dbfadf8c0d_trimesh_000.obj"]
+  patch_size: 32
 
 trainer:
   gpu: 1

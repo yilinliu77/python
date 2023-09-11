@@ -20,7 +20,7 @@ except:
 def generate_coords(v_resolution):
     coords = np.meshgrid(np.arange(v_resolution), np.arange(v_resolution), np.arange(v_resolution), indexing="ij")
     coords = np.stack(coords, axis=3) / (v_resolution - 1)
-    coords = coords * 2 - 1
+    coords = (coords * 2 - 1).astype(np.float32)
     # coords = coords + (1 / v_resolution / 2)
     return coords
 
@@ -106,11 +106,9 @@ class ABC_dataset_patch_hdf5(torch.utils.data.Dataset):
 
 
 class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
-    def __init__(self, v_data_root, v_training_mode, v_batch_size, v_output_features=4):
+    def __init__(self, v_data_root, v_training_mode, v_patch_size):
         super(ABC_dataset_points_hdf5, self).__init__()
         self.data_root = v_data_root
-        self.batch_size = v_batch_size
-        self.output_features = v_output_features
 
         with h5py.File(self.data_root, "r") as f:
             self.num_items = f["features"].shape[0]
@@ -120,7 +118,7 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         self.validation_start = self.num_items // 5 * 4
         self.coords = generate_coords(self.resolution).astype(np.float32)
 
-        self.patch_size = 32
+        self.patch_size = v_patch_size
         self.num_patch = self.resolution // self.patch_size
         self.num_patches = self.num_patch ** 3
         assert self.resolution % self.patch_size == 0
@@ -142,10 +140,6 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         self.index = self.index.reshape((-1, 2))
 
     def __len__(self):
-        if self.mode == "training":
-            return 1
-        else:
-            return 512
         return self.index.shape[0]
 
     def get_patch(self, v_id_item, v_id_patch):
@@ -155,13 +149,15 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         with h5py.File(self.data_root, "r") as f:
             features = f["features"][
                        v_id_item, x_start:x_start + self.patch_size,
-                       y_start:y_start + self.patch_size, z_start:z_start + self.patch_size]
-            flags = f["flags"][
+                       y_start:y_start + self.patch_size, z_start:z_start + self.patch_size].astype(np.float32)
+            flags = (f["flags"][
                     v_id_item, x_start:x_start + self.patch_size,
-                    y_start:y_start + self.patch_size, z_start:z_start + self.patch_size]
-            points = f["points"][v_id_item]
-        coords = self.coords[x_start:x_start + self.patch_size,
-                 y_start:y_start + self.patch_size, z_start:z_start + self.patch_size]
+                    y_start:y_start + self.patch_size, z_start:z_start + self.patch_size]>0).astype(np.float32)
+            points = f["points"][v_id_item].astype(np.float32)
+        coords = self.coords[
+                 x_start:x_start + self.patch_size,
+                 y_start:y_start + self.patch_size,
+                 z_start:z_start + self.patch_size]
         return points, features, coords, flags
 
     def __getitem__(self, idx):
@@ -174,13 +170,13 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         times[0] += time.time() - cur_time
         cur_time = time.time()
 
-        features = features.astype(np.float32) / 65535
+        features = features / 65535
         angles = (features[:, :, :, 1:3] * np.pi * 2).reshape(-1, 2)
         dx = np.cos(angles[:, 0]) * np.sin(angles[:, 1])
         dy = np.sin(angles[:, 0]) * np.sin(angles[:, 1])
         dz = np.cos(angles[:, 1])
         gradients = np.stack([dx, dy, dz], axis=1)
-        udf = features[:, :, :, 0:1].astype(np.float32).reshape(-1, 1) * 2
+        udf = features[:, :, :, 0:1].reshape(-1, 1) * 2
         coords = coords.reshape((-1, 3))
         flags = flags.reshape((-1, 1))
 

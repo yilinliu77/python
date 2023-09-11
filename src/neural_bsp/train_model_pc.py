@@ -30,7 +30,6 @@ class PC_phase(pl.LightningModule):
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
-        self.validation_batch_size = self.hydra_conf["trainer"]["validation_batch_size"]
         self.num_worker = self.hydra_conf["trainer"]["num_worker"]
         self.save_hyperparameters(hparams)
 
@@ -39,15 +38,9 @@ class PC_phase(pl.LightningModule):
             os.makedirs(self.log_root)
 
         self.data = v_data
-        self.phase = self.hydra_conf["model"]["phase"]
         mod = importlib.import_module('src.neural_bsp.model')
         self.model = getattr(mod, self.hydra_conf["model"]["model_name"])(
-            self.phase,
-            self.hydra_conf["model"]["loss"],
-            self.hydra_conf["model"]["loss_alpha"],
-            self.hydra_conf["model"]["v_input_channel"],
-            self.hydra_conf["model"]["v_depth"],
-            self.hydra_conf["model"]["v_base_channel"],
+
         )
         # Import module according to the dataset_name
         mod = importlib.import_module('src.neural_bsp.abc_hdf5_dataset')
@@ -81,10 +74,9 @@ class PC_phase(pl.LightningModule):
         self.train_dataset = self.dataset_name(
             self.data,
             "training",
-            self.batch_size,
-            self.hydra_conf["dataset"]["v_output_features"],
+            self.hydra_conf["dataset"]["patch_size"],
         )
-        return DataLoader(self.train_dataset, batch_size=1, shuffle=True,
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=False,
@@ -96,11 +88,10 @@ class PC_phase(pl.LightningModule):
         self.valid_dataset = self.dataset_name(
             self.data,
             "validation",
-            self.validation_batch_size,
-            self.hydra_conf["dataset"]["v_output_features"],
+            self.hydra_conf["dataset"]["patch_size"],
         )
         self.target_viz_name = self.valid_dataset.names[self.id_viz + self.valid_dataset.validation_start]
-        return DataLoader(self.valid_dataset, batch_size=1,
+        return DataLoader(self.valid_dataset, batch_size=self.batch_size,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=False,
@@ -155,7 +146,7 @@ class PC_phase(pl.LightningModule):
                          batch_size=data[0].shape[0])
 
         prob = torch.sigmoid(outputs[:,:,4])
-        gt = (data[1][:,:,7]>0).to(torch.long)
+        gt = data[1][:,:,7].to(torch.long)
         self.pr_computer.update(prob, gt)
         return
 
@@ -192,7 +183,7 @@ class PC_phase(pl.LightningModule):
         query_points = gt_labels[:,:,:,:3]
         gt_gradient = gt_labels[:,:,:,3:6]
         gt_udf = gt_labels[:,:,:,6:7]
-        gt_flag = (gt_labels[:,:,:,7:8] > 0.5)
+        gt_flag = gt_labels[:,:,:,7:8].astype(bool)
 
         pred_udf = predicted_labels[:,:,:,0:1]
         pred_gradient = predicted_labels[:,:,:,1:4]

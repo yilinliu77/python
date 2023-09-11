@@ -25,3 +25,6 @@
 [submodule "thirdparty/bvh-distance-queries"]
 	path = thirdparty/bvh-distance-queries
 	url = https://github.com/YuliangXiu/bvh-distance-queries
+[submodule "thirdparty/pvcnn"]
+	path = thirdparty/pvcnn
+	url = https://github.com/mit-han-lab/pvcnn

@@ -44,8 +44,8 @@ class Residual_fc(nn.Module):
 #################################################################################################################
 
 class PVCNN(nn.Module):
-    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5,
-                 v_input_channel=3, *kwargs
+    def __init__(self,
+                 *kwargs
                  ):
         super().__init__()
         self.voxelizer = Voxelization(256, normalize=False, eps=0)
@@ -56,11 +56,11 @@ class PVCNN(nn.Module):
         for i in range(5):
             if i == 0:
                 self.encoders.append(nn.Sequential(
-                    nn.Conv3d(v_input_channel, cur_channels, 3, padding=1),
+                    nn.Conv3d(6, cur_channels, 3, padding=1),
                     nn.LeakyReLU(),
                     nn.Conv3d(cur_channels, cur_channels, 3, padding=1),
                     nn.LeakyReLU(),
-                    nn.BatchNorm3d(cur_channels)
+                    # nn.BatchNorm3d(cur_channels)
                 ))
             else:
                 target_channels = min(128, cur_channels * 2)
@@ -128,7 +128,7 @@ class PVCNN(nn.Module):
         gt_labels = v_gt[1]
         gt_gradient = gt_labels[:,:,3:6]
         gt_udf = gt_labels[:,:,6:7]
-        gt_flag = (gt_labels[:,:,7:8] > 0).to(gt_gradient.dtype)
+        gt_flag = gt_labels[:,:,7:8].to(gt_gradient.dtype)
 
         udf_loss = F.l1_loss(v_prediction[:,:,0:1], gt_udf, reduction="mean")
         gradient_loss = F.l1_loss(v_prediction[:,:,1:4], gt_gradient, reduction="mean")

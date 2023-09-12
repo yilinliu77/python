@@ -105,8 +105,12 @@ class ABC_dataset_patch_hdf5(torch.utils.data.Dataset):
                 torch.from_numpy(v_batches[0][3])]
 
 
+"""
+points: N*3
+query_and_data: M*8 (xyz, gradient, udf, flag) 
+"""
 class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
-    def __init__(self, v_data_root, v_training_mode, v_patch_size):
+    def __init__(self, v_data_root, v_training_mode, v_conf):
         super(ABC_dataset_points_hdf5, self).__init__()
         self.data_root = v_data_root
 
@@ -118,7 +122,8 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         self.validation_start = self.num_items // 5 * 4
         self.coords = generate_coords(self.resolution).astype(np.float32)
 
-        self.patch_size = v_patch_size
+        self.patch_size = v_conf["patch_size"]
+        self.sd = v_conf["sample_density"] # sample density
         self.num_patch = self.resolution // self.patch_size
         self.num_patches = self.num_patch ** 3
         assert self.resolution % self.patch_size == 0
@@ -144,10 +149,7 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
     def __len__(self):
         return self.index.shape[0]
 
-    def get_patch(self, v_id_item, v_id_patch):
-        if self.mode == "training":
-            v_id_patch = np.random.randint(self.num_patches)
-
+    def get_patch_test(self, v_id_item, v_id_patch):
         x_start = v_id_patch // self.num_patch // self.num_patch * self.patch_size
         y_start = v_id_patch // self.num_patch % self.num_patch * self.patch_size
         z_start = v_id_patch % self.num_patch * self.patch_size
@@ -165,13 +167,25 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
                  z_start:z_start + self.patch_size]
         return points, features, coords, flags
 
+    def get_patch_train(self, v_id_item, v_id_patch):
+        with h5py.File(self.data_root, "r") as f:
+            features = f["features"][v_id_item, ::self.sd, ::self.sd, ::self.sd].astype(np.float32)
+            flags = (f["flags"][v_id_item, ::self.sd, ::self.sd, ::self.sd] > 0).astype(np.float32)
+            points = f["points"][v_id_item].astype(np.float32)
+        coords = self.coords[::self.sd, ::self.sd, ::self.sd]
+        return points, features, coords, flags
+
+
     def __getitem__(self, idx):
         id_object, id_patch = self.index[idx]
 
         times = [0] * 10
         cur_time = time.time()
 
-        points, features, coords, flags = self.get_patch(id_object, id_patch)
+        if self.mode == "training":
+            points, features, coords, flags = self.get_patch_train(id_object, id_patch)
+        else:
+            points, features, coords, flags = self.get_patch_test(id_object, id_patch)
         times[0] += time.time() - cur_time
         cur_time = time.time()
 

@@ -3,6 +3,7 @@ dataset:
   root: G:/Dataset/ABC/GSP_v6_1k/training.hdf5
   dataset_name: ABC_dataset_points_hdf5
   patch_size: 64
+  sample_density: 2
 
 #  test_list: []
 #  test_list: ["00860128","00860559","00860889","00861617"]
@@ -21,7 +22,12 @@ trainer:
   accelerator: "16-mixed"
 
 model:
-  model_name: PVCNN
+  model_name: PVCNN_local
+  voxel_resolution: 64
+  fc_hidden_dim: 64
+  max_voxel_dim: 64
+  employ_max_pool: true
+
   test_threshold: 0.5
 
 hydra:

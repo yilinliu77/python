@@ -43,16 +43,23 @@ class Residual_fc(nn.Module):
 
 #################################################################################################################
 
+"""
+points: N*3
+query_and_data: M*8 (udf, gradient, flag) 
+"""
 class PVCNN(nn.Module):
     def __init__(self,
-                 *kwargs
+                 v_conf,
                  ):
         super().__init__()
-        self.voxelizer = Voxelization(256, normalize=False, eps=0)
-        self.maxpool = nn.MaxPool3d(2)
+        self.voxelizer = Voxelization(v_conf["voxel_resolution"], normalize=False, eps=0)
+        self.maxpool = nn.MaxPool3d(2) if v_conf["employ_max_pool"] else nn.Identity()
 
         cur_channels = 16
         self.encoders = nn.ModuleList()
+        hidden_dim_out = 0
+        fc_hidden_dim =  v_conf["fc_hidden_dim"]
+        conv_hidden_dim =  v_conf["max_voxel_dim"]
         for i in range(5):
             if i == 0:
                 self.encoders.append(nn.Sequential(
@@ -63,38 +70,39 @@ class PVCNN(nn.Module):
                     # nn.BatchNorm3d(cur_channels)
                 ))
             else:
-                target_channels = min(128, cur_channels * 2)
+                target_channels = min(conv_hidden_dim, cur_channels * 2)
                 self.encoders.append(nn.Sequential(
                     nn.Conv3d(cur_channels, target_channels, 3, padding=1),
                     nn.LeakyReLU(),
                     nn.Conv3d(target_channels, target_channels, 3, padding=1),
                     nn.LeakyReLU(),
-                    nn.BatchNorm3d(target_channels)
+                    # nn.BatchNorm3d(target_channels)
                 ))
                 cur_channels = target_channels
+            hidden_dim_out += cur_channels
 
         self.udf_out = nn.Sequential(
-            nn.Linear(368, 256),
+            nn.Linear(hidden_dim_out, fc_hidden_dim),
             nn.LeakyReLU(),
-            Residual_fc(256,256),
-            Residual_fc(256,256),
-            nn.Linear(256,1),
+            Residual_fc(fc_hidden_dim,fc_hidden_dim),
+            Residual_fc(fc_hidden_dim,fc_hidden_dim),
+            nn.Linear(fc_hidden_dim,1),
         )
 
         self.gradient_out = nn.Sequential(
-            nn.Linear(368, 256),
+            nn.Linear(hidden_dim_out, fc_hidden_dim),
             nn.LeakyReLU(),
-            Residual_fc(256, 256),
-            Residual_fc(256, 256),
-            nn.Linear(256, 3),
+            Residual_fc(fc_hidden_dim, fc_hidden_dim),
+            Residual_fc(fc_hidden_dim, fc_hidden_dim),
+            nn.Linear(fc_hidden_dim, 3),
         )
 
         self.flag_out = nn.Sequential(
-            nn.Linear(368, 256),
+            nn.Linear(hidden_dim_out, fc_hidden_dim),
             nn.LeakyReLU(),
-            Residual_fc(256, 256),
-            Residual_fc(256, 256),
-            nn.Linear(256, 1),
+            Residual_fc(fc_hidden_dim, fc_hidden_dim),
+            Residual_fc(fc_hidden_dim, fc_hidden_dim),
+            nn.Linear(fc_hidden_dim, 1),
         )
 
     def forward(self, v_data, v_training=False):
@@ -141,6 +149,43 @@ class PVCNN(nn.Module):
             "total_loss": total_loss
         }
 
+class PVCNN_local(PVCNN):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(PVCNN_local, self).__init__(v_conf)
+        self.maxpool = nn.Identity()
+
+        cur_channels = 16
+        self.encoders = nn.ModuleList()
+        conv_hidden_dim =  v_conf["max_voxel_dim"]
+        for i in range(5):
+            if i == 0:
+                self.encoders.append(nn.Sequential(
+                    nn.Conv3d(6, cur_channels, 7, padding=1),
+                    nn.LeakyReLU(),
+                    nn.Conv3d(cur_channels, cur_channels, 7, padding=1),
+                    nn.LeakyReLU(),
+                    # nn.BatchNorm3d(cur_channels)
+                ))
+            elif i <= 2:
+                target_channels = min(conv_hidden_dim, cur_channels * 2)
+                self.encoders.append(nn.Sequential(
+                    nn.Conv3d(cur_channels, target_channels, 7, padding=1),
+                    nn.LeakyReLU(),
+                    nn.Conv3d(target_channels, target_channels, 7, padding=1),
+                    nn.LeakyReLU(),
+                ))
+                cur_channels = target_channels
+            else:
+                target_channels = min(conv_hidden_dim, cur_channels * 2)
+                self.encoders.append(nn.Sequential(
+                    nn.Conv3d(cur_channels, target_channels, 1, padding=1),
+                    nn.LeakyReLU(),
+                    nn.Conv3d(target_channels, target_channels, 1, padding=1),
+                    nn.LeakyReLU(),
+                ))
+                cur_channels = target_channels
 
 #################################################################################################################
 

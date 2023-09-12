@@ -40,7 +40,7 @@ class PC_phase(pl.LightningModule):
         self.data = v_data
         mod = importlib.import_module('src.neural_bsp.model')
         self.model = getattr(mod, self.hydra_conf["model"]["model_name"])(
-
+            self.hydra_conf["model"]
         )
         # Import module according to the dataset_name
         mod = importlib.import_module('src.neural_bsp.abc_hdf5_dataset')
@@ -74,7 +74,7 @@ class PC_phase(pl.LightningModule):
         self.train_dataset = self.dataset_name(
             self.data,
             "training",
-            self.hydra_conf["dataset"]["patch_size"],
+            self.hydra_conf["dataset"],
         )
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
                           collate_fn=self.dataset_name.collate_fn,
@@ -88,7 +88,7 @@ class PC_phase(pl.LightningModule):
         self.valid_dataset = self.dataset_name(
             self.data,
             "validation",
-            self.hydra_conf["dataset"]["patch_size"],
+            self.hydra_conf["dataset"],
         )
         self.target_viz_name = self.valid_dataset.names[self.id_viz + self.valid_dataset.validation_start]
         return DataLoader(self.valid_dataset, batch_size=self.batch_size,

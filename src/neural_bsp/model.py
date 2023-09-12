@@ -162,27 +162,27 @@ class PVCNN_local(PVCNN):
         for i in range(5):
             if i == 0:
                 self.encoders.append(nn.Sequential(
-                    nn.Conv3d(6, cur_channels, 7, padding=1),
+                    nn.Conv3d(6, cur_channels, 7, padding=3),
                     nn.LeakyReLU(),
-                    nn.Conv3d(cur_channels, cur_channels, 7, padding=1),
+                    nn.Conv3d(cur_channels, cur_channels, 7, padding=3),
                     nn.LeakyReLU(),
                     # nn.BatchNorm3d(cur_channels)
                 ))
             elif i <= 2:
                 target_channels = min(conv_hidden_dim, cur_channels * 2)
                 self.encoders.append(nn.Sequential(
-                    nn.Conv3d(cur_channels, target_channels, 7, padding=1),
+                    nn.Conv3d(cur_channels, target_channels, 7, padding=3),
                     nn.LeakyReLU(),
-                    nn.Conv3d(target_channels, target_channels, 7, padding=1),
+                    nn.Conv3d(target_channels, target_channels, 7, padding=3),
                     nn.LeakyReLU(),
                 ))
                 cur_channels = target_channels
             else:
                 target_channels = min(conv_hidden_dim, cur_channels * 2)
                 self.encoders.append(nn.Sequential(
-                    nn.Conv3d(cur_channels, target_channels, 1, padding=1),
+                    nn.Conv3d(cur_channels, target_channels, 1, padding=0),
                     nn.LeakyReLU(),
-                    nn.Conv3d(target_channels, target_channels, 1, padding=1),
+                    nn.Conv3d(target_channels, target_channels, 1, padding=0),
                     nn.LeakyReLU(),
                 ))
                 cur_channels = target_channels

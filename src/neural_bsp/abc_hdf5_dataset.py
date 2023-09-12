@@ -169,8 +169,10 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
 
     def get_patch_train(self, v_id_item, v_id_patch):
         with h5py.File(self.data_root, "r") as f:
-            features = f["features"][v_id_item, ::self.sd, ::self.sd, ::self.sd].astype(np.float32)
-            flags = (f["flags"][v_id_item, ::self.sd, ::self.sd, ::self.sd] > 0).astype(np.float32)
+            # features = f["features"][v_id_item, ::self.sd, ::self.sd, ::self.sd].astype(np.float32)
+            # flags = (f["flags"][v_id_item, ::self.sd, ::self.sd, ::self.sd] > 0).astype(np.float32)
+            features = f["features"][v_id_item].astype(np.float32)[::self.sd, ::self.sd, ::self.sd]
+            flags = (f["flags"][v_id_item] > 0).astype(np.float32)[::self.sd, ::self.sd, ::self.sd]
             points = f["points"][v_id_item].astype(np.float32)
         coords = self.coords[::self.sd, ::self.sd, ::self.sd]
         return points, features, coords, flags

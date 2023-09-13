@@ -4,9 +4,9 @@ import sys
 
 import numpy as np
 
-sys.path.append("thirdparty/pvcnn")
-from thirdparty.pvcnn.modules.pvconv import PVConv
-from thirdparty.pvcnn.modules.voxelization import Voxelization
+# sys.path.append("thirdparty/pvcnn")
+# from thirdparty.pvcnn.modules.pvconv import PVConv
+# from thirdparty.pvcnn.modules.voxelization import Voxelization
 
 from torch import nn
 from torch.nn import functional as F
@@ -52,8 +52,7 @@ class PVCNN(nn.Module):
                  v_conf,
                  ):
         super().__init__()
-        self.voxelizer = Voxelization(v_conf["voxel_resolution"], normalize=False, eps=0)
-        self.maxpool = nn.MaxPool3d(2) if v_conf["employ_max_pool"] else nn.Identity()
+        self.maxpool = nn.MaxPool3d(2)
 
         cur_channels = 16
         self.encoders = nn.ModuleList()
@@ -63,7 +62,7 @@ class PVCNN(nn.Module):
         for i in range(5):
             if i == 0:
                 self.encoders.append(nn.Sequential(
-                    nn.Conv3d(6, cur_channels, 3, padding=1),
+                    nn.Conv3d(7, cur_channels, 3, padding=1),
                     nn.LeakyReLU(),
                     nn.Conv3d(cur_channels, cur_channels, 3, padding=1),
                     nn.LeakyReLU(),
@@ -106,19 +105,16 @@ class PVCNN(nn.Module):
         )
 
     def forward(self, v_data, v_training=False):
-        x, labels = v_data
+        sparse_features, query_features = v_data
 
-        voxel_feature, voxel_coordinate = self.voxelizer(
-            x.permute(0,2,1),
-            x[:,:,:3].permute(0,2,1),
-        )
+        voxel_feature = sparse_features.permute(0,4,1,2,3)
         features= []
         for layer in self.encoders:
             voxel_feature = layer(voxel_feature)
             features.append(voxel_feature)
             voxel_feature = self.maxpool(voxel_feature)
 
-        sampled_feature = self.embedding(labels[:,:,:3], features)
+        sampled_feature = self.embedding(query_features[:,:,:3], features)
         pred_udf = self.udf_out(sampled_feature.permute(0,2,1))
         pred_gradient = self.gradient_out(sampled_feature.permute(0,2,1))
         pred_flag = self.flag_out(sampled_feature.permute(0,2,1))
@@ -162,11 +158,10 @@ class PVCNN_local(PVCNN):
         for i in range(5):
             if i == 0:
                 self.encoders.append(nn.Sequential(
-                    nn.Conv3d(6, cur_channels, 7, padding=3),
+                    nn.Conv3d(7, cur_channels, 7, padding=3),
                     nn.LeakyReLU(),
                     nn.Conv3d(cur_channels, cur_channels, 7, padding=3),
                     nn.LeakyReLU(),
-                    # nn.BatchNorm3d(cur_channels)
                 ))
             elif i <= 2:
                 target_channels = min(conv_hidden_dim, cur_channels * 2)

@@ -105,10 +105,6 @@ class ABC_dataset_patch_hdf5(torch.utils.data.Dataset):
                 torch.from_numpy(v_batches[0][3])]
 
 
-"""
-points: N*3
-query_and_data: M*8 (xyz, gradient, udf, flag) 
-"""
 class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
     def __init__(self, v_data_root, v_training_mode, v_conf):
         super(ABC_dataset_points_hdf5, self).__init__()
@@ -123,7 +119,8 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         self.coords = generate_coords(self.resolution).astype(np.float32)
 
         self.patch_size = v_conf["patch_size"]
-        self.sd = v_conf["sample_density"] # sample density
+        self.id = v_conf["input_density"] # input density
+        self.qd = v_conf["query_density"] # query density
         self.num_patch = self.resolution // self.patch_size
         self.num_patches = self.num_patch ** 3
         assert self.resolution % self.patch_size == 0
@@ -154,29 +151,34 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         y_start = v_id_patch // self.num_patch % self.num_patch * self.patch_size
         z_start = v_id_patch % self.num_patch * self.patch_size
         with h5py.File(self.data_root, "r") as f:
+            point_features = f["point_features"][v_id_item, ::self.id, ::self.id, ::self.id].astype(np.float32)
             features = f["features"][
                        v_id_item, x_start:x_start + self.patch_size,
                        y_start:y_start + self.patch_size, z_start:z_start + self.patch_size].astype(np.float32)
             flags = (f["flags"][
                      v_id_item, x_start:x_start + self.patch_size,
                      y_start:y_start + self.patch_size, z_start:z_start + self.patch_size] > 0).astype(np.float32)
-            points = f["points"][v_id_item].astype(np.float32)
         coords = self.coords[
                  x_start:x_start + self.patch_size,
                  y_start:y_start + self.patch_size,
                  z_start:z_start + self.patch_size]
-        return points, features, coords, flags
+        return point_features, features, coords, flags
 
     def get_patch_train(self, v_id_item, v_id_patch):
         with h5py.File(self.data_root, "r") as f:
-            # features = f["features"][v_id_item, ::self.sd, ::self.sd, ::self.sd].astype(np.float32)
-            # flags = (f["flags"][v_id_item, ::self.sd, ::self.sd, ::self.sd] > 0).astype(np.float32)
-            features = f["features"][v_id_item].astype(np.float32)[::self.sd, ::self.sd, ::self.sd]
-            flags = (f["flags"][v_id_item] > 0).astype(np.float32)[::self.sd, ::self.sd, ::self.sd]
-            points = f["points"][v_id_item].astype(np.float32)
-        coords = self.coords[::self.sd, ::self.sd, ::self.sd]
-        return points, features, coords, flags
+            point_features = f["point_features"][v_id_item, ::self.id, ::self.id, ::self.id].astype(np.float32)
+            features = f["features"][v_id_item, ::self.qd, ::self.qd, ::self.qd].astype(np.float32)
+            flags = (f["flags"][v_id_item, ::self.qd, ::self.qd, ::self.qd] > 0).astype(np.float32)
+        coords = self.coords[::self.qd, ::self.qd, ::self.qd]
+        return point_features, features, coords, flags
 
+    def angle2vector(self, v_angles):
+        angles = (v_angles / 65535 * np.pi * 2)
+        dx = np.cos(angles[..., 0]) * np.sin(angles[..., 1])
+        dy = np.sin(angles[..., 0]) * np.sin(angles[..., 1])
+        dz = np.cos(angles[..., 1])
+        gradients = np.stack([dx, dy, dz], axis=-1)
+        return gradients
 
     def __getitem__(self, idx):
         id_object, id_patch = self.index[idx]
@@ -185,42 +187,40 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         cur_time = time.time()
 
         if self.mode == "training":
-            points, features, coords, flags = self.get_patch_train(id_object, id_patch)
+            point_features, features, coords, flags = self.get_patch_train(id_object, id_patch)
         else:
-            points, features, coords, flags = self.get_patch_test(id_object, id_patch)
+            point_features, features, coords, flags = self.get_patch_test(id_object, id_patch)
         times[0] += time.time() - cur_time
         cur_time = time.time()
 
-        features = features / 65535
-        angles = (features[:, :, :, 1:3] * np.pi * 2).reshape(-1, 2)
-        dx = np.cos(angles[:, 0]) * np.sin(angles[:, 1])
-        dy = np.sin(angles[:, 0]) * np.sin(angles[:, 1])
-        dz = np.cos(angles[:, 1])
-        gradients = np.stack([dx, dy, dz], axis=1)
-        udf = features[:, :, :, 0:1].reshape(-1, 1) * 2
-        coords = coords.reshape((-1, 3))
-        flags = flags.reshape((-1, 1))
+        sparse_udf = point_features[..., 0:1] / 65535 * 2
+        sparse_gradients = self.angle2vector(point_features[..., 1:3])
+        sparse_normals = self.angle2vector(point_features[..., 3:5])
+        sparse_features = np.concatenate([sparse_udf, sparse_gradients, sparse_normals], axis=-1)
 
-        query_and_data = np.concatenate((coords, gradients, udf, flags), axis=1)
+        query_udf = features[..., 0:1] / 65535 * 2
+        query_gradient = self.angle2vector(features[..., 1:3])
+        query_features = np.concatenate([coords, query_udf, query_gradient, flags[:,:,:,None]], axis=-1)
+        query_features = query_features.reshape((-1, 8))
         times[1] += time.time() - cur_time
-        return points, query_and_data, self.names[id_object], id_patch
+        return sparse_features, query_features, self.names[id_object], id_patch
 
     @staticmethod
     def collate_fn(v_batches):
-        points, query_and_data, names, id_patch = [], [], [], []
+        sparse_features, query_features, names, id_patch = [], [], [], []
         for item in v_batches:
-            points.append(item[0])
-            query_and_data.append(item[1])
+            sparse_features.append(item[0])
+            query_features.append(item[1])
             names.append(item[2])
             id_patch.append(item[3])
-        points = np.stack(points, axis=0)
-        query_and_data = np.stack(query_and_data, axis=0)
+        sparse_features = np.stack(sparse_features, axis=0)
+        query_features = np.stack(query_features, axis=0)
         id_patch = np.stack(id_patch, axis=0)
         names = np.asarray(names)
 
         return (
-            torch.from_numpy(points),
-            torch.from_numpy(query_and_data),
+            torch.from_numpy(sparse_features),
+            torch.from_numpy(query_features),
             names,
             torch.from_numpy(id_patch),
         )

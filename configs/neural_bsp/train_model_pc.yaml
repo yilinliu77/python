@@ -1,9 +1,10 @@
 dataset:
 #  root: G:\Dataset\ABC\GSP_v3_part_1k\training
-  root: G:/Dataset/ABC/GSP_v6_1k/training.hdf5
+  root: F:/GSP/v6_200/training.hdf5
   dataset_name: ABC_dataset_points_hdf5
   patch_size: 64
-  sample_density: 2
+  input_density: 4
+  query_density: 2
 
 #  test_list: []
 #  test_list: ["00860128","00860559","00860889","00861617"]
@@ -12,7 +13,7 @@ dataset:
 trainer:
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 0
+  num_worker: 4
 
   batch_size: 1
   resume_from_checkpoint:
@@ -26,7 +27,6 @@ model:
   voxel_resolution: 64
   fc_hidden_dim: 64
   max_voxel_dim: 64
-  employ_max_pool: true
 
   test_threshold: 0.5
 

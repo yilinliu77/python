@@ -72,7 +72,7 @@ class ABC_dataset_patch_hdf5(torch.utils.data.Dataset):
     def get_patch(self, v_id_item, v_id_patch):
         with h5py.File(self.data_root, "r") as f:
             features = f["point_features"][
-                       v_id_patch,
+                       v_id_item,
                        v_id_patch*self.patch_size:(v_id_patch+1)*self.patch_size].astype(np.float32)
             flags = (f["flags"][
                      v_id_item,

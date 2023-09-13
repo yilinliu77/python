@@ -1,3 +1,4 @@
+import os
 from functools import partial
 
 import sys
@@ -14,6 +15,8 @@ import torch
 from torchvision import models
 import torchvision
 from torchvision.ops import sigmoid_focal_loss
+
+from shared.common_utils import sigmoid, export_point_cloud
 
 
 def focal_loss(v_predictions, labels, v_alpha=0.75):
@@ -144,6 +147,51 @@ class PVCNN(nn.Module):
             "flag_loss": flag_loss,
             "total_loss": total_loss
         }
+
+    def compute_pr(self, outputs, data):
+        prob = torch.sigmoid(outputs[:,:,4])
+        gt = data[:,:,7].to(torch.long)
+        return prob, gt
+
+    def valid_output(self,idx, log_root, target_viz_name,
+                     gathered_prediction,gathered_gt):
+        assert gathered_prediction.shape[0] == 256 ** 3
+        predicted_labels = gathered_prediction.reshape((256, 256, 256, -1))
+        gt_labels = gathered_gt.reshape((256, 256, 256, -1))
+
+        query_points = gt_labels[:, :, :, :3]
+        gt_udf = gt_labels[:, :, :, 3:4]
+        gt_gradient = gt_labels[:, :, :, 4:7]
+        gt_flag = gt_labels[:, :, :, 7:8].astype(bool)
+
+        pred_udf = predicted_labels[:, :, :, 0:1]
+        pred_gradient = predicted_labels[:, :, :, 1:4]
+        pred_flag = sigmoid(predicted_labels[:, :, :, 4:5]) > 0.5
+
+        gt_surface_points = (query_points + gt_gradient * gt_udf)
+        export_point_cloud(
+            str(log_root / "{}_{}_gt_p.ply".format(idx, target_viz_name)),
+            gt_surface_points.reshape(-1, 3)
+        )
+
+        pred_surface_points = (query_points + pred_gradient * pred_udf)
+        export_point_cloud(
+            str(log_root / "{}_{}_pred_p.ply".format(idx, target_viz_name)),
+            pred_surface_points.reshape(-1, 3)
+        )
+
+        gt_boundary = query_points[gt_flag[:, :, :, 0]]
+        export_point_cloud(
+            str(log_root / "{}_{}_gt_b.ply".format(idx, target_viz_name)),
+            gt_boundary
+        )
+
+        pred_boundary = query_points[pred_flag[:, :, :, 0]]
+        export_point_cloud(
+            str(log_root / "{}_{}_pred_b.ply".format(idx, target_viz_name)),
+            pred_boundary.reshape(-1, 3)
+        )
+
 
 class PVCNN_local(PVCNN):
     def __init__(self,
@@ -741,13 +789,13 @@ class NoUpsampling(AbstractUpsampling):
 
 
 class TestNetDoubleConv(nn.Module):
-    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5,
-                 v_input_channel=3, *kwargs
+    def __init__(self, v_conf,
                  ):
         super(TestNetDoubleConv, self).__init__()
-        self.f_maps = v_phase
+        self.conf = v_conf
+        self.f_maps = self.conf["fmaps"]
         self.encoders = create_encoders(
-            v_input_channel,
+            self.conf["channels"],
             self.f_maps,
             DoubleConv,
             3,
@@ -765,8 +813,6 @@ class TestNetDoubleConv(nn.Module):
             8,
             True)
         self.final_conv = nn.Conv3d(self.f_maps[0], 1, 1)
-        self.loss_func = globals()[v_loss_type]
-        self.loss_alpha = v_alpha
 
     def forward(self, v_data, v_training=False):
         x, labels = v_data
@@ -782,23 +828,52 @@ class TestNetDoubleConv(nn.Module):
             x = decoder(encoder_features, x)
 
         prediction = self.final_conv(x)
-
         return prediction
+
+    def compute_pr(self, v_pred, v_gt):
+        bs = v_pred.shape[0]
+        prob = torch.sigmoid(v_pred).reshape(bs, -1)
+        gt = v_gt.reshape(bs, -1).to(torch.long)
+        return prob, gt
 
     def loss(self, v_predictions, v_input):
         features, labels = v_input
 
-        loss = self.loss_func(v_predictions, labels, self.loss_alpha)
-        return loss
+        loss = focal_loss(v_predictions, labels, 0.75)
+        return {
+            "total_loss": loss
+        }
+
+    def valid_output(self,idx, log_root, target_viz_name,
+                     gathered_prediction,gathered_gt):
+        assert gathered_prediction.shape[0]==512
+        v_resolution=256
+        query_points = np.meshgrid(np.arange(v_resolution), np.arange(v_resolution), np.arange(v_resolution), indexing="ij")
+        query_points = np.stack(query_points, axis=3) / (v_resolution - 1)
+        query_points = (query_points * 2 - 1).astype(np.float32).reshape(-1,3)
+
+        predicted_labels = gathered_prediction.reshape(
+            (-1, 8, 8, 8, 32, 32, 32)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(-1, 256, 256, 256)
+        gt_labels = gathered_gt.reshape(
+            (-1, 8, 8, 8, 32, 32, 32)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(-1, 256, 256, 256)
+
+        predicted_labels = sigmoid(predicted_labels[0]) > 0.5
+        mask = predicted_labels.reshape(-1)
+        export_point_cloud(os.path.join(log_root, "{}_{}_pred.ply".format(idx, target_viz_name)),
+                           query_points[mask])
+
+        gt_labels = sigmoid(gt_labels[0]) > 0.5
+        mask = gt_labels.reshape(-1)
+        export_point_cloud(os.path.join(log_root, "{}_{}_gt.ply".format(idx, target_viz_name)),
+                           query_points[mask])
 
 
 class TestNetResidual(TestNetDoubleConv):
-    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5,
-                 v_input_channel=3, *kwargs
+    def __init__(self, v_conf
                  ):
-        super().__init__(v_phase, v_loss_type, v_alpha)
+        super().__init__(v_conf)
         self.encoders = create_encoders(
-            v_input_channel,
+            self.conf["channels"],
             self.f_maps,
             ResNetBlock,
             3,
@@ -818,12 +893,11 @@ class TestNetResidual(TestNetDoubleConv):
 
 
 class TestNetResidualSE(TestNetDoubleConv):
-    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5,
-                 v_input_channel=3, *kwargs
+    def __init__(self, v_conf
                  ):
-        super().__init__(v_phase, v_loss_type, v_alpha)
+        super().__init__(v_conf)
         self.encoders = create_encoders(
-            v_input_channel,
+            self.conf["channels"],
             self.f_maps,
             ResNetBlockSE,
             3,

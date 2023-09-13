@@ -52,7 +52,6 @@ class PC_phase(pl.LightningModule):
             "loss": [],
             "prediction": [],
             "gt": [],
-            "id_patch": [],
         }
 
         # self.target_viz_name = "00015724"
@@ -125,14 +124,12 @@ class PC_phase(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         data = batch[:2]
         name = batch[2]
-        id_patch = batch[3]
 
         outputs = self.model(data, False)
         loss = self.model.loss(outputs, data)
         for idx, name_item in enumerate(name):
             if name_item == self.target_viz_name:
                 self.viz_data["loss"].append(loss["total_loss"].item())
-                self.viz_data["id_patch"].append(id_patch[idx])
                 self.viz_data["prediction"].append(outputs[idx])
                 self.viz_data["gt"].append(data[1][idx])
         for loss_name in loss:
@@ -145,9 +142,8 @@ class PC_phase(pl.LightningModule):
                          sync_dist=True,
                          batch_size=data[0].shape[0])
 
-        prob = torch.sigmoid(outputs[:,:,4])
-        gt = data[1][:,:,7].to(torch.long)
-        self.pr_computer.update(prob, gt)
+        pr_result = self.model.compute_pr(outputs, data[1])
+        self.pr_computer.update(pr_result[0], pr_result[1])
         return
 
     def on_validation_epoch_end(self):
@@ -155,7 +151,6 @@ class PC_phase(pl.LightningModule):
             self.viz_data["gt"].clear()
             self.viz_data["prediction"].clear()
             self.viz_data["loss"].clear()
-            self.viz_data["id_patch"].clear()
             self.pr_computer.reset()
             return
 
@@ -164,10 +159,9 @@ class PC_phase(pl.LightningModule):
 
         self.pr_computer.reset()
 
-        if len(self.viz_data["id_patch"]) == 0:
+        if len(self.viz_data["prediction"]) == 0:
             return
 
-        id_patch = torch.stack(self.viz_data["id_patch"], dim=0)
         prediction = torch.cat(self.viz_data["prediction"], dim=0)
         gt = torch.cat(self.viz_data["gt"], dim=0)
 
@@ -176,47 +170,14 @@ class PC_phase(pl.LightningModule):
 
         idx = self.trainer.current_epoch + 1 if not self.trainer.sanity_checking else 0
 
-        assert gathered_prediction.shape[0] % 512 == 0
-        predicted_labels = gathered_prediction.reshape((256, 256, 256, -1))
-        gt_labels = gathered_gt.reshape((256, 256, 256, -1))
-
-        query_points = gt_labels[:,:,:,:3]
-        gt_udf = gt_labels[:,:,:,3:4]
-        gt_gradient = gt_labels[:,:,:,4:7]
-        gt_flag = gt_labels[:,:,:,7:8].astype(bool)
-
-        pred_udf = predicted_labels[:,:,:,0:1]
-        pred_gradient = predicted_labels[:,:,:,1:4]
-        pred_flag = sigmoid(predicted_labels[:,:,:,4:5]) > 0.5
-
-        gt_surface_points = (query_points + gt_gradient * gt_udf)
-        export_point_cloud(
-            str(self.log_root / "{}_{}_gt_p.ply".format(idx, self.target_viz_name)),
-            gt_surface_points.reshape(-1,3)
-        )
-
-        pred_surface_points = (query_points + pred_gradient * pred_udf)
-        export_point_cloud(
-            str(self.log_root / "{}_{}_pred_p.ply".format(idx, self.target_viz_name)),
-            pred_surface_points.reshape(-1,3)
-        )
-
-        gt_boundary = query_points[gt_flag[:,:,:,0]]
-        export_point_cloud(
-            str(self.log_root / "{}_{}_gt_b.ply".format(idx, self.target_viz_name)),
-            gt_boundary
-        )
-
-        pred_boundary = query_points[pred_flag[:,:,:,0]]
-        export_point_cloud(
-            str(self.log_root / "{}_{}_pred_b.ply".format(idx, self.target_viz_name)),
-            pred_boundary.reshape(-1,3)
+        self.model.valid_output(
+            idx, self.log_root, self.target_viz_name,
+            gathered_prediction,gathered_gt
         )
 
         self.viz_data["gt"].clear()
         self.viz_data["prediction"].clear()
         self.viz_data["loss"].clear()
-        self.viz_data["id_patch"].clear()
         return
 
     def test_dataloader(self):

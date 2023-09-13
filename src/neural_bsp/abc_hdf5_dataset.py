@@ -196,11 +196,13 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         sparse_udf = point_features[..., 0:1] / 65535 * 2
         sparse_gradients = self.angle2vector(point_features[..., 1:3])
         sparse_normals = self.angle2vector(point_features[..., 3:5])
+        # UDF, gradients * 3, normal * 3
         sparse_features = np.concatenate([sparse_udf, sparse_gradients, sparse_normals], axis=-1)
 
         query_udf = features[..., 0:1] / 65535 * 2
         query_gradient = self.angle2vector(features[..., 1:3])
         query_features = np.concatenate([coords, query_udf, query_gradient, flags[:,:,:,None]], axis=-1)
+        # points * 3, UDF, gradients * 3, flag
         query_features = query_features.reshape((-1, 8))
         times[1] += time.time() - cur_time
         return sparse_features, query_features, self.names[id_object], id_patch

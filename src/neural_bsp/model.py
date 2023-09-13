@@ -130,8 +130,8 @@ class PVCNN(nn.Module):
 
     def loss(self, v_prediction, v_gt):
         gt_labels = v_gt[1]
-        gt_gradient = gt_labels[:,:,3:6]
-        gt_udf = gt_labels[:,:,6:7]
+        gt_udf = gt_labels[:,:,3:4]
+        gt_gradient = gt_labels[:,:,4:7]
         gt_flag = gt_labels[:,:,7:8].to(gt_gradient.dtype)
 
         udf_loss = F.l1_loss(v_prediction[:,:,0:1], gt_udf, reduction="mean")

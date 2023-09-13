@@ -181,8 +181,8 @@ class PC_phase(pl.LightningModule):
         gt_labels = gathered_gt.reshape((256, 256, 256, -1))
 
         query_points = gt_labels[:,:,:,:3]
-        gt_gradient = gt_labels[:,:,:,3:6]
-        gt_udf = gt_labels[:,:,:,6:7]
+        gt_udf = gt_labels[:,:,:,3:4]
+        gt_gradient = gt_labels[:,:,:,4:7]
         gt_flag = gt_labels[:,:,:,7:8].astype(bool)
 
         pred_udf = predicted_labels[:,:,:,0:1]

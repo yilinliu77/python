@@ -40,7 +40,7 @@ class ABC_dataset_patch_hdf5(torch.utils.data.Dataset):
         self.data_root = v_data_root
         self.mode = v_training_mode
         self.conf = v_conf
-        self.patch_size = self.conf["patch_size"]
+        self.patch_size = 32
         with h5py.File(self.data_root, "r") as f:
             self.num_items = f["features"].shape[0]
             self.resolution = f["features"].shape[1]
@@ -48,8 +48,7 @@ class ABC_dataset_patch_hdf5(torch.utils.data.Dataset):
         self.validation_start = self.num_items // 5 * 4
 
         assert self.resolution % self.patch_size == 0
-        self.num_patch = self.resolution // self.patch_size
-        self.num_patches = self.num_patch ** 3
+        self.num_patches = self.resolution // self.patch_size
 
         if self.mode == "training":
             self.index = np.stack(np.meshgrid(
@@ -71,23 +70,15 @@ class ABC_dataset_patch_hdf5(torch.utils.data.Dataset):
         return self.index.shape[0]
 
     def get_patch(self, v_id_item, v_id_patch):
-        x_start = v_id_patch // self.num_patch // self.num_patch * self.patch_size
-        y_start = v_id_patch // self.num_patch % self.num_patch * self.patch_size
-        z_start = v_id_patch % self.num_patch * self.patch_size
-
         with h5py.File(self.data_root, "r") as f:
             features = f["point_features"][
-                       v_id_item,
-                       x_start:x_start + self.patch_size,
-                       y_start:y_start + self.patch_size,
-                       z_start:z_start + self.patch_size,
-                       ].astype(np.float32)
+                       v_id_patch,
+                       v_id_patch*self.patch_size:(v_id_patch+1)*self.patch_size].astype(np.float32)
             flags = (f["flags"][
                      v_id_item,
-                     x_start:x_start + self.patch_size,
-                     y_start:y_start + self.patch_size,
-                     z_start:z_start + self.patch_size,
-                     ] > 0).astype(np.float32)
+                     v_id_patch*self.patch_size:(v_id_patch+1)*self.patch_size] > 0).astype(np.float32)
+        features = features.reshape(32,8,32,8,32,5).transpose((1,3,0,2,4,5)).reshape((64, 32, 32, 32, 5))
+        flags = flags.reshape(32,8,32,8,32).transpose((1,3,0,2,4)).reshape((64, 32, 32, 32))
         return features, flags
 
     def __getitem__(self, idx):
@@ -103,8 +94,8 @@ class ABC_dataset_patch_hdf5(torch.utils.data.Dataset):
         udf = feat_data[..., 0:1] / 65535 * 2
         gradients = angle2vector(feat_data[..., 1:3])
         normal = angle2vector(feat_data[..., 3:5])
-        feat_data = np.concatenate([udf, gradients, normal], axis=-1).transpose((3,0,1,2))
-        flag_data = flag_data[None, :, :, :]
+        feat_data = np.concatenate([udf, gradients, normal], axis=-1).transpose((0,4,1,2,3))
+        flag_data = flag_data[:, None, :, :, :]
         times[1] += time.time() - cur_time
         return feat_data, flag_data, self.names[id_object], id_patch
 
@@ -116,8 +107,8 @@ class ABC_dataset_patch_hdf5(torch.utils.data.Dataset):
             flag_data.append(item[1])
             names.append(item[2])
             id_patch.append(item[3])
-        feat_data = np.stack(feat_data, axis=0)
-        flag_data = np.stack(flag_data, axis=0)
+        feat_data = np.concatenate(feat_data, axis=0)
+        flag_data = np.concatenate(flag_data, axis=0)
         id_patch = np.stack(id_patch, axis=0)
         names = np.asarray(names)
         return (
@@ -248,23 +239,15 @@ class ABC_dataset_patch_hdf5_raw(ABC_dataset_patch_hdf5):
         super(ABC_dataset_patch_hdf5_raw, self).__init__(v_data_root, v_training_mode, v_conf)
 
     def get_patch(self, v_id_item, v_id_patch):
-        x_start = v_id_patch // self.num_patch // self.num_patch * self.patch_size
-        y_start = v_id_patch // self.num_patch % self.num_patch * self.patch_size
-        z_start = v_id_patch % self.num_patch * self.patch_size
-
         with h5py.File(self.data_root, "r") as f:
-            features = f["features"][
-                       v_id_item,
-                       x_start:x_start + self.patch_size,
-                       y_start:y_start + self.patch_size,
-                       z_start:z_start + self.patch_size,
-                       ].astype(np.float32)
+            features = f["point_features"][
+                       v_id_patch,
+                       v_id_patch * self.patch_size:(v_id_patch + 1) * self.patch_size].astype(np.float32)
             flags = (f["flags"][
                      v_id_item,
-                     x_start:x_start + self.patch_size,
-                     y_start:y_start + self.patch_size,
-                     z_start:z_start + self.patch_size,
-                     ] > 0).astype(np.float32)
+                     v_id_patch * self.patch_size:(v_id_patch + 1) * self.patch_size] > 0).astype(np.float32)
+        features = features.reshape(32, 8, 32, 8, 32, 5).transpose((1, 3, 0, 2, 4, 5)).reshape((64, 32, 32, 32, 5))
+        flags = flags.reshape(32, 8, 32, 8, 32).transpose((1, 3, 0, 2, 4)).reshape((64, 32, 32, 32))
         return features, flags
 
     def __getitem__(self, idx):

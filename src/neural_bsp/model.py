@@ -847,7 +847,7 @@ class TestNetDoubleConv(nn.Module):
     def valid_output(self,idx, log_root, target_viz_name,
                      gathered_prediction,gathered_gt):
         assert gathered_prediction.shape[0]==512
-        v_resolution=256
+        v_resolution = 256
         query_points = np.meshgrid(np.arange(v_resolution), np.arange(v_resolution), np.arange(v_resolution), indexing="ij")
         query_points = np.stack(query_points, axis=3) / (v_resolution - 1)
         query_points = (query_points * 2 - 1).astype(np.float32).reshape(-1,3)

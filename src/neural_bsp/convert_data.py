@@ -84,7 +84,7 @@ def writer(v_queue: Queue, v_num_files, v_filename, num_block):
                                )
     output_file.create_dataset("point_features", shape=(0, 256, 256, 256, 5), dtype=np.uint16,
                                maxshape=(v_num_files, 256, 256, 256, 5),
-                               chunks=(1, 32, 32, 32, 3),
+                               chunks=(1, 32, 32, 32, 5),
                                shuffle=True,
                                compression="lzf"
                                )

@@ -123,15 +123,15 @@ class PC_phase(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         data = batch[:2]
-        name = batch[2]
+        name = batch[2][0]
+        assert len(batch[2])==1
 
         outputs = self.model(data, False)
         loss = self.model.loss(outputs, data)
-        for idx, name_item in enumerate(name):
-            if name_item == self.target_viz_name:
-                self.viz_data["loss"].append(loss["total_loss"].item())
-                self.viz_data["prediction"].append(outputs[idx])
-                self.viz_data["gt"].append(data[1][idx])
+        if name == self.target_viz_name:
+            self.viz_data["loss"].append(loss["total_loss"].item())
+            self.viz_data["prediction"].append(outputs)
+            self.viz_data["gt"].append(data[1])
         for loss_name in loss:
             if loss_name == "total_loss":
                 self.log("Validation_Loss", loss[loss_name], prog_bar=True, logger=True, on_step=False, on_epoch=True,

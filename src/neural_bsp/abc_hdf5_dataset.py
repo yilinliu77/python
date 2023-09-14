@@ -112,12 +112,6 @@ class ABC_dataset_patch_hdf5(torch.utils.data.Dataset):
         id_patch = np.stack(id_patch, axis=0)
         names = np.asarray(names)
 
-        udf = feat_data[..., 0:1] / 65535 * 2
-        gradients = angle2vector(feat_data[..., 1:3])
-        normal = angle2vector(feat_data[..., 3:5])
-        feat_data = np.concatenate([udf, gradients, normal], axis=-1).transpose((0,4,1,2,3))
-        flag_data = flag_data[:, None, :, :, :]
-
         return (
             torch.from_numpy(feat_data),
             torch.from_numpy(flag_data),

@@ -787,6 +787,13 @@ class NoUpsampling(AbstractUpsampling):
     def _no_upsampling(x, size):
         return x
 
+def angle2vector(v_angles):
+    angles = (v_angles / 65535 * torch.pi * 2)
+    dx = torch.cos(angles[..., 0]) * torch.sin(angles[..., 1])
+    dy = torch.sin(angles[..., 0]) * torch.sin(angles[..., 1])
+    dz = torch.cos(angles[..., 1])
+    gradients = torch.stack([dx, dy, dz], dim=-1)
+    return gradients
 
 class TestNetDoubleConv(nn.Module):
     def __init__(self, v_conf,
@@ -815,7 +822,13 @@ class TestNetDoubleConv(nn.Module):
         self.final_conv = nn.Conv3d(self.f_maps[0], 1, 1)
 
     def forward(self, v_data, v_training=False):
-        x, labels = v_data
+        feat_data, flag_data = v_data
+
+        udf = feat_data[..., 0:1] / 65535 * 2
+        gradients = angle2vector(feat_data[..., 1:3])
+        normal = angle2vector(feat_data[..., 3:5])
+        x = torch.cat([udf, gradients, normal], dim=-1).permute((0,4,1,2,3))
+
         encoders_features = []
         for encoder in self.encoders:
             x = encoder(x)
@@ -838,6 +851,7 @@ class TestNetDoubleConv(nn.Module):
 
     def loss(self, v_predictions, v_input):
         features, labels = v_input
+        labels = labels[:, None, :, :, :]
 
         loss = focal_loss(v_predictions, labels, 0.75)
         return {

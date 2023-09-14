@@ -64,10 +64,10 @@ def reader(v_queue: Queue, v_features, v_point_features, v_flags, v_points, num_
         points = np.load(v_points[cur_id])
         point_feat = np.load(v_point_features[cur_id])
         if True:
-            shutil.rmtree(v_features[cur_id])
-            shutil.rmtree(v_flags[cur_id])
-            shutil.rmtree(v_points[cur_id])
-            shutil.rmtree(v_point_features[cur_id])
+            os.remove(v_features[cur_id])
+            os.remove(v_flags[cur_id])
+            os.remove(v_points[cur_id])
+            os.remove(v_point_features[cur_id])
         v_queue.put((cur_id, prefix, feat, point_feat, flag, points))
         cur_id += 1
     print("reader finished")

@@ -261,10 +261,10 @@ class ABC_dataset_patch_hdf5_raw(ABC_dataset_patch_hdf5):
         times[0] += time.time() - cur_time
         cur_time = time.time()
 
-        udf = feat_data[..., 0:1] / 65535 * 2
-        gradients = angle2vector(feat_data[..., 1:3])
-        feat_data = np.concatenate([udf, gradients], axis=-1).transpose((3,0,1,2))
-        flag_data = flag_data[None, :, :, :]
+        # udf = feat_data[..., 0:1] / 65535 * 2
+        # gradients = angle2vector(feat_data[..., 1:3])
+        # feat_data = np.concatenate([udf, gradients], axis=-1).transpose((3,0,1,2))
+        # flag_data = flag_data[None, :, :, :]
         times[1] += time.time() - cur_time
         return feat_data, flag_data, self.names[id_object], id_patch
 

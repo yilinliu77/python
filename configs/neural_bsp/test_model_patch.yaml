@@ -1,7 +1,7 @@
 dataset:
   dataset_name: ABC_dataset_patch_hdf5
   v_output_features: 4
-  test_list: ["G:/Dataset/ABC/GSP_comparison_4/00860889/00860889_843748a7e5a1c4dbfadf8c0d_trimesh_000.obj"]
+  test_list: ["G:/Dataset/ABC/quadric_test/00999739/00999739_348b49253ff07a020fc5fe58_trimesh_000.obj"]
   patch_size: 32
 
 trainer:
@@ -14,13 +14,14 @@ trainer:
 
 model:
   model_name: TestNetResidualSE
-  v_input_channel: 4
+  channels: 4
+  need_normalize: false
 
   v_depth: 5
   v_base_channel: 32
 
 #  phase: [32,64,128,256,512,1024]
-  phase: [16, 32, 64, 128, 256]
+  fmaps: [16, 32, 64, 128, 256]
 
   loss: BCE_loss
   loss_alpha: 0.75

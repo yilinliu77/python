@@ -181,17 +181,15 @@ class PC_phase(pl.LightningModule):
         return
 
     def test_dataloader(self):
-        self.test_dataset = self.dataset_name(
+        self.valid_dataset = self.dataset_name(
             self.data,
             "testing",
-            self.validation_batch_size,
-            self.hydra_conf["dataset"]["v_output_features"],
-            self.hydra_conf["dataset"]["test_list"],
+            self.hydra_conf["dataset"],
         )
-        return DataLoader(self.test_dataset, batch_size=1,
+        self.target_viz_name = self.valid_dataset.names[self.id_viz + self.valid_dataset.validation_start]
+        return DataLoader(self.valid_dataset, batch_size=self.batch_size,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
-                          persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           )
 
     def test_step(self, batch, batch_idx):
@@ -204,11 +202,18 @@ class PC_phase(pl.LightningModule):
         loss = self.model.loss(outputs, data)
 
         # PR
-        self.pr_computer.update(torch.sigmoid(outputs), data[1].to(torch.long))
+        pr_result = self.model.compute_pr(outputs, data[1])
+        self.pr_computer.update(pr_result[0], pr_result[1])
 
-        self.log("Test_Loss", loss, prog_bar=True, logger=False, on_step=True, on_epoch=True,
-                 sync_dist=True,
-                 batch_size=data[0].shape[0])
+        for loss_name in loss:
+            if loss_name == "total_loss":
+                self.log("Test_Loss", loss[loss_name], prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                         sync_dist=True,
+                         batch_size=data[0].shape[0])
+            else:
+                self.log("Test_"+loss_name, loss[loss_name], prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                         sync_dist=True,
+                         batch_size=data[0].shape[0])
 
         # Save
         if len(self.hydra_conf["dataset"]["test_list"]) > 0:
@@ -252,7 +257,9 @@ class PC_phase(pl.LightningModule):
         metrics = self.pr_computer.compute()
         for key in metrics:
             print("{:3}: {:.3f}".format(key, metrics[key].cpu().item()))
-        print("Loss: {:.3f}".format(self.trainer.callback_metrics["Test_Loss_epoch"].cpu().item()))
+
+        for loss in self.trainer.callback_metrics:
+            print("{}: {:.3f}".format(loss, self.trainer.callback_metrics[loss].cpu().item()))
 
 
 @hydra.main(config_name="train_model_pc.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")

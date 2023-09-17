@@ -1,11 +1,11 @@
 dataset:
-  root: F:/GSP/v6_200/training.hdf5
+  root: F:/GSP/GSP_v6_200/training.hdf5
   dataset_name: ABC_dataset_patch_hdf5
   patch_size: 32
   input_density: 4
   query_density: 2
 
-#  test_list: []
+  test_list: []
 #  test_list: ["00860128","00860559","00860889","00861617"]
 #  test_list: ["00015724"]
 

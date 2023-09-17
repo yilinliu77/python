@@ -24,12 +24,7 @@ def main(v_cfg: DictConfig):
 
     mod = importlib.import_module('src.neural_bsp.model')
     model = getattr(mod, v_cfg["model"]["model_name"])(
-        v_cfg["model"]["phase"],
-        v_cfg["model"]["loss"],
-        v_cfg["model"]["loss_alpha"],
-        v_cfg["model"]["v_input_channel"],
-        v_cfg["model"]["v_depth"],
-        v_cfg["model"]["v_base_channel"],
+        v_cfg["model"]
     )
     model.cuda()
     state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]

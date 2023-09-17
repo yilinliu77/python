@@ -44,6 +44,20 @@ class Residual_fc(nn.Module):
         feature = self.relu(self.fc(v_data))
         return feature + v_data
 
+
+def angle2vector(v_angles):
+    angles = (v_angles / 65535 * torch.pi * 2)
+    dx = torch.cos(angles[..., 0]) * torch.sin(angles[..., 1])
+    dy = torch.sin(angles[..., 0]) * torch.sin(angles[..., 1])
+    dz = torch.cos(angles[..., 1])
+    gradients = torch.stack([dx, dy, dz], dim=-1)
+    return gradients
+
+
+def de_normalize_udf(v_udf):
+    return v_udf / 65535 * 2
+
+
 #################################################################################################################
 
 """
@@ -110,7 +124,12 @@ class PVCNN(nn.Module):
     def forward(self, v_data, v_training=False):
         sparse_features, query_features = v_data
 
-        voxel_feature = sparse_features.permute(0,4,1,2,3)
+        udf = de_normalize_udf(sparse_features[..., 0:1])
+        gradients = angle2vector(sparse_features[..., 1:3])
+        normal = angle2vector(sparse_features[..., 3:5])
+        x = torch.cat([udf, gradients, normal], dim=-1).permute((0, 4, 1, 2, 3))
+
+        voxel_feature = x
         features= []
         for layer in self.encoders:
             voxel_feature = layer(voxel_feature)
@@ -133,9 +152,9 @@ class PVCNN(nn.Module):
 
     def loss(self, v_prediction, v_gt):
         gt_labels = v_gt[1]
-        gt_udf = gt_labels[:,:,3:4]
-        gt_gradient = gt_labels[:,:,4:7]
-        gt_flag = gt_labels[:,:,7:8].to(gt_gradient.dtype)
+        gt_udf = de_normalize_udf(gt_labels[:,:,3:4])
+        gt_gradient = angle2vector(gt_labels[:,:,4:6])
+        gt_flag = gt_labels[:,:,6:7].to(gt_gradient.dtype)
 
         udf_loss = F.l1_loss(v_prediction[:,:,0:1], gt_udf, reduction="mean")
         gradient_loss = F.l1_loss(v_prediction[:,:,1:4], gt_gradient, reduction="mean")
@@ -150,7 +169,7 @@ class PVCNN(nn.Module):
 
     def compute_pr(self, outputs, data):
         prob = torch.sigmoid(outputs[:,:,4])
-        gt = data[:,:,7].to(torch.long)
+        gt = data[:,:,6].to(torch.long)
         return prob, gt
 
     def valid_output(self,idx, log_root, target_viz_name,
@@ -787,13 +806,6 @@ class NoUpsampling(AbstractUpsampling):
     def _no_upsampling(x, size):
         return x
 
-def angle2vector(v_angles):
-    angles = (v_angles / 65535 * torch.pi * 2)
-    dx = torch.cos(angles[..., 0]) * torch.sin(angles[..., 1])
-    dy = torch.sin(angles[..., 0]) * torch.sin(angles[..., 1])
-    dz = torch.cos(angles[..., 1])
-    gradients = torch.stack([dx, dy, dz], dim=-1)
-    return gradients
 
 class TestNetDoubleConv(nn.Module):
     def __init__(self, v_conf,
@@ -801,6 +813,7 @@ class TestNetDoubleConv(nn.Module):
         super(TestNetDoubleConv, self).__init__()
         self.conf = v_conf
         self.f_maps = self.conf["fmaps"]
+        self.need_normalize = self.conf["need_normalize"]
         self.encoders = create_encoders(
             self.conf["channels"],
             self.f_maps,
@@ -824,11 +837,16 @@ class TestNetDoubleConv(nn.Module):
     def forward(self, v_data, v_training=False):
         feat_data, flag_data = v_data
 
-        udf = feat_data[..., 0:1] / 65535 * 2
-        gradients = angle2vector(feat_data[..., 1:3])
-        normal = angle2vector(feat_data[..., 3:5])
-        x = torch.cat([udf, gradients, normal], dim=-1).permute((0,4,1,2,3))
-
+        if self.need_normalize:
+            udf = de_normalize_udf(feat_data[..., 0:1])
+            gradients = angle2vector(feat_data[..., 1:3])
+            if feat_data.shape[-1] == 5:
+                normal = angle2vector(feat_data[..., 3:5])
+                x = torch.cat([udf, gradients, normal], dim=-1).permute((0,4,1,2,3))
+            else:
+                x = torch.cat([udf, gradients], dim=-1).permute((0, 4, 1, 2, 3))
+        else:
+            x = feat_data
         encoders_features = []
         for encoder in self.encoders:
             x = encoder(x)

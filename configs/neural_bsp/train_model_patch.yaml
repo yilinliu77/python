@@ -21,8 +21,9 @@ trainer:
   accelerator: "32-true"
 
 model:
-  model_name: PVCNN
+  model_name: TestNetResidualSE
   v_input_channel: 6
+  need_normalize: false
 
   v_depth: 5
   v_base_channel: 32

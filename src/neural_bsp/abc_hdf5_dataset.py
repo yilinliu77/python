@@ -34,9 +34,9 @@ def angle2vector(v_angles):
     return gradients
 
 
-class ABC_dataset_patch_hdf5(torch.utils.data.Dataset):
+class ABC_dataset_sparse_features(torch.utils.data.Dataset):
     def __init__(self, v_data_root, v_training_mode, v_conf):
-        super(ABC_dataset_patch_hdf5, self).__init__()
+        super(ABC_dataset_sparse_features, self).__init__()
         self.data_root = v_data_root
         self.mode = v_training_mode
         self.conf = v_conf
@@ -152,7 +152,7 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
                 np.arange(self.num_patches), indexing="ij"), axis=2)
         elif self.mode == "testing":
             self.index = np.stack(np.meshgrid(
-                np.arange(self.num_items),
+                np.arange(self.num_items)[:self.validation_start],
                 np.arange(self.num_patches), indexing="ij"), axis=2)
         else:
             raise ""
@@ -200,19 +200,17 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         times[0] += time.time() - cur_time
         cur_time = time.time()
 
-        sparse_udf = point_features[..., 0:1] / 65535 * 2
-        sparse_gradients = angle2vector(point_features[..., 1:3])
-        sparse_normals = angle2vector(point_features[..., 3:5])
-        # UDF, gradients * 3, normal * 3
-        sparse_features = np.concatenate([sparse_udf, sparse_gradients, sparse_normals], axis=-1)
+        # sparse_udf = point_features[..., 0:1] / 65535 * 2
+        # sparse_gradients = angle2vector(point_features[..., 1:3])
+        # sparse_normals = angle2vector(point_features[..., 3:5])
+        # sparse_features = np.concatenate([sparse_udf, sparse_gradients, sparse_normals], axis=-1)
 
-        query_udf = features[..., 0:1] / 65535 * 2
-        query_gradient = angle2vector(features[..., 1:3])
-        query_features = np.concatenate([coords, query_udf, query_gradient, flags[:, :, :, None]], axis=-1)
-        # points * 3, UDF, gradients * 3, flag
-        query_features = query_features.reshape((-1, 8))
+        # query_udf = features[..., 0:1] / 65535 * 2
+        # query_gradient = angle2vector(features[..., 1:3])
+        query_features = np.concatenate([coords, features, flags[:, :, :, None]], axis=-1)
+        query_features = query_features.reshape((-1, 7))
         times[1] += time.time() - cur_time
-        return sparse_features, query_features, self.names[id_object], id_patch
+        return point_features, query_features, self.names[id_object], id_patch
 
     @staticmethod
     def collate_fn(v_batches):
@@ -235,19 +233,19 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         )
 
 
-class ABC_dataset_patch_hdf5_raw(ABC_dataset_patch_hdf5):
+class ABC_dataset_dense_features(ABC_dataset_sparse_features):
     def __init__(self, v_data_root, v_training_mode, v_conf):
-        super(ABC_dataset_patch_hdf5_raw, self).__init__(v_data_root, v_training_mode, v_conf)
+        super(ABC_dataset_dense_features, self).__init__(v_data_root, v_training_mode, v_conf)
 
     def get_patch(self, v_id_item, v_id_patch):
         with h5py.File(self.data_root, "r") as f:
-            features = f["point_features"][
+            features = f["features"][
                        v_id_item,
                        v_id_patch*self.patch_size:(v_id_patch+1)*self.patch_size].astype(np.float32)
             flags = (f["flags"][
                      v_id_item,
                      v_id_patch*self.patch_size:(v_id_patch+1)*self.patch_size] > 0).astype(np.float32)
-        features = features.reshape(32, 8, 32, 8, 32, 5).transpose((1, 3, 0, 2, 4, 5)).reshape((64, 32, 32, 32, 5))
+        features = features.reshape(32, 8, 32, 8, 32, 3).transpose((1, 3, 0, 2, 4, 5)).reshape((64, 32, 32, 32, 3))
         flags = flags.reshape(32, 8, 32, 8, 32).transpose((1, 3, 0, 2, 4)).reshape((64, 32, 32, 32))
         return features, flags
 
@@ -270,9 +268,9 @@ class ABC_dataset_patch_hdf5_raw(ABC_dataset_patch_hdf5):
 
 ########################################################################################################################
 
-class ABC_dataset_patch_hdf5_sample(ABC_dataset_patch_hdf5):
+class ABC_dataset_sparsefeatures_sample(ABC_dataset_sparse_features):
     def __init__(self, v_data_root, v_training_mode, v_batch_size, v_output_features=4):
-        super(ABC_dataset_patch_hdf5_sample, self).__init__(
+        super(ABC_dataset_sparsefeatures_sample, self).__init__(
             v_data_root, v_training_mode, v_batch_size, v_output_features)
 
     def get_patch(self, v_id_item, v_id_patch):
@@ -292,9 +290,9 @@ class ABC_dataset_patch_hdf5_sample(ABC_dataset_patch_hdf5):
         return np.asarray([id_object] * self.batch_size), id_patch, features, flags
 
 
-class ABC_dataset_patch_hdf5_test(ABC_dataset_patch_hdf5):
+class ABC_dataset_sparsefeatures_test(ABC_dataset_sparse_features):
     def __init__(self, v_data_root, v_training_mode, v_batch_size, v_output_features=4, v_test_list=[]):
-        super(ABC_dataset_patch_hdf5_test, self).__init__(v_data_root, v_training_mode, v_batch_size, v_output_features)
+        super(ABC_dataset_sparsefeatures_test, self).__init__(v_data_root, v_training_mode, v_batch_size, v_output_features)
 
         if len(v_test_list) > 0:
             self.idxs = np.zeros(len(v_test_list), dtype=np.int32)
@@ -314,7 +312,7 @@ class ABC_dataset_patch_hdf5_test(ABC_dataset_patch_hdf5):
                 (-1, self.batch_size, 2))
 
 
-class ABC_dataset_patch_npy(ABC_dataset_patch_hdf5):
+class ABC_dataset_patch_npy(ABC_dataset_sparse_features):
     def __init__(self, v_data_root, v_training_mode, v_batch_size, v_output_features=4, ):
         super(ABC_dataset_patch_npy, self).__init__(v_data_root, v_training_mode, v_batch_size, v_output_features)
 

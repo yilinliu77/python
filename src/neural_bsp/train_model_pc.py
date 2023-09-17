@@ -78,7 +78,7 @@ class PC_phase(pl.LightningModule):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
-                          pin_memory=False,
+                          pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
                           )
@@ -93,7 +93,7 @@ class PC_phase(pl.LightningModule):
         return DataLoader(self.valid_dataset, batch_size=self.batch_size,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
-                          pin_memory=False,
+                          pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
                           )

@@ -265,6 +265,7 @@ class PC_phase(pl.LightningModule):
 @hydra.main(config_name="train_model_pc.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
+    torch.multiprocessing.set_start_method("spawn")
     torch.set_float32_matmul_precision("medium")
     print(OmegaConf.to_yaml(v_cfg))
 

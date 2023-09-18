@@ -210,7 +210,7 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         query_features = np.concatenate([coords, features, flags[:, :, :, None]], axis=-1)
         query_features = query_features.reshape((-1, 7))
         times[1] += time.time() - cur_time
-        print(times)
+        # print(times)
         return point_features, query_features, self.names[id_object], id_patch
 
     @staticmethod

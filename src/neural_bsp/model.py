@@ -174,14 +174,15 @@ class PVCNN(nn.Module):
 
     def valid_output(self,idx, log_root, target_viz_name,
                      gathered_prediction,gathered_gt):
-        assert gathered_prediction.shape[0] == 256 ** 3
-        predicted_labels = gathered_prediction.reshape((256, 256, 256, -1))
-        gt_labels = gathered_gt.reshape((256, 256, 256, -1))
+        predicted_labels = gathered_prediction.reshape(
+            (4,4,4,64,64,64,5)).transpose((0,3,1,4,2,5,6)).reshape((256,256,256,5))
+        gt_labels = gathered_gt.reshape(
+            (4,4,4,64,64,64,7)).transpose((0,3,1,4,2,5,6)).reshape((256,256,256,7))
 
         query_points = gt_labels[:, :, :, :3]
-        gt_udf = gt_labels[:, :, :, 3:4]
-        gt_gradient = gt_labels[:, :, :, 4:7]
-        gt_flag = gt_labels[:, :, :, 7:8].astype(bool)
+        gt_udf = de_normalize_udf(gt_labels[:, :, :, 3:4])
+        gt_gradient = angle2vector(torch.from_numpy(gt_labels[:, :, :, 4:6])).numpy()
+        gt_flag = gt_labels[:, :, :, 6:7].astype(bool)
 
         pred_udf = predicted_labels[:, :, :, 0:1]
         pred_gradient = predicted_labels[:, :, :, 1:4]

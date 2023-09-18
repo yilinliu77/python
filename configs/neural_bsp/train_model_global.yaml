@@ -1,5 +1,5 @@
 dataset:
-  root: F:/GSP/GSP_v6_200/training.hdf5
+  root: G:/Dataset/GSP/GSP_v6_200/training.hdf5
   dataset_name: ABC_dataset_points_hdf5
   patch_size: 64
   input_density: 4

@@ -180,11 +180,24 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         return point_features, features, coords, flags
 
     def get_patch_train(self, v_id_item, v_id_patch):
+        times = [0]*5
+        cur_time = time.time()
         with h5py.File(self.data_root, "r") as f:
-            point_features = f["point_features"][v_id_item, ::self.id, ::self.id, ::self.id].astype(np.float32)
-            features = f["features"][v_id_item, ::self.qd, ::self.qd, ::self.qd].astype(np.float32)
-            flags = (f["flags"][v_id_item, ::self.qd, ::self.qd, ::self.qd] > 0).astype(np.float32)
+            times[0]+=time.time()-cur_time
+            cur_time = time.time()
+            point_features = f["point_features"][v_id_item][::self.id, ::self.id, ::self.id].astype(np.float32)
+            times[1]+=time.time()-cur_time
+            cur_time = time.time()
+            features = f["features"][v_id_item][::self.qd, ::self.qd, ::self.qd].astype(np.float32)
+            times[2]+=time.time()-cur_time
+            cur_time = time.time()
+            flags = (f["flags"][v_id_item][::self.qd, ::self.qd, ::self.qd] > 0).astype(np.float32)
+            times[3]+=time.time()-cur_time
+            cur_time = time.time()
         coords = self.coords[::self.qd, ::self.qd, ::self.qd]
+        times[3]+=time.time()-cur_time
+        cur_time = time.time()
+        print(times)
         return point_features, features, coords, flags
 
     def __getitem__(self, idx):
@@ -210,6 +223,7 @@ class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
         query_features = np.concatenate([coords, features, flags[:, :, :, None]], axis=-1)
         query_features = query_features.reshape((-1, 7))
         times[1] += time.time() - cur_time
+        print(times)
         return point_features, query_features, self.names[id_object], id_patch
 
     @staticmethod

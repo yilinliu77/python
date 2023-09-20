@@ -267,6 +267,41 @@ class ABC_dataset_dense_features(ABC_dataset_sparse_features):
         times[1] += time.time() - cur_time
         return feat_data, flag_data, self.names[id_object], id_patch
 
+
+class ABC_dataset_dense_features_256(ABC_dataset_sparse_features):
+    def __init__(self, v_data_root, v_training_mode, v_conf):
+        super(ABC_dataset_dense_features_256, self).__init__(v_data_root, v_training_mode, v_conf)
+
+    def get_patch(self, v_id_item, v_id_patch):
+        with h5py.File(self.data_root, "r") as f:
+            features = f["features"][
+                       v_id_item,
+                       ].astype(np.float32)
+            flags = (f["flags"][
+                     v_id_item,
+                     ] > 0).astype(np.float32)
+        features = features.reshape(8, 32, 8, 32, 8, 32, 3).transpose((0,2,4,1,3,5,6)).reshape((512, 32, 32, 32, 3))
+        flags = flags.reshape(8, 32, 8, 32, 8, 32).transpose((0,2,4,1,3,5)).reshape((512, 32, 32, 32))
+        return features, flags
+
+    def __getitem__(self, idx):
+        id_object = self.index[idx, 0]
+        id_patch = self.index[idx, 1]
+
+        times = [0] * 10
+        cur_time = time.time()
+        feat_data, flag_data = self.get_patch(id_object, id_patch)
+        times[0] += time.time() - cur_time
+        cur_time = time.time()
+
+        # udf = feat_data[..., 0:1] / 65535 * 2
+        # gradients = angle2vector(feat_data[..., 1:3])
+        # feat_data = np.concatenate([udf, gradients], axis=-1).transpose((3,0,1,2))
+        # flag_data = flag_data[None, :, :, :]
+        times[1] += time.time() - cur_time
+        return feat_data, flag_data, self.names[id_object], id_patch
+
+
 ########################################################################################################################
 
 class ABC_dataset_sparsefeatures_sample(ABC_dataset_sparse_features):

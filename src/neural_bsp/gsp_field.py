@@ -49,13 +49,13 @@ def cube_vertices():
     return vertices
 
 
-def sample_edges(v_vertices):
+def sample_edges(v_vertices, v_resolution):
     edges = np.stack((v_vertices, np.roll(v_vertices, -1, axis=0)), axis=1)
     dir = edges[:, 1] - edges[:, 0]
     points = []
     id_primitives = []
     for i_edge in range(v_vertices.shape[0]):
-        num_sampled = int(np.linalg.norm(dir[i_edge]) / 0.01)
+        num_sampled = int(np.linalg.norm(dir[i_edge]) / (1/v_resolution))
         points.append(edges[i_edge, 0] + dir[i_edge] * np.linspace(0, 1, num_sampled)[:, None])
         id_primitives.append(num_sampled)
     points = np.concatenate(points, axis=0)
@@ -68,15 +68,15 @@ def generate_test_shape1():
     return surface_points
 
 
-def generate_test_shape2():
+def generate_test_shape2(v_resolution = 50):
     ccube_vertices = cube_vertices()
-    surface_points1, id_primitives = sample_edges(ccube_vertices)
+    surface_points1, id_primitives = sample_edges(ccube_vertices, v_resolution)
 
     # x^2+0.1x+0.0025+y^2-0.01=0
-    sphere_points1_x = np.linspace(-0.15, -0.05, 50)
+    sphere_points1_x = np.linspace(-0.15, -0.05, int(v_resolution / 10) )
     sphere_points1_y = np.sqrt(10 * -(sphere_points1_x ** 2 + 0.2 * sphere_points1_x + 0.0001 - 0.01)) - 0.45
     # x^2-0.1x+0.0025+y^2-0.01=0
-    sphere_points2_x = np.linspace(0.05, 0.15, 50)
+    sphere_points2_x = np.linspace(0.05, 0.15, int(v_resolution / 10) )
     sphere_points2_y = np.sqrt(10 * -(sphere_points2_x ** 2 - 0.2 * sphere_points2_x + 0.0001 - 0.01)) - 0.45
 
     points = np.concatenate((
@@ -272,7 +272,7 @@ def generate_training_data():
     udf = np.sqrt(squared_dis[:, 0])
 
     # Visualize the target shape
-    if False:
+    if True:
         _, axes = plt.subplots(1, 2)
         axes[0].scatter(target_vertices[:, 0], target_vertices[:, 1], s=1, c=(1, 0, 0))
         axes[0].set_title("Target shape")

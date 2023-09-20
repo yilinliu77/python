@@ -124,7 +124,7 @@ class PC_phase(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         data = batch[:2]
         name = batch[2][0]
-        assert len(batch[2])==1
+        # assert len(batch[2])==1
 
         outputs = self.model(data, False)
         loss = self.model.loss(outputs, data)

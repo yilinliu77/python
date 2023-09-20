@@ -1,6 +1,6 @@
 dataset:
-  root: F:/GSP/GSP_v6_200/training.hdf5
-  dataset_name: ABC_dataset_dense_features
+  root: G:/Dataset/GSP/GSP_v6_200/training.hdf5
+  dataset_name: ABC_dataset_dense_features_256
 #  dataset_name: ABC_dataset_sparse_features
   patch_size: 32
   input_density: 4
@@ -23,7 +23,7 @@ trainer:
   accelerator: "16-mixed"
 
 model:
-  model_name: TestNetDoubleConv
+  model_name: TestNetResidualSE
   fc_hidden_dim: 64
   max_voxel_dim: 64
   need_normalize: true

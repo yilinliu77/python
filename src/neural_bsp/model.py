@@ -64,6 +64,8 @@ def de_normalize_udf(v_udf):
 points: N*3
 query_and_data: M*8 (udf, gradient, flag) 
 """
+
+
 class PVCNN(nn.Module):
     def __init__(self,
                  v_conf,
@@ -74,8 +76,8 @@ class PVCNN(nn.Module):
         cur_channels = 16
         self.encoders = nn.ModuleList()
         hidden_dim_out = 0
-        fc_hidden_dim =  v_conf["fc_hidden_dim"]
-        conv_hidden_dim =  v_conf["max_voxel_dim"]
+        fc_hidden_dim = v_conf["fc_hidden_dim"]
+        conv_hidden_dim = v_conf["max_voxel_dim"]
         for i in range(5):
             if i == 0:
                 self.encoders.append(nn.Sequential(
@@ -100,9 +102,9 @@ class PVCNN(nn.Module):
         self.udf_out = nn.Sequential(
             nn.Linear(hidden_dim_out, fc_hidden_dim),
             nn.LeakyReLU(),
-            Residual_fc(fc_hidden_dim,fc_hidden_dim),
-            Residual_fc(fc_hidden_dim,fc_hidden_dim),
-            nn.Linear(fc_hidden_dim,1),
+            Residual_fc(fc_hidden_dim, fc_hidden_dim),
+            Residual_fc(fc_hidden_dim, fc_hidden_dim),
+            nn.Linear(fc_hidden_dim, 1),
         )
 
         self.gradient_out = nn.Sequential(
@@ -130,35 +132,35 @@ class PVCNN(nn.Module):
         x = torch.cat([udf, gradients, normal], dim=-1).permute((0, 4, 1, 2, 3))
 
         voxel_feature = x
-        features= []
+        features = []
         for layer in self.encoders:
             voxel_feature = layer(voxel_feature)
             features.append(voxel_feature)
             voxel_feature = self.maxpool(voxel_feature)
 
-        sampled_feature = self.embedding(query_features[:,:,:3], features)
-        pred_udf = self.udf_out(sampled_feature.permute(0,2,1))
-        pred_gradient = self.gradient_out(sampled_feature.permute(0,2,1))
-        pred_flag = self.flag_out(sampled_feature.permute(0,2,1))
+        sampled_feature = self.embedding(query_features[:, :, :3], features)
+        pred_udf = self.udf_out(sampled_feature.permute(0, 2, 1))
+        pred_gradient = self.gradient_out(sampled_feature.permute(0, 2, 1))
+        pred_flag = self.flag_out(sampled_feature.permute(0, 2, 1))
         return torch.cat((pred_udf, pred_gradient, pred_flag), dim=2)
 
     def embedding(self, p, v_features):
         sampled_features = []
         for feature in v_features:
-            sampled_feature = F.grid_sample(feature, p.unsqueeze(1).unsqueeze(1), align_corners=True)[:,:,0,0]
+            sampled_feature = F.grid_sample(feature, p.unsqueeze(1).unsqueeze(1), align_corners=True)[:, :, 0, 0]
             sampled_features.append(sampled_feature)
         sampled_features = torch.cat(sampled_features, dim=1)
         return sampled_features
 
     def loss(self, v_prediction, v_gt):
         gt_labels = v_gt[1]
-        gt_udf = de_normalize_udf(gt_labels[:,:,3:4])
-        gt_gradient = angle2vector(gt_labels[:,:,4:6])
-        gt_flag = gt_labels[:,:,6:7].to(gt_gradient.dtype)
+        gt_udf = de_normalize_udf(gt_labels[:, :, 3:4])
+        gt_gradient = angle2vector(gt_labels[:, :, 4:6])
+        gt_flag = gt_labels[:, :, 6:7].to(gt_gradient.dtype)
 
-        udf_loss = F.l1_loss(v_prediction[:,:,0:1], gt_udf, reduction="mean")
-        gradient_loss = F.l1_loss(v_prediction[:,:,1:4], gt_gradient, reduction="mean")
-        flag_loss = focal_loss(v_prediction[:,:,4:5], gt_flag, 0.75)
+        udf_loss = F.l1_loss(v_prediction[:, :, 0:1], gt_udf, reduction="mean")
+        gradient_loss = F.l1_loss(v_prediction[:, :, 1:4], gt_gradient, reduction="mean")
+        flag_loss = focal_loss(v_prediction[:, :, 4:5], gt_flag, 0.75)
         total_loss = udf_loss + gradient_loss + flag_loss * 10
         return {
             "udf_loss": udf_loss,
@@ -168,16 +170,16 @@ class PVCNN(nn.Module):
         }
 
     def compute_pr(self, outputs, data):
-        prob = torch.sigmoid(outputs[:,:,4])
-        gt = data[:,:,6].to(torch.long)
+        prob = torch.sigmoid(outputs[:, :, 4])
+        gt = data[:, :, 6].to(torch.long)
         return prob, gt
 
-    def valid_output(self,idx, log_root, target_viz_name,
-                     gathered_prediction,gathered_gt):
+    def valid_output(self, idx, log_root, target_viz_name,
+                     gathered_prediction, gathered_gt):
         predicted_labels = gathered_prediction.reshape(
-            (4,4,4,64,64,64,5)).transpose((0,3,1,4,2,5,6)).reshape((256,256,256,5))
+            (4, 4, 4, 64, 64, 64, 5)).transpose((0, 3, 1, 4, 2, 5, 6)).reshape((256, 256, 256, 5))
         gt_labels = gathered_gt.reshape(
-            (4,4,4,64,64,64,7)).transpose((0,3,1,4,2,5,6)).reshape((256,256,256,7))
+            (4, 4, 4, 64, 64, 64, 7)).transpose((0, 3, 1, 4, 2, 5, 6)).reshape((256, 256, 256, 7))
 
         query_points = gt_labels[:, :, :, :3]
         gt_udf = de_normalize_udf(gt_labels[:, :, :, 3:4])
@@ -222,7 +224,7 @@ class PVCNN_local(PVCNN):
 
         cur_channels = 16
         self.encoders = nn.ModuleList()
-        conv_hidden_dim =  v_conf["max_voxel_dim"]
+        conv_hidden_dim = v_conf["max_voxel_dim"]
         for i in range(5):
             if i == 0:
                 self.encoders.append(nn.Sequential(
@@ -249,6 +251,7 @@ class PVCNN_local(PVCNN):
                     nn.LeakyReLU(),
                 ))
                 cur_channels = target_channels
+
 
 #################################################################################################################
 
@@ -843,7 +846,7 @@ class TestNetDoubleConv(nn.Module):
             gradients = angle2vector(feat_data[..., 1:3])
             if feat_data.shape[-1] == 5:
                 normal = angle2vector(feat_data[..., 3:5])
-                x = torch.cat([udf, gradients, normal], dim=-1).permute((0,4,1,2,3))
+                x = torch.cat([udf, gradients, normal], dim=-1).permute((0, 4, 1, 2, 3))
             else:
                 x = torch.cat([udf, gradients], dim=-1).permute((0, 4, 1, 2, 3))
         else:
@@ -877,13 +880,14 @@ class TestNetDoubleConv(nn.Module):
             "total_loss": loss
         }
 
-    def valid_output(self,idx, log_root, target_viz_name,
-                     gathered_prediction,gathered_gt):
-        assert gathered_prediction.shape[0]==512
+    def valid_output(self, idx, log_root, target_viz_name,
+                     gathered_prediction, gathered_gt):
+        assert gathered_prediction.shape[0] == 512
         v_resolution = 256
-        query_points = np.meshgrid(np.arange(v_resolution), np.arange(v_resolution), np.arange(v_resolution), indexing="ij")
+        query_points = np.meshgrid(np.arange(v_resolution), np.arange(v_resolution), np.arange(v_resolution),
+                                   indexing="ij")
         query_points = np.stack(query_points, axis=3) / (v_resolution - 1)
-        query_points = (query_points * 2 - 1).astype(np.float32).reshape(-1,3)
+        query_points = (query_points * 2 - 1).astype(np.float32).reshape(-1, 3)
 
         predicted_labels = gathered_prediction.reshape(
             (-1, 8, 8, 8, 32, 32, 32)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(-1, 256, 256, 256)
@@ -1030,12 +1034,16 @@ class U_Net_3D(nn.Module):
         for i in range(v_depth):
             self.conv.append(conv_block(ch_in=cur_channel, ch_out=cur_channel * 2, with_bn=with_bn))
 
-            self.up.append(up_conv(ch_in=cur_channel * 2, ch_out=cur_channel))
-            self.up_conv.append(conv_block(ch_in=cur_channel * 2, ch_out=cur_channel, with_bn=with_bn))
+            if i == 1:
+                self.up.append(up_conv(ch_in=cur_channel * 2, ch_out=cur_channel))
+                self.up_conv.append(conv_block(ch_in=cur_channel, ch_out=cur_channel, with_bn=with_bn))
+            elif i > 1:
+                self.up.append(up_conv(ch_in=cur_channel * 2, ch_out=cur_channel))
+                self.up_conv.append(conv_block(ch_in=cur_channel * 2, ch_out=cur_channel, with_bn=with_bn))
 
             cur_channel = cur_channel * 2
 
-        self.Conv_1x1 = nn.Conv3d(base_channel, output_ch, kernel_size=1, stride=1, padding=0)
+        self.Conv_1x1 = nn.Conv3d(base_channel * 2, output_ch, kernel_size=1, stride=1, padding=0)
 
     def forward(self, v_input):
         # encoding path
@@ -1046,9 +1054,10 @@ class U_Net_3D(nn.Module):
             x.append(self.Maxpool(self.conv[i](x[-1])))
 
         up_x = [x[-1]]
-        for i in range(self.depths - 1, -1, -1):
+        for i in range(self.depths - 2, -1, -1):
             item = self.up[i](up_x[-1])
-            item = torch.cat((item, x[i]), dim=1)
+            if i > 0:
+                item = torch.cat((item, x[i + 1]), dim=1)
             up_x.append(self.up_conv[i](item))
 
         d1 = self.Conv_1x1(up_x[-1])
@@ -1057,31 +1066,73 @@ class U_Net_3D(nn.Module):
 
 
 class Base_model(nn.Module):
-    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5, v_input_channel=3, v_depth=4, v_base_channel=16):
+    def __init__(self, v_conf):
         super(Base_model, self).__init__()
-        self.phase = v_phase
+        self.need_normalize = v_conf["need_normalize"]
         self.encoder = U_Net_3D(
-            img_ch=v_input_channel, output_ch=1, v_pool_first=False, v_depth=v_depth, base_channel=v_base_channel)
-        self.loss_func = globals()[v_loss_type]
-        self.loss_alpha = v_alpha
+            img_ch=v_conf["channels"],
+            output_ch=1,
+            v_pool_first=False,
+            v_depth=v_conf["depths"],
+            base_channel=8
+        )
+        self.loss_func = focal_loss
+        self.loss_alpha = 0.75
 
     def forward(self, v_data, v_training=False):
-        features, labels = v_data
-        prediction = self.encoder(features)
+        feat_data, labels = v_data
+
+        if self.need_normalize:
+            udf = de_normalize_udf(feat_data[..., 0:1])
+            gradients = angle2vector(feat_data[..., 1:3])
+            if feat_data.shape[-1] == 5:
+                normal = angle2vector(feat_data[..., 3:5])
+                x = torch.cat([udf, gradients, normal], dim=-1).permute((0, 4, 1, 2, 3))
+            else:
+                x = torch.cat([udf, gradients], dim=-1).permute((0, 4, 1, 2, 3))
+        else:
+            x = feat_data
+
+        prediction = self.encoder(x)
 
         return prediction
 
     def loss(self, v_predictions, v_input):
         features, labels = v_input
 
-        loss = self.loss_func(v_predictions, labels, self.loss_alpha)
-        return loss
+        loss = self.loss_func(v_predictions, labels[:, None, :, :, :], self.loss_alpha)
+        return {"total_loss": loss}
 
+    def compute_pr(self, v_pred, v_gt):
+        bs = v_pred.shape[0]
+        prob = torch.sigmoid(v_pred).reshape(bs, -1)
+        gt = v_gt.reshape(bs, -1).to(torch.long)
+        return prob, gt
 
-class Base_patch_model_deeper_wo_bn(Base_model):
-    def __init__(self, v_phase=0, v_loss_type="focal", v_alpha=0.5, v_input_channel=3, v_depth=4, v_base_channel=16):
-        super(Base_patch_model_deeper_wo_bn, self).__init__(v_phase, v_loss_type, v_alpha)
-        self.phase = v_phase
-        self.encoder = U_Net_3D(
-            img_ch=v_input_channel, output_ch=1, v_pool_first=False,
-            v_depth=v_depth, base_channel=v_base_channel, with_bn=False)
+    def valid_output(self, idx, log_root, target_viz_name,
+                     gathered_prediction, gathered_gt):
+        assert gathered_prediction.shape[0] == 3375
+        v_resolution = 256
+        query_points = np.meshgrid(np.arange(v_resolution), np.arange(v_resolution), np.arange(v_resolution),
+                                   indexing="ij")
+        query_points = np.stack(query_points, axis=3) / (v_resolution - 1)
+        query_points = (query_points * 2 - 1).astype(np.float32).reshape(-1, 3)
+
+        predicted_labels = gathered_prediction.reshape(
+            (-1, 15, 15, 15, 16, 16, 16)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(240, 240, 240)
+        gt_labels = gathered_gt.reshape(
+            (-1, 15, 15, 15, 16, 16, 16)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(240, 240, 240)
+
+        predicted_labels = np.pad(predicted_labels, 8, mode="constant", constant_values=0)
+        gt_labels = np.pad(gt_labels, 8, mode="constant", constant_values=0)
+
+        predicted_labels = sigmoid(predicted_labels) > 0.5
+        mask = predicted_labels.reshape(-1)
+        export_point_cloud(os.path.join(log_root, "{}_{}_pred.ply".format(idx, target_viz_name)),
+                           query_points[mask])
+
+        gt_labels = sigmoid(gt_labels) > 0.5
+        mask = gt_labels.reshape(-1)
+        export_point_cloud(os.path.join(log_root, "{}_{}_gt.ply".format(idx, target_viz_name)),
+                           query_points[mask])
+        return

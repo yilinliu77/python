@@ -90,7 +90,7 @@ class ABC_dataset_overlap(torch.utils.data.Dataset):
                      v_id_item,
                      x_start:x_start + self.patch_size,
                      y_start:y_start + self.patch_size,
-                     ]).astype(np.float32)
+                     ]).astype(bool).astype(np.float32)
 
         times[0] += time.time() - cur_time
         cur_time = time.time()

@@ -1087,9 +1087,9 @@ class Base_model(nn.Module):
             gradients = angle2vector(feat_data[..., 1:3])
             if feat_data.shape[-1] == 5:
                 normal = angle2vector(feat_data[..., 3:5])
-                x = torch.cat([udf, gradients, normal], dim=-1).permute((0, 4, 1, 2, 3))
+                x = torch.cat([udf, gradients, normal], dim=-1).permute((0, 4, 1, 2, 3)).contiguous()
             else:
-                x = torch.cat([udf, gradients], dim=-1).permute((0, 4, 1, 2, 3))
+                x = torch.cat([udf, gradients], dim=-1).permute((0, 4, 1, 2, 3)).contiguous()
         else:
             x = feat_data
 

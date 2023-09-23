@@ -1,9 +1,12 @@
 import h5py, time
 import numpy as np
 import open3d as o3d
+import torch
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.neural_bsp.abc_hdf5_dataset import angle2vector, generate_coords
+# from src.neural_bsp.abc_hdf5_dataset import angle2vector, generate_coords
+from src.neural_bsp.my_dataloader import MyDataLoader
 
 
 def test_hdf5():
@@ -104,5 +107,30 @@ def test_hdf53():
         pass
     pass
 
+class ABC(torch.utils.data.Dataset):
+    def __init__(self):
+        super().__init__()
+        pass
+
+    def __getitem__(self, idx):
+        time.sleep(0.5)
+        return idx
+
+    def __len__(self):
+        return 100
+
+def test_dataloader():
+    dataset = ABC()
+    # loader = MyDataLoader(dataset, num_workers=8, batch_size=1, shuffle=True)
+    loader = DataLoader(dataset, num_workers=8, batch_size=1, shuffle=True)
+
+    index = []
+    for i in tqdm(loader):
+        index.append(i)
+    index = torch.cat(index)
+    index = torch.sort(index)[0]
+    pass
+
 if __name__ == '__main__':
-    test_hdf53()
+    test_dataloader()
+    # test_hdf53()

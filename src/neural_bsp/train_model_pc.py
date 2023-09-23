@@ -15,7 +15,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 import pytorch_lightning as pl
 import torch
 from torch.optim import Adam
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 from torchmetrics import MetricCollection
 
 from shared.common_utils import export_point_cloud, sigmoid
@@ -81,6 +81,7 @@ class PC_phase(pl.LightningModule):
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
+                          sampler=RandomSampler(self.train_dataset, num_samples=1000000)
                           )
 
     def val_dataloader(self):

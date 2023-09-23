@@ -80,7 +80,7 @@ class PC_phase(pl.LightningModule):
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
-                          prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
+                          prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
                           )
 
     def val_dataloader(self):
@@ -95,7 +95,7 @@ class PC_phase(pl.LightningModule):
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
-                          prefetch_factor=1 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
+                          prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
                           )
 
     def configure_optimizers(self):

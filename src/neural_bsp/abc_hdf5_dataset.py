@@ -45,7 +45,7 @@ class ABC_dataset_overlap(torch.utils.data.Dataset):
             self.num_items = f["features"].shape[0]
             self.resolution = f["features"].shape[1]
             self.names = np.asarray(["{:08d}".format(item) for item in np.asarray(f["names"])])
-        self.validation_start = self.num_items // 5 * 4
+        self.validation_start = self.num_items // 10 * 9
 
         assert self.resolution % self.patch_size == 0
         self.num_patch = self.resolution // (self.patch_size // 2) - 1

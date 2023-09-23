@@ -78,7 +78,7 @@ class PC_phase(pl.LightningModule):
             self.hydra_conf["dataset"],
         )
         # return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=False,
-        return MyDataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=False,
+        return MyDataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,

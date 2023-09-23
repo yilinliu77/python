@@ -121,8 +121,8 @@ class ABC(torch.utils.data.Dataset):
 
 def test_dataloader():
     dataset = ABC()
-    # loader = MyDataLoader(dataset, num_workers=8, batch_size=1, shuffle=True)
-    loader = DataLoader(dataset, num_workers=8, batch_size=1, shuffle=True)
+    loader = MyDataLoader(dataset, num_workers=8, batch_size=1, shuffle=True)
+    # loader = DataLoader(dataset, num_workers=8, batch_size=1, shuffle=True)
 
     index = []
     for i in tqdm(loader):

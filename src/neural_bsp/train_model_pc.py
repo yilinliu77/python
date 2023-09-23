@@ -23,6 +23,8 @@ import torch.distributed as dist
 
 from torchmetrics.classification import BinaryPrecision, BinaryRecall, BinaryAveragePrecision, BinaryF1Score
 
+from src.neural_bsp.my_dataloader import MyDataLoader
+
 
 class PC_phase(pl.LightningModule):
     def __init__(self, hparams, v_data):
@@ -75,13 +77,14 @@ class PC_phase(pl.LightningModule):
             "training",
             self.hydra_conf["dataset"],
         )
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
+        # return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=False,
+        return MyDataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=False,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
-                          sampler=RandomSampler(self.train_dataset, num_samples=1000000)
+                          # sampler=RandomSampler(self.train_dataset, num_samples=1000000)
                           )
 
     def val_dataloader(self):
@@ -91,7 +94,8 @@ class PC_phase(pl.LightningModule):
             self.hydra_conf["dataset"],
         )
         self.target_viz_name = self.valid_dataset.names[self.id_viz + self.valid_dataset.validation_start]
-        return DataLoader(self.valid_dataset, batch_size=self.batch_size,
+        # return DataLoader(self.valid_dataset, batch_size=self.batch_size,
+        return MyDataLoader(self.valid_dataset, batch_size=self.batch_size,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,

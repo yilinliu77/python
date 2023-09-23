@@ -998,7 +998,7 @@ class up_conv(nn.Module):
         )
 
     def forward(self, x):
-        x = self.up(x)
+        x = self.up(x).contiguous()
         return x
 
 

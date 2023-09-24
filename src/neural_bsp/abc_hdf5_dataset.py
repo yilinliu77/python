@@ -44,8 +44,8 @@ class ABC_dataset_overlap(torch.utils.data.Dataset):
         with h5py.File(self.data_root, "r") as f:
             self.num_items = f["features"].shape[0]
             self.resolution = f["features"].shape[1]
-            self.names = np.asarray(["{:08d}".format(item) for item in np.asarray(f["names"])])
-        self.validation_start = self.num_items // 10 * 9
+            self.names = np.asarray(["{:08d}_{:08d}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
+        self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
 
         assert self.resolution % self.patch_size == 0
         self.num_patch = self.resolution // (self.patch_size // 2) - 1
@@ -113,7 +113,7 @@ class ABC_dataset_overlap(torch.utils.data.Dataset):
         id_patch = self.index[idx, 1]
 
         feat_data, flag_data = self.get_patch(id_object, id_patch)
-        return feat_data, flag_data, self.names[id_object], id_patch
+        return feat_data, flag_data, self.names[id_object], np.arange(flag_data.shape[0], dtype=np.int64) + id_patch * flag_data.shape[0]
 
     @staticmethod
     def collate_fn(v_batches):

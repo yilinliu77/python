@@ -5,7 +5,7 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-# from src.neural_bsp.abc_hdf5_dataset import angle2vector, generate_coords
+from src.neural_bsp.abc_hdf5_dataset import angle2vector, generate_coords
 from src.neural_bsp.my_dataloader import MyDataLoader
 
 
@@ -84,8 +84,8 @@ def test_hdf52():
             ]
     print(time.time() - cur_time)
 
-def test_hdf53():
-    root = "G:/Dataset/GSP/GSP_v7_1k/training.h5"
+def check_data():
+    root = "/mnt/d/GSP/GSP_v7_100k/training.h5"
     id_item = 500
     query_points = generate_coords(256)
     with h5py.File(root) as f:
@@ -131,6 +131,8 @@ def test_dataloader():
     index = torch.sort(index)[0]
     pass
 
+
 if __name__ == '__main__':
-    test_dataloader()
+    check_data()
+    # test_dataloader()
     # test_hdf53()

@@ -13,6 +13,7 @@ from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 import pytorch_lightning as pl
+from sympy import true
 import torch
 from torch.optim import Adam
 from torch.utils.data import DataLoader, RandomSampler
@@ -54,6 +55,7 @@ class PC_phase(pl.LightningModule):
             "loss": [],
             "prediction": [],
             "gt": [],
+            "id_patch": []
         }
 
         # self.target_viz_name = "00015724"
@@ -78,13 +80,14 @@ class PC_phase(pl.LightningModule):
             self.hydra_conf["dataset"],
         )
         # return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=False,
-        return MyDataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
+        sampler = None if self.hydra_conf["trainer"]["num_samples"] <= 0 else RandomSampler(self.train_dataset, num_samples=self.hydra_conf["trainer"]["num_samples"])
+        return MyDataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=False,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
-                          # sampler=RandomSampler(self.train_dataset, num_samples=1000000)
+                          sampler=sampler
                           )
 
     def val_dataloader(self):
@@ -94,8 +97,8 @@ class PC_phase(pl.LightningModule):
             self.hydra_conf["dataset"],
         )
         self.target_viz_name = self.valid_dataset.names[self.id_viz + self.valid_dataset.validation_start]
-        # return DataLoader(self.valid_dataset, batch_size=self.batch_size,
-        return MyDataLoader(self.valid_dataset, batch_size=self.batch_size,
+        return DataLoader(self.valid_dataset, batch_size=1,
+        # return MyDataLoader(self.valid_dataset, batch_size=1,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
@@ -129,14 +132,15 @@ class PC_phase(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         data = batch[:2]
         name = batch[2][0]
-        # assert len(batch[2])==1
-
+        assert len(batch[2])==1
+        id_patch = batch[3]
         outputs = self.model(data, False)
         loss = self.model.loss(outputs, data)
         if name == self.target_viz_name:
             self.viz_data["loss"].append(loss["total_loss"].item())
-            self.viz_data["prediction"].append(outputs)
+            self.viz_data["prediction"].append(outputs[:,0])
             self.viz_data["gt"].append(data[1])
+            self.viz_data["id_patch"].append(id_patch[0])
         for loss_name in loss:
             if loss_name == "total_loss":
                 self.log("Validation_Loss", loss[loss_name], prog_bar=True, logger=True, on_step=False, on_epoch=True,
@@ -151,11 +155,50 @@ class PC_phase(pl.LightningModule):
         self.pr_computer.update(pr_result[0], pr_result[1])
         return
 
+    def gather_data(self):
+        id_patch = torch.cat(self.viz_data["id_patch"], dim=0)
+        prediction = torch.cat(self.viz_data["prediction"], dim=0)
+        gt = torch.cat(self.viz_data["gt"], dim=0)
+        if self.trainer.world_size != 1:
+            device = prediction.device
+            dtype = prediction.dtype
+            size = torch.tensor([prediction.shape[0]], device=device, dtype=torch.int64)
+            gathered_size = [torch.zeros(1, device=device, dtype=torch.int64) for _ in range(self.trainer.world_size)]
+            dist.all_gather(gathered_size, size)
+
+            gathered_id_patch = [torch.zeros((item.item(),), dtype=torch.int64, device=device) for item in
+                                 gathered_size]
+            dist.all_gather(gathered_id_patch, id_patch)
+            gathered_id_patch = torch.cat(gathered_id_patch, dim=0)
+
+            gathered_prediction_list = [torch.zeros((item.item(), 16, 16, 16), dtype=dtype, device=device) for item in
+                                        gathered_size]
+            gathered_gt_list = [torch.zeros((item.item(), 16, 16, 16), dtype=dtype, device=device) for item in
+                                gathered_size]
+
+            dist.all_gather(gathered_prediction_list, prediction)
+            dist.all_gather(gathered_gt_list, gt)
+            gathered_prediction_list = torch.cat(gathered_prediction_list, dim=0)
+            gathered_gt_list = torch.cat(gathered_gt_list, dim=0)
+
+            total_size = 3375
+            gathered_prediction = torch.zeros((total_size, 16, 16, 16), dtype=dtype, device=device)
+            gathered_prediction[gathered_id_patch] = gathered_prediction_list
+            gathered_gt = torch.zeros((total_size, 16, 16, 16), dtype=dtype, device=device)
+            gathered_gt[gathered_id_patch] = gathered_gt_list
+            gathered_prediction = gathered_prediction.cpu().numpy()
+            gathered_gt = gathered_gt.cpu().numpy()
+        else:
+            gathered_prediction = prediction.cpu().numpy()
+            gathered_gt = gt.cpu().numpy()
+        return gathered_prediction, gathered_gt
+
     def on_validation_epoch_end(self):
         if self.trainer.sanity_checking:
             self.viz_data["gt"].clear()
             self.viz_data["prediction"].clear()
             self.viz_data["loss"].clear()
+            self.viz_data["id_patch"].clear()
             self.pr_computer.reset()
             return
 
@@ -166,12 +209,11 @@ class PC_phase(pl.LightningModule):
 
         if len(self.viz_data["prediction"]) == 0:
             return
+        
+        gathered_prediction,gathered_gt = self.gather_data()
 
-        prediction = torch.cat(self.viz_data["prediction"], dim=0)
-        gt = torch.cat(self.viz_data["gt"], dim=0)
-
-        gathered_prediction = prediction.cpu().numpy()
-        gathered_gt = gt.cpu().numpy()
+        if self.global_rank != 0:
+            return
 
         idx = self.trainer.current_epoch + 1 if not self.trainer.sanity_checking else 0
 
@@ -183,6 +225,7 @@ class PC_phase(pl.LightningModule):
         self.viz_data["gt"].clear()
         self.viz_data["prediction"].clear()
         self.viz_data["loss"].clear()
+        self.viz_data["id_patch"].clear()
         return
 
     def test_dataloader(self):
@@ -270,14 +313,14 @@ class PC_phase(pl.LightningModule):
 @hydra.main(config_name="train_model_pc.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
-    torch.multiprocessing.set_start_method("spawn")
     torch.set_float32_matmul_precision("medium")
     print(OmegaConf.to_yaml(v_cfg))
 
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir']
     v_cfg["trainer"]["output"] = os.path.join(log_dir, v_cfg["trainer"]["output"])
-
+    if v_cfg["trainer"]["spawn"] is True:
+        torch.multiprocessing.set_start_method("spawn")
     model = PC_phase(v_cfg, v_cfg["dataset"]["root"])
 
     mc = ModelCheckpoint(monitor="Validation_Loss", save_top_k=3, save_last=True)

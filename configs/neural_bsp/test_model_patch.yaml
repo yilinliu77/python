@@ -1,6 +1,6 @@
 dataset:
-  dataset_name: ABC_dataset_patch_hdf5
-  v_output_features: 4
+  dataset_name: ABC_dataset_test_mesh
+  v_output_features: 7
   test_list: ["G:/Dataset/ABC/quadric_test/00999739/00999739_348b49253ff07a020fc5fe58_trimesh_000.obj"]
   patch_size: 32
 
@@ -8,14 +8,15 @@ trainer:
   gpu: 1
 
   batch_size: 128
-  resume_from_checkpoint: output/neural_bsp/0815_26k_focal_residual.ckpt
+  resume_from_checkpoint: output/neural_bsp/1004_16k_base.ckpt
   output: .
-  accelerator: "16-mixed"
+  accelerator: "32-true"
 
 model:
-  model_name: TestNetResidualSE
-  channels: 4
+  model_name: Base_model
+  channels: 7
   need_normalize: false
+  depths: 4
 
   v_depth: 5
   v_base_channel: 32

@@ -3,6 +3,7 @@ import os.path
 import sys
 import time
 
+import faiss
 import h5py
 import numpy as np
 import torch
@@ -548,29 +549,48 @@ class ABC_dataset_test_mesh(torch.utils.data.Dataset):
         if not os.path.exists(v_data_root):
             print("Cannot find ", v_data_root)
         mesh = o3d.io.read_triangle_mesh(v_data_root)
+        mesh.compute_triangle_normals()
+        # Normalize
         points = np.asarray(mesh.vertices)
-        faces = np.asarray(mesh.triangles)
         min_xyz = points.min(axis=0)
         center_xyz = (min_xyz + points.max(axis=0)) / 2
         bbox = points.max(axis=0) - min_xyz
         diagonal = np.linalg.norm(bbox)
         points = (points - center_xyz) / diagonal * 2
-        triangles = points[faces]
-        num_triangles = triangles.shape[0]
-        num_queries = self.coords.shape[0]
-        query_result = cuda_distance.query(triangles.reshape(-1), self.coords.reshape(-1), 512, 512 ** 3)
+        mesh.vertices = o3d.utility.Vector3dVector(points)
 
-        udf = np.asarray(query_result[0]).astype(np.float32)
-        closest_points = np.asarray(query_result[1]).reshape((num_queries, 3)).astype(np.float32)
-        dir = closest_points - self.coords
-        dir = dir / np.linalg.norm(dir, axis=1, keepdims=True)
+        use_dense_feature = False
+        if use_dense_feature:
+            points = np.asarray(mesh.vertices)
+            faces = np.asarray(mesh.triangles)
+            normals = np.asarray(mesh.triangle_normals)
+            triangles = points[faces]
+            num_triangles = triangles.shape[0]
+            num_queries = self.coords.shape[0]
+            query_result = cuda_distance.query(triangles.reshape(-1), self.coords.reshape(-1), 512, 512 ** 3)
 
-        if self.output_features == 4:
-            feat_data = np.concatenate([dir, udf[:, None] * np.pi], axis=1)
-        elif self.output_features == 1:
-            feat_data = udf[:, None] * np.pi
+            udf = np.asarray(query_result[0]).astype(np.float32)
+            closest_points = np.asarray(query_result[1]).reshape((num_queries, 3)).astype(np.float32)
+            dir = closest_points - self.coords
+            dir = dir / np.linalg.norm(dir, axis=1, keepdims=True)
+
+            normals = normals[query_result[2]].astype(np.float32)
         else:
-            raise
+            pc = mesh.sample_points_poisson_disk(10000)
+            points = np.asarray(pc.points)
+            normals = np.asarray(pc.normals)
+            index = faiss.IndexFlatL2(3)
+            index.add(points)
+            dists, indices = index.search(self.coords, 1)
+            closest_points = points[indices.reshape(-1)]
+            dir = closest_points - self.coords
+            dir = dir / np.linalg.norm(dir, axis=1, keepdims=True)
+            udf = np.sqrt(dists).reshape(-1)
+            normals = normals[indices.reshape(-1)]
+            normals = normals / np.linalg.norm(normals, axis=1, keepdims=True)
+
+        # Revised at 1004
+        feat_data = np.concatenate([udf[:, None], dir, normals], axis=1)
         self.feat_data = feat_data.reshape(
             (v_resolution, v_resolution, v_resolution, self.output_features)).astype(np.float32)
 

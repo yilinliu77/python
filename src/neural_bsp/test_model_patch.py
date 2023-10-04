@@ -60,42 +60,24 @@ def main(v_cfg: DictConfig):
         features = np.concatenate(features, axis=0)
         flags = np.concatenate(flags, axis=0)
 
-        predicted_labels = (sigmoid(flags[:, 0]) > threshold).astype(np.ubyte)
+        flags = flags.reshape(
+            (-1, 15, 15, 15, 16, 16, 16)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(240, 240, 240)
+        flags = np.pad(flags, 8, mode="constant", constant_values=0)
+        flags = sigmoid(flags) > 0.5
 
-        total_labels = np.zeros((res, res, res), dtype=np.ubyte)
-        total_features = np.zeros((4, res, res, res), dtype=np.float32)
-        for idx in range(predicted_labels.shape[0]):
-            x,y,z = dataset.patch_list[idx]
-            x_start = warp
-            x_end = ps - warp
-            y_start = warp
-            y_end = ps - warp
-            z_start = warp
-            z_end = ps - warp
-            if x==0:
-                x_start = 0
-            elif x == res - ps:
-                x_end = ps
-            if y==0:
-                y_start = 0
-            elif y == res - ps:
-                y_end = ps
-            if z==0:
-                z_start = 0
-            elif z == res - ps:
-                z_end = ps
-            total_labels[x+x_start:x+x_end, y+y_start:y+y_end, z+z_start:z+z_end] = \
-                predicted_labels[idx][x_start:x_end, y_start:y_end, z_start:z_end]
-            total_features[:, x+x_start:x+x_end, y+y_start:y+y_end, z+z_start:z+z_end] = \
-                features[idx][:, x_start:x_end, y_start:y_end, z_start:z_end]
+        v_resolution = 256
+        query_points = np.meshgrid(np.arange(v_resolution), np.arange(v_resolution), np.arange(v_resolution),
+                                   indexing="ij")
+        query_points = np.stack(query_points, axis=3) / (v_resolution - 1)
+        query_points = (query_points * 2 - 1).astype(np.float32).reshape(-1, 3)
+        export_point_cloud(os.path.join(output_root, "{}_pc.ply".format(name)),
+                           query_points[flags.reshape(-1)])
 
-        predicted_labels = total_labels
-        features = np.transpose(
-            total_features,(1,2,3,0))
-        features[:, :, :, 3] /= np.pi
+        feat_data = dataset.feat_data
+        predicted_labels = flags.astype(np.ubyte)
+        gradients_and_udf = np.concatenate((feat_data[..., 1:4], feat_data[..., 0:1]), axis=-1)
 
-        # Save
-        np.save(os.path.join(output_root, "{}_feat.npy".format(name)), features)
+        np.save(os.path.join(output_root, "{}_feat.npy".format(name)), gradients_and_udf)
         np.save(os.path.join(output_root, "{}_pred.npy".format(name)), predicted_labels)
 
 

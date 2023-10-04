@@ -1078,6 +1078,7 @@ class Base_model(nn.Module):
         )
         self.loss_func = focal_loss
         self.loss_alpha = 0.75
+        self.num_features = v_conf["channels"]
 
     def forward(self, v_data, v_training=False):
         feat_data, labels = v_data
@@ -1085,7 +1086,7 @@ class Base_model(nn.Module):
         if self.need_normalize:
             udf = de_normalize_udf(feat_data[..., 0:1])
             gradients = angle2vector(feat_data[..., 1:3])
-            if feat_data.shape[-1] == 5:
+            if feat_data.shape[-1] == 5 and self.num_features == 7:
                 normal = angle2vector(feat_data[..., 3:5])
                 x = torch.cat([udf, gradients, normal], dim=-1).permute((0, 4, 1, 2, 3)).contiguous()
             else:

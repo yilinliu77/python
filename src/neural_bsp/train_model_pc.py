@@ -13,7 +13,6 @@ from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 import pytorch_lightning as pl
-from sympy import true
 import torch
 from torch.optim import Adam
 from torch.utils.data import DataLoader, RandomSampler

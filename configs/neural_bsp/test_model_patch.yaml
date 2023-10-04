@@ -1,7 +1,9 @@
 dataset:
-  dataset_name: ABC_dataset_test_mesh
+#  dataset_name: ABC_dataset_test_mesh
+  dataset_name: ABC_dataset_test_pc
   v_output_features: 7
-  test_list: ["G:/Dataset/ABC/quadric_test/00999739/00999739_348b49253ff07a020fc5fe58_trimesh_000.obj"]
+  test_list: ["C:/Users/whats/Desktop/test.ply"]
+#  test_list: ["G:/Dataset/ABC/quadric_test/00999739/00999739_348b49253ff07a020fc5fe58_trimesh_000.obj"]
   patch_size: 32
 
 trainer:

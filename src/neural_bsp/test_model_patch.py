@@ -10,7 +10,8 @@ import torch
 from tqdm import tqdm
 
 from shared.common_utils import export_point_cloud, sigmoid
-from src.neural_bsp.abc_hdf5_dataset import ABC_dataset_test_mesh
+from src.neural_bsp.abc_hdf5_dataset import ABC_dataset_test_mesh, ABC_dataset_test_pc
+
 
 @hydra.main(config_name="test_model_patch.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
@@ -40,7 +41,7 @@ def main(v_cfg: DictConfig):
     for model_name in test_list:
         print("Start testing {}".format(model_name))
         name = Path(model_name).stem
-        dataset = ABC_dataset_test_mesh(
+        dataset = ABC_dataset_test_pc(
             model_name,
             v_cfg["trainer"]["batch_size"],
             v_cfg["dataset"]["v_output_features"],

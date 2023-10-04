@@ -137,6 +137,76 @@ class ABC_dataset_overlap(torch.utils.data.Dataset):
         )
 
 
+class ABC_dataset_pc(torch.utils.data.Dataset):
+    def __init__(self, v_data_root, v_training_mode, v_conf):
+        super(ABC_dataset_pc, self).__init__()
+        self.data_root = v_data_root
+        self.mode = v_training_mode
+        self.conf = v_conf
+        self.patch_size = 32
+        with h5py.File(self.data_root, "r") as f:
+            self.num_items = f["features"].shape[0]
+            self.resolution = f["features"].shape[1]
+            self.names = np.asarray(["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
+        self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
+
+        assert self.resolution % self.patch_size == 0
+        self.num_patch = self.resolution // (self.patch_size // 2) - 1
+        self.num_patches = self.num_patch ** 2
+
+        if self.mode == "training":
+            self.index = np.arange(self.num_items)[:self.validation_start]
+        elif self.mode == "validation":
+            self.index = np.arange(self.num_items)[self.validation_start:]
+        elif self.mode == "testing":
+            self.index = np.arange(self.num_items)
+        else:
+            raise ""
+
+    def __len__(self):
+        return self.index.shape[0]
+
+    def get_patch(self, v_id_item):
+        times = [0] * 10
+        cur_time = time.time()
+        index = np.random.randint(0, self.resolution-1, (128, 128, 128))
+
+        with h5py.File(self.data_root, "r") as f:
+            features = f["features"][v_id_item][index[:,0],index[:,1],index[:,2]].astype(np.float32)
+            flags = f["flags"][v_id_item][index[:,0],index[:,1],index[:,2]].astype(bool).astype(np.float32)
+
+        points = np.asarray(o3d.io.read_point_cloud(
+            os.path.join(self.data_root, "pointcloud/{}.ply".format(self.names[v_id_item]))).points)
+
+        times[0] += time.time() - cur_time
+        cur_time = time.time()
+        times[1] += time.time() - cur_time
+        return points, features, flags
+
+    def __getitem__(self, idx):
+        id_object = self.index[idx]
+
+        points, feat_data, flag_data = self.get_patch(id_object)
+        return points, feat_data, flag_data
+
+    @staticmethod
+    def collate_fn(v_batches):
+        points, feat_data, flag_data= [], [], []
+        for item in v_batches:
+            points.append(item[0])
+            feat_data.append(item[1])
+            flag_data.append(item[2])
+        points = np.concatenate(points, axis=0)
+        feat_data = np.concatenate(feat_data, axis=0)
+        flag_data = np.concatenate(flag_data, axis=0)
+
+        return (
+            torch.from_numpy(points),
+            torch.from_numpy(feat_data),
+            torch.from_numpy(flag_data),
+        )
+
+
 class ABC_dataset_sparse_features(torch.utils.data.Dataset):
     def __init__(self, v_data_root, v_training_mode, v_conf):
         super(ABC_dataset_sparse_features, self).__init__()
@@ -588,6 +658,72 @@ class ABC_dataset_test_mesh(torch.utils.data.Dataset):
             udf = np.sqrt(dists).reshape(-1)
             normals = normals[indices.reshape(-1)]
             normals = normals / np.linalg.norm(normals, axis=1, keepdims=True)
+
+        # Revised at 1004
+        feat_data = np.concatenate([udf[:, None], dir, normals], axis=1)
+        self.feat_data = feat_data.reshape(
+            (v_resolution, v_resolution, v_resolution, self.output_features)).astype(np.float32)
+
+        self.patch_size = 32
+        self.patch_list = []
+        for x in range(0, v_resolution - self.patch_size + 1, self.patch_size // 2):
+            for y in range(0, v_resolution - self.patch_size + 1, self.patch_size // 2):
+                for z in range(0, v_resolution - self.patch_size + 1, self.patch_size // 2):
+                    self.patch_list.append((x, y, z))
+
+        pass
+
+    def __len__(self):
+        return math.ceil(len(self.patch_list) / self.batch_size)
+
+    def __getitem__(self, idx):
+        features = []
+        id_list = []
+        for i in range(self.batch_size):
+            id = idx * self.batch_size + i
+            if id >= len(self.patch_list):
+                break
+            feat_data = self.feat_data[
+                        self.patch_list[id][0]:self.patch_list[id][0] + self.patch_size,
+                        self.patch_list[id][1]:self.patch_list[id][1] + self.patch_size,
+                        self.patch_list[id][2]:self.patch_list[id][2] + self.patch_size,
+                        ]
+            features.append(np.transpose(feat_data, [3, 0, 1, 2]))
+            id_list.append(self.patch_list[id])
+        features = np.stack(features, axis=0)
+        return features, id_list
+
+
+class ABC_dataset_test_pc(torch.utils.data.Dataset):
+    def __init__(self, v_data_root, v_batch_size, v_output_features=4, v_resolution=256):
+        super(ABC_dataset_test_pc, self).__init__()
+        self.batch_size = v_batch_size
+        self.output_features = v_output_features
+        self.data_root = v_data_root
+        self.resolution = v_resolution
+
+        assert v_resolution % 32 == 0
+        num_patches_per_dim = v_resolution // 32
+        coords = generate_test_coords(v_resolution)
+        self.coords = coords / (v_resolution - 1) * 2 - 1
+        self.num_patches = (v_resolution // 32) ** 3
+        assert self.num_patches % v_resolution == 0
+
+        print("Prepare mesh data")
+        if not os.path.exists(v_data_root):
+            print("Cannot find ", v_data_root)
+        pcd = o3d.io.read_point_cloud(v_data_root)
+        points = np.asarray(pcd.points)
+        normals = np.asarray(pcd.normals)
+        index = faiss.IndexFlatL2(3)
+        index.add(points)
+        dists, indices = index.search(self.coords, 1)
+        closest_points = points[indices.reshape(-1)]
+        dir = closest_points - self.coords
+        dir = dir / np.linalg.norm(dir, axis=1, keepdims=True)
+        udf = np.sqrt(dists).reshape(-1)
+        normals = normals[indices.reshape(-1)]
+        normals = normals / np.linalg.norm(normals, axis=1, keepdims=True)
 
         # Revised at 1004
         feat_data = np.concatenate([udf[:, None], dir, normals], axis=1)

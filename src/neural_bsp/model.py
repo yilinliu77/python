@@ -5,9 +5,9 @@ import sys
 
 import numpy as np
 
-# sys.path.append("thirdparty/pvcnn")
-# from thirdparty.pvcnn.modules.pvconv import PVConv
-# from thirdparty.pvcnn.modules.voxelization import Voxelization
+sys.path.append("thirdparty/pvcnn")
+from thirdparty.pvcnn.modules import functional as pvcnn_F
+
 
 from torch import nn
 from torch.nn import functional as F
@@ -1100,6 +1100,106 @@ class Base_model(nn.Module):
 
     def loss(self, v_predictions, v_input):
         features, labels = v_input
+
+        loss = self.loss_func(v_predictions, labels[:, None, :, :, :], self.loss_alpha)
+        return {"total_loss": loss}
+
+    def compute_pr(self, v_pred, v_gt):
+        bs = v_pred.shape[0]
+        prob = torch.sigmoid(v_pred).reshape(bs, -1)
+        gt = v_gt.reshape(bs, -1).to(torch.long)
+        return prob, gt
+
+    def valid_output(self, idx, log_root, target_viz_name,
+                     gathered_prediction, gathered_gt):
+        assert gathered_prediction.shape[0] == 3375
+        v_resolution = 256
+        query_points = np.meshgrid(np.arange(v_resolution), np.arange(v_resolution), np.arange(v_resolution),
+                                   indexing="ij")
+        query_points = np.stack(query_points, axis=3) / (v_resolution - 1)
+        query_points = (query_points * 2 - 1).astype(np.float32).reshape(-1, 3)
+
+        predicted_labels = gathered_prediction.reshape(
+            (-1, 15, 15, 15, 16, 16, 16)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(240, 240, 240)
+        gt_labels = gathered_gt.reshape(
+            (-1, 15, 15, 15, 16, 16, 16)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(240, 240, 240)
+
+        predicted_labels = np.pad(predicted_labels, 8, mode="constant", constant_values=0)
+        gt_labels = np.pad(gt_labels, 8, mode="constant", constant_values=0)
+
+        predicted_labels = sigmoid(predicted_labels) > 0.5
+        mask = predicted_labels.reshape(-1)
+        export_point_cloud(os.path.join(log_root, "{}_{}_pred.ply".format(idx, target_viz_name)),
+                           query_points[mask])
+
+        gt_labels = sigmoid(gt_labels) > 0.5
+        mask = gt_labels.reshape(-1)
+        export_point_cloud(os.path.join(log_root, "{}_{}_gt.ply".format(idx, target_viz_name)),
+                           query_points[mask])
+        return
+    
+
+class PC_model(nn.Module):
+    def __init__(self, v_conf):
+        super(PC_model, self).__init__()
+        self.need_normalize = v_conf["need_normalize"]
+        self.encoder = U_Net_3D(
+            img_ch=v_conf["channels"],
+            output_ch=1,
+            v_pool_first=False,
+            v_depth=v_conf["depths"],
+            base_channel=8
+        )
+        self.encoder.Conv_1x1 = nn.Conv3d(240, 1, 1)
+        self.resolution = 64
+        self.loss_func = focal_loss
+        self.loss_alpha = 0.75
+        self.num_features = v_conf["channels"]
+
+    def forward(self, v_data, v_training=False):
+        (points,feat_data), labels = v_data
+        query_coords = feat_data[..., :3]
+        feat_data = feat_data[..., 3:]
+        bs = feat_data.shape[0] # Batch size
+        
+        if self.need_normalize:
+            udf = de_normalize_udf(feat_data[..., 0:1])
+            gradients = angle2vector(feat_data[..., 1:3])
+            if feat_data.shape[-1] == 5 and self.num_features == 7:
+                normal = angle2vector(feat_data[..., 3:5])
+                x = torch.cat([udf, gradients, normal], dim=-1).permute((0, 4, 1, 2, 3)).contiguous()
+            else:
+                x = torch.cat([udf, gradients], dim=-1).permute((0, 4, 1, 2, 3)).contiguous()
+        else:
+            x = feat_data
+
+        points = points.permute(0,2,1)
+        vox_coords = torch.round((points[:, :3] + torch.ones_like(points[:, :3])) / 2 * self.resolution).to(torch.int32)
+        voxel_features = pvcnn_F.avg_voxelize(points, vox_coords, self.resolution)
+        x1 = self.encoder.conv1(voxel_features)
+
+        x = [x1, ]
+        for i in range(self.encoder.depths):
+            x.append(self.encoder.Maxpool(self.encoder.conv[i](x[-1])))
+
+        up_x = [x[-1]]
+        for i in range(self.encoder.depths - 2, -1, -1):
+            item = self.encoder.up[i](up_x[-1])
+            if i > 0:
+                item = torch.cat((item, x[i + 1]), dim=1)
+            up_x.append(self.encoder.up_conv[i](item))
+
+        sampled_features = []
+        for feature in up_x:
+            sampled_feature = F.grid_sample(feature, query_coords, mode="bilinear", align_corners=True)
+            sampled_features.append(sampled_feature)
+        sampled_features = torch.cat(sampled_features, dim=1)
+        prediction = self.encoder.Conv_1x1(sampled_features)
+
+        return prediction
+
+    def loss(self, v_predictions, v_input):
+        (points,feat_data), labels = v_input
 
         loss = self.loss_func(v_predictions, labels[:, None, :, :, :], self.loss_alpha)
         return {"total_loss": loss}

@@ -1,14 +1,16 @@
 import math
 import os.path
+from pathlib import Path
 import sys
 import time
 
-import faiss
+# import faiss
 import h5py
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import open3d as o3d
 
 try:
     sys.path.append("thirdparty")
@@ -141,69 +143,104 @@ class ABC_dataset_pc(torch.utils.data.Dataset):
     def __init__(self, v_data_root, v_training_mode, v_conf):
         super(ABC_dataset_pc, self).__init__()
         self.data_root = v_data_root
+        self.pc_dir = str(Path(v_data_root).parent)
         self.mode = v_training_mode
         self.conf = v_conf
-        self.patch_size = 32
+        self.batch_size = 128
         with h5py.File(self.data_root, "r") as f:
             self.num_items = f["features"].shape[0]
             self.resolution = f["features"].shape[1]
             self.names = np.asarray(["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
         self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
 
-        assert self.resolution % self.patch_size == 0
-        self.num_patch = self.resolution // (self.patch_size // 2) - 1
-        self.num_patches = self.num_patch ** 2
+        assert self.resolution % self.batch_size == 0
+        self.num_batches_per_item = ((self.resolution // self.batch_size) ** 3)
 
         if self.mode == "training":
-            self.index = np.arange(self.num_items)[:self.validation_start]
+            self.index = np.stack(np.meshgrid(
+                np.arange(self.num_items)[:self.validation_start],
+                np.arange(1), indexing="ij"), axis=2).reshape(-1,2)
         elif self.mode == "validation":
-            self.index = np.arange(self.num_items)[self.validation_start:]
+            self.index = np.stack(np.meshgrid(
+                np.arange(self.num_items)[self.validation_start:],
+                np.arange(self.num_batches_per_item), indexing="ij"), axis=2).reshape(-1,2)
         elif self.mode == "testing":
-            self.index = np.arange(self.num_items)
+            self.index = np.stack(np.meshgrid(
+                np.arange(self.num_items),
+                np.arange(self.num_batches_per_item), indexing="ij"), axis=2).reshape(-1,2)
         else:
             raise ""
+        
+        self.coords = np.mgrid[:self.resolution, :self.resolution, :self.resolution] / (self.resolution-1) * 2 - 1
+        self.coords = np.transpose(self.coords, (1,2,3,0)).astype(np.float32)
+
 
     def __len__(self):
         return self.index.shape[0]
 
-    def get_patch(self, v_id_item):
+    def get_patch(self, v_id_item, id_patch):
         times = [0] * 10
         cur_time = time.time()
-        index = np.random.randint(0, self.resolution-1, (128, 128, 128))
+        if self.mode == "training":
+            id_item = v_id_item
+            id_patch = 0
+            index = np.random.randint(0, self.resolution-1, (self.batch_size, self.batch_size, self.batch_size, 3))
+            with h5py.File(self.data_root, "r") as f:
+                features = f["features"][v_id_item][index[...,0],index[...,1],index[...,2]].astype(np.float32)
+                flags = f["flags"][v_id_item][index[...,0],index[...,1],index[...,2]].astype(bool).astype(np.float32)
+                coords = self.coords[index[...,0],index[...,1],index[...,2]]
+        else:
+            nums_per_dim = self.resolution // self.batch_size
+            bs = self.batch_size
+            xs = id_patch // nums_per_dim // nums_per_dim
+            ys = id_patch // nums_per_dim % nums_per_dim
+            zs = id_patch % nums_per_dim
 
-        with h5py.File(self.data_root, "r") as f:
-            features = f["features"][v_id_item][index[:,0],index[:,1],index[:,2]].astype(np.float32)
-            flags = f["flags"][v_id_item][index[:,0],index[:,1],index[:,2]].astype(bool).astype(np.float32)
+            with h5py.File(self.data_root, "r") as f:
+                features = f["features"][v_id_item][xs:xs+bs, ys:ys+bs, zs:zs+bs].astype(np.float32)
+                flags = f["flags"][v_id_item][xs:xs+bs, ys:ys+bs, zs:zs+bs].astype(bool).astype(np.float32)
+                coords = self.coords[xs:xs+bs, ys:ys+bs, zs:zs+bs]
 
-        points = np.asarray(o3d.io.read_point_cloud(
-            os.path.join(self.data_root, "pointcloud/{}.ply".format(self.names[v_id_item]))).points)
+        pcd = o3d.io.read_point_cloud(
+            os.path.join(self.pc_dir, "pointcloud/{}.ply".format(self.names[v_id_item])))
+        points = np.asarray(pcd.points)
+        normals = np.asarray(pcd.normals)
+        points = np.concatenate((points,normals), axis=-1).astype(np.float32)
+
+        features = np.concatenate((coords, features), axis=-1)
 
         times[0] += time.time() - cur_time
         cur_time = time.time()
         times[1] += time.time() - cur_time
-        return points, features, flags
+        return points[None,:], features[None,:], flags[None,:], id_patch
 
     def __getitem__(self, idx):
-        id_object = self.index[idx]
+        id_object = self.index[idx, 0]
+        id_patch = self.index[idx, 1]
 
-        points, feat_data, flag_data = self.get_patch(id_object)
-        return points, feat_data, flag_data
+        points, feat_data, flag_data, id_patch = self.get_patch(id_object, id_patch)
+        return points, feat_data, flag_data, self.names[id_object], id_patch
 
     @staticmethod
     def collate_fn(v_batches):
-        points, feat_data, flag_data= [], [], []
+        points, feat_data, flag_data, names, ids = [], [], [], [], []
         for item in v_batches:
             points.append(item[0])
             feat_data.append(item[1])
             flag_data.append(item[2])
+            names.append(item[3])
+            ids.append(item[4])
         points = np.concatenate(points, axis=0)
         feat_data = np.concatenate(feat_data, axis=0)
         flag_data = np.concatenate(flag_data, axis=0)
+        names = np.stack(names, axis=0)
+        ids = np.stack(ids, axis=0)
 
         return (
-            torch.from_numpy(points),
-            torch.from_numpy(feat_data),
+            (torch.from_numpy(points),torch.from_numpy(feat_data)),
             torch.from_numpy(flag_data),
+            names,
+            ids
         )
 
 

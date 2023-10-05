@@ -121,11 +121,11 @@ class PC_phase(pl.LightningModule):
             if loss_name == "total_loss":
                 self.log("Training_Loss", loss[loss_name], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                          sync_dist=True,
-                         batch_size=data[0].shape[0])
+                         batch_size=data[1].shape[0])
             else:
                 self.log("Training_"+loss_name, loss[loss_name], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                          sync_dist=True,
-                         batch_size=data[0].shape[0])
+                         batch_size=data[1].shape[0])
         return loss["total_loss"]
 
     def validation_step(self, batch, batch_idx):
@@ -144,11 +144,11 @@ class PC_phase(pl.LightningModule):
             if loss_name == "total_loss":
                 self.log("Validation_Loss", loss[loss_name], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                          sync_dist=True,
-                         batch_size=data[0].shape[0])
+                         batch_size=data[1].shape[0])
             else:
                 self.log("Validation_"+loss_name, loss[loss_name], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                          sync_dist=True,
-                         batch_size=data[0].shape[0])
+                         batch_size=data[1].shape[0])
 
         pr_result = self.model.compute_pr(outputs, data[1])
         self.pr_computer.update(pr_result[0], pr_result[1])

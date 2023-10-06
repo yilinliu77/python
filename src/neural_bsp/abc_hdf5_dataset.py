@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import time
 
-# import faiss
+import faiss
 import h5py
 import numpy as np
 import torch
@@ -24,7 +24,6 @@ def generate_coords(v_resolution):
     coords = np.meshgrid(np.arange(v_resolution), np.arange(v_resolution), np.arange(v_resolution), indexing="ij")
     coords = np.stack(coords, axis=3) / (v_resolution - 1)
     coords = (coords * 2 - 1).astype(np.float32)
-    # coords = coords + (1 / v_resolution / 2)
     return coords
 
 
@@ -36,10 +35,11 @@ def angle2vector(v_angles):
     gradients = np.stack([dx, dy, dz], axis=-1)
     return gradients
 
-
-class ABC_dataset_overlap(torch.utils.data.Dataset):
+# Dataset for patch training
+# Do overlap during the training
+class ABC_patch(torch.utils.data.Dataset):
     def __init__(self, v_data_root, v_training_mode, v_conf):
-        super(ABC_dataset_overlap, self).__init__()
+        super(ABC_patch, self).__init__()
         self.data_root = v_data_root
         self.mode = v_training_mode
         self.conf = v_conf
@@ -47,7 +47,7 @@ class ABC_dataset_overlap(torch.utils.data.Dataset):
         with h5py.File(self.data_root, "r") as f:
             self.num_items = f["features"].shape[0]
             self.resolution = f["features"].shape[1]
-            self.names = np.asarray(["{:08d}_{:08d}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
+            self.names = np.asarray(["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
         self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
 
         assert self.resolution % self.patch_size == 0
@@ -126,8 +126,8 @@ class ABC_dataset_overlap(torch.utils.data.Dataset):
             flag_data.append(item[1])
             names.append(item[2])
             id_patch.append(item[3])
-        feat_data = np.concatenate(feat_data, axis=0)
-        flag_data = np.concatenate(flag_data, axis=0)
+        feat_data = np.stack(feat_data, axis=0)
+        flag_data = np.stack(flag_data, axis=0)
         id_patch = np.stack(id_patch, axis=0)
         names = np.asarray(names)
 
@@ -138,10 +138,10 @@ class ABC_dataset_overlap(torch.utils.data.Dataset):
             torch.from_numpy(id_patch),
         )
 
-
-class ABC_dataset_pc(torch.utils.data.Dataset):
+# Read pointcloud and features
+class ABC_pc(torch.utils.data.Dataset):
     def __init__(self, v_data_root, v_training_mode, v_conf):
-        super(ABC_dataset_pc, self).__init__()
+        super(ABC_pc, self).__init__()
         self.data_root = v_data_root
         self.pc_dir = str(Path(v_data_root).parent)
         self.mode = v_training_mode
@@ -174,7 +174,6 @@ class ABC_dataset_pc(torch.utils.data.Dataset):
         self.coords = np.mgrid[:self.resolution, :self.resolution, :self.resolution] / (self.resolution-1) * 2 - 1
         self.coords = np.transpose(self.coords, (1,2,3,0)).astype(np.float32)
 
-
     def __len__(self):
         return self.index.shape[0]
 
@@ -186,33 +185,25 @@ class ABC_dataset_pc(torch.utils.data.Dataset):
             id_patch = 0
             index = np.random.randint(0, self.resolution-1, (self.batch_size, self.batch_size, self.batch_size, 3))
             with h5py.File(self.data_root, "r") as f:
-                features = f["features"][v_id_item][index[...,0],index[...,1],index[...,2]].astype(np.float32)
+                points = f["poisson_points"][v_id_item].astype(np.float32)
                 flags = f["flags"][v_id_item][index[...,0],index[...,1],index[...,2]].astype(bool).astype(np.float32)
                 coords = self.coords[index[...,0],index[...,1],index[...,2]]
         else:
             nums_per_dim = self.resolution // self.batch_size
             bs = self.batch_size
-            xs = id_patch // nums_per_dim // nums_per_dim
-            ys = id_patch // nums_per_dim % nums_per_dim
-            zs = id_patch % nums_per_dim
+            xs = id_patch // nums_per_dim // nums_per_dim * bs
+            ys = id_patch // nums_per_dim % nums_per_dim * bs
+            zs = id_patch % nums_per_dim * bs
 
             with h5py.File(self.data_root, "r") as f:
-                features = f["features"][v_id_item][xs:xs+bs, ys:ys+bs, zs:zs+bs].astype(np.float32)
                 flags = f["flags"][v_id_item][xs:xs+bs, ys:ys+bs, zs:zs+bs].astype(bool).astype(np.float32)
+                points = f["poisson_points"][v_id_item].astype(np.float32)
                 coords = self.coords[xs:xs+bs, ys:ys+bs, zs:zs+bs]
-
-        pcd = o3d.io.read_point_cloud(
-            os.path.join(self.pc_dir, "pointcloud/{}.ply".format(self.names[v_id_item])))
-        points = np.asarray(pcd.points)
-        normals = np.asarray(pcd.normals)
-        points = np.concatenate((points,normals), axis=-1).astype(np.float32)
-
-        features = np.concatenate((coords, features), axis=-1)
 
         times[0] += time.time() - cur_time
         cur_time = time.time()
         times[1] += time.time() - cur_time
-        return points[None,:], features[None,:], flags[None,:], id_patch
+        return points[None,:], coords[None,:], flags[None,:], id_patch
 
     def __getitem__(self, idx):
         id_object = self.index[idx, 0]
@@ -240,406 +231,13 @@ class ABC_dataset_pc(torch.utils.data.Dataset):
             (torch.from_numpy(points),torch.from_numpy(feat_data)),
             torch.from_numpy(flag_data),
             names,
-            ids
+            torch.from_numpy(ids)
         )
 
 
-class ABC_dataset_sparse_features(torch.utils.data.Dataset):
-    def __init__(self, v_data_root, v_training_mode, v_conf):
-        super(ABC_dataset_sparse_features, self).__init__()
-        self.data_root = v_data_root
-        self.mode = v_training_mode
-        self.conf = v_conf
-        self.patch_size = 32
-        with h5py.File(self.data_root, "r") as f:
-            self.num_items = f["features"].shape[0]
-            self.resolution = f["features"].shape[1]
-            self.names = np.asarray(["{:08d}".format(item) for item in np.asarray(f["names"])])
-        self.validation_start = self.num_items // 5 * 4
-
-        assert self.resolution % self.patch_size == 0
-        self.num_patches = self.resolution // self.patch_size
-
-        if self.mode == "training":
-            self.index = np.stack(np.meshgrid(
-                np.arange(self.num_items)[:self.validation_start],
-                np.arange(self.num_patches), indexing="ij"), axis=2)
-        elif self.mode == "validation":
-            self.index = np.stack(np.meshgrid(
-                np.arange(self.num_items)[self.validation_start:],
-                np.arange(self.num_patches), indexing="ij"), axis=2)
-        elif self.mode == "testing":
-            self.index = np.stack(np.meshgrid(
-                np.arange(self.num_items),
-                np.arange(self.num_patches), indexing="ij"), axis=2)
-        else:
-            raise ""
-        self.index = self.index.reshape((-1, 2))
-
-    def __len__(self):
-        return self.index.shape[0]
-
-    def get_patch(self, v_id_item, v_id_patch):
-        with h5py.File(self.data_root, "r") as f:
-            features = f["point_features"][
-                       v_id_item,
-                       v_id_patch*self.patch_size:(v_id_patch+1)*self.patch_size].astype(np.float32)
-            flags = (f["flags"][
-                     v_id_item,
-                     v_id_patch*self.patch_size:(v_id_patch+1)*self.patch_size] > 0).astype(np.float32)
-        features = features.reshape(32,8,32,8,32,5).transpose((1,3,0,2,4,5)).reshape((64, 32, 32, 32, 5))
-        flags = flags.reshape(32,8,32,8,32).transpose((1,3,0,2,4)).reshape((64, 32, 32, 32))
-        return features, flags
-
-    def __getitem__(self, idx):
-        id_object = self.index[idx, 0]
-        id_patch = self.index[idx, 1]
-
-        times = [0] * 10
-        cur_time = time.time()
-        feat_data, flag_data = self.get_patch(id_object, id_patch)
-        times[0] += time.time() - cur_time
-        cur_time = time.time()
-
-        # udf = feat_data[..., 0:1] / 65535 * 2
-        # gradients = angle2vector(feat_data[..., 1:3])
-        # normal = angle2vector(feat_data[..., 3:5])
-        # feat_data = np.concatenate([udf, gradients, normal], axis=-1).transpose((0,4,1,2,3))
-        # flag_data = flag_data[:, None, :, :, :]
-        times[1] += time.time() - cur_time
-        return feat_data, flag_data, self.names[id_object], id_patch
-
-    @staticmethod
-    def collate_fn(v_batches):
-        feat_data, flag_data, names, id_patch = [], [], [], []
-        for item in v_batches:
-            feat_data.append(item[0])
-            flag_data.append(item[1])
-            names.append(item[2])
-            id_patch.append(item[3])
-        feat_data = np.concatenate(feat_data, axis=0)
-        flag_data = np.concatenate(flag_data, axis=0)
-        id_patch = np.stack(id_patch, axis=0)
-        names = np.asarray(names)
-
-        return (
-            torch.from_numpy(feat_data),
-            torch.from_numpy(flag_data),
-            names,
-            torch.from_numpy(id_patch),
-        )
-
-
-class ABC_dataset_points_hdf5(torch.utils.data.Dataset):
-    def __init__(self, v_data_root, v_training_mode, v_conf):
-        super(ABC_dataset_points_hdf5, self).__init__()
-        self.data_root = v_data_root
-
-        with h5py.File(self.data_root, "r") as f:
-            self.num_items = f["features"].shape[0]
-            self.resolution = f["features"].shape[1]
-            self.names = np.asarray(["{:08d}".format(item) for item in np.asarray(f["names"])])
-        self.mode = v_training_mode
-        self.validation_start = self.num_items // 5 * 4
-        self.coords = generate_coords(self.resolution).astype(np.float32)
-
-        self.patch_size = v_conf["patch_size"]
-        self.id = v_conf["input_density"]  # input density
-        self.qd = v_conf["query_density"]  # query density
-        self.num_patch = self.resolution // self.patch_size
-        self.num_patches = self.num_patch ** 3
-        assert self.resolution % self.patch_size == 0
-        if self.mode == "training":
-            self.index = np.stack(np.meshgrid(
-                np.arange(self.num_items)[:self.validation_start],
-                np.arange(1), indexing="ij"), axis=2)
-        elif self.mode == "validation":
-            self.index = np.stack(np.meshgrid(
-                np.arange(self.num_items)[:self.validation_start],
-                np.arange(self.num_patches), indexing="ij"), axis=2)
-            self.index = np.stack(np.meshgrid(
-                np.arange(self.num_items)[self.validation_start:],
-                np.arange(self.num_patches), indexing="ij"), axis=2)
-        elif self.mode == "testing":
-            self.index = np.stack(np.meshgrid(
-                np.arange(self.num_items)[:self.validation_start],
-                np.arange(self.num_patches), indexing="ij"), axis=2)
-        else:
-            raise ""
-        self.index = self.index.reshape((-1, 2))
-
-    def __len__(self):
-        return self.index.shape[0]
-
-    def get_patch_test(self, v_id_item, v_id_patch):
-        x_start = v_id_patch // self.num_patch // self.num_patch * self.patch_size
-        y_start = v_id_patch // self.num_patch % self.num_patch * self.patch_size
-        z_start = v_id_patch % self.num_patch * self.patch_size
-        with h5py.File(self.data_root, "r") as f:
-            point_features = f["point_features"][v_id_item, ::self.id, ::self.id, ::self.id].astype(np.float32)
-            features = f["features"][
-                       v_id_item, x_start:x_start + self.patch_size,
-                       y_start:y_start + self.patch_size, z_start:z_start + self.patch_size].astype(np.float32)
-            flags = (f["flags"][
-                     v_id_item, x_start:x_start + self.patch_size,
-                     y_start:y_start + self.patch_size, z_start:z_start + self.patch_size] > 0).astype(np.float32)
-        coords = self.coords[
-                 x_start:x_start + self.patch_size,
-                 y_start:y_start + self.patch_size,
-                 z_start:z_start + self.patch_size]
-        return point_features, features, coords, flags
-
-    def get_patch_train(self, v_id_item, v_id_patch):
-        with h5py.File(self.data_root, "r") as f:
-            point_features = f["point_features"][v_id_item][::self.id, ::self.id, ::self.id].astype(np.float32)
-            features = f["features"][v_id_item][ ::self.qd,::self.qd, ::self.qd].astype(np.float32)
-            flags = (f["flags"][v_id_item][::self.qd, ::self.qd, ::self.qd] > 0).astype(np.float32)
-        coords = self.coords[::self.qd, ::self.qd, ::self.qd]
-        return point_features, features, coords, flags
-
-    def __getitem__(self, idx):
-        id_object, id_patch = self.index[idx]
-
-        times = [0] * 10
-        cur_time = time.time()
-
-        if self.mode == "training":
-            point_features, features, coords, flags = self.get_patch_train(id_object, id_patch)
-        else:
-            point_features, features, coords, flags = self.get_patch_test(id_object, id_patch)
-        times[0] += time.time() - cur_time
-        cur_time = time.time()
-
-        # sparse_udf = point_features[..., 0:1] / 65535 * 2
-        # sparse_gradients = angle2vector(point_features[..., 1:3])
-        # sparse_normals = angle2vector(point_features[..., 3:5])
-        # sparse_features = np.concatenate([sparse_udf, sparse_gradients, sparse_normals], axis=-1)
-
-        # query_udf = features[..., 0:1] / 65535 * 2
-        # query_gradient = angle2vector(features[..., 1:3])
-        query_features = np.concatenate([coords, features, flags[:, :, :, None]], axis=-1)
-        query_features = query_features.reshape((-1, 7))
-        times[1] += time.time() - cur_time
-        # print(times)
-        return point_features, query_features, self.names[id_object], id_patch
-
-    @staticmethod
-    def collate_fn(v_batches):
-        sparse_features, query_features, names, id_patch = [], [], [], []
-        for item in v_batches:
-            sparse_features.append(item[0])
-            query_features.append(item[1])
-            names.append(item[2])
-            id_patch.append(item[3])
-        sparse_features = np.stack(sparse_features, axis=0)
-        query_features = np.stack(query_features, axis=0)
-        id_patch = np.stack(id_patch, axis=0)
-        names = np.asarray(names)
-
-        return (
-            torch.from_numpy(sparse_features),
-            torch.from_numpy(query_features),
-            names,
-            torch.from_numpy(id_patch),
-        )
-
-
-class ABC_dataset_dense_features(ABC_dataset_sparse_features):
-    def __init__(self, v_data_root, v_training_mode, v_conf):
-        super(ABC_dataset_dense_features, self).__init__(v_data_root, v_training_mode, v_conf)
-
-    def get_patch(self, v_id_item, v_id_patch):
-        with h5py.File(self.data_root, "r") as f:
-            features = f["features"][
-                       v_id_item,
-                       v_id_patch*self.patch_size:(v_id_patch+1)*self.patch_size].astype(np.float32)
-            flags = (f["flags"][
-                     v_id_item,
-                     v_id_patch*self.patch_size:(v_id_patch+1)*self.patch_size] > 0).astype(np.float32)
-        features = features.reshape(32, 8, 32, 8, 32, 3).transpose((1, 3, 0, 2, 4, 5)).reshape((64, 32, 32, 32, 3))
-        flags = flags.reshape(32, 8, 32, 8, 32).transpose((1, 3, 0, 2, 4)).reshape((64, 32, 32, 32))
-        return features, flags
-
-    def __getitem__(self, idx):
-        id_object = self.index[idx, 0]
-        id_patch = self.index[idx, 1]
-
-        times = [0] * 10
-        cur_time = time.time()
-        feat_data, flag_data = self.get_patch(id_object, id_patch)
-        times[0] += time.time() - cur_time
-        cur_time = time.time()
-
-        # udf = feat_data[..., 0:1] / 65535 * 2
-        # gradients = angle2vector(feat_data[..., 1:3])
-        # feat_data = np.concatenate([udf, gradients], axis=-1).transpose((3,0,1,2))
-        # flag_data = flag_data[None, :, :, :]
-        times[1] += time.time() - cur_time
-        return feat_data, flag_data, self.names[id_object], id_patch
-
-
-
-########################################################################################################################
-
-class ABC_dataset_sparsefeatures_sample(ABC_dataset_sparse_features):
-    def __init__(self, v_data_root, v_training_mode, v_batch_size, v_output_features=4):
-        super(ABC_dataset_sparsefeatures_sample, self).__init__(
-            v_data_root, v_training_mode, v_batch_size, v_output_features)
-
-    def get_patch(self, v_id_item, v_id_patch):
-        if self.mode == "training":
-            index = np.unique(np.random.choice(np.arange(self.num_patches), self.batch_size, replace=False))
-            index = np.sort(index)
-            id_object = v_id_item[0]
-            id_patch = index
-        elif self.mode == "validation":
-            id_object = v_id_item[0]
-            id_patch = v_id_patch
-        else:
-            raise ""
-        with h5py.File(self.data_root, "r") as f:
-            features = f["features"][id_object, id_patch]
-            flags = f["flags"][id_object, id_patch]
-        return np.asarray([id_object] * self.batch_size), id_patch, features, flags
-
-
-class ABC_dataset_sparsefeatures_test(ABC_dataset_sparse_features):
-    def __init__(self, v_data_root, v_training_mode, v_batch_size, v_output_features=4, v_test_list=[]):
-        super(ABC_dataset_sparsefeatures_test, self).__init__(v_data_root, v_training_mode, v_batch_size, v_output_features)
-
-        if len(v_test_list) > 0:
-            self.idxs = np.zeros(len(v_test_list), dtype=np.int32)
-            for id, name in enumerate(v_test_list):
-                if name in self.names:
-                    self.idxs[id] = np.where(self.names == name)[0][0]
-                else:
-                    print("Cannot find ", name, " in the dataset")
-                    raise ""
-            self.names = np.asarray(v_test_list)
-            self.total_num_items = len(v_test_list)
-            self.num_items = self.total_num_items
-            self.index = np.stack(np.meshgrid(
-                np.arange(self.num_items),
-                np.arange(self.num_patches), indexing="ij"), axis=2)
-            self.index = self.index.reshape((self.index.shape[0], -1, self.batch_size, 2)).reshape(
-                (-1, self.batch_size, 2))
-
-
-class ABC_dataset_patch_npy(ABC_dataset_sparse_features):
-    def __init__(self, v_data_root, v_training_mode, v_batch_size, v_output_features=4, ):
-        super(ABC_dataset_patch_npy, self).__init__(v_data_root, v_training_mode, v_batch_size, v_output_features)
-
-    def get_patch(self, v_id_item, v_id_patch):
-        if self.mode == "training":
-            index = np.unique(np.random.choice(np.arange(self.num_patches), self.batch_size, replace=False))
-            index = np.sort(index)
-            id_object = v_id_item[0]
-            id_patch = index
-        elif self.mode == "validation" or self.mode == "testing":
-            id_object = v_id_item[0]
-            id_patch = v_id_patch
-        else:
-            raise ""
-        features = np.load(self.objects[id_object] + "_feat.npy", mmap_mode="r")
-        features = features[id_patch]
-        flags = np.load(self.objects[id_object] + "_flag.npy", mmap_mode="r")
-        flags = flags[id_patch]
-        return np.asarray([id_object] * self.batch_size), id_patch, features, flags
-
-
-class ABC_dataset_patch_test(ABC_dataset_patch_npy):
-    def __init__(self, v_data_root, v_training_mode, v_batch_size, v_output_features=4, v_test_list=[]):
-        super(ABC_dataset_patch_test, self).__init__(v_data_root, v_training_mode, v_batch_size, v_output_features)
-        if len(v_test_list) > 0:
-            self.idxs = np.zeros(len(v_test_list), dtype=np.int32)
-            for id, name in enumerate(v_test_list):
-                if name in self.names:
-                    self.idxs[id] = np.where(self.names == name)[0][0]
-                else:
-                    print("Cannot find ", name, " in the dataset")
-                    raise ""
-            self.names = np.asarray(v_test_list)
-            self.total_num_items = len(v_test_list)
-            self.num_items = self.total_num_items
-            self.index = np.stack(np.meshgrid(
-                np.arange(self.num_items),
-                np.arange(self.num_patches), indexing="ij"), axis=2)
-            self.index = self.index.reshape((self.index.shape[0], -1, self.batch_size, 2)).reshape(
-                (-1, self.batch_size, 2))
-
-
-class ABC_dataset_test_raw(torch.utils.data.Dataset):
-    def __init__(self, v_data_root=None, v_training_mode=None):
-        super(ABC_dataset_test_raw, self).__init__()
-        self.data_root = v_data_root
-        if v_data_root is None:
-            return
-        self.names = list(set([item[:8] for item in os.listdir(v_data_root)]))
-        self.names = sorted(self.names, key=lambda x: int(x))
-        self.objects = [os.path.join(v_data_root, item) for item in self.names]
-
-        self.num_items = len(self.objects)
-
-        self.mode = v_training_mode
-
-        pass
-
-    def __len__(self):
-        if self.mode == "training":
-            return self.num_items // 4 * 3
-        elif self.mode == "validation":
-            return self.num_items // 4
-        elif self.mode == "testing":
-            return self.num_items
-        raise
-
-    def get_total(self, v_idx):
-        features = np.load(self.objects[v_idx] + "_feat.npy")
-        features = features.reshape((8, 8, 8, 32, 32, 32, 3)).transpose((0, 3, 1, 4, 2, 5, 6)).reshape(256, 256, 256, 3)
-        flags = np.load(self.objects[v_idx] + "_flag.npy")
-        flags = flags.reshape((8, 8, 8, 32, 32, 32)).transpose((0, 3, 1, 4, 2, 5)).reshape(256, 256, 256)
-        return features, flags
-
-    def __getitem__(self, idx):
-        if self.mode == "training" or self.mode == "testing":
-            id_dummy = 0
-        else:
-            id_dummy = self.num_items // 4 * 3
-        times = [0] * 10
-        cur_time = time.time()
-        feat_data, flag_data = self.get_total(idx + id_dummy)
-        times[0] += time.time() - cur_time
-        cur_time = time.time()
-        feat_data = np.transpose(feat_data.astype(np.float32) / 65535, (3, 0, 1, 2))
-        flag_data = flag_data.astype(np.float32)[None, :, :, :]
-        times[1] += time.time() - cur_time
-        return feat_data, flag_data, self.names[idx + id_dummy]
-
-    @staticmethod
-    def collate_fn(v_batches):
-        input_features = []
-        consistent_flags = []
-        for item in v_batches:
-            input_features.append(item[0])
-            consistent_flags.append(item[1])
-
-        input_features = np.stack(input_features, axis=0)
-        # input_features = torch.from_numpy(np.stack(input_features,axis=0).astype(np.float32)).permute(0, 4, 1, 2, 3)
-        consistent_flags = torch.from_numpy(np.stack(consistent_flags, axis=0))
-
-        return input_features, consistent_flags
-
-
-def generate_test_coords(v_resolution):
-    coords = np.meshgrid(np.arange(v_resolution), np.arange(v_resolution), np.arange(v_resolution), indexing="ij")
-    coords = np.stack(coords, axis=3)
-    coords = coords.reshape((-1, 3))
-    return coords
-
-
-class ABC_dataset_test_mesh(torch.utils.data.Dataset):
+class ABC_test_mesh(torch.utils.data.Dataset):
     def __init__(self, v_data_root, v_batch_size, v_output_features=4, v_resolution=256):
-        super(ABC_dataset_test_mesh, self).__init__()
+        super(ABC_test_mesh, self).__init__()
         self.batch_size = v_batch_size
         self.output_features = v_output_features
         self.data_root = v_data_root
@@ -647,8 +245,7 @@ class ABC_dataset_test_mesh(torch.utils.data.Dataset):
 
         assert v_resolution % 32 == 0
         num_patches_per_dim = v_resolution // 32
-        coords = generate_test_coords(v_resolution)
-        self.coords = coords / (v_resolution - 1) * 2 - 1
+        self.coords = generate_coords(v_resolution)
         self.num_patches = (v_resolution // 32) ** 3
         assert self.num_patches % v_resolution == 0
 
@@ -731,9 +328,9 @@ class ABC_dataset_test_mesh(torch.utils.data.Dataset):
         return features, id_list
 
 
-class ABC_dataset_test_pc(torch.utils.data.Dataset):
+class ABC_test_pc(torch.utils.data.Dataset):
     def __init__(self, v_data_root, v_batch_size, v_output_features=4, v_resolution=256):
-        super(ABC_dataset_test_pc, self).__init__()
+        super(ABC_test_pc, self).__init__()
         self.batch_size = v_batch_size
         self.output_features = v_output_features
         self.data_root = v_data_root
@@ -741,8 +338,7 @@ class ABC_dataset_test_pc(torch.utils.data.Dataset):
 
         assert v_resolution % 32 == 0
         num_patches_per_dim = v_resolution // 32
-        coords = generate_test_coords(v_resolution)
-        self.coords = coords / (v_resolution - 1) * 2 - 1
+        self.coords = generate_coords(v_resolution)
         self.num_patches = (v_resolution // 32) ** 3
         assert self.num_patches % v_resolution == 0
 

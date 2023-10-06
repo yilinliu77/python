@@ -96,7 +96,7 @@ class PC_phase(pl.LightningModule):
             self.hydra_conf["dataset"],
         )
         self.target_viz_name = self.valid_dataset.names[self.id_viz + self.valid_dataset.validation_start]
-        return DataLoader(self.valid_dataset, batch_size=1,
+        return DataLoader(self.valid_dataset, batch_size=self.batch_size,
         # return MyDataLoader(self.valid_dataset, batch_size=1,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
@@ -129,26 +129,26 @@ class PC_phase(pl.LightningModule):
         return loss["total_loss"]
 
     def validation_step(self, batch, batch_idx):
+        bs = batch[2].shape[0]
         data = batch[:2]
-        name = batch[2][0]
-        assert len(batch[2])==1
-        id_patch = batch[3]
+        names = batch[2]
+        id_patchs = batch[3]
         outputs = self.model(data, False)
         loss = self.model.loss(outputs, data)
-        if name == self.target_viz_name:
-            self.viz_data["loss"].append(loss["total_loss"].item())
-            self.viz_data["prediction"].append(outputs[:,0])
-            self.viz_data["gt"].append(data[1])
-            self.viz_data["id_patch"].append(id_patch[0])
+        for i in range(bs):
+            if names[i] == self.target_viz_name:
+                self.viz_data["prediction"].append(outputs[i:i+1])
+                self.viz_data["gt"].append(data[1][i:i+1])
+                self.viz_data["id_patch"].append(id_patchs[i:i+1])
         for loss_name in loss:
             if loss_name == "total_loss":
                 self.log("Validation_Loss", loss[loss_name], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                          sync_dist=True,
-                         batch_size=data[1].shape[0])
+                         batch_size=bs)
             else:
                 self.log("Validation_"+loss_name, loss[loss_name], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                          sync_dist=True,
-                         batch_size=data[1].shape[0])
+                         batch_size=bs)
 
         pr_result = self.model.compute_pr(outputs, data[1])
         self.pr_computer.update(pr_result[0], pr_result[1])
@@ -309,7 +309,7 @@ class PC_phase(pl.LightningModule):
             print("{}: {:.3f}".format(loss, self.trainer.callback_metrics[loss].cpu().item()))
 
 
-@hydra.main(config_name="train_model_pc.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
+@hydra.main(config_name="train_pc.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
     torch.set_float32_matmul_precision("medium")

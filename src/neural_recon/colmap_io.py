@@ -37,6 +37,7 @@ class Image:
 class Point_3d:
     pos: np.ndarray
     tracks: (int, int)
+    error: float
 
 @nb.njit(cache=True)
 def np_all_axis1(x):
@@ -109,13 +110,14 @@ def quaternion_rotation_matrix(Q):
 def read_world_points(original_img_id_to_current_img_id, bounds_center, bounds_size, line):
     pos = np.array([float(line[1]), float(line[2]), float(line[3])], dtype=np.float32)
     pos = (pos - bounds_center) / bounds_size + 0.5
+    error = float(line[7])
     assert (len(line) - 8) % 2 == 0
     num_track = (len(line) - 8) // 2
     tracks = []
     for i_track in range(num_track):
         tracks.append(
             (original_img_id_to_current_img_id[int(line[8 + 2 * i_track + 0])], int(line[8 + 2 * i_track + 1])))
-    return Point_3d(pos, tracks)
+    return Point_3d(pos, tracks, error)
 
 
 def read_superpoints(v_superglue_dir, v_img_size, v_args):
@@ -238,17 +240,16 @@ def read_dataset(v_colmap_dir, v_bounds):
     print("Found {} viewpoints".format(len(imgs)))
 
     points_3d: List[Point_3d] = []
-    if True: # For now we don't need it
-        with open(os.path.join(v_colmap_dir, "points3D.txt")) as f:
-            data = [item.strip().split(" ") for item in f.readlines() if item[0] != "#"]
-            points_3d = list(pool.map(
-                partial(read_world_points, original_img_id_to_current_img_id, bounds_center, bounds_size),
-                data, chunksize=1000))
-        num_original_points = len(points_3d)
-        points_3d = list(filter(lambda item: is_inside_scene(item.pos), points_3d))
+    with open(os.path.join(v_colmap_dir, "points3D.txt")) as f:
+        data = [item.strip().split(" ") for item in f.readlines() if item[0] != "#"]
+        points_3d = list(pool.map(
+            partial(read_world_points, original_img_id_to_current_img_id, bounds_center, bounds_size),
+            data, chunksize=1000))
+    num_original_points = len(points_3d)
+    points_3d = list(filter(lambda item: is_inside_scene(item.pos), points_3d))
 
-        print(
-            "Found {} world points after filtering {} points".format(len(points_3d), num_original_points - len(points_3d)))
+    print(
+        "Found {} world points after filtering {} points".format(len(points_3d), num_original_points - len(points_3d)))
 
     # Read point field and line field for each img
     # imgs = list(pool.map(partial(read_superpoints, v_superglue_dir, img_size), enumerate(imgs)))

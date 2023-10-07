@@ -63,27 +63,27 @@ def de_normalize_points(v_points):
 
 #################################################################################################################
 class conv_block(nn.Module):
-    def __init__(self, ch_in, ch_out, with_bn=True):
+    def __init__(self, ch_in, ch_out, with_bn=True, kernel_size=3, padding=1):
         super(conv_block, self).__init__()
         if with_bn:
             self.conv1 = nn.Sequential(
-                nn.Conv3d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+                nn.Conv3d(ch_in, ch_out, kernel_size=kernel_size, stride=1, padding=padding, bias=True),
                 nn.BatchNorm3d(ch_out),
                 nn.ReLU(inplace=True),
 
             )
             self.conv2 = nn.Sequential(
-                nn.Conv3d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+                nn.Conv3d(ch_out, ch_out, kernel_size=kernel_size, stride=1, padding=padding, bias=True),
                 nn.BatchNorm3d(ch_out),
                 nn.ReLU(inplace=True)
             )
         else:
             self.conv1 = nn.Sequential(
-                nn.Conv3d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+                nn.Conv3d(ch_in, ch_out, kernel_size=kernel_size, stride=1, padding=padding, bias=True),
                 nn.ReLU(inplace=True),
             )
             self.conv2 = nn.Sequential(
-                nn.Conv3d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+                nn.Conv3d(ch_out, ch_out, kernel_size=kernel_size, stride=1, padding=padding, bias=True),
                 nn.ReLU(inplace=True)
             )
 
@@ -257,10 +257,11 @@ class PC_model(nn.Module):
             base_channel=8
         )
         self.encoder.Conv_1x1 = nn.Conv3d(240, 1, 1)
-        self.resolution = 64
+        self.resolution = v_conf["voxelize_res"]
         self.loss_func = focal_loss
         self.loss_alpha = 0.75
         self.num_features = v_conf["channels"]
+        self.offset = -1/self.resolution
 
     def forward(self, v_data, v_training=False):
         (points,feat_data), labels = v_data
@@ -273,8 +274,19 @@ class PC_model(nn.Module):
             points = points
 
         points = points.permute(0,2,1)
-        vox_coords = torch.round((points[:, :3] + torch.ones_like(points[:, :3])) / 2 * self.resolution).to(torch.int32)
+        vox_coords = torch.round(
+            (self.offset + points[:, :3] + torch.ones_like(points[:, :3])) / 2 * self.resolution).to(torch.int32)
         voxel_features = pvcnn_F.avg_voxelize(points, vox_coords, self.resolution)
+        if False:
+            p = generate_coords(256)
+            v = vox_coords.cpu().numpy()[0]
+            p = p[v[0], v[1], v[2]]
+            export_point_cloud("test.ply", p)
+        if False:
+            p = generate_coords(256)
+            p = p[(voxel_features[0]!=0).max(dim=0)[0].cpu().numpy()]
+            export_point_cloud("test.ply", p)
+
         x1 = self.encoder.conv1(voxel_features)
 
         x = [x1, ]
@@ -298,9 +310,9 @@ class PC_model(nn.Module):
         return prediction
 
     def loss(self, v_predictions, v_input):
-        (points,feat_data), labels = v_input
+        (_,_), labels = v_input
 
-        loss = self.loss_func(v_predictions, labels[:, None, :, :, :], self.loss_alpha)
+        loss = self.loss_func(v_predictions, labels[:, :, None], self.loss_alpha)
         return {"total_loss": loss}
 
     def compute_pr(self, v_pred, v_gt):
@@ -319,6 +331,94 @@ class PC_model(nn.Module):
             (-1, 2, 2, 2, 128, 128, 128)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(v_resolution, v_resolution, v_resolution)
         gt_labels = gathered_gt.reshape(
             (-1, 2, 2, 2, 128, 128, 128)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(v_resolution, v_resolution, v_resolution)
+
+        predicted_labels = sigmoid(predicted_labels) > 0.5
+        mask = predicted_labels.reshape(-1)
+        export_point_cloud(os.path.join(log_root, "{}_{}_pred.ply".format(idx, target_viz_name)),
+                           query_points[mask])
+
+        gt_labels = sigmoid(gt_labels) > 0.5
+        mask = gt_labels.reshape(-1)
+        export_point_cloud(os.path.join(log_root, "{}_{}_gt.ply".format(idx, target_viz_name)),
+                           query_points[mask])
+        return
+
+
+class PC_model2(PC_model):
+    def __init__(self, v_conf):
+        super(PC_model2, self).__init__(v_conf)
+        self.encoder=None
+        self.Maxpool = nn.MaxPool3d(kernel_size=2, stride=2)
+
+        input_feature = self.num_features
+        base_channel = 8
+        with_bn = True
+        self.conv = nn.ModuleList()
+        self.conv.append(conv_block(ch_in=input_feature, ch_out=base_channel, with_bn=with_bn, kernel_size=3, padding=1))
+        self.conv.append(
+            conv_block(ch_in=base_channel * 1, ch_out=base_channel * 2, with_bn=with_bn, kernel_size=3, padding=1))
+        self.conv.append(
+            conv_block(ch_in=base_channel * 2, ch_out=base_channel * 4, with_bn=with_bn, kernel_size=3, padding=1))
+        self.conv.append(
+            conv_block(ch_in=base_channel * 4, ch_out=base_channel * 8, with_bn=with_bn, kernel_size=3, padding=1))
+        self.conv.append(
+            conv_block(ch_in=base_channel * 8, ch_out=base_channel * 16, with_bn=with_bn, kernel_size=3, padding=1))
+        self.conv.append(
+            conv_block(ch_in=base_channel * 16, ch_out=base_channel * 32, with_bn=with_bn, kernel_size=3, padding=1))
+
+
+        self.fc = nn.Sequential(
+            nn.Linear(504, 256),
+            Residual_fc(256, 256),
+            nn.Linear(256, 1),
+        )
+
+        self.atten = nn.MultiheadAttention(256, 2, batch_first=True)
+
+    def pos_encoding(self, v_points):
+        freq = 2 ** torch.arange(16, dtype=torch.float32, device=v_points.device) * np.pi  # [L]
+        spectrum = v_points[..., None] * freq  # [B,...,N,L]
+        sin, cos = spectrum.sin(), spectrum.cos()  # [B,...,N,L]
+        input_enc = torch.stack([sin, cos], dim=-2)  # [B,...,N,2,L]
+        input_enc = input_enc.view(*v_points.shape[:-1], -1)  # [B,...,2NL]
+        return input_enc
+
+    def forward(self, v_data, v_training=False):
+        (points, feat_data), labels = v_data
+        query_coords = feat_data[..., :3]
+        bs = feat_data.shape[0]  # Batch size
+
+        if self.need_normalize:
+            points = de_normalize_points(points)
+        else:
+            points = points
+
+        points = points.permute(0, 2, 1)
+        vox_coords = torch.round(
+            (self.offset + points[:, :3] + torch.ones_like(points[:, :3])) / 2 * self.resolution).to(torch.int32)
+        voxel_features = pvcnn_F.avg_voxelize(points, vox_coords, self.resolution)
+
+        features = [voxel_features, ]
+        for i in range(len(self.conv)):
+            features.append(self.Maxpool(self.conv[i](features[-1])))
+
+        sampled_features = []
+        for feature in features[1:]:
+            sampled_feature = F.grid_sample(
+                feature, query_coords[:,None,None,], mode="bilinear", align_corners=True)[:,:,0,0]
+            sampled_features.append(sampled_feature)
+
+        sampled_features = torch.cat(sampled_features, dim=1).permute((0,2,1))
+        prediction = self.fc(sampled_features)
+
+        return prediction
+
+    def valid_output(self, idx, log_root, target_viz_name,
+                     gathered_prediction, gathered_gt, gathered_queries):
+        query_points = gathered_queries.reshape(-1,3)
+
+        predicted_labels = gathered_prediction.reshape(-1)
+        gt_labels = gathered_gt.reshape(-1)
 
         predicted_labels = sigmoid(predicted_labels) > 0.5
         mask = predicted_labels.reshape(-1)

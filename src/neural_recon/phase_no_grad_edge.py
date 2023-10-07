@@ -109,7 +109,9 @@ def read_graph(v_filename, img_size):
     return graph
 
 
-def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds, v_reconstruct_data=False):
+def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds, v_reconstruct_data,
+                              v_max_error_for_initial_sfm
+                              ):
     print("Start to prepare dataset")
     print("1. Read imgs")
 
@@ -128,39 +130,20 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds, v_reconstruct_
         np.save(img_cache_name[:-4], np.asarray([img_database, points_3d], dtype=object))
         print("Save cache to ", img_cache_name)
 
-    graph_cache_name = "output/img_field_test/graph_cache.npy"
-    print("2. Build graph")
-    if os.path.exists(graph_cache_name) and not v_reconstruct_data:
-        graphs = np.load(graph_cache_name, allow_pickle=True)
-    else:
-        ray.init(
-            # local_mode=True
-        )
-        tasks = [read_graph.remote(
-            os.path.join(v_colmap_dir, "wireframe/{}.obj".format(img_database[i_img].img_name)),
-            img_database[i_img].img_size
-        ) for i_img in range(len(img_database))]
-        graphs = ray.get(tasks)
-        print("Read {} graphs".format(len(graphs)))
-        graphs = np.asarray(graphs, dtype=object)
-        np.save(graph_cache_name, graphs, allow_pickle=True)
-
     points_cache_name = "output/img_field_test/points_cache.npy"
     if os.path.exists(points_cache_name) and not v_reconstruct_data:
         points_from_sfm = np.load(points_cache_name)
     else:
         preserved_points = []
         for point in tqdm(points_3d):
-            for track in point.tracks:
-                if track[0] in [1, 2]:
-                    preserved_points.append(point)
-        if len(preserved_points) == 0:
+            if point.error < v_max_error_for_initial_sfm and len(point.tracks) > 3:
+                preserved_points.append(point)
+        if len(points_3d) == 0:
             points_from_sfm = np.array([[0.5, 0.5, 0.5]], dtype=np.float32)
         else:
             points_from_sfm = np.stack([item.pos for item in preserved_points])
+        export_point_cloud("output/img_field_test/filter_sfm_points.ply", points_from_sfm)
         np.save(points_cache_name, points_from_sfm)
-
-    print("Start to calculate initial wireframe for each image")
 
     # project the points_3d_from_sfm to points_2d, and filter points(2d && 3d) outside 2d space
     def project_points(v_projection_matrix, points_3d_pos):
@@ -175,12 +158,134 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds, v_reconstruct_
         projected_points = projected_points[projected_points_mask]
         return points_3d_pos, projected_points
 
+    final_graph_cache_name = "output/img_field_test/final_graph_cache.npy"
+    if os.path.exists(final_graph_cache_name) and not v_reconstruct_data:
+        graphs = np.load(final_graph_cache_name, allow_pickle=True)
+    else:
+        graph_cache_name = "output/img_field_test/graph_cache.npy"
+        print("2. Build graph")
+        if os.path.exists(graph_cache_name) and not v_reconstruct_data:
+            graphs = np.load(graph_cache_name, allow_pickle=True)
+        else:
+            ray.init(
+                # local_mode=True
+            )
+            tasks = [read_graph.remote(
+                os.path.join(v_colmap_dir, "wireframe/{}.obj".format(img_database[i_img].img_name)),
+                img_database[i_img].img_size
+            ) for i_img in range(len(img_database))]
+            graphs = ray.get(tasks)
+            print("Read {} graphs".format(len(graphs)))
+            graphs = np.asarray(graphs, dtype=object)
+            np.save(graph_cache_name, graphs, allow_pickle=True)
+
+        print("Start to calculate initial wireframe for each image")
+
+        # easy(but may be wrong sometimes) method:
+        # 1. to project the points_3d_from_sfm to points_2d
+        # 2. find nearist points_2d to init nodes' depth
+        # used method:
+        # 1. to project the points_3d_from_sfm to points_2d
+        # 2. for each node in the graph, find nearist N candidate points_2d(correspondingly get candidate points_3d_camera),
+        # then back project nodes to camera coordinates,
+        # construct the ray of each node,
+        # compute the nearist points_3d_camera from ray in camera coordinates
+        def compute_initial(v_graph, v_points_3d, v_points_2d, v_extrinsic, v_intrinsic):
+            distance_threshold = 5  # 5m; not used
+
+            v_graph.graph["face_center"] = np.zeros((len(v_graph.graph["faces"]), 2), dtype=np.float32)
+            v_graph.graph["ray_c"] = np.zeros((len(v_graph.graph["faces"]), 3), dtype=np.float32)
+            v_graph.graph["distance"] = np.zeros((len(v_graph.graph["faces"]),), dtype=np.float32)
+
+            # 1. Calculate the centroid of each faces
+            for id_face, id_edge_per_face in enumerate(v_graph.graph["faces"]):
+                # Convex assumption
+                center_point = np.stack(
+                    [v_graph.nodes[id_vertex]["pos_2d"] for id_vertex in id_edge_per_face], axis=0).mean(axis=0)
+                v_graph.graph["face_center"][id_face] = center_point
+
+            points_from_sfm_camera = (v_extrinsic @ np.insert(v_points_3d, 3, 1, axis=1).T).T[:, :3]  # (N, 3)
+            # filter out the point behind the camera
+            valid_mask = points_from_sfm_camera[:, 2] > 0
+            points_from_sfm_camera = points_from_sfm_camera[valid_mask]
+            v_points_2d = v_points_2d[valid_mask]
+            v_points_3d = v_points_3d[valid_mask]
+
+            # Query points: (M, 2)
+            # points from sfm: (N, 2)
+            kd_tree = faiss.IndexFlatL2(2)
+            kd_tree.add(v_points_2d.astype(np.float32))
+
+            # Prepare query points: Build an array of query points that
+            # contains vertices and centroid of each face in the graph
+            vertices_2d = np.asarray([v_graph.nodes[id_node]["pos_2d"] for id_node in v_graph.nodes()])  # (M, 2)
+            centroids_2d = v_graph.graph["face_center"]
+            query_points = np.concatenate([vertices_2d, centroids_2d], axis=0)
+            # 32 nearest neighbors for each query point.
+            shortest_distance, index_shortest_distance = kd_tree.search(query_points, 32)  # (M, K)
+
+            # Select the point which is nearest to the actual ray for each endpoints
+            # 1. Construct the ray
+            # (M, 3); points in camera coordinates
+            ray_c = (np.linalg.inv(v_intrinsic) @ np.insert(query_points, 2, 1, axis=1).T).T
+            ray_c = ray_c / np.linalg.norm(ray_c + 1e-6, axis=1, keepdims=True)  # Normalize the points(dir)
+            nearest_candidates = points_from_sfm_camera[index_shortest_distance]  # (M, K, 3)
+            # Compute the shortest distance from the candidate point to the ray for each query point
+            # (M, K, 1): K projected distance of the candidate point along each ray
+            distance_of_projection = nearest_candidates @ ray_c[:, :, np.newaxis]
+            distance_of_projection[distance_of_projection<0] = np.inf
+            # (M, K, 3): K projected points along the ray
+            # 投影距离*单位ray方向 = 投影点坐标
+            projected_points_on_ray = distance_of_projection * ray_c[:, np.newaxis, :]
+            distance_from_candidate_points_to_ray = np.linalg.norm(
+                nearest_candidates - projected_points_on_ray + 1e-6, axis=2)  # (M, 1)
+
+            # (M, 1): Index of the best projected points along the ray
+            index_best_projected = distance_from_candidate_points_to_ray.argmin(axis=1)
+
+            chosen_distances = distance_of_projection[np.arange(projected_points_on_ray.shape[0]), index_best_projected]
+            valid_mask = distance_from_candidate_points_to_ray[np.arange(
+                projected_points_on_ray.shape[0]), index_best_projected] < distance_threshold  # (M, 1)
+            # (M, 3): The best projected points along the ray
+            initial_points_camera = projected_points_on_ray[
+                np.arange(projected_points_on_ray.shape[0]), index_best_projected]
+            initial_points_world = (np.linalg.inv(v_extrinsic) @ np.insert(initial_points_camera, 3, 1, axis=1).T).T
+            initial_points_world = initial_points_world[:, :3] / initial_points_world[:, 3:4]
+
+            for idx, id_node in enumerate(v_graph.nodes):
+                v_graph.nodes[id_node]["pos_world"] = initial_points_world[idx]
+                v_graph.nodes[id_node]["distance"] = chosen_distances[idx, 0]
+                v_graph.nodes[id_node]["ray_c"] = ray_c[idx]
+
+            for id_face in range(v_graph.graph["face_center"].shape[0]):
+                idx = id_face + len(v_graph.nodes)
+                v_graph.graph["ray_c"][id_face] = ray_c[idx]
+                v_graph.graph["distance"][id_face] = chosen_distances[idx, 0]
+
+            line_coordinates = []
+            for edge in v_graph.edges():
+                line_coordinates.append(np.concatenate((initial_points_world[edge[0]], initial_points_world[edge[1]])))
+            save_line_cloud("output/img_field_test/initial_segments.obj", np.stack(line_coordinates, axis=0))
+            pc = o3d.geometry.PointCloud()
+            pc.points = o3d.utility.Vector3dVector(initial_points_world[len(v_graph.nodes):])
+            o3d.io.write_point_cloud("output/img_field_test/initial_face_centroid.ply", pc)
+            return
+
+        for id_img, img in enumerate(tqdm(img_database)):
+            points_from_sfm_local, points_from_sfm_2d = project_points(img.projection, points_from_sfm)
+            rgb = cv2.imread(img.img_path, cv2.IMREAD_UNCHANGED)[:, :, :3]
+            rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)[:, :, None]
+            # draw_initial(rgb, graphs[id_img], img)
+            compute_initial(graphs[id_img], points_from_sfm_local, points_from_sfm_2d, img.extrinsic, img.intrinsic)
+        np.save(final_graph_cache_name, graphs)
+
     def draw_initial(img, v_graph):
         # cv2.namedWindow("1", cv2.WINDOW_NORMAL)
         # cv2.resizeWindow("1", 1600, 900)
         # cv2.moveWindow("1", 5, 5)
         v_rgb = cv2.imread(img.img_path, cv2.IMREAD_UNCHANGED)
         point_img = v_rgb.copy()
+        points_from_sfm_local, points_from_sfm_2d = project_points(img.projection, points_from_sfm)
         for point in points_from_sfm_2d:
             cv2.circle(point_img, (point * img.img_size).astype(np.int32), 2, (0, 0, 255), thickness=4)
         print("Draw lines on img1")
@@ -205,98 +310,6 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds, v_reconstruct_
             cv2.circle(line_img1, end, 1, (0, 255, 255), 2)
         viz_img = np.concatenate((point_img, line_img1), axis=0)
         cv2.imwrite("output/img_field_test/input_img.jpg", viz_img)
-
-    # easy(but may be wrong sometimes) method:
-    # 1. to project the points_3d_from_sfm to points_2d
-    # 2. find nearist points_2d to init nodes' depth
-    # used method:
-    # 1. to project the points_3d_from_sfm to points_2d
-    # 2. for each node in the graph, find nearist N candidate points_2d(correspondingly get candidate points_3d_camera),
-    # then back project nodes to camera coordinates,
-    # construct the ray of each node,
-    # compute the nearist points_3d_camera from ray in camera coordinates
-    def compute_initial(v_graph, v_points_3d, v_points_2d, v_extrinsic, v_intrinsic):
-        distance_threshold = 5  # 5m; not used
-
-        v_graph.graph["face_center"] = np.zeros((len(v_graph.graph["faces"]), 2), dtype=np.float32)
-        v_graph.graph["ray_c"] = np.zeros((len(v_graph.graph["faces"]), 3), dtype=np.float32)
-        v_graph.graph["distance"] = np.zeros((len(v_graph.graph["faces"]),), dtype=np.float32)
-
-        # 1. Calculate the centroid of each faces
-        for id_face, id_edge_per_face in enumerate(v_graph.graph["faces"]):
-            # Convex assumption
-            center_point = np.stack(
-                [v_graph.nodes[id_vertex]["pos_2d"] for id_vertex in id_edge_per_face], axis=0).mean(axis=0)
-            v_graph.graph["face_center"][id_face] = center_point
-
-        # Query points: (M, 2)
-        # points from sfm: (N, 2)
-        kd_tree = faiss.IndexFlatL2(2)
-        kd_tree.add(v_points_2d.astype(np.float32))
-
-        # Prepare query points: Build an array of query points that
-        # contains vertices and centroid of each face in the graph
-        vertices_2d = np.asarray([v_graph.nodes[id_node]["pos_2d"] for id_node in v_graph.nodes()])  # (M, 2)
-        centroids_2d = v_graph.graph["face_center"]
-        query_points = np.concatenate([vertices_2d, centroids_2d], axis=0)
-        # 32 nearest neighbors for each query point.
-        shortest_distance, index_shortest_distance = kd_tree.search(query_points, 32)  # (M, K)
-
-        points_from_sfm_camera = (v_extrinsic @ np.insert(v_points_3d, 3, 1, axis=1).T).T[:, :3]  # (N, 3)
-
-        # Select the point which is nearest to the actual ray for each endpoints
-        # 1. Construct the ray
-        # (M, 3); points in camera coordinates
-        ray_c = (np.linalg.inv(v_intrinsic) @ np.insert(query_points, 2, 1, axis=1).T).T
-        ray_c = ray_c / np.linalg.norm(ray_c + 1e-6, axis=1, keepdims=True)  # Normalize the points(dir)
-        nearest_candidates = points_from_sfm_camera[index_shortest_distance]  # (M, K, 3)
-        # Compute the shortest distance from the candidate point to the ray for each query point
-        # (M, K, 1): K projected distance of the candidate point along each ray
-        distance_of_projection = nearest_candidates @ ray_c[:, :, np.newaxis]
-        # (M, K, 3): K projected points along the ray
-        # 投影距离*单位ray方向 = 投影点坐标
-        projected_points_on_ray = distance_of_projection * ray_c[:, np.newaxis, :]
-        distance_from_candidate_points_to_ray = np.linalg.norm(
-            nearest_candidates - projected_points_on_ray + 1e-6, axis=2)  # (M, 1)
-
-        # 相机坐标系中所有点到其相应的射线的距离，距离最小的称之为最佳投影点
-        # (M, 1): Index of the best projected points along the ray
-        index_best_projected = distance_from_candidate_points_to_ray.argmin(axis=1)
-
-        chosen_distances = distance_of_projection[np.arange(projected_points_on_ray.shape[0]), index_best_projected]
-        valid_mask = distance_from_candidate_points_to_ray[np.arange(
-            projected_points_on_ray.shape[0]), index_best_projected] < distance_threshold  # (M, 1)
-        # (M, 3): The best projected points along the ray
-        initial_points_camera = projected_points_on_ray[
-            np.arange(projected_points_on_ray.shape[0]), index_best_projected]
-        initial_points_world = (np.linalg.inv(v_extrinsic) @ np.insert(initial_points_camera, 3, 1, axis=1).T).T
-        initial_points_world = initial_points_world[:, :3] / initial_points_world[:, 3:4]
-
-        for idx, id_node in enumerate(v_graph.nodes):
-            v_graph.nodes[id_node]["pos_world"] = initial_points_world[idx]
-            v_graph.nodes[id_node]["distance"] = chosen_distances[idx, 0]
-            v_graph.nodes[id_node]["ray_c"] = ray_c[idx]
-
-        for id_face in range(v_graph.graph["face_center"].shape[0]):
-            idx = id_face + len(v_graph.nodes)
-            v_graph.graph["ray_c"][id_face] = ray_c[idx]
-            v_graph.graph["distance"][id_face] = chosen_distances[idx, 0]
-
-        line_coordinates = []
-        for edge in v_graph.edges():
-            line_coordinates.append(np.concatenate((initial_points_world[edge[0]], initial_points_world[edge[1]])))
-        save_line_cloud("output/img_field_test/initial_segments.obj", np.stack(line_coordinates, axis=0))
-        pc = o3d.geometry.PointCloud()
-        pc.points = o3d.utility.Vector3dVector(initial_points_world[len(v_graph.nodes):])
-        o3d.io.write_point_cloud("output/img_field_test/initial_face_centroid.ply", pc)
-        return
-
-    for id_img, img in enumerate(img_database):
-        points_from_sfm_local, points_from_sfm_2d = project_points(img.projection, points_from_sfm)
-        rgb = cv2.imread(img.img_path, cv2.IMREAD_UNCHANGED)[:, :, :3]
-        rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)[:, :, None]
-        # draw_initial(rgb, graphs[id_img], img)
-        compute_initial(graphs[id_img], points_from_sfm_local, points_from_sfm_2d, img.extrinsic, img.intrinsic)
     draw_initial(img_database[0], graphs[0])
 
     # Read camera pairs
@@ -596,6 +609,7 @@ def main(v_cfg: DictConfig):
         v_cfg["dataset"]["id_viz_face"],
         v_cfg["dataset"]["scene_boundary"],
         v_cfg["dataset"]["v_reconstruct_data"],
+        v_cfg["dataset"]["max_error_for_initial_sfm"],
     )
 
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()

@@ -53,6 +53,7 @@ class PC_phase(pl.LightningModule):
         self.viz_data = {
             "loss": [],
             "prediction": [],
+            "query": [],
             "gt": [],
             "id_patch": []
         }
@@ -138,6 +139,7 @@ class PC_phase(pl.LightningModule):
         for i in range(bs):
             if names[i] == self.target_viz_name:
                 self.viz_data["prediction"].append(outputs[i:i+1])
+                self.viz_data["query"].append(data[0][1][i:i+1])
                 self.viz_data["gt"].append(data[1][i:i+1])
                 self.viz_data["id_patch"].append(id_patchs[i:i+1])
         for loss_name in loss:
@@ -157,6 +159,7 @@ class PC_phase(pl.LightningModule):
     def gather_data(self):
         id_patch = torch.cat(self.viz_data["id_patch"], dim=0)
         prediction = torch.cat(self.viz_data["prediction"], dim=0)
+        queries = torch.cat(self.viz_data["query"], dim=0)
         gt = torch.cat(self.viz_data["gt"], dim=0)
         if self.trainer.world_size != 1:
             device = prediction.device
@@ -190,12 +193,14 @@ class PC_phase(pl.LightningModule):
         else:
             gathered_prediction = prediction.cpu().numpy()
             gathered_gt = gt.cpu().numpy()
-        return gathered_prediction, gathered_gt
+            gathered_queries = queries.cpu().numpy()
+        return gathered_prediction, gathered_gt, gathered_queries
 
     def on_validation_epoch_end(self):
         if self.trainer.sanity_checking:
             self.viz_data["gt"].clear()
             self.viz_data["prediction"].clear()
+            self.viz_data["query"].clear()
             self.viz_data["loss"].clear()
             self.viz_data["id_patch"].clear()
             self.pr_computer.reset()
@@ -209,7 +214,7 @@ class PC_phase(pl.LightningModule):
         if len(self.viz_data["prediction"]) == 0:
             return
         
-        gathered_prediction,gathered_gt = self.gather_data()
+        gathered_prediction, gathered_gt, gathered_queries = self.gather_data()
 
         if self.global_rank != 0:
             return
@@ -218,12 +223,13 @@ class PC_phase(pl.LightningModule):
 
         self.model.valid_output(
             idx, self.log_root, self.target_viz_name,
-            gathered_prediction,gathered_gt
+            gathered_prediction,gathered_gt, gathered_queries
         )
 
         self.viz_data["gt"].clear()
         self.viz_data["prediction"].clear()
         self.viz_data["loss"].clear()
+        self.viz_data["query"].clear()
         self.viz_data["id_patch"].clear()
         return
 

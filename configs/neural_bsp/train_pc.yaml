@@ -1,6 +1,9 @@
 dataset:
-  root: G:/Dataset/GSP/GSP_v8_100/training.h5
-  dataset_name: ABC_pc_dynamic
+  root: G:/Dataset/GSP/GSP_debug/training.h5
+  dataset_name: ABC_whole_pc
+
+  overfit: false
+  max_training_sample: 262144
   test_list: []
 
 trainer:
@@ -18,11 +21,11 @@ trainer:
   accelerator: "16-mixed"
 
 model:
-  model_name: PC_model2
+  model_name: PC_model_whole_voxel
   depths: 4
-  channels: 6
+  channels: 7
   need_normalize: true
-  voxelize_res: 64
+  voxelize_res: 256
 
   test_threshold: 0.5
 

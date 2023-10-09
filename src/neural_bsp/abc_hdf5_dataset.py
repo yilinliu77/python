@@ -258,7 +258,9 @@ class ABC_pc_dynamic(torch.utils.data.Dataset):
                 ["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
         self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
 
-        if self.mode == "training":
+        if self.mode == "training" and self.conf["overfit"]:
+            self.index = np.arange(self.num_items)
+        elif self.mode == "training" and self.conf["overfit"]:
             self.index = np.arange(self.num_items)[:self.validation_start]
         elif self.mode == "validation":
             self.index = np.arange(self.num_items)[self.validation_start:]
@@ -268,6 +270,7 @@ class ABC_pc_dynamic(torch.utils.data.Dataset):
             raise ""
 
         self.coords = generate_coords(self.resolution)
+        self.max_training_sample = self.conf["max_training_sample"]
 
     def __len__(self):
         return self.index.shape[0]
@@ -284,15 +287,185 @@ class ABC_pc_dynamic(torch.utils.data.Dataset):
             flags = flags[distance_flag].astype(np.float32)
 
         if self.mode == "training":
-            if coords.shape[0] > 2621440:
+            if coords.shape[0] > self.max_training_sample:
                 index = np.arange(coords.shape[0])
                 np.random.shuffle(index)
-                coords = coords[index[:2621440]]
-                flags = flags[index[:2621440]]
+                coords = coords[index[:self.max_training_sample]]
+                flags = flags[index[:self.max_training_sample]]
 
         times[0] += time.time() - cur_time
         cur_time = time.time()
         return points[None, :], coords[None, :], flags[None, :], 0
+
+    def __getitem__(self, idx):
+        id_object = self.index[idx]
+
+        points, feat_data, flag_data, id_patch = self.get_patch(id_object)
+        return points, feat_data, flag_data, self.names[id_object], id_patch
+
+    @staticmethod
+    def collate_fn(v_batches):
+        points, feat_data, flag_data, names, ids = [], [], [], [], []
+        for item in v_batches:
+            points.append(item[0])
+            feat_data.append(item[1])
+            flag_data.append(item[2])
+            names.append(item[3])
+            ids.append(item[4])
+        points = np.concatenate(points, axis=0)
+        feat_data = np.concatenate(feat_data, axis=0)
+        flag_data = np.concatenate(flag_data, axis=0)
+        names = np.stack(names, axis=0)
+        ids = np.stack(ids, axis=0)
+
+        return (
+            (torch.from_numpy(points), torch.from_numpy(feat_data)),
+            torch.from_numpy(flag_data),
+            names,
+            torch.from_numpy(ids)
+        )
+
+
+# Whole field
+class ABC_whole_pc(torch.utils.data.Dataset):
+    def __init__(self, v_data_root, v_training_mode, v_conf):
+        super(ABC_whole_pc, self).__init__()
+        self.data_root = v_data_root
+        self.pc_dir = str(Path(v_data_root).parent)
+        self.mode = v_training_mode
+        self.conf = v_conf
+        with h5py.File(self.data_root, "r") as f:
+            self.num_items = f["flags"].shape[0]
+            self.resolution = f["flags"].shape[1]
+            self.names = np.asarray(
+                ["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
+        self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
+
+        if self.mode == "training" and self.conf["overfit"]:
+            self.index = np.arange(self.num_items)
+        elif self.mode == "training" and self.conf["overfit"]:
+            self.index = np.arange(self.num_items)[:self.validation_start]
+        elif self.mode == "validation":
+            self.index = np.arange(self.num_items)[self.validation_start:]
+        elif self.mode == "testing":
+            self.index = np.arange(self.num_items)
+        else:
+            raise ""
+
+        self.coords = generate_coords(self.resolution)
+        self.max_training_sample = self.conf["max_training_sample"]
+
+    def __len__(self):
+        return self.index.shape[0]
+
+    def get_patch(self, v_id_item):
+        times = [0] * 10
+        cur_time = time.time()
+        with h5py.File(self.data_root, "r") as f:
+            flags = f["flags"][v_id_item].astype(bool).astype(np.float32)
+            point_features = f["point_features"][v_id_item].astype(np.float32)
+            coords = self.coords
+
+        times[0] += time.time() - cur_time
+        cur_time = time.time()
+        return point_features[None, :], coords[None, :], flags[None, :], 0
+
+    def __getitem__(self, idx):
+        id_object = self.index[idx]
+
+        points, feat_data, flag_data, id_patch = self.get_patch(id_object)
+        return points, feat_data, flag_data, self.names[id_object], id_patch
+
+    @staticmethod
+    def collate_fn(v_batches):
+        points, feat_data, flag_data, names, ids = [], [], [], [], []
+        for item in v_batches:
+            points.append(item[0])
+            feat_data.append(item[1])
+            flag_data.append(item[2])
+            names.append(item[3])
+            ids.append(item[4])
+        points = np.concatenate(points, axis=0)
+        feat_data = np.concatenate(feat_data, axis=0)
+        flag_data = np.concatenate(flag_data, axis=0)
+        names = np.stack(names, axis=0)
+        ids = np.stack(ids, axis=0)
+
+        return (
+            (torch.from_numpy(points), torch.from_numpy(feat_data)),
+            torch.from_numpy(flag_data),
+            names,
+            torch.from_numpy(ids)
+        )
+
+
+# Calculate the point features online using kdtree
+# Not used because it is so slow
+class ABC_whole_pc_dynamic(torch.utils.data.Dataset):
+    def __init__(self, v_data_root, v_training_mode, v_conf):
+        super(ABC_whole_pc_dynamic, self).__init__()
+        self.data_root = v_data_root
+        self.pc_dir = str(Path(v_data_root).parent)
+        self.mode = v_training_mode
+        self.conf = v_conf
+        with h5py.File(self.data_root, "r") as f:
+            self.num_items = f["flags"].shape[0]
+            self.resolution = f["flags"].shape[1]
+            self.names = np.asarray(
+                ["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
+        self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
+
+        if self.mode == "training" and self.conf["overfit"]:
+            self.index = np.arange(self.num_items)
+        elif self.mode == "training" and self.conf["overfit"]:
+            self.index = np.arange(self.num_items)[:self.validation_start]
+        elif self.mode == "validation":
+            self.index = np.arange(self.num_items)[self.validation_start:]
+        elif self.mode == "testing":
+            self.index = np.arange(self.num_items)
+        else:
+            raise ""
+
+        self.coords = generate_coords(self.resolution)
+        self.max_training_sample = self.conf["max_training_sample"]
+
+    def __len__(self):
+        return self.index.shape[0]
+
+    def get_patch(self, v_id_item):
+        times = [0] * 10
+        cur_time = time.time()
+        with h5py.File(self.data_root, "r") as f:
+            flags = f["flags"][v_id_item].astype(bool).astype(np.float32)
+            points = f["poisson_points"][v_id_item].astype(np.float32) / 65535 * 2 - 1
+            coords = self.coords
+
+        times[0] += time.time() - cur_time
+        cur_time = time.time()
+
+        kdtree = faiss.IndexFlatL2(3)
+        res = faiss.StandardGpuResources()
+        gpu_kdtree = faiss.index_cpu_to_gpu(res, 0, kdtree)
+
+        gpu_kdtree.add(points[:,:3])
+        dists, indices = gpu_kdtree.search(coords.reshape(-1,3), 1)
+
+        times[1] += time.time() - cur_time
+        cur_time = time.time()
+
+        udf = np.sqrt(dists).reshape(self.resolution, self.resolution, self.resolution,1)
+        gradients = points[indices.reshape(-1), :3] - coords.reshape(-1,3)
+        gradients = (gradients / np.linalg.norm(gradients, axis=1, keepdims=True)).reshape(
+            self.resolution, self.resolution, self.resolution, 3)
+        normals = points[indices.reshape(-1), 3:6].reshape(
+            self.resolution, self.resolution, self.resolution, 3)
+
+        point_features = np.concatenate([udf, gradients, normals], axis=-1)
+
+        times[2] += time.time() - cur_time
+        cur_time = time.time()
+
+        return point_features[None, :], coords[None, :], flags[None, :], 0
 
     def __getitem__(self, idx):
         id_object = self.index[idx]

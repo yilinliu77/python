@@ -58,34 +58,25 @@ def de_normalize_angles(v_angles):
 def de_normalize_udf(v_udf):
     return v_udf / 65535 * 2
 
+
 def de_normalize_points(v_points):
     return v_points / 65535 * 2 - 1
 
 #################################################################################################################
 class conv_block(nn.Module):
-    def __init__(self, ch_in, ch_out, with_bn=True, kernel_size=3, padding=1):
+    def __init__(self, ch_in, ch_out, with_bn=True, kernel_size=3, padding=1, stride=1, dilate=1):
         super(conv_block, self).__init__()
-        if with_bn:
-            self.conv1 = nn.Sequential(
-                nn.Conv3d(ch_in, ch_out, kernel_size=kernel_size, stride=1, padding=padding, bias=True),
-                nn.BatchNorm3d(ch_out),
-                nn.ReLU(inplace=True),
+        self.conv1 = nn.Sequential(
+            nn.Conv3d(ch_in, ch_out, kernel_size=kernel_size, stride=stride, padding=padding, bias=True, dilation=dilate),
+            nn.BatchNorm3d(ch_out) if with_bn else nn.Identity(),
+            nn.ReLU(inplace=True),
+        )
+        self.conv2 = nn.Sequential(
+            nn.Conv3d(ch_out, ch_out, kernel_size=kernel_size, stride=stride, padding=padding, bias=True, dilation=dilate),
+            nn.BatchNorm3d(ch_out) if with_bn else nn.Identity(),
+            nn.ReLU(inplace=True)
+        )
 
-            )
-            self.conv2 = nn.Sequential(
-                nn.Conv3d(ch_out, ch_out, kernel_size=kernel_size, stride=1, padding=padding, bias=True),
-                nn.BatchNorm3d(ch_out),
-                nn.ReLU(inplace=True)
-            )
-        else:
-            self.conv1 = nn.Sequential(
-                nn.Conv3d(ch_in, ch_out, kernel_size=kernel_size, stride=1, padding=padding, bias=True),
-                nn.ReLU(inplace=True),
-            )
-            self.conv2 = nn.Sequential(
-                nn.Conv3d(ch_out, ch_out, kernel_size=kernel_size, stride=1, padding=padding, bias=True),
-                nn.ReLU(inplace=True)
-            )
 
     def forward(self, x):
         x = self.conv1(x)
@@ -278,12 +269,12 @@ class PC_model(nn.Module):
             (self.offset + points[:, :3] + torch.ones_like(points[:, :3])) / 2 * self.resolution).to(torch.int32)
         voxel_features = pvcnn_F.avg_voxelize(points, vox_coords, self.resolution)
         if False:
-            p = generate_coords(256)
+            p = generate_coords(self.resolution)
             v = vox_coords.cpu().numpy()[0]
             p = p[v[0], v[1], v[2]]
             export_point_cloud("test.ply", p)
         if False:
-            p = generate_coords(256)
+            p = generate_coords(self.resolution)
             p = p[(voxel_features[0]!=0).max(dim=0)[0].cpu().numpy()]
             export_point_cloud("test.ply", p)
 
@@ -352,28 +343,27 @@ class PC_model2(PC_model):
 
         input_feature = self.num_features
         base_channel = 8
-        with_bn = True
+        with_bn = False
         self.conv = nn.ModuleList()
-        self.conv.append(conv_block(ch_in=input_feature, ch_out=base_channel, with_bn=with_bn, kernel_size=3, padding=1))
         self.conv.append(
-            conv_block(ch_in=base_channel * 1, ch_out=base_channel * 2, with_bn=with_bn, kernel_size=3, padding=1))
+            conv_block(ch_in=input_feature, ch_out=base_channel, with_bn=with_bn, kernel_size=7, padding=3))
         self.conv.append(
-            conv_block(ch_in=base_channel * 2, ch_out=base_channel * 4, with_bn=with_bn, kernel_size=3, padding=1))
+            conv_block(ch_in=base_channel * 1, ch_out=base_channel * 2, with_bn=with_bn, kernel_size=7, padding=3))
+        self.conv.append(
+            conv_block(ch_in=base_channel * 2, ch_out=base_channel * 4, with_bn=with_bn, kernel_size=5, padding=2))
         self.conv.append(
             conv_block(ch_in=base_channel * 4, ch_out=base_channel * 8, with_bn=with_bn, kernel_size=3, padding=1))
-        self.conv.append(
-            conv_block(ch_in=base_channel * 8, ch_out=base_channel * 16, with_bn=with_bn, kernel_size=3, padding=1))
-        self.conv.append(
-            conv_block(ch_in=base_channel * 16, ch_out=base_channel * 32, with_bn=with_bn, kernel_size=3, padding=1))
-
+        # self.conv.append(
+        #     conv_block(ch_in=base_channel * 8, ch_out=base_channel * 16, with_bn=with_bn, kernel_size=3, padding=1))
+        # self.conv.append(
+        #     conv_block(ch_in=base_channel * 16, ch_out=base_channel * 32, with_bn=with_bn, kernel_size=3, padding=1))
 
         self.fc = nn.Sequential(
-            nn.Linear(504, 256),
-            Residual_fc(256, 256),
-            nn.Linear(256, 1),
+            # nn.Linear(504, 256),
+            # nn.ReLU(inplace=True),
+            Residual_fc(120, 120),
+            nn.Linear(120, 1),
         )
-
-        self.atten = nn.MultiheadAttention(256, 2, batch_first=True)
 
     def pos_encoding(self, v_points):
         freq = 2 ** torch.arange(16, dtype=torch.float32, device=v_points.device) * np.pi  # [L]
@@ -397,6 +387,15 @@ class PC_model2(PC_model):
         vox_coords = torch.round(
             (self.offset + points[:, :3] + torch.ones_like(points[:, :3])) / 2 * self.resolution).to(torch.int32)
         voxel_features = pvcnn_F.avg_voxelize(points, vox_coords, self.resolution)
+        if False:
+            p = generate_coords(self.resolution)
+            v = vox_coords.cpu().numpy()[0]
+            p = p[v[0], v[1], v[2]]
+            export_point_cloud("test.ply", p)
+        if False:
+            p = generate_coords(self.resolution)
+            p = p[(voxel_features[0]!=0).max(dim=0)[0].cpu().numpy()]
+            export_point_cloud("test.ply", p)
 
         features = [voxel_features, ]
         for i in range(len(self.conv)):
@@ -412,6 +411,102 @@ class PC_model2(PC_model):
         prediction = self.fc(sampled_features)
 
         return prediction
+
+    def valid_output(self, idx, log_root, target_viz_name,
+                     gathered_prediction, gathered_gt, gathered_queries):
+        query_points = gathered_queries.reshape(-1,3)
+
+        predicted_labels = gathered_prediction.reshape(-1)
+        gt_labels = gathered_gt.reshape(-1)
+
+        predicted_labels = sigmoid(predicted_labels) > 0.5
+        mask = predicted_labels.reshape(-1)
+        export_point_cloud(os.path.join(log_root, "{}_{}_pred.ply".format(idx, target_viz_name)),
+                           query_points[mask])
+
+        gt_labels = sigmoid(gt_labels) > 0.5
+        mask = gt_labels.reshape(-1)
+        export_point_cloud(os.path.join(log_root, "{}_{}_gt.ply".format(idx, target_viz_name)),
+                           query_points[mask])
+        return
+
+##################################################################
+class U_Net_3D2(nn.Module):
+    def __init__(self, img_ch=3, output_ch=1, base_channel=16, with_bn=True):
+        super(U_Net_3D2, self).__init__()
+
+        self.Maxpool = nn.MaxPool3d(kernel_size=2, stride=2)
+
+        self.conv = nn.ModuleList()
+        self.up = nn.ModuleList()
+        self.up_conv = nn.ModuleList()
+        self.conv1 = conv_block(ch_in=img_ch, ch_out=base_channel, with_bn=with_bn, dilate=2, padding=2)
+        self.conv2 = conv_block(ch_in=base_channel, ch_out=base_channel * 2, with_bn=with_bn, dilate=2, padding=2)
+        self.conv3 = conv_block(ch_in=base_channel * 2, ch_out=base_channel * 4, with_bn=with_bn, dilate=1)
+        self.conv4 = conv_block(ch_in=base_channel * 4, ch_out=base_channel * 8, with_bn=with_bn, dilate=1)
+
+        self.up4 = nn.ConvTranspose3d(base_channel * 8, base_channel * 4, kernel_size=2, stride=2)
+        self.up_conv4 = conv_block(ch_in=base_channel * 4, ch_out=base_channel * 4, with_bn=with_bn)
+        self.up3 = nn.ConvTranspose3d(base_channel * 4, base_channel * 2, kernel_size=2, stride=2)
+        self.up_conv3 = conv_block(ch_in=base_channel * 2, ch_out=base_channel * 2, with_bn=with_bn)
+        self.up2 = nn.ConvTranspose3d(base_channel * 2, base_channel * 1, kernel_size=2, stride=2)
+        self.up_conv2 = nn.Conv3d(in_channels=base_channel * 1, out_channels=output_ch, kernel_size=1)
+
+
+    def forward(self, v_input):
+        x1 = self.conv1(v_input)
+        x2 = self.Maxpool(self.conv2(x1))
+        x3 = self.Maxpool(self.conv3(x2))
+        x4 = self.Maxpool(self.conv4(x3))
+
+        up_x4 = self.up4(x4)
+        up_x4 = self.up_conv4(up_x4 + x3)
+        up_x3 = self.up3(up_x4)
+        up_x3 = self.up_conv3(up_x3 + x2)
+        up_x2 = self.up2(up_x3)
+        prediction = self.up_conv2(up_x2 + x1)
+
+        return prediction
+
+class PC_model_whole_voxel(PC_model):
+    def __init__(self, v_conf):
+        super(PC_model_whole_voxel, self).__init__(v_conf)
+        self.encoder=None
+        self.Maxpool = nn.MaxPool3d(kernel_size=2, stride=2)
+
+        input_feature = self.num_features
+        base_channel = 8
+        with_bn = False
+        self.conv = U_Net_3D2(
+            img_ch=input_feature,
+            output_ch=1,
+            base_channel=base_channel,
+            with_bn=with_bn
+        )
+
+    def forward(self, v_data, v_training=False):
+        (feature, query_coords), labels = v_data
+        bs = feature.shape[0]  # Batch size
+
+        if self.need_normalize:
+            udf = de_normalize_udf(feature[..., 0:1])
+            gradients = de_normalize_angles(feature[..., 1:3])
+            normals = de_normalize_angles(feature[..., 3:5])
+            feature = torch.cat((udf, gradients, normals), dim=-1)
+        else:
+            feature = feature
+
+        feature = feature.permute(0, 4,1,2,3)
+
+        prediction = self.conv(feature)
+
+        return prediction
+
+    def loss(self, v_predictions, v_input):
+        (_,_), labels = v_input
+
+        loss = self.loss_func(v_predictions, labels[:, None], self.loss_alpha)
+        return {"total_loss": loss}
 
     def valid_output(self, idx, log_root, target_viz_name,
                      gathered_prediction, gathered_gt, gathered_queries):

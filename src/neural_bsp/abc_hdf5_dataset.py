@@ -83,7 +83,6 @@ class ABC_patch(torch.utils.data.Dataset):
         self.index = self.index.reshape((-1, 2))
 
     def __len__(self):
-        return 64
         return self.index.shape[0]
 
     def get_patch(self, v_id_item, v_id_patch):

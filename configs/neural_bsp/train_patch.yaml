@@ -19,10 +19,10 @@ trainer:
   accelerator: "16-mixed"
 
 model:
-  model_name: Base_model
+  model_name: Base_model2
   depths: 4
   need_normalize: true
-  channels: 7
+  channels: 4
 
   test_threshold: 0.5
 

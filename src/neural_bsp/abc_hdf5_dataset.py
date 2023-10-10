@@ -343,7 +343,7 @@ class ABC_whole_pc(torch.utils.data.Dataset):
 
         if self.mode == "training" and self.conf["overfit"]:
             self.index = np.arange(self.num_items)
-        elif self.mode == "training" and self.conf["overfit"]:
+        elif self.mode == "training" and not self.conf["overfit"]:
             self.index = np.arange(self.num_items)[:self.validation_start]
         elif self.mode == "validation":
             self.index = np.arange(self.num_items)[self.validation_start:]

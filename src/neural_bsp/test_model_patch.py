@@ -59,7 +59,7 @@ def main(v_cfg: DictConfig):
         flags = []
         for idx in tqdm(range(len(dataset))):
             data = dataset[idx]
-            feat = [torch.from_numpy(data[0]).cuda().unsqueeze(0), None]
+            feat = [(torch.from_numpy(data[0]).cuda().unsqueeze(0), torch.zeros(data[0].shape[0])), None]
 
             prediction = model(feat, False)
             features.append(data[0])
@@ -86,7 +86,7 @@ def main(v_cfg: DictConfig):
                            valid_points)
 
         feat_data = dataset.feat_data
-        predicted_labels = flags.astype(np.ubyte)
+        predicted_labels = flags.astype(np.ubyte).reshape(res,res,res)
         gradients_and_udf = np.concatenate((feat_data[..., 1:4], feat_data[..., 0:1]), axis=-1)
 
         np.save(os.path.join(output_root, "{}_feat.npy".format(name)), gradients_and_udf)

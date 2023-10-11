@@ -72,7 +72,7 @@ class conv_block(nn.Module):
             nn.ReLU(inplace=True),
         )
         self.conv2 = nn.Sequential(
-            nn.Conv3d(ch_out, ch_out, kernel_size=kernel_size, stride=stride, padding=padding, bias=True, dilation=dilate),
+            nn.Conv3d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True, dilation=1),
             nn.BatchNorm3d(ch_out) if with_bn else nn.Identity(),
             nn.ReLU(inplace=True)
         )
@@ -320,6 +320,30 @@ class Base_model2(nn.Module):
                            query_points[mask])
         return
 
+
+class Base_model_dilated(Base_model2):
+    def __init__(self, v_conf):
+        super(Base_model_dilated, self).__init__(v_conf)
+        self.need_normalize = v_conf["need_normalize"]
+
+        self.Maxpool = nn.MaxPool3d(kernel_size=2, stride=2)
+
+        ic = v_conf["channels"] # input_channels
+        bs = 8 # base_channel
+        with_bn=False
+
+        self.conv1 = conv_block(ch_in=ic, ch_out=bs * 2, with_bn=with_bn, kernel_size=3, padding=5, dilate=5)
+        self.conv2 = conv_block(ch_in=bs * 2, ch_out=bs * 4, with_bn=with_bn, kernel_size=3, padding=2, dilate=2)
+        self.conv3 = conv_block(ch_in=bs * 4, ch_out=bs * 8, with_bn=with_bn, kernel_size=3, padding=1, dilate=1)
+        self.conv4 = conv_block(ch_in=bs * 8, ch_out=bs * 4, with_bn=with_bn, kernel_size=3, padding=1, dilate=1)
+        self.conv5 = conv_block(ch_in=bs * 4, ch_out=bs * 2, with_bn=with_bn, kernel_size=3, padding=1, dilate=1)
+        self.fc = nn.Conv3d(bs * 2, 1, kernel_size=3, padding=1)
+
+        self.offset = 8
+
+        self.loss_func = focal_loss
+        self.loss_alpha = 0.75
+        self.num_features = v_conf["channels"]
 
 class PC_model(nn.Module):
     def __init__(self, v_conf):

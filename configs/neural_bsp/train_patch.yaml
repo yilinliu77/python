@@ -19,7 +19,7 @@ trainer:
   accelerator: "16-mixed"
 
 model:
-  model_name: Base_model2
+  model_name: Base_model_dilated
   depths: 4
   need_normalize: true
   channels: 4

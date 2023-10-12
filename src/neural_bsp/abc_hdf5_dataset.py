@@ -601,10 +601,9 @@ class ABC_whole_pc_dynamic(torch.utils.data.Dataset):
 
 
 class ABC_test_mesh(torch.utils.data.Dataset):
-    def __init__(self, v_data_root, v_batch_size, v_output_features=4, v_resolution=256, v_output_root=None):
+    def __init__(self, v_data_root, v_batch_size, v_resolution=256, v_output_root=None):
         super(ABC_test_mesh, self).__init__()
         self.batch_size = v_batch_size
-        self.output_features = v_output_features
         self.data_root = v_data_root
         self.resolution = v_resolution
 
@@ -617,15 +616,12 @@ class ABC_test_mesh(torch.utils.data.Dataset):
         print("Prepare mesh data")
         if not os.path.exists(v_data_root):
             print("Cannot find ", v_data_root)
+
         mesh = o3d.io.read_triangle_mesh(v_data_root)
         mesh.compute_triangle_normals()
         # Normalize
         points = np.asarray(mesh.vertices)
-        min_xyz = points.min(axis=0)
-        center_xyz = (min_xyz + points.max(axis=0)) / 2
-        bbox = points.max(axis=0) - min_xyz
-        diagonal = np.linalg.norm(bbox)
-        points = (points - center_xyz) / diagonal * 2
+        points = normalize_points(points)
         mesh.vertices = o3d.utility.Vector3dVector(points)
         if v_output_root is not None:
             o3d.io.write_triangle_mesh(os.path.join(v_output_root, "temp.ply"), mesh)
@@ -662,7 +658,7 @@ class ABC_test_mesh(torch.utils.data.Dataset):
         # Revised at 1004
         feat_data = np.concatenate([udf[:, None], dir, normals], axis=1)
         self.feat_data = feat_data.reshape(
-            (v_resolution, v_resolution, v_resolution, 7)).astype(np.float32)[:, :, :, :self.output_features]
+            (v_resolution, v_resolution, v_resolution, 7)).astype(np.float32)[:, :, :]
 
         self.patch_size = 32
         self.patch_list = []

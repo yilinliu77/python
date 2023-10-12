@@ -13,7 +13,7 @@ from shared.common_utils import export_point_cloud, sigmoid
 from src.neural_bsp.abc_hdf5_dataset import ABC_test_mesh, ABC_test_pc, generate_coords
 
 
-@hydra.main(config_name="test_model_patch.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
+@hydra.main(config_name="test_patch.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
     # Predefined variables
 
@@ -50,7 +50,6 @@ def main(v_cfg: DictConfig):
         dataset = dataset_name(
             model_name,
             v_cfg["trainer"]["batch_size"],
-            v_cfg["dataset"]["v_output_features"],
             res,
             output_root,
         )
@@ -87,7 +86,7 @@ def main(v_cfg: DictConfig):
 
         feat_data = dataset.feat_data
         predicted_labels = flags.astype(np.ubyte).reshape(res,res,res)
-        gradients_and_udf = np.concatenate((feat_data[..., 1:4], feat_data[..., 0:1]), axis=-1)
+        gradients_and_udf = feat_data
 
         np.save(os.path.join(output_root, "{}_feat.npy".format(name)), gradients_and_udf)
         np.save(os.path.join(output_root, "{}_pred.npy".format(name)), predicted_labels)

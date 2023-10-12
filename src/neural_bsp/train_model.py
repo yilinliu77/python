@@ -120,7 +120,7 @@ class PC_phase(pl.LightningModule):
         loss = self.model.loss(outputs, data)
         for loss_name in loss:
             if loss_name == "total_loss":
-                self.log("Training_Loss", loss[loss_name], prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                self.log("Training_Loss", loss[loss_name], prog_bar=True, logger=True, on_step=True, on_epoch=True,
                          sync_dist=True,
                          batch_size=data[1].shape[0])
             else:
@@ -206,7 +206,7 @@ class PC_phase(pl.LightningModule):
             self.pr_computer.reset()
             return
 
-        self.log_dict(self.pr_computer.compute(), prog_bar=True, logger=True, on_step=False, on_epoch=True,
+        self.log_dict(self.pr_computer.compute(), prog_bar=False, logger=True, on_step=False, on_epoch=True,
                       sync_dist=True)
 
         self.pr_computer.reset()

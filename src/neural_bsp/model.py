@@ -194,6 +194,7 @@ class Base_model(nn.Module):
         else:
             x = feat_data
 
+        x = x[:,:self.num_features]
         prediction = self.encoder(x)
 
         return prediction.reshape((bs, num_mini_batch,) + prediction.shape[1:])
@@ -344,6 +345,7 @@ class Base_model_dilated(Base_model2):
         self.loss_func = focal_loss
         self.loss_alpha = 0.75
         self.num_features = v_conf["channels"]
+
 
 class PC_model(nn.Module):
     def __init__(self, v_conf):

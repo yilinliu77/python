@@ -19,12 +19,25 @@ from torchvision.ops import sigmoid_focal_loss
 
 from shared.common_utils import sigmoid, export_point_cloud
 
+# Adopt the implementation in pytorch, but prevent NaN values
+def focal_loss(p, targets, v_alpha=0.75, gamma: float = 2,):
+    # loss = sigmoid_focal_loss(v_predictions, labels,
+    #                           alpha=v_alpha,
+    #                           reduction="mean"
+    #                           )
 
-def focal_loss(v_predictions, labels, v_alpha=0.75):
-    loss = sigmoid_focal_loss(v_predictions, labels,
-                              alpha=v_alpha,
-                              reduction="mean"
-                              )
+    p = p.to(torch.float32)
+    inputs = torch.sigmoid(p)
+    ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
+    p_t = p * targets + (1 - p) * (1 - targets)
+    loss = ce_loss * ((1 - p_t) ** gamma)
+
+    if v_alpha >= 0:
+        alpha_t = v_alpha * targets + (1 - v_alpha) * (1 - targets)
+        loss = alpha_t * loss
+
+    # Check reduction option and return loss accordingly
+    loss = loss.mean()
     return loss
 
 
@@ -237,9 +250,9 @@ class Base_model(nn.Module):
         return
 
 
-class Base_model2(nn.Module):
+class Base_model_wo_pooling(nn.Module):
     def __init__(self, v_conf):
-        super(Base_model2, self).__init__()
+        super(Base_model_wo_pooling, self).__init__()
         self.need_normalize = v_conf["need_normalize"]
 
         self.Maxpool = nn.MaxPool3d(kernel_size=2, stride=2)
@@ -322,7 +335,7 @@ class Base_model2(nn.Module):
         return
 
 
-class Base_model_dilated(Base_model2):
+class Base_model_dilated(Base_model_wo_pooling):
     def __init__(self, v_conf):
         super(Base_model_dilated, self).__init__(v_conf)
         self.need_normalize = v_conf["need_normalize"]

@@ -9,12 +9,12 @@ trainer:
   gpu: 1
 
   batch_size: 128
-  resume_from_checkpoint: output/neural_bsp/1010_v7_base_wo_normal.ckpt
+  resume_from_checkpoint: output/neural_bsp/last.ckpt
   output: .
   accelerator: "32-true"
 
 model:
-  model_name: Base_model
+  model_name: Base_model_wo_pooling
   channels: 4
   need_normalize: false
   depths: 4

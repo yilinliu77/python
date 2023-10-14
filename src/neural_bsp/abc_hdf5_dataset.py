@@ -260,8 +260,10 @@ class ABC_pc(torch.utils.data.Dataset):
         with h5py.File(self.data_root, "r") as f:
             self.num_items = f["features"].shape[0]
             self.resolution = f["features"].shape[1]
+            names = f["names"]
+            ids = f["ids"]
             self.names = np.asarray(
-                ["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
+                ["{:08d}_{}".format(names[i], ids[i]) for i in range(ids.shape[0])])
         self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
 
         assert self.resolution % self.batch_size == 0
@@ -346,6 +348,86 @@ class ABC_pc(torch.utils.data.Dataset):
             torch.from_numpy(ids)
         )
 
+# Only read point cloud and flags
+class ABC_points_and_flags(torch.utils.data.Dataset):
+    def __init__(self, v_data_root, v_training_mode, v_conf):
+        super(ABC_points_and_flags, self).__init__()
+        self.data_root = v_data_root
+        self.pc_dir = str(Path(v_data_root).parent)
+        self.mode = v_training_mode
+        self.conf = v_conf
+        self.batch_size = 64
+        with h5py.File(self.data_root, "r") as f:
+            self.num_items = f["features"].shape[0]
+            self.resolution = f["features"].shape[1]
+            names = f["names"]
+            ids = f["ids"]
+            self.names = np.asarray(
+                ["{:08d}_{}".format(names[i], ids[i]) for i in range(ids.shape[0])])
+        self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
+
+        if self.mode == "training":
+            self.index = np.stack(np.meshgrid(
+                np.arange(self.num_items)[:self.validation_start],
+                np.arange(1), indexing="ij"), axis=2).reshape(-1, 2)
+        elif self.mode == "validation":
+            self.index = np.stack(np.meshgrid(
+                np.arange(self.num_items)[self.validation_start:],
+                np.arange(1), indexing="ij"), axis=2).reshape(-1, 2)
+        elif self.mode == "testing":
+            self.index = np.stack(np.meshgrid(
+                np.arange(self.num_items),
+                np.arange(1), indexing="ij"), axis=2).reshape(-1, 2)
+        else:
+            raise ""
+
+        self.coords = np.mgrid[:self.resolution, :self.resolution, :self.resolution] / (self.resolution - 1) * 2 - 1
+        self.coords = np.transpose(self.coords, (1, 2, 3, 0)).astype(np.float32)
+
+    def __len__(self):
+        return self.index.shape[0]
+
+    def get_patch(self, v_id_item, id_patch):
+        times = [0] * 10
+        cur_time = time.time()
+        with h5py.File(self.data_root, "r") as f:
+            points = f["poisson_points"][v_id_item].astype(np.float32)
+            flags = f["flags"][v_id_item].astype(bool).astype(np.float32)
+            coords = self.coords
+
+        times[0] += time.time() - cur_time
+        cur_time = time.time()
+        times[1] += time.time() - cur_time
+        return points[None, :], coords[None, :], flags[None, :], id_patch
+
+    def __getitem__(self, idx):
+        id_object = self.index[idx, 0]
+        id_patch = self.index[idx, 1]
+
+        points, feat_data, flag_data, id_patch = self.get_patch(id_object, id_patch)
+        return points, feat_data, flag_data, self.names[id_object], id_patch
+
+    @staticmethod
+    def collate_fn(v_batches):
+        points, feat_data, flag_data, names, ids = [], [], [], [], []
+        for item in v_batches:
+            points.append(item[0])
+            feat_data.append(item[1])
+            flag_data.append(item[2])
+            names.append(item[3])
+            ids.append(item[4])
+        points = np.concatenate(points, axis=0)
+        feat_data = np.concatenate(feat_data, axis=0)
+        flag_data = np.concatenate(flag_data, axis=0)
+        names = np.stack(names, axis=0)
+        ids = np.stack(ids, axis=0)
+
+        return (
+            (torch.from_numpy(points), torch.from_numpy(feat_data)),
+            torch.from_numpy(flag_data),
+            names,
+            torch.from_numpy(ids)
+        )
 
 # Dynamically generate point features
 class ABC_pc_dynamic(torch.utils.data.Dataset):

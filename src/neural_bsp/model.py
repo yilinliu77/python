@@ -1,11 +1,12 @@
 import os
-from functools import partial
 
 import sys
 
 import numpy as np
+from torchvision.ops import sigmoid_focal_loss
 
 from src.neural_bsp.abc_hdf5_dataset import generate_coords
+from thirdparty.Pointnet2_PyTorch.pointnet2_ops_lib.pointnet2_ops.pointnet2_modules import PointnetFPModule, PointnetSAModule
 
 sys.path.append("thirdparty/pvcnn")
 from thirdparty.pvcnn.modules import functional as pvcnn_F
@@ -13,21 +14,17 @@ from thirdparty.pvcnn.modules import functional as pvcnn_F
 from torch import nn
 from torch.nn import functional as F
 import torch
-from torchvision import models
-import torchvision
-from torchvision.ops import sigmoid_focal_loss
 
 from shared.common_utils import sigmoid, export_point_cloud
 
 # Adopt the implementation in pytorch, but prevent NaN values
-def focal_loss(p, targets, v_alpha=0.75, gamma: float = 2,):
+def focal_loss(inputs, targets, v_alpha=0.75, gamma: float = 2,):
     # loss = sigmoid_focal_loss(v_predictions, labels,
     #                           alpha=v_alpha,
     #                           reduction="mean"
     #                           )
 
-    p = p.to(torch.float32)
-    inputs = torch.sigmoid(p)
+    p = torch.sigmoid(inputs.to(torch.float32))
     ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
     p_t = p * targets + (1 - p) * (1 - targets)
     loss = ce_loss * ((1 - p_t) ** gamma)
@@ -289,7 +286,7 @@ class Base_model_wo_pooling(nn.Module):
             else:
                 x = torch.cat([udf, gradients], dim=-1).permute((0, 4, 1, 2, 3)).contiguous()
         else:
-            x = feat_data
+            x = feat_data[:,:self.num_features]
 
         x = self.conv1(x)
         x = self.conv2(x)
@@ -303,7 +300,8 @@ class Base_model_wo_pooling(nn.Module):
     def loss(self, v_predictions, v_input):
         features, labels = v_input
 
-        loss = self.loss_func(v_predictions, labels[:, :, None, :, :, :], self.loss_alpha)
+        with torch.autocast(device_type="cuda"):
+            loss = self.loss_func(v_predictions, labels[:, :, None, :, :, :], self.loss_alpha)
         return {"total_loss": loss}
 
     def compute_pr(self, v_pred, v_gt):
@@ -360,23 +358,102 @@ class Base_model_dilated(Base_model_wo_pooling):
         self.num_features = v_conf["channels"]
 
 
-class PC_model(nn.Module):
+class PC_local_global(nn.Module):
     def __init__(self, v_conf):
-        super(PC_model, self).__init__()
+        super(PC_local_global, self).__init__()
         self.need_normalize = v_conf["need_normalize"]
-        self.encoder = U_Net_3D(
-            img_ch=v_conf["channels"],
-            output_ch=1,
-            v_pool_first=False,
-            v_depth=v_conf["depths"],
-            base_channel=8
+
+        self.num_features = v_conf["channels"]
+
+        # Point cloud
+        self.SA_modules = nn.ModuleList()
+        self.SA_modules.append(
+            PointnetSAModule(
+                npoint=1024,
+                radius=0.1,
+                nsample=32,
+                mlp=[6, 32, 32, 64],
+                use_xyz=True,
+                bn=False
+            )
         )
-        self.encoder.Conv_1x1 = nn.Conv3d(240, 1, 1)
+        self.SA_modules.append(
+            PointnetSAModule(
+                npoint=256,
+                radius=0.2,
+                nsample=32,
+                mlp=[64, 64, 64, 128],
+                use_xyz=True,
+                bn=False
+            )
+        )
+        self.SA_modules.append(
+            PointnetSAModule(
+                npoint=64,
+                radius=0.4,
+                nsample=32,
+                mlp=[128, 128, 128, 256],
+                use_xyz=True,
+                bn=False
+            )
+        )
+        self.SA_modules.append(
+            PointnetSAModule(
+                npoint=16,
+                radius=0.8,
+                nsample=32,
+                mlp=[256, 256, 256, 512],
+                use_xyz=True,
+                bn=False
+            )
+        )
+
+        self.FP_modules = nn.ModuleList()
+        self.FP_modules.append(PointnetFPModule(mlp=[128 + 6, 128, 128, 128], bn=False))
+        self.FP_modules.append(PointnetFPModule(mlp=[256 + 64, 256, 128], bn=False))
+        self.FP_modules.append(PointnetFPModule(mlp=[256 + 128, 256, 256], bn=False))
+        self.FP_modules.append(PointnetFPModule(mlp=[512 + 256, 256, 256], bn=False))
+
+        # Convolutional network
+        with_bn= False
+        self.conv1 = conv_block(ch_in=128, ch_out=128, with_bn=with_bn, dilate=2, padding=2)
+        self.conv2 = conv_block(ch_in=128, ch_out=128, with_bn=with_bn, dilate=2, padding=2)
+        self.conv3 = conv_block(ch_in=128, ch_out=128, with_bn=with_bn, dilate=1)
+        self.conv4 = conv_block(ch_in=128, ch_out=128, with_bn=with_bn, dilate=1)
+
+        self.up4 = nn.ConvTranspose3d(128, 128, kernel_size=2, stride=2)
+        self.up_conv4 = conv_block(ch_in=128, ch_out=128, with_bn=with_bn)
+        self.up3 = nn.ConvTranspose3d(128, 128, kernel_size=2, stride=2)
+        self.up_conv3 = conv_block(ch_in=128, ch_out=128, with_bn=with_bn)
+        self.up2 = nn.ConvTranspose3d(128, 128, kernel_size=2, stride=2)
+        self.up_conv2 = nn.Conv3d(in_channels=128, out_channels=16, kernel_size=1)
+
+        self.up1 = nn.ConvTranspose3d(16, 8, kernel_size=4, stride=4)
+        self.up_conv1 = nn.Conv3d(in_channels=8, out_channels=1, kernel_size=1)
+
+        self.Maxpool = nn.MaxPool3d(kernel_size=2, stride=2)
+
         self.resolution = v_conf["voxelize_res"]
         self.loss_func = focal_loss
         self.loss_alpha = 0.75
-        self.num_features = v_conf["channels"]
         self.offset = -1/self.resolution
+
+    def point_features(self, points):
+        xyz = points[:, :3].permute(0,2,1).contiguous()
+        features = points
+
+        l_xyz, l_features = [xyz], [features]
+        for i in range(len(self.SA_modules)):
+            li_xyz, li_features = self.SA_modules[i](l_xyz[i], l_features[i])
+            l_xyz.append(li_xyz)
+            l_features.append(li_features)
+
+        for i in range(-1, -(len(self.FP_modules) + 1), -1):
+            l_features[i - 1] = self.FP_modules[i](
+                l_xyz[i - 1], l_xyz[i], l_features[i - 1], l_features[i]
+            )
+
+        return l_features[0]
 
     def forward(self, v_data, v_training=False):
         (points,feat_data), labels = v_data
@@ -388,10 +465,13 @@ class PC_model(nn.Module):
         else:
             points = points
 
-        points = points.permute(0,2,1)
+        points = points.permute(0,2,1).contiguous()
+
+        point_features = self.point_features(points)
+
         vox_coords = torch.round(
             (self.offset + points[:, :3] + torch.ones_like(points[:, :3])) / 2 * self.resolution).to(torch.int32)
-        voxel_features = pvcnn_F.avg_voxelize(points, vox_coords, self.resolution)
+        voxel_features = pvcnn_F.avg_voxelize(point_features, vox_coords, self.resolution)
         if False:
             p = generate_coords(self.resolution)
             v = vox_coords.cpu().numpy()[0]
@@ -402,32 +482,27 @@ class PC_model(nn.Module):
             p = p[(voxel_features[0]!=0).max(dim=0)[0].cpu().numpy()]
             export_point_cloud("test.ply", p)
 
-        x1 = self.encoder.conv1(voxel_features)
+        x1 = self.conv1(voxel_features)
+        x2 = self.Maxpool(self.conv2(x1))
+        x3 = self.Maxpool(self.conv3(x2))
+        x4 = self.Maxpool(self.conv4(x3))
 
-        x = [x1, ]
-        for i in range(self.encoder.depths):
-            x.append(self.encoder.Maxpool(self.encoder.conv[i](x[-1])))
+        up_x4 = self.up4(x4)
+        up_x4 = self.up_conv4(up_x4 + x3)
+        up_x3 = self.up3(up_x4)
+        up_x3 = self.up_conv3(up_x3 + x2)
+        up_x2 = self.up2(up_x3)
+        up_x1 = self.up_conv2(up_x2 + x1)
 
-        up_x = [x[-1]]
-        for i in range(self.encoder.depths - 2, -1, -1):
-            item = self.encoder.up[i](up_x[-1])
-            if i > 0:
-                item = torch.cat((item, x[i + 1]), dim=1)
-            up_x.append(self.encoder.up_conv[i](item))
-
-        sampled_features = []
-        for feature in up_x:
-            sampled_feature = F.grid_sample(feature, query_coords, mode="bilinear", align_corners=True)
-            sampled_features.append(sampled_feature)
-        sampled_features = torch.cat(sampled_features, dim=1)
-        prediction = self.encoder.Conv_1x1(sampled_features)
+        prediction = self.up1(up_x1)
+        prediction = self.up_conv1(prediction)
 
         return prediction
 
     def loss(self, v_predictions, v_input):
         (_,_), labels = v_input
 
-        loss = self.loss_func(v_predictions, labels[:, :, None], self.loss_alpha)
+        loss = self.loss_func(v_predictions, labels[:, None], self.loss_alpha)
         return {"total_loss": loss}
 
     def compute_pr(self, v_pred, v_gt):
@@ -459,7 +534,7 @@ class PC_model(nn.Module):
         return
 
 
-class PC_model2(PC_model):
+class PC_model2(PC_local_global):
     def __init__(self, v_conf):
         super(PC_model2, self).__init__(v_conf)
         self.encoder=None
@@ -594,7 +669,7 @@ class U_Net_3D2(nn.Module):
         return prediction
 
 
-class PC_model_whole_voxel(PC_model):
+class PC_model_whole_voxel(PC_local_global):
     def __init__(self, v_conf):
         super(PC_model_whole_voxel, self).__init__(v_conf)
         self.encoder=None

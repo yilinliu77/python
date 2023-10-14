@@ -4,9 +4,6 @@
 [submodule "thirdparty/kitti-object-eval-python"]
 	path = thirdparty/kitti-object-eval-python
 	url = https://github.com/traveller59/kitti-object-eval-python
-[submodule "thirdparty/Pointnet_Pointnet2_pytorch"]
-	path = thirdparty/Pointnet_Pointnet2_pytorch
-	url = https://github.com/yanx27/Pointnet_Pointnet2_pytorch
 [submodule "thirdparty/AA_RMVSNet"]
 	path = thirdparty/AA_RMVSNet
 	url = https://github.com/qt-zhu/aa-rmvsnet
@@ -28,3 +25,6 @@
 [submodule "thirdparty/pvcnn"]
 	path = thirdparty/pvcnn
 	url = https://github.com/mit-han-lab/pvcnn
+[submodule "thirdparty/Pointnet2_PyTorch"]
+	path = thirdparty/Pointnet2_PyTorch
+	url = https://github.com/erikwijmans/Pointnet2_PyTorch

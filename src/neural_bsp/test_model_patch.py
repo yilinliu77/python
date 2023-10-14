@@ -73,7 +73,8 @@ def main(v_cfg: DictConfig):
         features[8:-8, 8:-8, 8:-8, :] = features_
 
         flags = np.concatenate(flags, axis=0)
-        flags = flags.reshape(
+        flags_ = np.transpose(flags[:,:, 8:24, 8:24, 8:24], (0,2,3,4,1))
+        flags = flags_.reshape(
             (-1, 15, 15, 15, 16, 16, 16)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(240, 240, 240)
         flags = np.pad(flags, 8, mode="constant", constant_values=0)
         flags = (sigmoid(flags) > threshold).reshape(-1)

@@ -385,6 +385,7 @@ class ABC_points_and_flags(torch.utils.data.Dataset):
         self.coords = np.transpose(self.coords, (1, 2, 3, 0)).astype(np.float32)
 
     def __len__(self):
+        return 1
         return self.index.shape[0]
 
     def get_patch(self, v_id_item, id_patch):

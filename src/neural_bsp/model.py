@@ -512,22 +512,20 @@ class PC_local_global(nn.Module):
         return prob, gt
 
     def valid_output(self, idx, log_root, target_viz_name,
-                     gathered_prediction, gathered_gt):
-        assert gathered_prediction.shape[0] == 8
+                     gathered_prediction, gathered_gt, gathered_query):
+        assert gathered_prediction.shape[0] == 1
         v_resolution = 256
         query_points = generate_coords(v_resolution).reshape(-1, 3)
 
-        predicted_labels = gathered_prediction.reshape(
-            (-1, 2, 2, 2, 128, 128, 128)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(v_resolution, v_resolution, v_resolution)
-        gt_labels = gathered_gt.reshape(
-            (-1, 2, 2, 2, 128, 128, 128)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(v_resolution, v_resolution, v_resolution)
+        predicted_labels = gathered_prediction.reshape(v_resolution, v_resolution, v_resolution)
+        gt_labels = gathered_gt.reshape(v_resolution, v_resolution, v_resolution)
 
         predicted_labels = sigmoid(predicted_labels) > 0.5
         mask = predicted_labels.reshape(-1)
         export_point_cloud(os.path.join(log_root, "{}_{}_pred.ply".format(idx, target_viz_name)),
                            query_points[mask])
 
-        gt_labels = sigmoid(gt_labels) > 0.5
+        gt_labels = gt_labels > 0.5
         mask = gt_labels.reshape(-1)
         export_point_cloud(os.path.join(log_root, "{}_{}_gt.ply".format(idx, target_viz_name)),
                            query_points[mask])

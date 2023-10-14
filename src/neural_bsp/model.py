@@ -457,9 +457,8 @@ class PC_local_global(nn.Module):
 
     def forward(self, v_data, v_training=False):
         (points,feat_data), labels = v_data
-        query_coords = feat_data[..., :3]
         bs = feat_data.shape[0] # Batch size
-        
+
         if self.need_normalize:
             points = de_normalize_points(points)
         else:
@@ -467,7 +466,8 @@ class PC_local_global(nn.Module):
 
         points = points.permute(0,2,1).contiguous()
 
-        point_features = self.point_features(points)
+        with torch.autocast(device_type="cuda", dtype=torch.float32):
+            point_features = self.point_features(points)
 
         vox_coords = torch.round(
             (self.offset + points[:, :3] + torch.ones_like(points[:, :3])) / 2 * self.resolution).to(torch.int32)

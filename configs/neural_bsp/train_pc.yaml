@@ -18,10 +18,10 @@ trainer:
   evaluate: false
   output: .
   check_val_every_n_epoch: 1
-  accelerator: "32-true"
+  accelerator: "16-mixed"
 
 model:
-  model_name: PC_PVCNN
+  model_name: PC_local_global
   depths: 4
   channels: 6
   need_normalize: true

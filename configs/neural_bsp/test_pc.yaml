@@ -1,0 +1,37 @@
+dataset:
+  root: G:/Dataset/GSP/GSP_v8_100/training.h5
+  dataset_name: ABC_test_voxel
+  test_list: ["G:/Dataset/ABC/quadric_test/00999739/00999739_348b49253ff07a020fc5fe58_trimesh_000.obj"]
+
+trainer:
+  learning_rate: 1e-4
+  gpu: 1
+  num_worker: 0
+
+  spawn: false
+  num_samples: -1
+  batch_size: 128
+  resume_from_checkpoint: output/neural_bsp/1007_v8_PC.ckpt
+  evaluate: true
+  output: .
+  check_val_every_n_epoch: 1
+  accelerator: "16-mixed"
+
+model:
+  model_name: PC_model
+  depths: 4
+  channels: 6
+  need_normalize: false
+  voxelize_res: 64
+
+  test_threshold: 0.5
+  test_resolution: 256
+
+hydra:
+  run:
+    dir: ./outputs/${now:%Y_%m_%d_%H_%M_%S}
+  job:
+    chdir: False
+#  output_subdir: null
+#  job_logging: disabled
+#  hydra_logging: disabled

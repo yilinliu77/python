@@ -31,7 +31,7 @@ from torch.utils.data import (
     SequentialSampler,
     RandomSampler,
     BatchSampler,
-    Dataset,)
+    Dataset, DataLoader, )
 
 from torch.utils.data import _utils
 
@@ -562,7 +562,7 @@ class MyDataLoader(Generic[T_co]):
 
 
 class _BaseDataLoaderIter:
-    def __init__(self, loader: MyDataLoader) -> None:
+    def __init__(self, loader: DataLoader) -> None:
         self._dataset = loader.dataset
         self._shared_seed = None
         self._pg = None
@@ -1294,13 +1294,6 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     return data
 
     def _next_data(self):
-        # if not self._persistent_workers:
-        #     self._shutdown_workers()
-        #     raise StopIteration
-        # idx, data = self._get_data()
-        # del self._task_info[idx]
-        # self._tasks_outstanding -= 1
-        # return self._process_data(data)
         while True:
             # If the worker responsible for `self._rcvd_idx` has already ended
             # and was unable to fulfill this task (due to exhausting an `IterableDataset`),
@@ -1332,22 +1325,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             assert not self._shutdown and self._tasks_outstanding > 0
             idx, data = self._get_data()
             self._tasks_outstanding -= 1
-            if self._dataset_kind == _DatasetKind.Iterable:
-                # Check for _IterableDatasetStopIteration
-                if isinstance(data, _utils.worker._IterableDatasetStopIteration):
-                    if self._persistent_workers:
-                        self._workers_status[data.worker_id] = False
-                    else:
-                        self._mark_worker_as_unavailable(data.worker_id)
-                    self._try_put_index()
-                    continue
 
-            if idx != self._rcvd_idx:
-                # store out-of-order samples
-                self._task_info[idx] += (data,)
-            else:
-                del self._task_info[idx]
-                return self._process_data(data)
+            return self._process_data(data)
 
     def _try_put_index(self):
         assert self._tasks_outstanding < self._prefetch_factor * self._num_workers
@@ -1481,3 +1460,4 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
     def __del__(self):
         self._shutdown_workers()
+

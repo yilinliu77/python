@@ -1,0 +1,39 @@
+dataset:
+  dataset_name: ABC_test_mesh
+#  dataset_name: ABC_test_pc
+#  test_list: ["C:/Users/whats/Desktop/test.ply"]
+  test_list: ["G:/Dataset/ABC/quadric_test/00999739/00999739_348b49253ff07a020fc5fe58_trimesh_000.obj"]
+  patch_size: 32
+
+trainer:
+  gpu: 1
+
+  batch_size: 128
+  resume_from_checkpoint: output/neural_bsp/1010_v7_base_wo_normal.ckpt
+  output: .
+  accelerator: "32-true"
+
+model:
+  model_name: Base_model
+  channels: 4
+  need_normalize: false
+  depths: 4
+
+  v_depth: 5
+  v_base_channel: 32
+
+#  phase: [32,64,128,256,512,1024]
+  fmaps: [16, 32, 64, 128, 256]
+
+  loss: BCE_loss
+  loss_alpha: 0.75
+
+  test_threshold: 0.5
+  test_resolution: 256
+
+
+hydra:
+  run:
+    dir: ./outputs/${now:%Y_%m_%d_%H_%M_%S}
+  job:
+    chdir: False

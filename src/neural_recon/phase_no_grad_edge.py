@@ -234,6 +234,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds, v_reconstruct_
             # (M, K, 1): K projected distance of the candidate point along each ray
             distance_of_projection = nearest_candidates @ ray_c[:, :, np.newaxis]
             distance_of_projection[distance_of_projection < 0] = np.inf
+
             # (M, K, 3): K projected points along the ray
             # 投影距离*单位ray方向 = 投影点坐标
             projected_points_on_ray = distance_of_projection * ray_c[:, np.newaxis, :]
@@ -679,6 +680,7 @@ def main(v_cfg: DictConfig):
         v_cfg["dataset"]["id_viz_face"],
         v_cfg["dataset"]["scene_boundary"],
         v_cfg["dataset"]["v_reconstruct_data"],
+        v_cfg["dataset"]["max_error_for_initial_sfm"],
     )
 
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()

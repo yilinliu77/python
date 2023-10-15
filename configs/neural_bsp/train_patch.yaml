@@ -1,21 +1,30 @@
 dataset:
-  root: D:/DATASET/BSP/03636649_vox256_img_train.hdf5
-  id: 0
+  root: G:/Dataset/GSP/GSP_v7_1k/training.hdf5
+  dataset_name: ABC_patch
+
+  test_list: []
 
 trainer:
   learning_rate: 1e-4
   gpu: 1
   num_worker: 0
 
+  spawn: false
+  num_samples: -1
   batch_size: 1
   resume_from_checkpoint:
   evaluate: false
   output: .
-  check_val_every_n_epoch: 100
+  check_val_every_n_epoch: 1
+  accelerator: "16-mixed"
 
 model:
-  model_name: BSP_base_model
-  phase: 0
+  model_name: Base_model_wo_pooling
+  depths: 4
+  need_normalize: true
+  channels: 4
+
+  test_threshold: 0.5
 
 hydra:
   run:

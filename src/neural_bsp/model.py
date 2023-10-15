@@ -78,12 +78,12 @@ class conv_block(nn.Module):
         super(conv_block, self).__init__()
         self.conv1 = nn.Sequential(
             nn.Conv3d(ch_in, ch_out, kernel_size=kernel_size, stride=stride, padding=padding, bias=True, dilation=dilate),
-            nn.BatchNorm3d(ch_out) if with_bn else nn.Identity(),
+            nn.InstanceNorm3d(ch_out) if with_bn else nn.Identity(),
             nn.ReLU(inplace=True),
         )
         self.conv2 = nn.Sequential(
             nn.Conv3d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True, dilation=1),
-            nn.BatchNorm3d(ch_out) if with_bn else nn.Identity(),
+            nn.InstanceNorm3d(ch_out) if with_bn else nn.Identity(),
             nn.ReLU(inplace=True)
         )
 
@@ -415,7 +415,7 @@ class PC_local_global(nn.Module):
         self.FP_modules.append(PointnetFPModule(mlp=[512 + 256, 256, 256], bn=False))
 
         # Convolutional network
-        with_bn= False
+        with_bn= True
         self.conv1 = conv_block(ch_in=128, ch_out=128, with_bn=with_bn, dilate=2, padding=2)
         self.conv2 = conv_block(ch_in=128, ch_out=128, with_bn=with_bn, dilate=2, padding=2)
         self.conv3 = conv_block(ch_in=128, ch_out=128, with_bn=with_bn, dilate=1)

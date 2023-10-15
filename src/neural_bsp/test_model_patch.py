@@ -73,8 +73,8 @@ def main(v_cfg: DictConfig):
         features[8:-8, 8:-8, 8:-8, :] = features_
 
         flags = np.concatenate(flags, axis=0)
-        flags_ = np.transpose(flags[:,:, 8:24, 8:24, 8:24], (0,2,3,4,1))
-        flags = flags_.reshape(
+        # flags_ = np.transpose(flags[:,:, 8:24, 8:24, 8:24], (0,2,3,4,1))
+        flags = flags.reshape(
             (-1, 15, 15, 15, 16, 16, 16)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(240, 240, 240)
         flags = np.pad(flags, 8, mode="constant", constant_values=0)
         flags = (sigmoid(flags) > threshold).reshape(-1)
@@ -91,7 +91,8 @@ def main(v_cfg: DictConfig):
 
         np.save(os.path.join(output_root, "{}_feat.npy".format(name)), gradients_and_udf)
         np.save(os.path.join(output_root, "{}_pred.npy".format(name)), predicted_labels)
-
+        export_point_cloud(os.path.join(output_root, "{}_points.ply".format(name)), dataset.poisson_points)
+        print("Done")
 
 if __name__ == '__main__':
     main()

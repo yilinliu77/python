@@ -277,5 +277,7 @@ def sigmoid(z):
 
 def export_point_cloud(v_file_path, v_pcs):
     pc = o3d.geometry.PointCloud()
-    pc.points = o3d.utility.Vector3dVector(v_pcs)
+    pc.points = o3d.utility.Vector3dVector(v_pcs[:,:3])
+    if v_pcs.shape[1] > 3:
+        pc.normals = o3d.utility.Vector3dVector(v_pcs[:, 3:6])
     o3d.io.write_point_cloud(v_file_path, pc)

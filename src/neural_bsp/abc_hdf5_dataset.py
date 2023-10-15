@@ -707,6 +707,12 @@ class ABC_test_mesh(torch.utils.data.Dataset):
         mesh.vertices = o3d.utility.Vector3dVector(points)
         if v_output_root is not None:
             o3d.io.write_triangle_mesh(os.path.join(v_output_root, "temp.ply"), mesh)
+
+        pc = mesh.sample_points_poisson_disk(10000)
+        points = np.asarray(pc.points)
+        normals = np.asarray(pc.normals)
+        self.poisson_points = np.concatenate([points, normals], axis=1)
+
         use_dense_feature = True
         if use_dense_feature:
             points = np.asarray(mesh.vertices)
@@ -724,9 +730,7 @@ class ABC_test_mesh(torch.utils.data.Dataset):
 
             normals = normals[query_result[2]].astype(np.float32)
         else:
-            pc = mesh.sample_points_poisson_disk(10000)
-            points = np.asarray(pc.points)
-            normals = np.asarray(pc.normals)
+
             index = faiss.IndexFlatL2(3)
             index.add(points)
             dists, indices = index.search(self.coords, 1)

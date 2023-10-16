@@ -372,7 +372,7 @@ class PC_local_global(nn.Module):
                 npoint=1024,
                 radius=0.1,
                 nsample=32,
-                mlp=[6, 32, 32, 64],
+                mlp=[6, 32, 32],
                 use_xyz=True,
                 bn=False
             )
@@ -382,7 +382,7 @@ class PC_local_global(nn.Module):
                 npoint=256,
                 radius=0.2,
                 nsample=32,
-                mlp=[64, 64, 64, 128],
+                mlp=[32, 32, 64],
                 use_xyz=True,
                 bn=False
             )
@@ -392,7 +392,7 @@ class PC_local_global(nn.Module):
                 npoint=64,
                 radius=0.4,
                 nsample=32,
-                mlp=[128, 128, 128, 256],
+                mlp=[64, 64, 128],
                 use_xyz=True,
                 bn=False
             )
@@ -402,34 +402,37 @@ class PC_local_global(nn.Module):
                 npoint=16,
                 radius=0.8,
                 nsample=32,
-                mlp=[256, 256, 256, 512],
+                mlp=[128, 128, 256],
                 use_xyz=True,
                 bn=False
             )
         )
 
         self.FP_modules = nn.ModuleList()
-        self.FP_modules.append(PointnetFPModule(mlp=[128 + 6, 128, 128, 128], bn=False))
-        self.FP_modules.append(PointnetFPModule(mlp=[256 + 64, 256, 128], bn=False))
-        self.FP_modules.append(PointnetFPModule(mlp=[256 + 128, 256, 256], bn=False))
-        self.FP_modules.append(PointnetFPModule(mlp=[512 + 256, 256, 256], bn=False))
+        self.FP_modules.append(PointnetFPModule(mlp=[32 + 6, 8,], bn=False))
+        self.FP_modules.append(PointnetFPModule(mlp=[64 + 32, 32], bn=False))
+        self.FP_modules.append(PointnetFPModule(mlp=[128 + 64, 64], bn=False))
+        self.FP_modules.append(PointnetFPModule(mlp=[256 + 128, 128], bn=False))
 
         # Convolutional network
         with_bn= True
-        self.conv1 = conv_block(ch_in=128, ch_out=128, with_bn=with_bn, dilate=2, padding=2)
-        self.conv2 = conv_block(ch_in=128, ch_out=128, with_bn=with_bn, dilate=2, padding=2)
-        self.conv3 = conv_block(ch_in=128, ch_out=128, with_bn=with_bn, dilate=1)
-        self.conv4 = conv_block(ch_in=128, ch_out=128, with_bn=with_bn, dilate=1)
+        self.conv1 = conv_block(ch_in=8, ch_out=16, with_bn=with_bn, dilate=2, padding=2)
+        self.conv2 = conv_block(ch_in=16, ch_out=32, with_bn=with_bn, dilate=2, padding=2)
+        self.conv3 = conv_block(ch_in=32, ch_out=32, with_bn=with_bn, dilate=1)
+        self.conv4 = conv_block(ch_in=32, ch_out=32, with_bn=with_bn, dilate=1)
+        self.conv5 = conv_block(ch_in=32, ch_out=32, with_bn=with_bn, dilate=1)
 
-        self.up4 = nn.ConvTranspose3d(128, 128, kernel_size=2, stride=2)
-        self.up_conv4 = conv_block(ch_in=128, ch_out=128, with_bn=with_bn)
-        self.up3 = nn.ConvTranspose3d(128, 128, kernel_size=2, stride=2)
-        self.up_conv3 = conv_block(ch_in=128, ch_out=128, with_bn=with_bn)
-        self.up2 = nn.ConvTranspose3d(128, 128, kernel_size=2, stride=2)
-        self.up_conv2 = nn.Conv3d(in_channels=128, out_channels=16, kernel_size=1)
+        self.up5 = nn.ConvTranspose3d(32, 32, kernel_size=2, stride=2)
+        self.up_conv5 = conv_block(ch_in=32, ch_out=32, with_bn=with_bn)
+        self.up4 = nn.ConvTranspose3d(32, 32, kernel_size=2, stride=2)
+        self.up_conv4 = conv_block(ch_in=32, ch_out=32, with_bn=with_bn)
+        self.up3 = nn.ConvTranspose3d(32, 32, kernel_size=2, stride=2)
+        self.up_conv3 = conv_block(ch_in=32, ch_out=32, with_bn=with_bn)
+        self.up2 = nn.ConvTranspose3d(32, 16, kernel_size=2, stride=2)
+        self.up_conv2 = nn.Conv3d(in_channels=16, out_channels=16, kernel_size=1)
 
-        self.up1 = nn.ConvTranspose3d(16, 8, kernel_size=4, stride=4)
-        self.up_conv1 = nn.Conv3d(in_channels=8, out_channels=1, kernel_size=1)
+        # self.up1 = nn.ConvTranspose3d(16, 8, kernel_size=4, stride=4)
+        self.up_conv1 = nn.Conv3d(in_channels=16, out_channels=1, kernel_size=1)
 
         self.Maxpool = nn.MaxPool3d(kernel_size=2, stride=2)
 
@@ -486,16 +489,18 @@ class PC_local_global(nn.Module):
         x2 = self.Maxpool(self.conv2(x1))
         x3 = self.Maxpool(self.conv3(x2))
         x4 = self.Maxpool(self.conv4(x3))
+        x5 = self.Maxpool(self.conv4(x4))
 
-        up_x4 = self.up4(x4)
+        up_x5 = self.up5(x5)
+        up_x5 = self.up_conv5(up_x5 + x4)
+        up_x4 = self.up4(up_x5)
         up_x4 = self.up_conv4(up_x4 + x3)
         up_x3 = self.up3(up_x4)
         up_x3 = self.up_conv3(up_x3 + x2)
         up_x2 = self.up2(up_x3)
         up_x1 = self.up_conv2(up_x2 + x1)
 
-        prediction = self.up1(up_x1)
-        prediction = self.up_conv1(prediction)
+        prediction = self.up_conv1(up_x1)
 
         return prediction
 

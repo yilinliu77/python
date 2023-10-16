@@ -44,11 +44,10 @@ def intersection_of_ray_and_all_plane(planes_abcd, vertexes_ray):
     vertexes_ray_expanded = vertexes_ray.unsqueeze(0).expand(n_planes, m_rays, 3)
 
     # 计算射线与平面的交点
-    numerator = -planes_abcd_expanded[..., -1].unsqueeze(-1)  # 分子：-(D)
-    denominator = torch.sum(planes_abcd_expanded[..., :3] * vertexes_ray_expanded, dim=-1).unsqueeze(
-        -1)  # 分母：(A * v_ray.x + B * v_ray.y + C * v_ray.z)
-    t = numerator / denominator  # t = -(D) / (A * v_ray.x + B * v_ray.y + C * v_ray.z)
-    intersection_points = t * vertexes_ray_expanded  # p = p0 + t * v_ray，这里我们假设 p0 为原点 (0, 0, 0)
+    numerator = -planes_abcd_expanded[..., -1]
+    denominator = torch.sum(planes_abcd_expanded[..., :3] * vertexes_ray_expanded, dim=-1)
+    t = torch.div(numerator, denominator, out=torch.empty_like(numerator))  # t = -(D) / (A * v_ray.x + B * v_ray.y + C * v_ray.z)
+    intersection_points = t.unsqueeze(-1) * vertexes_ray_expanded  # p = p0 + t * v_ray，这里我们假设 p0 为原点 (0, 0, 0)
     # n*m*3
     return intersection_points
 
@@ -56,7 +55,7 @@ def intersection_of_ray_and_all_plane(planes_abcd, vertexes_ray):
 def compute_plane_abcd(patch_ray, ray_depth, normal):
     # patch_ray：n*3
     # ray_depth：n*100
-    # normal:n*100*3
+    # normal: n*100*3
     intersection = patch_ray.unsqueeze(1).tile(1, 100, 1) * ray_depth[:, :, None]
     d = -torch.sum(intersection * normal, dim=-1, keepdim=True)
     plane_abcd = torch.cat([normal, d], dim=-1)

@@ -257,6 +257,22 @@ def read_dataset(v_colmap_dir, v_bounds):
     # print("Done reading segments")
     pool.close()
 
+    if False:
+        def save_pc(points_3d: List[Point_3d]):
+            from plyfile import PlyData, PlyElement
+            vertex_array = np.empty(len(points_3d),
+                                    dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('red', 'u1'), ('green', 'u1'),
+                                           ('blue', 'u1')])
+
+            for i, point in enumerate(points_3d):
+                vertex_array[i] = (point.pos[0], point.pos[1], point.pos[2], 255, 255, 255)
+
+            vertex_element = PlyElement.describe(vertex_array, 'vertex')
+
+            PlyData([vertex_element]).write('output/filtered_pc.ply')
+            pass
+        save_pc(points_3d)
+
     # Testcase
     if False:
         cv2.namedWindow("1", cv2.WINDOW_NORMAL)

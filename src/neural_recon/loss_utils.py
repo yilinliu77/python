@@ -63,6 +63,10 @@ def sample_imgs(v_img1, v_img2, points_2d1, points_2d2):
     sample_img2 = sample_img(v_img2[None, :].permute(0, 3, 1, 2), points_2d2[None, :, :])
     return sample_img1, sample_img2
 
+def sample_imgs_batch2(v_img2, points_2d2):
+    sample_img2 = sample_img(v_img2[:,:,:,None].permute(0, 3, 1, 2), points_2d2)
+    return sample_img2
+
 def sample_imgs_batch(v_img1, v_img2, points_2d1, points_2d2):
     num_source = v_img2.shape[0]
     sample_img1 = sample_img(v_img1[None, :].permute(0, 3, 1, 2), points_2d1[None, :, :])
@@ -343,7 +347,7 @@ class Edge_loss_computer:
         return mean_edge_loss, valid_mask, num_horizontal
 
     def compute_batch(self, v_edge_points, v_intrinsic, v_transformation,
-                v_gradient1, v_gradient2, v_num_hypothesis=100):
+                v_gradient1, v_gradient2, img2s, v_num_hypothesis=100):
         num_edge, _, _ = v_edge_points.shape
 
         # 1. Get the projected points in both images
@@ -380,31 +384,46 @@ class Edge_loss_computer:
         # Also we do not calculate black area
         sample_imgs1, sample_imgs2 = sample_imgs_batch(v_gradient1, v_gradient2,
                                                  sampled_points1, sampled_points2)
+        sample_pixel_imgs2 = sample_imgs_batch2(img2s, sampled_points2)
 
         edge_directions1 = normalize_tensor(points_2d1[:, 0] - points_2d1[:, 1])
 
-        weight1 = torch.clamp_max(torch.norm(sample_imgs1, dim=-1) / self.max_gradient_norm, 1)
+        #weight1 = torch.clamp_max(torch.norm(sample_imgs1, dim=-1) / self.max_gradient_norm, 1)
+        mean_edge_grad_norm = scatter_mean(torch.norm(sample_imgs1, dim=-1),
+                                      torch.arange(
+                                          num_horizontal.shape[0], device=sample_imgs1.device
+                                      ).repeat_interleave(num_horizontal), dim=1)
+        valid_edge_mask = (mean_edge_grad_norm > 0.01)
+
         weight2 = 1 - ((normalize_tensor(sample_imgs1) * edge_directions1.repeat_interleave(num_horizontal, dim=0))
                        .sum(dim=-1).abs())
 
-        weight = torch.pow(weight1 * weight2, self.edge_power)
+        weight = torch.pow(weight2, self.edge_power)
 
         sample_imgs2 = normalize_tensor(sample_imgs2)
         edge_directions2 = normalize_tensor(points_2d2[:,:, 0] - points_2d2[:,:, 1])
         edge_directions2 = edge_directions2.repeat_interleave(num_horizontal, dim=1)
-        black_mask = torch.linalg.norm(sample_imgs2, dim=-1) < 1e-8
-
         edge_loss2 = torch.abs(torch.sum(edge_directions2 * sample_imgs2, dim=-1))
+
+        # mean_edge_pixel_norm = scatter_mean(sample_pixel_imgs2.squeeze(2),
+        #                               torch.arange(
+        #                                   num_horizontal.shape[0], device=sample_imgs1.device
+        #                               ).repeat_interleave(num_horizontal), dim=1)
+        black_mask = (sample_pixel_imgs2 < 1e-8).squeeze(2)
         edge_loss2[black_mask] = 1
+
         weighted_edge_loss = edge_loss2 * weight
 
         weight_edge = num_horizontal.reshape(v_num_hypothesis, -1)
         weight_edge = (weight_edge / weight_edge.sum(dim=1, keepdim=True)).reshape(-1)
         weighted_edge_loss = weighted_edge_loss * weight_edge.repeat_interleave(num_horizontal)
+        #weighted_edge_loss[black_mask] = 1
         mean_edge_loss = scatter_mean(weighted_edge_loss,
                                       torch.arange(
                                           num_horizontal.shape[0], device=edge_directions2.device
                                       ).repeat_interleave(num_horizontal), dim=1)
+
+        mean_edge_loss[~valid_edge_mask.tile(mean_edge_loss.shape[0], 1)] = torch.nan
 
         return mean_edge_loss, valid_mask, num_horizontal
 

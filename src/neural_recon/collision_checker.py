@@ -62,58 +62,70 @@ class Collision_checker:
         self.n_ = None
         self.d = None
 
+    def check_ray_batch(self, patch_id_c, v_origin, v_direction):
+        check_triangle = self.triangles[self.tri_to_patch != patch_id_c]
+        final_flag = torch.ones((v_origin.shape[0], check_triangle.shape[0]), dtype=torch.bool,
+                                device=v_origin.device)
+
+        v0v1 = (check_triangle[:, 1] - check_triangle[:, 0])[None, :]  # 1,M,3
+        v0v2 = (check_triangle[:, 2] - check_triangle[:, 0])[None, :]  # 1,M,3
+
+        original_distance = torch.linalg.norm(v_direction, dim=-1, keepdim=True)
+        ray_direction_ = (v_direction / original_distance)[:, None]  # N,1,3
+        ray_origin = v_origin[:, None]  # N,1,3
+
+        pvec = torch.cross(ray_direction_, v0v2, dim=-1)
+        det = torch.sum(v0v1 * pvec, dim=-1)
+
+        # det = v0v1.sum(-1) * torch.cross(ray_direction_, v0v2).sum(-1)
+
+        # Check parallel
+        final_flag[torch.abs(det) < 1e-8] = 0
+
+        invDet = 1.0 / det
+        tvec = ray_origin - check_triangle[:, 0][None, :]
+        u = torch.sum(tvec * pvec, dim=-1) * invDet
+
+        final_flag[torch.logical_or(u < 0, u > 1)] = 0
+
+        qvec = torch.cross(tvec, v0v1, dim=-1)
+        v = torch.sum(ray_direction_ * qvec, dim=-1) * invDet
+
+        final_flag[torch.logical_or(v < 0, u + v > 1)] = 0
+        t = torch.sum(v0v2 * qvec, dim=-1) * invDet
+        final_flag[t < 1e-8] = 0
+        final_flag[t > original_distance - 1e-12] = 0
+        # intersected_point = ray_origin + ray_direction_ * t
+        return torch.max(final_flag, dim=-1)[0]
+
     # v_origin: N,3
     # v_direction: N,3
     # self.triangles: M,3
     # self.triangles: M,3,3
     # self.n_: M,3
     # self.d: M,
-    def check_ray(self, patch_id_c, v_origin, v_direction):
+    def check_ray(self, patch_id_c, v_origin, v_direction, batch_size=20000):
         if self.triangles is None:
             return torch.zeros_like(v_origin[:, 0], dtype=torch.bool)
         else:
-            check_triangle = self.triangles[self.tri_to_patch != patch_id_c]
-            final_flag = torch.ones((v_origin.shape[0], check_triangle.shape[0]), dtype=torch.bool,
-                                    device=v_origin.device)
-
-            v0v1 = (check_triangle[:, 1] - check_triangle[:, 0])[None, :]  # 1,M,3
-            v0v2 = (check_triangle[:, 2] - check_triangle[:, 0])[None, :]  # 1,M,3
-
-            original_distance = torch.linalg.norm(v_direction, dim=-1, keepdim=True)
-            ray_direction_ = (v_direction / original_distance)[:, None]  # N,1,3
-            ray_origin = v_origin[:, None]  # N,1,3
-
-            pvec = torch.cross(ray_direction_, v0v2, dim=-1)
-            det = torch.sum(v0v1 * pvec, dim=-1)
-
-            # Check parallel
-            final_flag[torch.abs(det) < 1e-8] = 0
-
-            invDet = 1.0 / det
-            tvec = ray_origin - check_triangle[:, 0][None, :]
-            u = torch.sum(tvec * pvec, dim=-1) * invDet
-
-            final_flag[torch.logical_or(u < 0, u > 1)] = 0
-
-            qvec = torch.cross(tvec, v0v1, dim=-1)
-            v = torch.sum(ray_direction_ * qvec, dim=-1) * invDet
-
-            final_flag[torch.logical_or(v < 0, u + v > 1)] = 0
-
-            t = torch.sum(v0v2 * qvec, dim=-1) * invDet
-            final_flag[t < 1e-8] = 0
-            final_flag[t > original_distance - 1e-12] = 0
-            # intersected_point = ray_origin + ray_direction_ * t
-            return torch.max(final_flag, dim=-1)[0]
+            return torch.zeros_like(v_origin[:, 0], dtype=torch.bool)
+            num_batches = (v_origin.shape[0] + batch_size - 1) // batch_size
+            output = []
+            for i in range(num_batches):
+                cur_batch_s = i*batch_size
+                cur_batch_e = min((i + 1) * batch_size, v_origin.shape[0])
+                output.append(self.check_ray_batch(patch_id_c,
+                                                   v_origin[cur_batch_s: cur_batch_e],
+                                                   v_direction[cur_batch_s: cur_batch_e]))
+            return torch.cat(output)
 
     def add_triangles(self, v_triangles, tri_to_patch):
         if self.triangles is None:
             self.triangles = v_triangles
             self.tri_to_patch = tri_to_patch
         else:
-            self.triangles = torch.cat((self.triangles, v_triangles), dim=0)
-            # TODO update tri_to_patch
-            self.tri_to_patch = tri_to_patch
+            self.triangles = torch.cat((self.triangles, v_triangles))
+            self.tri_to_patch = torch.cat((self.tri_to_patch, tri_to_patch))
 
     def clear(self):
         self.triangles = None

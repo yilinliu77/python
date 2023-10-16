@@ -138,7 +138,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds, v_reconstruct_
         for point in tqdm(points_3d):
             if point.error < v_max_error_for_initial_sfm and len(point.tracks) > 3:
                 preserved_points.append(point)
-        if len(points_3d) == 0:
+        if len(preserved_points) == 0:
             points_from_sfm = np.array([[0.5, 0.5, 0.5]], dtype=np.float32)
         else:
             points_from_sfm = np.stack([item.pos for item in preserved_points])
@@ -233,7 +233,8 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds, v_reconstruct_
             # Compute the shortest distance from the candidate point to the ray for each query point
             # (M, K, 1): K projected distance of the candidate point along each ray
             distance_of_projection = nearest_candidates @ ray_c[:, :, np.newaxis]
-            distance_of_projection[distance_of_projection<0] = np.inf
+            distance_of_projection[distance_of_projection < 0] = np.inf
+
             # (M, K, 3): K projected points along the ray
             # 投影距离*单位ray方向 = 投影点坐标
             projected_points_on_ray = distance_of_projection * ray_c[:, np.newaxis, :]
@@ -325,7 +326,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds, v_reconstruct_
 
 # Remove the redundant face and edges in the graph
 # And build the dual graph in order to navigate between patches
-def fix_graph(v_graph, is_visualize=False):
+def fix_graph(v_graph, ref_img, is_visualize=False):
     dual_graph = nx.Graph()
 
     id_original_to_current = {}
@@ -377,12 +378,38 @@ def fix_graph(v_graph, is_visualize=False):
     v_graph.graph["dual_graph"] = dual_graph
 
     # Visualize
+    for idx_f, id_face in enumerate(dual_graph.nodes):
+        face = dual_graph.nodes[id_face]["id_vertex"]
+        if len(face) == 3:
+            continue
+        remove_p_id = []
+        for idx_p, id_start in enumerate(face):
+            id_end = face[(idx_p + 1) % len(face)]
+            pos1 = v_graph.nodes[id_start]["pos_2d"]
+            pos2 = v_graph.nodes[id_end]["pos_2d"]
+
+            if np.linalg.norm(pos1-pos2) < 0.01:
+                adjacent_vertices = []
+                for adj in list(dual_graph.adj[id_face].values()):
+                    adjacent_vertices.extend(adj['adjacent_vertices'])
+                if id_start not in adjacent_vertices:
+                    remove_p_id.append(id_start)
+                    break
+                elif id_end not in adjacent_vertices:
+                    remove_p_id.append(id_end)
+                    break
+
+        if len(remove_p_id) == 1:
+            face.remove(remove_p_id[0])
+        elif len(remove_p_id) > 1:
+            assert False
+
     if is_visualize:
         for idx, id_face in enumerate(dual_graph.nodes):
-            print("{}/{}".format(idx, len(dual_graph.nodes)))
             img11 = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
             shape = img11.shape[:2][::-1]
             face = dual_graph.nodes[id_face]["id_vertex"]
+            print("{}/{}, points_num: {}".format(idx, len(dual_graph.nodes), len(face)))
 
             for idx, id_start in enumerate(face):
                 id_end = face[(idx + 1) % len(face)]
@@ -412,6 +439,7 @@ def determine_valid_edges(v_graph, v_img, v_gradient):
         pos1 = v_graph.nodes[edge[0]]["pos_2d"]
         pos2 = v_graph.nodes[edge[1]]["pos_2d"]
         pos = torch.from_numpy(np.stack((pos1, pos2), axis=0).astype(np.float32)).to(v_img.device).unsqueeze(0)
+        length = torch.norm(pos[:, 0, :] - pos[:, 1, :], dim=1)
 
         ns, s = sample_points_2d(pos,
                                  torch.tensor([100] * pos.shape[0], dtype=torch.long, device=pos.device),
@@ -422,6 +450,7 @@ def determine_valid_edges(v_graph, v_img, v_gradient):
                                    torch.arange(ns.shape[0], device=pos.device).repeat_interleave(ns),
                                    dim=0)
         v_graph.edges[edge]["is_black"] = mean_pixels < 0.05
+        v_graph.edges[edge]["is_erase"] = length < 0.01
         pass
 
     return
@@ -472,13 +501,54 @@ def initialize_patches(rays_c, ray_distances_c, v_vertex_id_per_face):
     plane_parameters = []
     for vertex_id in v_vertex_id_per_face:
         pos_vertexes = initialized_vertices[vertex_id]
-        assert (len(pos_vertexes) >= 3)
-        # a) 3d vertexes of each patch -> fitting plane
-        p_abcd = fit_plane_svd(pos_vertexes)
+        # assert (len(pos_vertexes) >= 3)
+        # # a) 3d vertexes of each patch -> fitting plane
+        # p_abcd = fit_plane_svd(pos_vertexes)
+        abc = torch.mean(pos_vertexes, dim=0)
+        d = -torch.linalg.norm(abc, dim=-1)
+        p_abcd = torch.cat((abc, d.unsqueeze(0)), dim=-1)
         plane_parameters.append(p_abcd)
 
     return torch.stack(plane_parameters, dim=0)
 
+
+def viz_merge_plane(v_img_database):
+    import trimesh
+    def double_faces(mesh):
+        reversed_faces = mesh.faces[:, ::-1]  # 翻转每个面的顶点顺序
+        double_faces_mesh = trimesh.Trimesh(vertices=mesh.vertices,
+                                            faces=np.concatenate([mesh.faces, reversed_faces]))
+        return double_faces_mesh
+
+    mesh_paths = [r'D:\StructDescription\python\src\neural_recon\outputs\id_img1=5\optimized.ply',
+                  r'D:\StructDescription\python\src\neural_recon\outputs\id_img1=11\optimized.ply',
+                  r'D:\StructDescription\python\src\neural_recon\outputs\id_img1=22\optimized.ply',
+                  r'D:\StructDescription\python\src\neural_recon\outputs\id_img1=23\optimized.ply',]
+
+    transforms = [None,
+                  v_img_database[5].extrinsic @ np.linalg.inv(v_img_database[11].extrinsic),
+                  v_img_database[5].extrinsic @ np.linalg.inv(v_img_database[22].extrinsic),
+                  v_img_database[5].extrinsic @ np.linalg.inv(v_img_database[23].extrinsic),]
+
+    if len(mesh_paths) != len(transforms):
+        raise ValueError("The number of meshes and transforms must be the same.")
+
+    count = 0
+    meshes = []
+    for mesh_path, transform in zip(mesh_paths, transforms):
+        mesh = trimesh.load(mesh_path)
+        if transform is not None:
+            mesh.apply_transform(transform)
+        meshes.append(mesh)
+        mesh.export('./outputs/' + str(count) + '.ply')
+        count += 1
+
+    # 合并所有模型
+    merged_mesh = meshes[0]
+    for mesh in meshes[1:]:
+        merged_mesh += mesh
+    merged_mesh.export('./outputs/merged_mesh.ply')
+    pass
 
 def optimize_plane(v_data, v_log_root):
     v_img_database: list[Image] = v_data[0]
@@ -489,11 +559,12 @@ def optimize_plane(v_data, v_log_root):
     torch.set_grad_enabled(False)
     img_src_id = 0
     optimized_abcd_list_v = []
+    # viz_merge_plane(v_img_database)
 
     for id_img1, graph in enumerate(v_graphs):
         # 1. Prepare data
         # prepare some data
-        if id_img1 != 14:
+        if id_img1 != 425:
             continue
         id_src_imgs = (v_img_pairs[id_img1][:, 0]).astype(np.int64)
         ref_img = cv2.imread(v_img_database[id_img1].img_path, cv2.IMREAD_GRAYSCALE)
@@ -530,7 +601,7 @@ def optimize_plane(v_data, v_log_root):
         dilated_gradients2 = torch.from_numpy(dilate_edge(gradients2)).to(device)
 
         determine_valid_edges(graph, imgs[0], dilated_gradients1)
-        fix_graph(graph)
+        fix_graph(graph, ref_img)
 
         # Visualize
         if False:
@@ -568,8 +639,8 @@ def optimize_plane(v_data, v_log_root):
         if os.path.exists("output/init_optimized_abcd_list.pkl"):
             optimized_abcd_list = pickle.load(open("output/init_optimized_abcd_list.pkl", "rb"))
         else:
-            #initialized_planes = pickle.load(open("output/bu2/optimized_abcd_list_merged.pkl", "rb"))
-            #initialized_planes = torch.from_numpy(initialized_planes).to(device)
+            # initialized_planes = pickle.load(open("output/optimized_abcd_list.pkl", "rb"))
+            # initialized_planes = torch.from_numpy(initialized_planes).to(device)
             optimized_abcd_list = optimize_planes_batch(initialized_planes, rays_c, centroid_rays_c, dual_graph,
                                                         imgs, transformation, intrinsic, c1_2_c2_list, v_log_root)
             # save optimized_abcd_list

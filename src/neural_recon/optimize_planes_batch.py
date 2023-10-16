@@ -1,27 +1,68 @@
-import copy
-import os, time
-import random
-import copy
+import os
+import math
+import pickle
+from collections import deque
+
 import cv2
 import networkx as nx
 import numpy as np
 import torch
-import pickle
 from torch_scatter import scatter_mean, scatter_sum
-import multiprocessing as mp
 
-from shared.common_utils import normalize_tensor, to_homogeneous_tensor, record_time, profile_time
+from shared.common_utils import normalize_tensor, to_homogeneous_tensor
 from src.neural_recon.Visualizer import Visualizer
+from src.neural_recon.collision_checker import Collision_checker
 from src.neural_recon.geometric_util import angles_to_vectors, compute_plane_abcd, intersection_of_ray_and_all_plane, \
     intersection_of_ray_and_plane
 from src.neural_recon.io_utils import generate_random_color, save_plane
 from src.neural_recon.loss_utils import compute_regularization, Glue_loss_computer, \
-    Bilateral_ncc_computer, Edge_loss_computer, Regularization_loss_computer, Mutex_loss_computer, dilate_edge, \
-    get_projections, compute_regularization_batch
-
-from src.neural_recon.collision_checker import Collision_checker
+    Bilateral_ncc_computer, Edge_loss_computer, Regularization_loss_computer, Mutex_loss_computer, dilate_edge
 from src.neural_recon.sample_utils import sample_new_planes, sample_triangles
-from collections import deque
+
+import os
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+
+class CosineAnnealingScaleFactorScheduler:
+    def __init__(self, initial_sf=3.0, initial_sf_mult=0.99, T_0=12, T_mult=1.1, min_sf=0):
+        """Implements Cosine Annealing with Restarts learning rate scheduler.
+        Args:
+            initial_sf (float): Initial scale factor.
+            initial_sf_mult (float): Scale factor multiplier of initial_sf after a restart.
+            T_0 (int): Number of iterations for the first restart.
+            T_mult (int): A factor increases T_0 after a restart. Default: 1
+            min_sf (float): Minimum scale factor. Default: 0.001
+        """
+        self.initial_sf = initial_sf
+        self.initial_sf_mult = initial_sf_mult
+        self.init_sf_cur_cycle = initial_sf
+        self.T_0 = T_0
+        self.T_mult = T_mult
+        self.min_sf = min_sf
+
+        self.cur_cycle = 0
+        self.cur_iter = 0
+        self.sf_history = []
+
+    def get_sf(self):
+        if self.cur_iter != 0 and self.cur_iter % self.T_0 == 0:
+            self.cur_iter = 0
+            self.cur_cycle += 1
+
+            if self.cur_cycle != 0 and self.cur_cycle % 2 == 0:
+                self.initial_sf *= self.initial_sf_mult
+
+            self.init_sf_cur_cycle = self.initial_sf * np.clip(np.random.standard_cauchy(), 0.001, 5.0)
+            #self.init_sf_cur_cycle = self.initial_sf * np.random.uniform(0, 3)
+
+            new_T_0 = int(self.T_0 * self.T_mult)
+            self.T_0 = new_T_0 if new_T_0 % 2 == 0 else new_T_0 + 1
+
+        sf = self.min_sf + (self.init_sf_cur_cycle - self.min_sf) * (
+                    1 + math.cos(math.pi * (self.cur_iter % self.T_0) / self.T_0)) / 2
+
+        self.sf_history.append(sf)
+        self.cur_iter += 1
+        return sf
 
 
 def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_graph,
@@ -29,8 +70,11 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
     # Prepare some data
     device = initialized_planes.device
     patch_num = len(initialized_planes)
+
     patches_list = dual_graph.nodes  # each patch = id_vertexes
     patch_vertexes_id = [patches_list[i]['id_vertex'] for i in range(len(patches_list))]
+
+
     optimized_abcd_list = initialized_planes.clone()
 
     dilated_gradients_list = []
@@ -39,14 +83,15 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
         gradients = torch.stack((dx, dy), dim=-1)
 
         dilated_gradients = torch.from_numpy(dilate_edge(gradients)).to(device)
-        dilated_gradients_list.append(dilated_gradients)
+        # dilated_gradients_list.append(dilated_gradients)
+        dilated_gradients_list.append(gradients)
     dilated_gradients_list = torch.stack(dilated_gradients_list, dim=0)
 
     # optimization loop control variables
     cur_iter = [0] * patch_num
     best_loss = [None] * patch_num
     delta = [None] * patch_num
-    MAX_ITER = 2000
+    MAX_ITER = 1000
     MAX_TOLERENCE = 300
     num_tolerence = [MAX_TOLERENCE] * patch_num
 
@@ -57,26 +102,29 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
     sample_g.manual_seed(0)
     end_flag = [0] * patch_num
 
+    # scale_factor adapter1
     init_scale_factor = 3.0
     gamma = 0.8
-    milestones = [100, 100, 100, 100, 100, 100]
+    milestones = [150, 150, 250, 250, 100, 100, 100]
     scale_factors = [init_scale_factor * gamma ** i for i in range(len(milestones))]
 
-    def get_scale_factor(cur_iter):
+    def get_scale_factor1(cur_iter):
         scale_factor = scale_factors[-1]
         for i in range(len(milestones)):
             if cur_iter < milestones[i]:
                 scale_factor = scale_factors[i]
                 break
         # return scale_factor
-        return 1
-        return np.clip(abs(np.random.standard_cauchy() * scale_factor), 0.001, 5.0)
+        return np.clip(abs(np.random.standard_cauchy() * scale_factor), 0.1, 3.0)
+
+    # scale_factor adapter2
+    CASF = CosineAnnealingScaleFactorScheduler()
 
     # loss weight
     ncc_loss_weight = 1
     edge_loss_weight = 10
     reg_loss_weight = 0
-    glue_loss_weight = 1
+    glue_loss_weight = 0
     regularization_loss_weight = 0
     mutex_loss_weight = 0
     edge_loss_computer = Edge_loss_computer(v_sample_density=0.001)
@@ -89,6 +137,8 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
         v_window_size=7
     )
     collision_checker = Collision_checker()
+
+    id_neighbour_patches = [list(dual_graph[patch_id].keys()) for patch_id in dual_graph.nodes]
 
     # Start to optimize: patch based optimization
 
@@ -104,25 +154,75 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
         initialized_planes, v_rays_c, patch_vertexes_id,
     )
 
+    # Start to optimize: patch based optimization
+    # 1. partition the patches into several groups using the nx.greedy_color(dual_graph)
+    patch_color = nx.greedy_color(dual_graph)
+    groups = {}
+    for key, value in patch_color.items():
+        if value not in groups:
+            groups[value] = [key]
+        else:
+            groups[value].append(key)
+    groups = list(groups.values())
+    group_idx = -1
+    count = 0
+
+    # debug_id_list = torch.tensor([652,813,972,1029,1209,1492,1500,1600,1700]).to(device)
+    debug_id_list = torch.arange(patch_num).to(device)
+
+    # sort the patches by the area of neighbour patches
+    # sorted_patch_id_list = sorted(dual_graph.nodes, key=lambda x: len(dual_graph[x]), reverse=True)
+    area_list = []
+    for patch_id in range(patch_num):
+        local_vertex_pos = intersection_of_ray_and_all_plane(optimized_abcd_list[patch_id].unsqueeze(0),
+                                                             v_rays_c[patch_vertexes_id[patch_id]])  # 100 * n * 3
+        # 2. Construct the triangles
+        num_vertex = len(patch_vertexes_id[patch_id])
+        edges_idx = [[i, (i + 1) % num_vertex] for i in range(num_vertex)]
+        local_edge_pos = local_vertex_pos[:, edges_idx]
+        local_centroid = intersection_of_ray_and_all_plane(optimized_abcd_list[patch_id].unsqueeze(0),
+                                                           v_centroid_rays_c[patch_id].unsqueeze(0))[:, 0]
+        triangles_pos = torch.cat((local_edge_pos, local_centroid[:, None, None, :].tile(1, num_vertex, 1, 1)),
+                                  dim=2)
+        triangles_pos = triangles_pos.view(-1, 3, 3)  # (1*num_tri,3,3)
+
+        d1 = triangles_pos[:, 1, :] - triangles_pos[:, 0, :]
+        d2 = triangles_pos[:, 2, :] - triangles_pos[:, 1, :]
+        area = torch.linalg.norm(torch.cross(d1, d2) + 1e-6, dim=1).abs() / 2
+        area_list.append(area.sum().item())
+
+    debug_id_list = sorted(debug_id_list, key=lambda x: area_list[x], reverse=True)
+    debug_id_list = torch.tensor(debug_id_list[0:10]).to(device)
+
     while True:
+        # if count % 50 == 0:
+        group_idx = (group_idx + 1) % len(groups)
         visualizer.start_iter()
         # 1. Sample new hypothesis of all patch from 1) propagation 2) random perturbation
+        # patch_id_list = torch.tensor(groups[group_idx]).to(device)
+        patch_id_list = debug_id_list.clone()
         samples_depth, samples_angle = sample_new_planes(optimized_abcd_list,
                                                          v_centroid_rays_c,
-                                                         get_scale_factor(cur_iter[0]),
-                                                         dual_graph,
+                                                         id_neighbour_patches,
+                                                         patch_id_list,
+                                                         CASF.get_sf(),
                                                          sample_g)
         samples_abc = angles_to_vectors(samples_angle)  # n * 100 * 3
-        samples_intersection, samples_abcd = compute_plane_abcd(v_centroid_rays_c, samples_depth, samples_abc)
+        samples_intersection, samples_abcd = compute_plane_abcd(v_centroid_rays_c[patch_id_list], samples_depth, samples_abc)
 
         visualizer.update_timer("Sample")
-        visualizer.update_sample_plane(samples_abcd, v_rays_c, patch_vertexes_id, cur_iter[0])
+        visualizer.update_sample_plane(patch_id_list, samples_abcd, v_rays_c, patch_vertexes_id, cur_iter[0])
 
         if sum(end_flag) == patch_num:
             break
 
-        # Start to optimize
-        for v_patch_id in range(patch_num):
+        if min(cur_iter) > 50:
+            glue_loss_weight = 1
+
+        # for v_patch_id in range(patch_num):
+        for idx in range(len(patch_id_list)):
+            v_patch_id = patch_id_list[idx]
+
             if end_flag[v_patch_id] == 1:
                 continue
 
@@ -130,14 +230,17 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
             v_img1 = imgs[0]
             dilated_gradients1 = dilated_gradients_list[0]
             num_vertex = len(patch_vertexes_id[v_patch_id])
-            local_plane_parameter = samples_abcd[v_patch_id]
+            local_plane_parameter = samples_abcd[idx]
             local_vertex_pos = intersection_of_ray_and_all_plane(local_plane_parameter,
                                                                  v_rays_c[patch_vertexes_id[v_patch_id]])  # 100 * n * 3
+            visualizer.update_timer("Construct_p1")
             # 2. Construct the triangles
             edges_idx = [[i, (i + 1) % num_vertex] for i in range(num_vertex)]
+            visualizer.update_timer("Construct_p2")
             local_edge_pos = local_vertex_pos[:, edges_idx]
             local_centroid = intersection_of_ray_and_all_plane(local_plane_parameter,
                                                                v_centroid_rays_c[v_patch_id].unsqueeze(0))[:, 0]
+            visualizer.update_timer("Construct_p3")
             triangles_pos = torch.cat((local_edge_pos, local_centroid[:, None, None, :].tile(1, num_vertex, 1, 1)),
                                       dim=2)
             triangles_pos = triangles_pos.view(-1, 3, 3)  # (100*num_tri,3,3)
@@ -145,11 +248,12 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
             visualizer.update_timer("Construct")
 
             # 3. Sample points in this plane
-            num_sample_points_per_tri, sample_points_on_face_src = sample_triangles(50, triangles_pos[:, 0, :],
+            num_sample_points_per_tri, sample_points_on_face_src = sample_triangles(2500,
+                                                                                    triangles_pos[:, 0, :],
                                                                                     triangles_pos[:, 1, :],
                                                                                     triangles_pos[:, 2, :],
-                                                                                    v_sample_edge=False
-                                                                                    )
+                                                                                    v_sample_edge=False)
+
             triangle_normal = normalize_tensor(torch.cross(triangles_pos[:, 0, :] - triangles_pos[:, 1, :],
                                                            triangles_pos[:, 1, :] - triangles_pos[:, 2, :]))
 
@@ -190,12 +294,12 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
             visualizer.update_timer("NCC1")
             points_to_tri = points_to_tri_src[None, :].tile(num_source, 1)
             triangles_ncc = scatter_sum(points_ncc, points_to_tri, dim=1)
-            triangles_ncc = triangles_ncc / scatter_sum(remain_flag.to(torch.long), points_to_tri, dim=1)
+            triangles_ncc /= scatter_sum(remain_flag.to(torch.long), points_to_tri, dim=1)
             triangles_ncc = triangles_ncc.view(num_source, num_plane_sample, -1)
             triangle_weights = num_sample_points_per_tri.view(num_plane_sample, -1)
 
             triangle_weights = triangle_weights / (triangle_weights.sum(dim=-1, keepdim=True) + 1e-6)
-            ncc_loss = (triangles_ncc * triangle_weights).mean(dim=-1)
+            ncc_loss = (triangles_ncc * triangle_weights).nanmean(dim=-1)
 
             visualizer.update_timer("NCC2")
 
@@ -208,17 +312,18 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
             # collision_flag_edge = (collision_flag_edge.view(-1,2).sum(dim=1) == 2)  # 100 * num_edge
             # local_edge_pos[~collision_flag_edge.view(100,-1)]
 
-            edge_loss, edge_loss_mask, num_samples_per_edge = edge_loss_computer.compute_batch(
+            edge_loss, edge_outer_mask, num_samples_per_edge = edge_loss_computer.compute_batch(
                 local_edge_pos.reshape(-1, 2, 3),
                 intrinsic,
                 transformation,
                 dilated_gradients_list[0],
                 dilated_gradients_list[1:],
+                imgs[1:],
                 v_num_hypothesis=local_edge_pos.shape[0])
-            edge_loss[~edge_loss_mask] = torch.inf
+            edge_loss[~edge_outer_mask] = torch.inf
 
             edge_loss = edge_loss.view(num_source, num_plane_sample, -1)
-            edge_loss = torch.mean(edge_loss, dim=2)
+            edge_loss = torch.nanmean(edge_loss, dim=2)
 
             visualizer.update_timer("Edge")
 
@@ -242,31 +347,44 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
             edge_loss[torch.logical_not(valid_img_flag)] = torch.inf
 
             # when all the sample points of a sample are collided, the loss == inf, set it to nan
+
             final_loss = torch.where(final_loss.abs() == torch.inf, torch.nan, final_loss)
             ncc_loss_sum = torch.where(ncc_loss.abs() == torch.inf, torch.nan, ncc_loss)
             edge_loss_sum = torch.where(edge_loss.abs() == torch.inf, torch.nan, edge_loss)
 
             assert (final_loss == torch.inf).sum() == 0
-            # final_loss[~remain_num_each_sample] = torch.nan
+            # filter based on the loss of the first image
+            median = torch.nanmedian(final_loss[:,0],dim=0)[0]
+            outlier_mask = final_loss[:,0] > median * 3
+            assert outlier_mask.sum().item() != outlier_mask.shape[0]
+            final_loss[outlier_mask] = torch.nan
+
             final_loss_sum = final_loss.nanmean(dim=0)
-            ncc_loss_sum = ncc_loss_sum.nanmean(dim=0)
-            edge_loss_sum = edge_loss_sum.nanmean(dim=0)
+            #ncc_loss_sum = ncc_loss_sum.nanmean(dim=0)
+            #edge_loss_sum = edge_loss_sum.nanmean(dim=0)
 
             visualizer.update_timer("Loss")
 
             # 6. Select the best and update `optimized_abcd_list`
-            final_loss_sum[torch.isnan(final_loss_sum)] = torch.inf  # all the sample of all the patch are collided
+            # all the sample of all the patch are collided
+            # each sample should have at least 2 valid loss
+            valid_loss_num = (~torch.isnan(final_loss)).sum(dim=0)
+            final_loss_sum[torch.isnan(final_loss_sum)] = torch.inf
+
             id_best = torch.argmin(final_loss_sum, dim=-1)
 
+            if best_loss[v_patch_id] is not None and valid_loss_num[id_best] < 2:
+                id_best *= 0
+
             # if best_loss[v_patch_id] is not None and final_loss[id_best] < best_loss[v_patch_id]:
-            optimized_abcd_list[v_patch_id] = samples_abcd[v_patch_id][id_best]
+            optimized_abcd_list[v_patch_id] = samples_abcd[idx][id_best]
 
             # 7. Visualize
             visualizer.viz_patch_2d(
                 v_patch_id,
                 cur_iter[v_patch_id],
 
-                samples_abcd[v_patch_id],
+                samples_abcd[idx],
                 sample_points_on_face_src,
                 num_sample_points_per_tri,
 
@@ -285,12 +403,13 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
             cur_loss = final_loss_sum[id_best].cpu().item()
             if best_loss[v_patch_id] is not None:
                 delta[v_patch_id] = cur_loss - best_loss[v_patch_id]
-                print("Patch/Iter: {:3d}, {:4d}; Loss: {:.4f} Best: {:.4f} Delta: {:.4f}".format(
+                print("Patch/Iter: {:3d}, {:4d}; Loss: {:.4f} Best: {:.4f} Delta: {:.4f} Id_Best: {:3d}".format(
                     v_patch_id,
                     cur_iter[v_patch_id] + 1,
                     cur_loss,
                     best_loss[v_patch_id],
-                    delta[v_patch_id])
+                    delta[v_patch_id],
+                    id_best.cpu().item())
                 )
                 if abs(delta[v_patch_id]) < 1e-3:
                     num_tolerence[v_patch_id] -= 1
@@ -298,7 +417,7 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
                     num_tolerence[v_patch_id] = MAX_TOLERENCE
                     best_loss[v_patch_id] = cur_loss
 
-                if num_tolerence[v_patch_id] <= 0:
+                if num_tolerence[v_patch_id] <= 0 or best_loss[v_patch_id] < 0.1:
                     end_flag[v_patch_id] = 1
             else:
                 best_loss[v_patch_id] = cur_loss
@@ -327,16 +446,16 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, dual_
                 local_edge_pos, local_centroid[:, None, :].tile(num_vertex, 1, 1)), dim=1)
             final_triangles_list.append(triangles_pos)
         final_triangles = torch.cat(final_triangles_list)
-        tri_to_patch = torch.arange(patch_num).repeat_interleave(torch.from_numpy(np.array(tri_num_each_patch)))
+        tri_to_patch = torch.arange(patch_num).repeat_interleave(torch.from_numpy(np.array(tri_num_each_patch))).to(device)
         collision_checker.clear()
 
         collision_checker.add_triangles(final_triangles, tri_to_patch)
         visualizer.update_timer("Update2")
         visualizer.viz_results(
-            cur_iter[0],
-            optimized_abcd_list, v_rays_c, patch_vertexes_id,
+            max(cur_iter),
+            optimized_abcd_list, v_rays_c, patch_vertexes_id, debug_id_list
         )
-
+        count += 1
         continue
 
     # save optimized_abcd_list

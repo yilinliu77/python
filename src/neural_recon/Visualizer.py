@@ -29,7 +29,8 @@ class Visualizer:
         self.transformation = transformation
         self.tri_colors = [generate_random_color() for _ in range(100)]
 
-        self.viz_interval = 2000
+        self.viz_interval = 500
+        self.viz_debug_iter = []
 
         os.mkdir(os.path.join(self.log_root, "0total"))
         for i in range(self.num_patches):
@@ -39,6 +40,9 @@ class Visualizer:
         self.timer = {
             "Sample": 0,
             "Construct": 0,
+            "Construct_p1": 0,
+            "Construct_p2": 0,
+            "Construct_p3": 0,
             "Sample points": 0,
             "Collision": 0,
             "NCC1": 0,
@@ -59,13 +63,14 @@ class Visualizer:
         self.timer[name] += time.time() - self.timer_
         self.timer_ = time.time()
 
-    def update_sample_plane(self, samples_abcd, v_ray, id_vertexes, v_iter):
+    def update_sample_plane(self, patch_id_list, samples_abcd, v_ray, id_vertexes, v_iter):
         num_sample = samples_abcd.shape[1]
-        for i_patch in range(self.num_patches):
-            self.save_planes("patch_{}/samples/{}.ply".format(i_patch, v_iter),
-                             samples_abcd[i_patch],
+        for idx in range(len(patch_id_list)):
+            patch_id = patch_id_list[idx]
+            self.save_planes("patch_{}/samples/{}.ply".format(patch_id, v_iter),
+                             samples_abcd[idx],
                              v_ray,
-                             [id_vertexes[i_patch]] * num_sample
+                             [id_vertexes[patch_id]] * num_sample
                              )
 
         pass
@@ -129,7 +134,7 @@ class Visualizer:
                      edge_loss,
                      id_best,
                      ):
-        if v_iter % self.viz_interval != 0 or v_iter // self.viz_interval == 0:
+        if (v_iter % self.viz_interval != 0 or v_iter // self.viz_interval == 0) and v_iter not in self.viz_debug_iter:
             return
         print("Start to viz iter {} patch {}".format(v_iter, v_patch_id))
         num_sample = samples_abcd.shape[0]
@@ -137,6 +142,8 @@ class Visualizer:
         num_img = len(self.imgs)
 
         img_shape = self.imgs[0].shape[:2]
+        img_shape = img_shape[::-1]
+
         input_imgs = [self.imgs[0].copy()] + [item.copy() for item in self.imgs[1:]]
         input_points_2d = []
         input_points_2d.append(self.project(sample_points_on_face_src, self.intrinsic, img_shape))
@@ -165,7 +172,7 @@ class Visualizer:
                 i_start = sorted_index[i_sample] * num_triangles
                 i_end = (sorted_index[i_sample] + 1) * num_triangles
                 points_2d = input_points_2d[i_img][id_points[i_start]:id_points[i_end]]
-                local_remain_flag = remain_flag[i_img][id_points[i_start]:id_points[i_end]].cpu().numpy()
+                local_remain_flag = remain_flag[i_img-1][id_points[i_start]:id_points[i_end]].cpu().numpy()
 
                 point_color = []
                 for i_triangle in range(num_triangles):
@@ -186,21 +193,28 @@ class Visualizer:
                 assert len(point_color) == points_2d.shape[0]
                 point_color = np.stack(point_color)
                 point_color[~local_remain_flag] = 0
-                points_2d = np.clip(points_2d, 0, img_shape[0] - 1)
-                img[points_2d[:, 1], points_2d[:, 0]] = point_color
-
-                cv2.putText(img,
-                            "Sample: {:02d}; NCC: {:.4f}; Edge: {:.4f}; Final: {:.4f}/{:.4f}".format(
-                                sorted_index[i_sample],
-                                ncc_loss[i_img, sorted_index[i_sample]].item(),
-                                edge_loss[i_img, sorted_index[i_sample]].item(),
-                                final_loss[i_img, sorted_index[i_sample]].item(),
-                                final_loss_sum[sorted_index[i_sample]].item(),
-                            ),
-                            (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2, cv2.LINE_AA)
+                points_2d = np.clip(points_2d, 0, img_shape[1] - 1)
+                img[points_2d[:, 0], points_2d[:, 1]] = point_color
+                if i_img==0:
+                    cv2.putText(img,
+                                "Sample: {:02d}; Final: {:.4f}".format(
+                                    sorted_index[i_sample],
+                                    final_loss_sum[sorted_index[i_sample]].item(),
+                                ),
+                                (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2, cv2.LINE_AA)
+                else:
+                    cv2.putText(img,
+                                "Sample: {:02d}; NCC: {:.4f}; Edge: {:.4f}; Final: {:.4f}/{:.4f}".format(
+                                    sorted_index[i_sample],
+                                    ncc_loss[i_img-1, sorted_index[i_sample]].item(),
+                                    edge_loss[i_img-1, sorted_index[i_sample]].item(),
+                                    final_loss[i_img-1, sorted_index[i_sample]].item(),
+                                    final_loss_sum[sorted_index[i_sample]].item(),
+                                ),
+                                (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2, cv2.LINE_AA)
                 imgs.append(img)
-            total_img = np.stack(imgs, axis=0).reshape(10, 10, 800, 800, 3)
-            total_img = np.transpose(total_img, (0, 2, 1, 3, 4)).reshape(8000, 8000, 3)
+            total_img = np.stack(imgs, axis=0).reshape(10, 10, 968, 1296, 3)
+            total_img = np.transpose(total_img, (0, 2, 1, 3, 4)).reshape(968*10, 1296*10, 3)
             cv2.imwrite(os.path.join(
                 self.log_root, "patch_{}/image_{}_iter_{}.png".format(v_patch_id, i_img, v_iter)), total_img)
             pass
@@ -209,11 +223,19 @@ class Visualizer:
 
     def viz_results(self,
                     v_iter,
-                    planes, v_ray, id_vertexes
+                    planes, v_ray, id_vertexes, debug_id_list=None,
                     ):
+        if debug_id_list is not None:
+            planes = planes[debug_id_list]
+            id_vertexes_ = []
+            for debug_id in debug_id_list:
+                id_vertexes_.append(id_vertexes[debug_id])
+            id_vertexes = id_vertexes_
+
         num_patch = planes.shape[0]
         num_img = len(self.imgs)
         img_shape = self.imgs[0].shape[:2]
+        img_shape = img_shape[::-1]
 
         all_intersection_end_points = intersection_of_ray_and_all_plane(planes,
                                                                         v_ray)
@@ -230,8 +252,8 @@ class Visualizer:
             input_points_2d.append(self.project(
                 to_homogeneous_tensor(all_intersection_end_points), self.transformation[i_img], img_shape))
         input_points_2d = np.stack(input_points_2d, axis=0)
-        input_points_2d = np.clip(input_points_2d, 0, img_shape[0] - 1)
-
+        #input_points_2d = np.clip(input_points_2d, 0, img_shape[0] - 1)
+        #input_points_2d = input_points_2d[..., np.flip(np.arange(input_points_2d.shape[-1]))]
         for i_img in range(num_img):
             # Draw points
             for i_line in range(input_points_2d[i_img].shape[0]):
@@ -239,10 +261,16 @@ class Visualizer:
                          input_points_2d[i_img][i_line,0],
                          input_points_2d[i_img][i_line,1],
                          (0, 255, 0), 1)
-        total_img = np.stack(input_imgs[:10], axis=0).reshape(2, 5, 800, 800, 3)
-        total_img = np.transpose(total_img, (0, 2, 1, 3, 4)).reshape(1600, 4000, 3)
+        #total_img = np.stack(input_imgs[:10], axis=0).reshape(2, 5, 800, 800, 3)
+        #total_img = np.transpose(total_img, (0, 2, 1, 3, 4)).reshape(1600, 4000, 3)
+        total_img = np.stack(input_imgs[:10], axis=0).reshape(2, 5, 968, 1296, 3)
+        total_img = np.transpose(total_img, (0, 2, 1, 3, 4)).reshape(968*2, 1296*5, 3)
         cv2.imwrite(os.path.join(
             self.log_root, "0total/iter_{}.png".format(v_iter,)), total_img)
 
         self.save_planes("0total/iter_{}.ply".format(v_iter), planes, v_ray, id_vertexes)
         pass
+
+
+
+

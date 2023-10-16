@@ -3,7 +3,7 @@ import time
 import torch
 import numpy as np
 from shared.common_utils import normalize_tensor
-from src.neural_recon.geometric_util import vectors_to_angles, intersection_of_ray_and_plane
+from src.neural_recon.geometric_util import vectors_to_angles, intersection_of_ray_and_plane, intersection_of_ray_and_all_plane
 
 
 # cur_dir: (M, 3) M directions
@@ -35,12 +35,12 @@ def sample_edge(num_per_edge_m, cur_dir, start_point, num_max_sample=2000):
 # p1, p2, p3: (M, 3) M points
 # p1: (M, 3) M points
 # num_per_m: float value
-def sample_triangles(num_per_m, p1, p2, p3, num_max_sample=500, v_sample_edge=True):
+def sample_triangles(num_per_m2, p1, p2, p3, num_max_sample=500, v_sample_edge=True):
     d1 = p2 - p1
     d2 = p3 - p2
     area = torch.linalg.norm(torch.cross(d1, d2) + 1e-6, dim=1).abs() / 2
 
-    num_per_m2 = num_per_m * num_per_m
+    # num_per_m2 = num_per_m * num_per_m
     num_tri_samples = torch.clamp((area * num_per_m2).to(torch.long), 1, num_max_sample * 4)
 
     # samples = torch.rand(num_tri_samples.sum(), 2, device=p1.device)
@@ -126,10 +126,36 @@ def sample_points_2d(v_edge_points, v_num_horizontal,
     return num_coordinates_per_edge, interpolated_coordinates
 
 
+def LatinHypercubeSample(range_list=None, n_samples=100, device='cuda'):
+    if range_list is None:
+        range_list = [[0, 10], [-torch.pi, torch.pi]]
+
+    # 获取维度数量
+    ndim = len(range_list)
+
+    # 转换 range_list 为 tensor，使其能够直接用于向量化计算
+    range_tensor = torch.tensor(range_list).float()
+    lower_bounds = range_tensor[:, 0]  # 获取所有维度的下界
+    ranges = range_tensor[:, 1] - lower_bounds  # 获取所有维度的范围
+
+    # 计算每个维度的 delta
+    delta = ranges / n_samples
+
+    # 对每个维度进行采样
+    samples = torch.rand(n_samples, ndim) * delta + lower_bounds + torch.arange(n_samples).view(-1, 1).float() * delta
+    samples = samples.to(device)
+
+    # 随机打乱样本
+    for dim in range(ndim):
+        samples[:, dim] = samples[torch.randperm(n_samples), dim]
+
+    return samples
+
+
 # v_original_distances: (M, 1) M original samples
 def sample_new_distance(v_original_distances,
                         num_sample=100, scale_factor=1.0,
-                        v_max=10., v_min=0., v_random_g=None):
+                        v_max=20., v_min=0., v_random_g=None):
     num_vertices = v_original_distances.shape[0]
     device = v_original_distances.device
     # (B, S)
@@ -171,25 +197,35 @@ def sample_depth_and_angle(depth, angle, num_sample=100, scale_factor=1.0, v_ran
     return sample_depths, sample_angles.permute(0, 2, 1)
 
 
-def sample_new_planes(v_original_parameters, v_centroid_rays_c, scale_factor=1.0, v_dual_graph=None, v_random_g=None):
+def sample_new_planes(v_original_parameters, v_centroid_rays_c, id_neighbour_patches, patch_id_list,
+                      scale_factor=1.0, v_random_g=None):
     plane_angles = vectors_to_angles(v_original_parameters[:, :3])
     initial_centroids = intersection_of_ray_and_plane(v_original_parameters, v_centroid_rays_c)[1]
     init_depth = torch.linalg.norm(initial_centroids, dim=-1)
 
-    #init_depth[init_depth > 10] = 10
+    init_depth[init_depth > 20] = 20
 
-    sample_depth, sample_angle = sample_depth_and_angle(init_depth, plane_angles,
-                                                        scale_factor=scale_factor,v_random_g=v_random_g)
+    # sample = LatinHypercubeSample(range_list=[[0, 10], [-torch.pi, torch.pi], [-2 * torch.pi, 2 * torch.pi]],
+    #                               device=v_original_parameters.device)
+    # sample_depth = sample[:, 0].unsqueeze(0).tile(v_original_parameters.shape[0], 1)
+    # sample_angle = sample[:, 1:].unsqueeze(0).tile(v_original_parameters.shape[0], 1, 1)
+    sample_depth, sample_angle = sample_depth_and_angle(init_depth[patch_id_list],
+                                                        plane_angles[patch_id_list],
+                                                        scale_factor=scale_factor, v_random_g=v_random_g)
 
-    if v_dual_graph is None:
-        return sample_depth.contiguous(), sample_angle.contiguous()
-
-    id_neighbour_patches = [list(v_dual_graph[id_node].keys()) for id_node in v_dual_graph.nodes]
-    for patch_id in range(len(id_neighbour_patches)):
+    for idx in range(len(patch_id_list)):
+        patch_id = patch_id_list[idx]
         # propagation from neighbour, do not sample depth!
-        id_neighbour = id_neighbour_patches[patch_id]
-        sample_depth[patch_id, 1:1 + len(id_neighbour)] = init_depth[torch.tensor(id_neighbour)]
-        sample_angle[patch_id, 1:1 + len(id_neighbour)] = plane_angles[torch.tensor(id_neighbour)].clone()
+        id_neighbour_list = id_neighbour_patches[patch_id]
+        plane_parameter_neighbour = v_original_parameters[torch.tensor(id_neighbour_list)]
+        propagated_centroids = intersection_of_ray_and_all_plane(plane_parameter_neighbour,
+                                                                 v_centroid_rays_c[patch_id].unsqueeze(0))[:, 0]
+        propagated_depth = torch.linalg.norm(propagated_centroids, dim=-1)
+
+        # depth_neighbour = init_depth[torch.tensor(id_neighbour_list)]
+        #sample_depth[patch_id, 1:1 + len(id_neighbour_list)] = init_depth[torch.tensor(id_neighbour_list)].clone()
+        sample_depth[idx, 1:1 + len(id_neighbour_list)] = propagated_depth.clone()
+        sample_angle[idx, 1:1 + len(id_neighbour_list)] = plane_angles[torch.tensor(id_neighbour_list)].clone()
     return sample_depth.contiguous(), sample_angle.contiguous()
 
 

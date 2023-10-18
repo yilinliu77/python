@@ -1,6 +1,7 @@
 dataset:
   root: G:/Dataset/GSP/GSP_v7_1k/training.hdf5
   dataset_name: ABC_patch
+  is_bool_flag: true
 
   test_list: []
 
@@ -20,9 +21,10 @@ trainer:
 
 model:
   model_name: Base_model_wo_pooling
-  depths: 4
+  with_bn: true
+  channels: 7
+  output_channels: 26
   need_normalize: true
-  channels: 4
 
   test_threshold: 0.5
 

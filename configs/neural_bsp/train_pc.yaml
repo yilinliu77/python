@@ -1,6 +1,7 @@
 dataset:
   root: E:/GSP_v10_50k/training.h5
   dataset_name: ABC_pc_patch
+  is_bool_flag: true
 
   overfit: false
   max_training_sample: 262144
@@ -24,6 +25,7 @@ model:
   model_name: Base_model_dilated
   with_bn: true
   channels: 7
+  output_channels: 26
   need_normalize: true
   voxelize_res: 256
 

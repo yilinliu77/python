@@ -62,6 +62,8 @@ class ABC_patch(torch.utils.data.Dataset):
                 ["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
         self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
 
+        self.is_bool_flag = self.conf["is_bool_flag"]
+
         assert self.resolution % self.patch_size == 0
         self.num_patch = self.resolution // self.patch_size
         self.num_patches = self.num_patch ** 2
@@ -103,13 +105,19 @@ class ABC_patch(torch.utils.data.Dataset):
                      v_id_item,
                      x_start:x_start + ps,
                      y_start:y_start + ps,
-                     ]).astype(bool).astype(np.float32)
+                     ])
+            if self.is_bool_flag:
+                flags = flags.astype(bool).astype(np.float32)
+            else:
+                shifts = np.arange(26)
+                flags2 = (flags[None,] & (1<<shifts)[:,None,None,None]) > 0
+                flags = flags2.astype(np.float32)
 
         times[0] += time.time() - cur_time
         cur_time = time.time()
 
         features = features.reshape(ps, ps, self.num_patch, ps, -1).transpose(2, 0, 1, 3, 4)
-        flags = flags.reshape(ps, ps, self.num_patch, ps).transpose(2, 0, 1, 3)
+        flags = flags.reshape(-1, ps, ps, self.num_patch, ps).transpose(3, 0, 1, 2, 4)
 
         times[1] += time.time() - cur_time
         return features, flags
@@ -239,17 +247,26 @@ class ABC_pc_patch(ABC_patch):
                      v_id_item,
                      x_start:x_start + ps,
                      y_start:y_start + ps,
-                     ]).astype(bool).astype(np.float32)
+                     ])
 
-        times[0] += time.time() - cur_time
+            times[0] += time.time() - cur_time
+            cur_time = time.time()
+
+            if self.is_bool_flag:
+                flags = flags.astype(bool).astype(np.float32)[None,]
+            else:
+                shifts = np.arange(26)
+                flags2 = (flags[None,] & (1<<shifts)[:,None,None,None]) > 0
+                flags = flags2.astype(np.float32)
+
+        times[1] += time.time() - cur_time
         cur_time = time.time()
 
         features = features.reshape(ps, ps, self.num_patch, ps, -1).transpose(2, 0, 1, 3, 4)
-        flags = flags.reshape(ps, ps, self.num_patch, ps).transpose(2, 0, 1, 3)
+        flags = flags.reshape(-1, ps, ps, self.num_patch, ps).transpose(3, 0, 1, 2, 4)
 
-        times[1] += time.time() - cur_time
+        times[2] += time.time() - cur_time
         return features, flags
-
 
 
 # Do overlap during the training

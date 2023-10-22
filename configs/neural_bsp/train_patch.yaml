@@ -1,5 +1,5 @@
 dataset:
-  root: G:/Dataset/GSP/GSP_v7_1k/training.hdf5
+  root: E:/GSP_v10_50k/training.h5
   dataset_name: ABC_patch
   is_bool_flag: true
 
@@ -20,10 +20,10 @@ trainer:
   accelerator: "16-mixed"
 
 model:
-  model_name: Base_model_wo_pooling
+  model_name: Base_model_dilated
   with_bn: true
   channels: 7
-  output_channels: 26
+  output_channels: 1
   need_normalize: true
 
   test_threshold: 0.5

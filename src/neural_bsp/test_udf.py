@@ -26,6 +26,10 @@ def main(v_cfg: DictConfig):
     test_list = v_cfg["dataset"]["test_list"]  # List of models to test
     threshold = v_cfg["model"]["test_threshold"]
     res = v_cfg["model"]["test_resolution"]
+    ps = v_cfg["dataset"]["patch_size"]
+    ps_2 = ps//2
+    ps_4 = ps//4
+    num_patch_dim = res // ps * 2 - 1
     query_points = generate_coords(res)
 
     # Load model and dataset
@@ -62,23 +66,27 @@ def main(v_cfg: DictConfig):
             feat = [(torch.from_numpy(data[0]).cuda().unsqueeze(0), torch.zeros(data[0].shape[0])), None]
 
             prediction = model(feat, False)
-            features.append(data[0])
             flags.append(prediction.detach().cpu().numpy()[0])
 
-        features = np.transpose(np.concatenate(features, axis=0), (0, 2, 3, 4, 1))
         flags = np.concatenate(flags, axis=0)
 
         final_flags = np.zeros((res, res, res), dtype=np.float32)
-        for i in range(features.shape[0]):
-            x = i // 15 // 15
-            y = i // 15 % 15
-            z = i % 15
+        for i in range(flags.shape[0]):
+            x = i // num_patch_dim // num_patch_dim
+            y = i // num_patch_dim % num_patch_dim
+            z = i % num_patch_dim
 
-            if x == 0 or x == 14 or y == 0 or y == 14 or z == 0 or z == 14:
-                final_flags[x * 16:x * 16 + 32, y * 16:y * 16 + 32, z * 16:z * 16 + 32] = flags[i, 0]
+            if x == 0 or x == num_patch_dim-1 or y == 0 or y == num_patch_dim-1 or z == 0 or z == num_patch_dim-1:
+                final_flags[x * ps_2:x * ps_2 + ps, y * ps_2:y * ps_2 + ps, z * ps_2:z * ps_2 + ps] = flags[i, 0]
             else:
                 final_flags[
-                x * 16 + 8:x * 16 + 24, y * 16 + 8:y * 16 + 24, z * 16 + 8:z * 16 + 24] = flags[i, 0, 8:24, 8:24, 8:24]
+                x * ps_2 + ps_4:x * ps_2 + ps_4 + ps_2,
+                y * ps_2 + ps_4:y * ps_2 + ps_4 + ps_2,
+                z * ps_2 + ps_4:z * ps_2 + ps_4 + ps_2] = flags[
+                                                          i, 0,
+                                                          ps_4:ps_2 + ps_4,
+                                                          ps_4:ps_2 + ps_4,
+                                                          ps_4:ps_2 + ps_4]
 
         final_flags = sigmoid(final_flags) > threshold
         final_features = dataset.feat_data

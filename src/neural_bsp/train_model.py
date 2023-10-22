@@ -262,11 +262,14 @@ class PC_phase(pl.LightningModule):
             if loss_name == "total_loss":
                 self.log("Test_Loss", loss[loss_name], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                          sync_dist=True,
-                         batch_size=data[0].shape[0])
+                         batch_size=data[0][0].shape[0])
             else:
                 self.log("Test_"+loss_name, loss[loss_name], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                          sync_dist=True,
-                         batch_size=data[0].shape[0])
+                         batch_size=data[0][0].shape[0])
+
+        self.model.valid_output(batch_idx, self.log_root, name,
+                     outputs.cpu().numpy(), data[1].cpu().numpy(), None)
 
         # Save
         if len(self.hydra_conf["dataset"]["test_list"]) > 0:
@@ -343,12 +346,12 @@ def main(v_cfg: DictConfig):
         num_sanity_val_steps=2,
         check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
         precision=v_cfg["trainer"]["accelerator"],
-        gradient_clip_val=0.5,
+        # gradient_clip_val=0.5,
     )
     torch.find_unused_parameters = False
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
         state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
-        model.load_state_dict(state_dict, strict=True)
+        model.load_state_dict(state_dict, strict=False)
 
     if v_cfg["trainer"].evaluate:
         trainer.test(model)

@@ -5,8 +5,8 @@ dataset:
   test_list: [
     "G:/Dataset/ABC/quadric_test/00990017/00990017_d770b3b036e65283d9195870_trimesh_002.obj",
     "G:/Dataset/ABC/quadric_test/00990044/00990044_44ff2f0a4e7e92d94d816fe9_trimesh_001.obj",
-#    "G:/Dataset/ABC/quadric_test/00990267/00990267_c3a4c16b691d5fa972811080_trimesh_000.obj",
-#    "G:/Dataset/ABC/quadric_test/00990271/00990271_e6d9b3822bd5bb0ee58ee10d_trimesh_001.obj",
+    "G:/Dataset/ABC/quadric_test/00990267/00990267_c3a4c16b691d5fa972811080_trimesh_000.obj",
+    "G:/Dataset/ABC/quadric_test/00990271/00990271_e6d9b3822bd5bb0ee58ee10d_trimesh_001.obj",
   ]
 
 trainer:
@@ -21,7 +21,7 @@ trainer:
   evaluate: true
   output: .
   check_val_every_n_epoch: 1
-  accelerator: "16-mixed"
+  accelerator: "32-true"
 
 model:
   model_name: PC_model_whole_voxel
@@ -30,7 +30,7 @@ model:
   need_normalize: false
   voxelize_res: 64
 
-  test_threshold: 0.3
+  test_threshold: 0.5
   test_resolution: 256
 
 hydra:

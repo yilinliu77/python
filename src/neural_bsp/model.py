@@ -441,12 +441,18 @@ class PC_model_whole_voxel(nn.Module):
     def loss(self, v_predictions, v_input):
         (_, _), labels = v_input
 
-        loss = self.loss_func(v_predictions, labels[:, None], self.loss_alpha)
+        loss = focal_loss(v_predictions, labels[:, None])
         return {"total_loss": loss}
+
+    def compute_pr(self, v_pred, v_gt):
+        bs = v_pred.shape[0]
+        prob = torch.sigmoid(v_pred).reshape(bs, -1)
+        gt = v_gt.reshape(bs, -1).to(torch.long)
+        return prob, gt
 
     def valid_output(self, idx, log_root, target_viz_name,
                      gathered_prediction, gathered_gt, gathered_queries):
-        query_points = gathered_queries.reshape(-1, 3)
+        query_points = generate_coords(256).reshape(-1, 3)
 
         predicted_labels = gathered_prediction.reshape(-1)
         gt_labels = gathered_gt.reshape(-1)

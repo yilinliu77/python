@@ -1,6 +1,6 @@
 dataset:
   root: E:/GSP_v10_50k/training.h5
-  dataset_name: ABC_pc_patch
+  dataset_name: ABC_whole_pc
   is_bool_flag: true
 
   overfit: false
@@ -22,10 +22,10 @@ trainer:
   accelerator: "16-mixed"
 
 model:
-  model_name: Base_model_dilated
+  model_name: PC_model_whole_voxel
   with_bn: true
   channels: 7
-  output_channels: 26
+  output_channels: 1
   need_normalize: true
   voxelize_res: 256
 

@@ -2,7 +2,13 @@ dataset:
   dataset_name: ABC_test_mesh
 #  dataset_name: ABC_test_pc
 #  test_list: ["C:/Users/whats/Desktop/test.ply"]
-  test_list: ["G:/Dataset/ABC/quadric_test/00999739/00999739_348b49253ff07a020fc5fe58_trimesh_000.obj"]
+#  test_list: ["G:/Dataset/ABC/quadric_test/00999739/00999739_348b49253ff07a020fc5fe58_trimesh_000.obj"]
+  test_list: [
+    "G:/Dataset/ABC/quadric_test/00990017/00990017_d770b3b036e65283d9195870_trimesh_002.obj",
+    "G:/Dataset/ABC/quadric_test/00990044/00990044_44ff2f0a4e7e92d94d816fe9_trimesh_001.obj",
+    "G:/Dataset/ABC/quadric_test/00990267/00990267_c3a4c16b691d5fa972811080_trimesh_000.obj",
+    "G:/Dataset/ABC/quadric_test/00990271/00990271_e6d9b3822bd5bb0ee58ee10d_trimesh_001.obj",
+  ]
   patch_size: 32
 
 trainer:
@@ -11,12 +17,14 @@ trainer:
   batch_size: 128
   resume_from_checkpoint: output/neural_bsp/1016_v9_base_wo_normal.ckpt
   output: .
-  accelerator: "32-true"
+  accelerator: "16-mixed"
 
 model:
   model_name: Base_model_dilated
   channels: 4
   need_normalize: false
+  with_bn: false
+  output_channels: 1
   depths: 4
 
   v_depth: 5

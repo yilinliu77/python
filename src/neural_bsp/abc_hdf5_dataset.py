@@ -107,7 +107,7 @@ class ABC_patch(torch.utils.data.Dataset):
                      y_start:y_start + ps,
                      ])
             if self.is_bool_flag:
-                flags = flags.astype(bool).astype(np.float32)
+                flags = (flags>0).astype(bool).astype(np.float32)
             else:
                 shifts = np.arange(26)
                 flags2 = (flags[None,] & (1<<shifts)[:,None,None,None]) > 0
@@ -746,6 +746,7 @@ class ABC_test_mesh(torch.utils.data.Dataset):
         self.coords = generate_coords(v_resolution).reshape(-1, 3)
         self.num_patches = (v_resolution // 32) ** 3
         assert self.num_patches % v_resolution == 0
+        prefix = Path(v_data_root).stem
 
         print("Prepare mesh data")
         if not os.path.exists(v_data_root):
@@ -758,7 +759,7 @@ class ABC_test_mesh(torch.utils.data.Dataset):
         points = normalize_points(points)
         mesh.vertices = o3d.utility.Vector3dVector(points)
         if v_output_root is not None:
-            o3d.io.write_triangle_mesh(os.path.join(v_output_root, "temp.ply"), mesh)
+            o3d.io.write_triangle_mesh(os.path.join(v_output_root, prefix+"_norm.ply"), mesh)
 
         pc = mesh.sample_points_poisson_disk(10000)
         points = np.asarray(pc.points)

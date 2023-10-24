@@ -1,6 +1,7 @@
 dataset:
   root: E:/GSP_v10_50k/training.h5
-  dataset_name: ABC_points_and_flags
+  dataset_name: ABC_whole_pc
+  is_bool_flag: true
 
   overfit: false
   max_training_sample: 262144
@@ -9,7 +10,7 @@ dataset:
 trainer:
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 8
+  num_worker: 0
 
   spawn: false
   num_samples: -1
@@ -21,11 +22,12 @@ trainer:
   accelerator: "16-mixed"
 
 model:
-  model_name: PC_local_global
-  depths: 4
-  channels: 6
+  model_name: PC_model_whole_voxel
+  with_bn: true
+  channels: 7
+  output_channels: 1
   need_normalize: true
-  voxelize_res: 64
+  voxelize_res: 256
 
   test_threshold: 0.5
 

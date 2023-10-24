@@ -62,6 +62,8 @@ class ABC_patch(torch.utils.data.Dataset):
                 ["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
         self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
 
+        self.is_bool_flag = self.conf["is_bool_flag"]
+
         assert self.resolution % self.patch_size == 0
         self.num_patch = self.resolution // self.patch_size
         self.num_patches = self.num_patch ** 2
@@ -103,13 +105,19 @@ class ABC_patch(torch.utils.data.Dataset):
                      v_id_item,
                      x_start:x_start + ps,
                      y_start:y_start + ps,
-                     ]).astype(bool).astype(np.float32)
+                     ])
+            if self.is_bool_flag:
+                flags = (flags>0).astype(bool).astype(np.float32)
+            else:
+                shifts = np.arange(26)
+                flags2 = (flags[None,] & (1<<shifts)[:,None,None,None]) > 0
+                flags = flags2.astype(np.float32)
 
         times[0] += time.time() - cur_time
         cur_time = time.time()
 
         features = features.reshape(ps, ps, self.num_patch, ps, -1).transpose(2, 0, 1, 3, 4)
-        flags = flags.reshape(ps, ps, self.num_patch, ps).transpose(2, 0, 1, 3)
+        flags = flags.reshape(-1, ps, ps, self.num_patch, ps).transpose(3, 0, 1, 2, 4)
 
         times[1] += time.time() - cur_time
         return features, flags
@@ -141,6 +149,124 @@ class ABC_patch(torch.utils.data.Dataset):
             names,
             torch.from_numpy(id_patch),
         )
+
+# Whole field
+class ABC_whole_pc(torch.utils.data.Dataset):
+    def __init__(self, v_data_root, v_training_mode, v_conf):
+        super(ABC_whole_pc, self).__init__()
+        self.data_root = v_data_root
+        self.pc_dir = str(Path(v_data_root).parent)
+        self.mode = v_training_mode
+        self.conf = v_conf
+        with h5py.File(self.data_root, "r") as f:
+            self.num_items = f["flags"].shape[0]
+            self.resolution = f["flags"].shape[1]
+            self.names = np.asarray(
+                ["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
+        self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
+
+        if self.mode == "training" and self.conf["overfit"]:
+            self.index = np.arange(self.num_items)
+        elif self.mode == "training" and not self.conf["overfit"]:
+            self.index = np.arange(self.num_items)[:self.validation_start]
+        elif self.mode == "validation":
+            self.index = np.arange(self.num_items)[self.validation_start:]
+        elif self.mode == "testing":
+            self.index = np.arange(self.num_items)
+        else:
+            raise ""
+
+        self.coords = generate_coords(self.resolution)
+        self.max_training_sample = self.conf["max_training_sample"]
+
+    def __len__(self):
+        return self.index.shape[0]
+
+    def get_patch(self, v_id_item):
+        times = [0] * 10
+        cur_time = time.time()
+        with h5py.File(self.data_root, "r") as f:
+            flags = f["flags"][v_id_item].astype(bool).astype(np.float32)
+            point_features = f["point_features"][v_id_item].astype(np.float32)
+            coords = self.coords
+
+        times[0] += time.time() - cur_time
+        cur_time = time.time()
+        return point_features[None, :], coords[None, :], flags[None, :], 0
+
+    def __getitem__(self, idx):
+        id_object = self.index[idx]
+
+        points, feat_data, flag_data, id_patch = self.get_patch(id_object)
+        return points, feat_data, flag_data, self.names[id_object], id_patch
+
+    @staticmethod
+    def collate_fn(v_batches):
+        points, feat_data, flag_data, names, ids = [], [], [], [], []
+        for item in v_batches:
+            points.append(item[0])
+            feat_data.append(item[1])
+            flag_data.append(item[2])
+            names.append(item[3])
+            ids.append(item[4])
+        points = np.concatenate(points, axis=0)
+        feat_data = np.concatenate(feat_data, axis=0)
+        flag_data = np.concatenate(flag_data, axis=0)
+        names = np.stack(names, axis=0)
+        ids = np.stack(ids, axis=0)
+
+        return (
+            (torch.from_numpy(points), torch.from_numpy(feat_data)),
+            torch.from_numpy(flag_data),
+            names,
+            torch.from_numpy(ids)
+        )
+
+################################################################################################################
+
+# Dataset for patch training
+class ABC_pc_patch(ABC_patch):
+    def __init__(self, v_data_root, v_training_mode, v_conf):
+        super(ABC_pc_patch, self).__init__(v_data_root, v_training_mode, v_conf)
+
+    def get_patch(self, v_id_item, v_id_patch):
+        times = [0] * 10
+        cur_time = time.time()
+
+        ps = self.patch_size
+        x_start = (v_id_patch // self.num_patch) * ps
+        y_start = (v_id_patch % self.num_patch) * ps
+
+        with h5py.File(self.data_root, "r") as f:
+            features = f["point_features"][
+                       v_id_item,
+                       x_start:x_start + ps,
+                       y_start:y_start + ps,
+                       ].astype(np.float32)
+            flags = (f["flags"][
+                     v_id_item,
+                     x_start:x_start + ps,
+                     y_start:y_start + ps,
+                     ])
+
+            times[0] += time.time() - cur_time
+            cur_time = time.time()
+
+            if self.is_bool_flag:
+                flags = flags.astype(bool).astype(np.float32)[None,]
+            else:
+                shifts = np.arange(26)
+                flags2 = (flags[None,] & (1<<shifts)[:,None,None,None]) > 0
+                flags = flags2.astype(np.float32)
+
+        times[1] += time.time() - cur_time
+        cur_time = time.time()
+
+        features = features.reshape(ps, ps, self.num_patch, ps, -1).transpose(2, 0, 1, 3, 4)
+        flags = flags.reshape(-1, ps, ps, self.num_patch, ps).transpose(3, 0, 1, 2, 4)
+
+        times[2] += time.time() - cur_time
+        return features, flags
 
 
 # Do overlap during the training
@@ -511,80 +637,6 @@ class ABC_pc_dynamic(torch.utils.data.Dataset):
             torch.from_numpy(ids)
         )
 
-
-# Whole field
-class ABC_whole_pc(torch.utils.data.Dataset):
-    def __init__(self, v_data_root, v_training_mode, v_conf):
-        super(ABC_whole_pc, self).__init__()
-        self.data_root = v_data_root
-        self.pc_dir = str(Path(v_data_root).parent)
-        self.mode = v_training_mode
-        self.conf = v_conf
-        with h5py.File(self.data_root, "r") as f:
-            self.num_items = f["flags"].shape[0]
-            self.resolution = f["flags"].shape[1]
-            self.names = np.asarray(
-                ["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
-        self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
-
-        if self.mode == "training" and self.conf["overfit"]:
-            self.index = np.arange(self.num_items)
-        elif self.mode == "training" and not self.conf["overfit"]:
-            self.index = np.arange(self.num_items)[:self.validation_start]
-        elif self.mode == "validation":
-            self.index = np.arange(self.num_items)[self.validation_start:]
-        elif self.mode == "testing":
-            self.index = np.arange(self.num_items)
-        else:
-            raise ""
-
-        self.coords = generate_coords(self.resolution)
-        self.max_training_sample = self.conf["max_training_sample"]
-
-    def __len__(self):
-        return self.index.shape[0]
-
-    def get_patch(self, v_id_item):
-        times = [0] * 10
-        cur_time = time.time()
-        with h5py.File(self.data_root, "r") as f:
-            flags = f["flags"][v_id_item].astype(bool).astype(np.float32)
-            point_features = f["point_features"][v_id_item].astype(np.float32)
-            coords = self.coords
-
-        times[0] += time.time() - cur_time
-        cur_time = time.time()
-        return point_features[None, :], coords[None, :], flags[None, :], 0
-
-    def __getitem__(self, idx):
-        id_object = self.index[idx]
-
-        points, feat_data, flag_data, id_patch = self.get_patch(id_object)
-        return points, feat_data, flag_data, self.names[id_object], id_patch
-
-    @staticmethod
-    def collate_fn(v_batches):
-        points, feat_data, flag_data, names, ids = [], [], [], [], []
-        for item in v_batches:
-            points.append(item[0])
-            feat_data.append(item[1])
-            flag_data.append(item[2])
-            names.append(item[3])
-            ids.append(item[4])
-        points = np.concatenate(points, axis=0)
-        feat_data = np.concatenate(feat_data, axis=0)
-        flag_data = np.concatenate(flag_data, axis=0)
-        names = np.stack(names, axis=0)
-        ids = np.stack(ids, axis=0)
-
-        return (
-            (torch.from_numpy(points), torch.from_numpy(feat_data)),
-            torch.from_numpy(flag_data),
-            names,
-            torch.from_numpy(ids)
-        )
-
-
 # Calculate the point features online using kdtree
 # Not used because it is so slow
 class ABC_whole_pc_dynamic(torch.utils.data.Dataset):
@@ -694,6 +746,7 @@ class ABC_test_mesh(torch.utils.data.Dataset):
         self.coords = generate_coords(v_resolution).reshape(-1, 3)
         self.num_patches = (v_resolution // 32) ** 3
         assert self.num_patches % v_resolution == 0
+        prefix = Path(v_data_root).stem
 
         print("Prepare mesh data")
         if not os.path.exists(v_data_root):
@@ -706,7 +759,7 @@ class ABC_test_mesh(torch.utils.data.Dataset):
         points = normalize_points(points)
         mesh.vertices = o3d.utility.Vector3dVector(points)
         if v_output_root is not None:
-            o3d.io.write_triangle_mesh(os.path.join(v_output_root, "temp.ply"), mesh)
+            o3d.io.write_triangle_mesh(os.path.join(v_output_root, prefix+"_norm.ply"), mesh)
 
         pc = mesh.sample_points_poisson_disk(10000)
         points = np.asarray(pc.points)
@@ -776,26 +829,29 @@ class ABC_test_mesh(torch.utils.data.Dataset):
         return features, id_list
 
 
-class ABC_test_pc(torch.utils.data.Dataset):
-    def __init__(self, v_data_root, v_batch_size, v_output_features=4, v_resolution=256):
-        super(ABC_test_pc, self).__init__()
+class ABC_test_voxel(torch.utils.data.Dataset):
+    def __init__(self, v_data_root, v_batch_size, v_resolution=256, v_output_root=None):
+        super(ABC_test_voxel, self).__init__()
         self.batch_size = v_batch_size
-        self.output_features = v_output_features
         self.data_root = v_data_root
         self.resolution = v_resolution
-
-        assert v_resolution % 32 == 0
-        num_patches_per_dim = v_resolution // 32
-        self.coords = generate_coords(v_resolution)
-        self.num_patches = (v_resolution // 32) ** 3
-        assert self.num_patches % v_resolution == 0
-
+        self.coords = generate_coords(v_resolution).reshape(-1,3)
         print("Prepare mesh data")
         if not os.path.exists(v_data_root):
             print("Cannot find ", v_data_root)
-        pcd = o3d.io.read_point_cloud(v_data_root)
+        mesh = o3d.io.read_triangle_mesh(v_data_root)
+        prefix = Path(v_data_root).stem
+        vertices = np.asarray(mesh.vertices)
+        vertices = normalize_points(vertices)
+        mesh.vertices = o3d.utility.Vector3dVector(vertices)
+        if v_output_root is not None:
+            o3d.io.write_triangle_mesh(os.path.join(v_output_root, prefix+"_norm.ply"), mesh)
+        # poisson sampling
+        pcd = mesh.sample_points_poisson_disk(10000)
         points = np.asarray(pcd.points)
         normals = np.asarray(pcd.normals)
+        self.poisson_points = points
+
         index = faiss.IndexFlatL2(3)
         index.add(points)
         dists, indices = index.search(self.coords, 1)
@@ -807,75 +863,15 @@ class ABC_test_pc(torch.utils.data.Dataset):
         normals = normals / np.linalg.norm(normals, axis=1, keepdims=True)
 
         # Revised at 1004
-        feat_data = np.concatenate([udf[:, None], dir, normals], axis=1)
-        self.feat_data = feat_data.reshape(
-            (v_resolution, v_resolution, v_resolution, self.output_features)).astype(np.float32)
-
-        self.patch_size = 32
-        self.patch_list = []
-        for x in range(0, v_resolution - self.patch_size + 1, self.patch_size // 2):
-            for y in range(0, v_resolution - self.patch_size + 1, self.patch_size // 2):
-                for z in range(0, v_resolution - self.patch_size + 1, self.patch_size // 2):
-                    self.patch_list.append((x, y, z))
-
-        pass
+        feat_data = np.concatenate([udf[:,None], dir, normals], axis=1)
+        self.feat_data = feat_data.astype(np.float32).reshape(v_resolution,v_resolution,v_resolution, -1)
+        self.coords.reshape(v_resolution,v_resolution,v_resolution, -1)
 
     def __len__(self):
-        return math.ceil(len(self.patch_list) / self.batch_size)
-
-    def __getitem__(self, idx):
-        features = []
-        id_list = []
-        for i in range(self.batch_size):
-            id = idx * self.batch_size + i
-            if id >= len(self.patch_list):
-                break
-            feat_data = self.feat_data[
-                        self.patch_list[id][0]:self.patch_list[id][0] + self.patch_size,
-                        self.patch_list[id][1]:self.patch_list[id][1] + self.patch_size,
-                        self.patch_list[id][2]:self.patch_list[id][2] + self.patch_size,
-                        ]
-            features.append(np.transpose(feat_data, [3, 0, 1, 2]))
-            id_list.append(self.patch_list[id])
-        features = np.stack(features, axis=0)
-        return features, id_list
-
-
-class ABC_test_voxel(torch.utils.data.Dataset):
-    def __init__(self, v_data_root, v_batch_size, v_resolution=256, v_output_root=None):
-        super(ABC_test_voxel, self).__init__()
-        self.batch_size = v_batch_size
-        self.data_root = v_data_root
-        self.resolution = v_resolution
-
-        print("Prepare mesh data")
-        if not os.path.exists(v_data_root):
-            print("Cannot find ", v_data_root)
-        mesh = o3d.io.read_triangle_mesh(v_data_root)
-        vertices = np.asarray(mesh.vertices)
-        vertices = normalize_points(vertices)
-        mesh.vertices = o3d.utility.Vector3dVector(vertices)
-        if v_output_root is not None:
-            o3d.io.write_triangle_mesh(os.path.join(v_output_root, "temp.ply"), mesh)
-        # poisson sampling
-        pcd = mesh.sample_points_poisson_disk(10000)
-        points = np.asarray(pcd.points)
-        normals = np.asarray(pcd.normals)
-
-        # Revised at 1004
-        feat_data = np.concatenate([points, normals], axis=1)
-        self.feat_data = feat_data.astype(np.float32)
-
-        self.query_coords = generate_coords(v_resolution).reshape(-1, 3)
-        self.bs_1d = self.batch_size ** 3  # actual batch size 1D
-        self.num_patches = math.ceil(self.query_coords.shape[0] / self.bs_1d)
-
-    def __len__(self):
-        return self.num_patches
+        return 1
 
     def __getitem__(self, idx):
         return (
             self.feat_data,
-            self.query_coords[idx * self.bs_1d:min(self.query_coords.shape[0], (idx + 1) * self.bs_1d)].reshape(
-                self.batch_size, self.batch_size, self.batch_size, 3)
+            self.coords
         )

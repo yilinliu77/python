@@ -127,8 +127,12 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds, v_reconstruct_
                                                [bound_min,
                                                 bound_max]
                                                )
+
         np.save(img_cache_name[:-4], np.asarray([img_database, points_3d], dtype=object))
         print("Save cache to ", img_cache_name)
+
+    def de_normalize(v_points):
+        return (v_points - shitfs) * scales
 
     points_cache_name = "output/img_field_test/points_cache.npy"
     if os.path.exists(points_cache_name) and not v_reconstruct_data:
@@ -320,7 +324,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds, v_reconstruct_
     camera_pair_data = [np.asarray(item.strip().split(" ")[1:], dtype=np.float32).reshape(-1, 2) for item in
                         camera_pair_txt[1::2]]
 
-    return img_database, graphs, camera_pair_data, points_from_sfm
+    return img_database, graphs, camera_pair_data, points_from_sfm, de_normalize
 
 
 
@@ -377,32 +381,34 @@ def fix_graph(v_graph, ref_img, is_visualize=False):
 
     v_graph.graph["dual_graph"] = dual_graph
 
+    # There are some very close neighboring points in a patch that need to be merged
+    # for idx_f, id_face in enumerate(dual_graph.nodes):
+    #     face = dual_graph.nodes[id_face]["id_vertex"]
+    #     if len(face) == 3:
+    #         continue
+    #     remove_p_id = []
+    #     for idx_p, id_start in enumerate(face):
+    #         id_end = face[(idx_p + 1) % len(face)]
+    #         pos1 = v_graph.nodes[id_start]["pos_2d"]
+    #         pos2 = v_graph.nodes[id_end]["pos_2d"]
+    #
+    #         if np.linalg.norm(pos1-pos2) < 0.01:
+    #             adjacent_vertices = []
+    #             for adj in list(dual_graph.adj[id_face].values()):
+    #                 adjacent_vertices.extend(adj['adjacent_vertices'])
+    #             if id_start not in adjacent_vertices:
+    #                 remove_p_id.append(id_start)
+    #                 break
+    #             elif id_end not in adjacent_vertices:
+    #                 remove_p_id.append(id_end)
+    #                 break
+    #
+    #     if len(remove_p_id) == 1:
+    #         face.remove(remove_p_id[0])
+    #     elif len(remove_p_id) > 1:
+    #         assert False
+
     # Visualize
-    for idx_f, id_face in enumerate(dual_graph.nodes):
-        face = dual_graph.nodes[id_face]["id_vertex"]
-        if len(face) == 3:
-            continue
-        remove_p_id = []
-        for idx_p, id_start in enumerate(face):
-            id_end = face[(idx_p + 1) % len(face)]
-            pos1 = v_graph.nodes[id_start]["pos_2d"]
-            pos2 = v_graph.nodes[id_end]["pos_2d"]
-
-            if np.linalg.norm(pos1-pos2) < 0.01:
-                adjacent_vertices = []
-                for adj in list(dual_graph.adj[id_face].values()):
-                    adjacent_vertices.extend(adj['adjacent_vertices'])
-                if id_start not in adjacent_vertices:
-                    remove_p_id.append(id_start)
-                    break
-                elif id_end not in adjacent_vertices:
-                    remove_p_id.append(id_end)
-                    break
-
-        if len(remove_p_id) == 1:
-            face.remove(remove_p_id[0])
-        elif len(remove_p_id) > 1:
-            assert False
 
     if is_visualize:
         for idx, id_face in enumerate(dual_graph.nodes):
@@ -497,6 +503,13 @@ def visualize_polygon_with_normal(projected_points, normal, path, normal_seg_len
 
 def initialize_patches(rays_c, ray_distances_c, v_vertex_id_per_face):
     initialized_vertices = rays_c * ray_distances_c[:, None]
+
+    if True:
+        points = initialized_vertices.cpu().numpy()
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
+        o3d.io.write_point_cloud('output/initialized_vertices.ply', pcd)
+
     # abcd
     plane_parameters = []
     for vertex_id in v_vertex_id_per_face:
@@ -505,7 +518,7 @@ def initialize_patches(rays_c, ray_distances_c, v_vertex_id_per_face):
         # # a) 3d vertexes of each patch -> fitting plane
         # p_abcd = fit_plane_svd(pos_vertexes)
         abc = torch.mean(pos_vertexes, dim=0)
-        d = -torch.linalg.norm(abc, dim=-1)
+        d = -torch.dot(abc, abc)
         p_abcd = torch.cat((abc, d.unsqueeze(0)), dim=-1)
         plane_parameters.append(p_abcd)
 
@@ -561,10 +574,26 @@ def optimize_plane(v_data, v_log_root):
     optimized_abcd_list_v = []
     # viz_merge_plane(v_img_database)
 
+    debug_img1 = 89
+    if False:
+        for id_img1, graph in enumerate(v_graphs):
+            # Visualize id_img1 using opencv
+            ref_img = cv2.imread(v_img_database[id_img1].img_path, cv2.IMREAD_GRAYSCALE)
+            cv2.putText(ref_img, str(id_img1), (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.imshow('Choose Image', ref_img)
+
+            key = cv2.waitKey(0)
+            if key == ord(' '):
+                continue
+            elif key == ord('\r'):
+                debug_img1 = id_img1
+                cv2.destroyAllWindows()
+                break
+
     for id_img1, graph in enumerate(v_graphs):
         # 1. Prepare data
         # prepare some data
-        if id_img1 != 425:
+        if id_img1 != debug_img1:
             continue
         id_src_imgs = (v_img_pairs[id_img1][:, 0]).astype(np.int64)
         ref_img = cv2.imread(v_img_database[id_img1].img_path, cv2.IMREAD_GRAYSCALE)
@@ -582,6 +611,7 @@ def optimize_plane(v_data, v_log_root):
         c1_2_c2 = torch.from_numpy(
             v_img_database[int(id_src_imgs[img_src_id])].extrinsic @ np.linalg.inv(v_img_database[id_img1].extrinsic)
         ).to(device).to(torch.float32)
+        extrinsic_ref_cam = torch.from_numpy(v_img_database[id_img1].extrinsic).to(device).to(torch.float32)
         intrinsic = torch.from_numpy(intrinsic).to(device).to(torch.float32)
 
         c1_2_c2_list = []
@@ -642,7 +672,8 @@ def optimize_plane(v_data, v_log_root):
             # initialized_planes = pickle.load(open("output/optimized_abcd_list.pkl", "rb"))
             # initialized_planes = torch.from_numpy(initialized_planes).to(device)
             optimized_abcd_list = optimize_planes_batch(initialized_planes, rays_c, centroid_rays_c, dual_graph,
-                                                        imgs, transformation, intrinsic, c1_2_c2_list, v_log_root)
+                                                        imgs, transformation, extrinsic_ref_cam, intrinsic,
+                                                        c1_2_c2_list, v_log_root)
             # save optimized_abcd_list
             # with open("output/init_optimized_abcd_list.pkl", "wb") as f:
             #     pickle.dump(optimized_abcd_list, f)

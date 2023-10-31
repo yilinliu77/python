@@ -1,16 +1,15 @@
 dataset:
-  #  scene_boundary: [0., 0., 0., 1., 1., 1.]
-  scene_boundary: [-3, -3, -3, 10., 10., 5.]
-  #  colmap_dir: "H:/Data/SIGA23/Baseline/data/Mechanism/00000077"
-  #colmap_dir: "H:/Data/SIGA23/Baseline/data/00000077"
+  scene_boundary: [ -3, -3, -3, 10., 10., 5. ]
   colmap_dir: "H:/Data/SIGA23/Baseline/data/Scene1"
-#  colmap_dir: "H:/Data/SIGA23/Baseline/data/00000077"
+  #  scene_boundary: [0., 0., 0., 1., 1., 1.]
+  #  colmap_dir: "H:/Data/SIGA23/Baseline/data/Mechanism/00000077"
 
-#  colmap_dir: "G:/Dataset/NeuralRecon/Mechanism/00000077"
   only_train_target: true
   id_viz_face: []
   id_viz_edge: [9118]
-  v_reconstruct_data: true
+  v_reconstruct_data: false
+
+  max_error_for_initial_sfm: 1
 
 trainer:
   check_val_every_n_epoch: 10

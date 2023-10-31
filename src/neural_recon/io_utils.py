@@ -10,7 +10,8 @@ def generate_random_color():
     return (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
 
 
-def save_plane(v_abcds, rays_c, patch_vertexes_id, file_path="output/init.ply"):
+def save_plane(v_abcds, rays_c, patch_vertexes_id,
+               file_path="output/init.ply"):
     vertices = []
     polygons = []
     acc_num_vertices = 0

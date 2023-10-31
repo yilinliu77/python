@@ -258,6 +258,16 @@ def read_dataset(v_colmap_dir, v_bounds):
     pool.close()
 
     if False:
+        import trimesh
+        mesh = trimesh.load(os.path.join(v_colmap_dir, "mesh.ply"))
+        pos = mesh.vertices
+        bounds_center = np.array(bounds_center)
+        bounds_size = np.array(bounds_size)
+        pos = (pos - bounds_center) / bounds_size + 0.5
+        mesh.vertices = pos
+        mesh.export('output/scaled_src_mesh.ply')
+
+    if False:
         def save_pc(points_3d: List[Point_3d]):
             from plyfile import PlyData, PlyElement
             vertex_array = np.empty(len(points_3d),

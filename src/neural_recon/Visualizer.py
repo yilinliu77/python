@@ -20,12 +20,15 @@ class Visualizer:
                  v_log_root,
                  v_imgs,
                  intrinsic,
-                 transformation
+                 extrinsic_ref_cam,
+                 transformation,
+                 debug_patch_id_list=None
                  ):
         self.num_patches = num_patches
         self.log_root = v_log_root
         self.imgs = [cv2.cvtColor((item * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR) for item in v_imgs.cpu().numpy()]
         self.intrinsic = intrinsic
+        self.extrinsic_ref_cam = extrinsic_ref_cam
         self.transformation = transformation
         self.tri_colors = [generate_random_color() for _ in range(100)]
 
@@ -33,9 +36,14 @@ class Visualizer:
         self.viz_debug_iter = []
 
         os.mkdir(os.path.join(self.log_root, "0total"))
-        for i in range(self.num_patches):
-            os.mkdir(os.path.join(self.log_root, "patch_{}".format(i)))
-            os.mkdir(os.path.join(self.log_root, "patch_{}/samples".format(i)))
+        if debug_patch_id_list is not None:
+            for i in debug_patch_id_list:
+                os.mkdir(os.path.join(self.log_root, "patch_{}".format(i)))
+                os.mkdir(os.path.join(self.log_root, "patch_{}/samples".format(i)))
+        else:
+            for i in range(self.num_patches):
+                os.mkdir(os.path.join(self.log_root, "patch_{}".format(i)))
+                os.mkdir(os.path.join(self.log_root, "patch_{}/samples".format(i)))
 
         self.timer = {
             "Sample": 0,
@@ -75,13 +83,19 @@ class Visualizer:
 
         pass
 
-    def save_planes(self, file_path, planes, v_ray, id_vertexes):
+    def save_planes(self, file_path, planes, v_ray, id_vertexes, transform_to_world=True):
         vertices = []
         polygons = []
         acc_num_vertices = 0
         for i in range(planes.shape[0]):
             intersection_points = intersection_of_ray_and_all_plane(planes[i:i + 1],
                                                                     v_ray[id_vertexes[i]])[0]
+            if transform_to_world:
+                intersection_points = (torch.linalg.inv(self.extrinsic_ref_cam)
+                                       @ to_homogeneous_tensor(intersection_points).T).T
+                intersection_points[:,0:3] /= intersection_points[:,3:4]
+                intersection_points = intersection_points[:,0:3]
+
             vertices.append(intersection_points)
             polygons.append(np.arange(intersection_points.shape[0]) + acc_num_vertices)
             acc_num_vertices += intersection_points.shape[0]
@@ -194,8 +208,8 @@ class Visualizer:
                 point_color = np.stack(point_color)
                 point_color[~local_remain_flag] = 0
                 points_2d = np.clip(points_2d, 0, img_shape[1] - 1)
-                img[points_2d[:, 0], points_2d[:, 1]] = point_color
-                if i_img==0:
+                img[points_2d[:, 1], points_2d[:, 0]] = point_color
+                if i_img == 0:
                     cv2.putText(img,
                                 "Sample: {:02d}; Final: {:.4f}".format(
                                     sorted_index[i_sample],

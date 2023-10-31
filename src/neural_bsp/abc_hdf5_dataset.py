@@ -96,6 +96,15 @@ class ABC_patch(torch.utils.data.Dataset):
         y_start = (v_id_patch % self.num_patch) * ps
 
         with h5py.File(self.data_root, "r") as f:
+            if False:
+                feat = np.asarray(f["features"][0], dtype=np.float32)
+                flags = np.asarray(f["flags"][0], dtype=np.float32) > 0
+                udf = feat[:,:,:,0:1] / 65535 * 2
+                gradient = angle2vector(feat[:,:,:,1:3])
+                p = (generate_coords(256) + gradient * udf).reshape(-1,3)
+                export_point_cloud("1.ply", p)
+                export_point_cloud("2.ply", generate_coords(256)[flags])
+
             features = f["features"][
                        v_id_item,
                        x_start:x_start + ps,

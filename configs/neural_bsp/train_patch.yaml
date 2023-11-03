@@ -1,7 +1,7 @@
 dataset:
 #  root: E:/GSP_v10_50k/training.h5
   root: C:/repo/python/output/neural_bsp/training.h5
-  dataset_name: ABC_patch_fast_training
+  dataset_name: ABC_patch
   is_bool_flag: true
 
   test_list: []
@@ -21,13 +21,15 @@ trainer:
   accelerator: "32-true"
 
 model:
-  model_name: Base_model_wo_pooling
+  model_name: Base_model_dilated
   with_bn: false
   channels: 4
   output_channels: 1
-  need_normalize: false
+  need_normalize: true
 
   test_threshold: 0.5
+  focal_alpha: 0.75
+
 
 hydra:
   run:

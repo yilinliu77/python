@@ -103,7 +103,7 @@ class up_conv(nn.Module):
         self.up = nn.Sequential(
             nn.Upsample(scale_factor=2),
             nn.Conv3d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
-            nn.BatchNorm3d(ch_out),
+            # nn.BatchNorm3d(ch_out),
             nn.ReLU(inplace=True)
         )
 
@@ -144,16 +144,12 @@ class U_Net_3D(nn.Module):
         for i in range(v_depth):
             self.conv.append(conv_block(ch_in=cur_channel, ch_out=cur_channel * 2, with_bn=with_bn))
 
-            if i == 1:
-                self.up.append(up_conv(ch_in=cur_channel * 2, ch_out=cur_channel))
-                self.up_conv.append(conv_block(ch_in=cur_channel, ch_out=cur_channel, with_bn=with_bn))
-            elif i > 1:
-                self.up.append(up_conv(ch_in=cur_channel * 2, ch_out=cur_channel))
-                self.up_conv.append(conv_block(ch_in=cur_channel * 2, ch_out=cur_channel, with_bn=with_bn))
+            self.up.append(up_conv(ch_in=cur_channel * 2, ch_out=cur_channel))
+            self.up_conv.append(conv_block(ch_in=cur_channel * 2, ch_out=cur_channel, with_bn=with_bn))
 
             cur_channel = cur_channel * 2
 
-        self.Conv_1x1 = nn.Conv3d(base_channel * 2, output_ch, kernel_size=1, stride=1, padding=0)
+        self.Conv_1x1 = nn.Conv3d(base_channel, output_ch, kernel_size=1, stride=1, padding=0)
 
     def forward(self, v_input):
         # encoding path
@@ -164,10 +160,10 @@ class U_Net_3D(nn.Module):
             x.append(self.Maxpool(self.conv[i](x[-1])))
 
         up_x = [x[-1]]
-        for i in range(self.depths - 2, -1, -1):
+        for i in range(self.depths - 1, -1, -1):
             item = self.up[i](up_x[-1])
-            if i > 0:
-                item = torch.cat((item, x[i + 1]), dim=1)
+            if i >= 0:
+                item = torch.cat((item, x[i]), dim=1)
             up_x.append(self.up_conv[i](item))
 
         d1 = self.Conv_1x1(up_x[-1])
@@ -179,43 +175,16 @@ class Base_model(nn.Module):
     def __init__(self, v_conf):
         super(Base_model, self).__init__()
         self.need_normalize = v_conf["need_normalize"]
-        self.encoder = U_Net_3D(
-            img_ch=v_conf["channels"],
-            output_ch=1,
-            v_pool_first=False,
-            v_depth=v_conf["depths"],
-            base_channel=8
-        )
         self.loss_func = focal_loss
-        self.loss_alpha = 0.75
+        self.loss_alpha = v_conf["focal_alpha"]
         self.num_features = v_conf["channels"]
-
-    def forward(self, v_data, v_training=False):
-        (feat_data, _), _ = v_data
-        bs = feat_data.shape[0]
-        num_mini_batch = feat_data.shape[1]
-        feat_data = feat_data.reshape((bs * num_mini_batch,) + feat_data.shape[2:])
-
-        if self.need_normalize:
-            udf = de_normalize_udf(feat_data[..., 0:1])
-            gradients = de_normalize_angles(feat_data[..., 1:3])
-            if feat_data.shape[-1] == 5 and self.num_features == 7:
-                normal = de_normalize_angles(feat_data[..., 3:5])
-                x = torch.cat([udf, gradients, normal], dim=-1).permute((0, 4, 1, 2, 3)).contiguous()
-            else:
-                x = torch.cat([udf, gradients], dim=-1).permute((0, 4, 1, 2, 3)).contiguous()
-        else:
-            x = feat_data
-
-        x = x[:, :self.num_features]
-        prediction = self.encoder(x)
-
-        return prediction.reshape((bs, num_mini_batch,) + prediction.shape[1:])
+        self.ic = v_conf["channels"]  # input_channels
+        self.output_c = v_conf["output_channels"]
 
     def loss(self, v_predictions, v_input):
         features, labels = v_input
 
-        loss = self.loss_func(v_predictions, labels[:, :, None, :, :, :], self.loss_alpha)
+        loss = self.loss_func(v_predictions, labels, self.loss_alpha)
         return {"total_loss": loss}
 
     def compute_pr(self, v_pred, v_gt):
@@ -250,30 +219,17 @@ class Base_model(nn.Module):
         return
 
 
-class Base_model_wo_pooling(nn.Module):
+class Base_model_UNet(Base_model):
     def __init__(self, v_conf):
-        super(Base_model_wo_pooling, self).__init__()
-        self.need_normalize = v_conf["need_normalize"]
-
-        self.Maxpool = nn.MaxPool3d(kernel_size=2, stride=2)
-
-        ic = v_conf["channels"]  # input_channels
-        bs = 8  # base_channel
-        with_bn = v_conf["with_bn"]
-        self.output_c = v_conf["output_channels"]
-
-        self.conv1 = conv_block(ch_in=ic, ch_out=bs * 2, with_bn=with_bn, kernel_size=7, padding=3)
-        self.conv2 = conv_block(ch_in=bs * 2, ch_out=bs * 4, with_bn=with_bn, kernel_size=5, padding=2)
-        self.conv3 = conv_block(ch_in=bs * 4, ch_out=bs * 8, with_bn=with_bn, kernel_size=3, padding=1)
-        self.conv4 = conv_block(ch_in=bs * 8, ch_out=bs * 4, with_bn=with_bn, kernel_size=3, padding=1)
-        self.conv5 = conv_block(ch_in=bs * 4, ch_out=bs * 2, with_bn=with_bn, kernel_size=3, padding=1)
-        self.fc = nn.Conv3d(bs * 2, 1, kernel_size=3, padding=1)
-
-        self.offset = 8
-
-        self.loss_func = focal_loss
-        self.loss_alpha = 0.75
-        self.num_features = v_conf["channels"]
+        super(Base_model_UNet, self).__init__(v_conf)
+        self.encoder = U_Net_3D(
+            img_ch=v_conf["channels"],
+            output_ch=self.output_c,
+            v_pool_first=False,
+            v_depth=4,
+            base_channel=8,
+            with_bn=v_conf["with_bn"]
+        )
 
     def forward(self, v_data, v_training=False):
         (feat_data, _), _ = v_data
@@ -283,12 +239,53 @@ class Base_model_wo_pooling(nn.Module):
 
         if self.need_normalize:
             udf = de_normalize_udf(feat_data[..., 0:1])
-            gradients = de_normalize_angles(feat_data[..., 1:3])
-            if feat_data.shape[-1] == 5 and self.num_features == 7:
+            if self.ic == 7:
+                gradients = de_normalize_angles(feat_data[..., 1:3])
                 normal = de_normalize_angles(feat_data[..., 3:5])
                 x = torch.cat([udf, gradients, normal], dim=-1).permute((0, 4, 1, 2, 3)).contiguous()
-            else:
+            elif self.ic == 4:
+                gradients = de_normalize_angles(feat_data[..., 1:3])
                 x = torch.cat([udf, gradients], dim=-1).permute((0, 4, 1, 2, 3)).contiguous()
+            else:
+                x = udf.permute((0, 4, 1, 2, 3)).contiguous()
+        else:
+            x = feat_data[:, :self.num_features]
+
+        prediction = self.encoder(x)
+
+        return prediction.reshape((bs, num_mini_batch,) + prediction.shape[1:])
+
+
+class Base_model_k7(Base_model):
+    def __init__(self, v_conf):
+        super(Base_model_k7, self).__init__(v_conf)
+        bs = 8  # base_channel
+        with_bn = v_conf["with_bn"]
+
+        self.conv1 = conv_block(ch_in=self.ic, ch_out=bs * 2, with_bn=with_bn, kernel_size=7, padding=3)
+        self.conv2 = conv_block(ch_in=bs * 2, ch_out=bs * 4, with_bn=with_bn, kernel_size=5, padding=2)
+        self.conv3 = conv_block(ch_in=bs * 4, ch_out=bs * 8, with_bn=with_bn, kernel_size=3, padding=1)
+        self.conv4 = conv_block(ch_in=bs * 8, ch_out=bs * 4, with_bn=with_bn, kernel_size=3, padding=1)
+        self.conv5 = conv_block(ch_in=bs * 4, ch_out=bs * 2, with_bn=with_bn, kernel_size=3, padding=1)
+        self.fc = nn.Linear(bs * 2, 1)
+
+    def forward(self, v_data, v_training=False):
+        (feat_data, _), _ = v_data
+        bs = feat_data.shape[0]
+        num_mini_batch = feat_data.shape[1]
+        feat_data = feat_data.reshape((bs * num_mini_batch,) + feat_data.shape[2:])
+
+        if self.need_normalize:
+            udf = de_normalize_udf(feat_data[..., 0:1])
+            if self.ic == 7:
+                gradients = de_normalize_angles(feat_data[..., 1:3])
+                normal = de_normalize_angles(feat_data[..., 3:5])
+                x = torch.cat([udf, gradients, normal], dim=-1).permute((0, 4, 1, 2, 3)).contiguous()
+            elif self.ic == 4:
+                gradients = de_normalize_angles(feat_data[..., 1:3])
+                x = torch.cat([udf, gradients], dim=-1).permute((0, 4, 1, 2, 3)).contiguous()
+            else:
+                x = udf.permute((0, 4, 1, 2, 3)).contiguous()
         else:
             x = feat_data[:, :self.num_features]
 
@@ -297,72 +294,23 @@ class Base_model_wo_pooling(nn.Module):
         x = self.conv3(x)
         x = self.conv4(x)
         x = self.conv5(x)
-        prediction = self.fc(x)
+        prediction = self.fc(x.permute(0, 2, 3, 4, 1)).permute(0, 4, 1, 2, 3)
 
         return prediction.reshape((bs, num_mini_batch,) + prediction.shape[1:])
 
-    def loss(self, v_predictions, v_input):
-        features, labels = v_input
 
-        with torch.autocast(device_type="cuda"):
-            loss = self.loss_func(v_predictions, labels, self.loss_alpha)
-        return {"total_loss": loss}
-
-    def compute_pr(self, v_pred, v_gt):
-        bs = v_pred.shape[0]
-        prob = torch.sigmoid(v_pred).reshape(bs, -1)
-        gt = v_gt.reshape(bs, -1).to(torch.long)
-        return prob, gt
-
-    def valid_output(self, idx, log_root, target_viz_name,
-                     gathered_prediction, gathered_gt, gathered_queries):
-        assert gathered_prediction.shape[0] == 64
-        v_resolution = 256
-        query_points = generate_coords(v_resolution).reshape(-1, 3)
-
-        predicted_labels = gathered_prediction.reshape(
-            (-1, 8, 8, 8, self.output_c, 32, 32, 32)).transpose((0, 1, 5, 2, 6, 3, 7, 4)).reshape(256, 256, 256, -1)
-        gt_labels = gathered_gt.reshape(
-            (-1, 8, 8, 8, self.output_c, 32, 32, 32)).transpose((0, 1, 5, 2, 6, 3, 7, 4)).reshape(256, 256, 256, -1)
-
-        predicted_labels = sigmoid(predicted_labels) > 0.5
-        predicted_labels = predicted_labels.max(axis=-1)
-        mask = predicted_labels.reshape(-1)
-        export_point_cloud(os.path.join(log_root, "{}_{}_pred.ply".format(idx, target_viz_name)),
-                           query_points[mask])
-
-        gt_labels = gt_labels > 0.5
-        gt_labels = gt_labels.max(axis=-1)
-        mask = gt_labels.reshape(-1)
-        export_point_cloud(os.path.join(log_root, "{}_{}_gt.ply".format(idx, target_viz_name)),
-                           query_points[mask])
-        return
-
-
-class Base_model_dilated(Base_model_wo_pooling):
+class Base_model_dilated(Base_model_k7):
     def __init__(self, v_conf):
         super(Base_model_dilated, self).__init__(v_conf)
-        self.need_normalize = v_conf["need_normalize"]
-
-        self.Maxpool = nn.MaxPool3d(kernel_size=2, stride=2)
-
-        ic = v_conf["channels"]  # input_channels
-        bs = 8  # base_channel
+        bs = 8
         with_bn = v_conf["with_bn"]
-        self.output_c = v_conf["output_channels"]
 
-        self.conv1 = conv_block(ch_in=ic, ch_out=bs * 2, with_bn=with_bn, kernel_size=3, padding=5, dilate=5)
+        self.conv1 = conv_block(ch_in=self.ic, ch_out=bs * 2, with_bn=with_bn, kernel_size=3, padding=5, dilate=5)
         self.conv2 = conv_block(ch_in=bs * 2, ch_out=bs * 4, with_bn=with_bn, kernel_size=3, padding=2, dilate=2)
         self.conv3 = conv_block(ch_in=bs * 4, ch_out=bs * 8, with_bn=with_bn, kernel_size=3, padding=1, dilate=1)
         self.conv4 = conv_block(ch_in=bs * 8, ch_out=bs * 4, with_bn=with_bn, kernel_size=3, padding=1, dilate=1)
         self.conv5 = conv_block(ch_in=bs * 4, ch_out=bs * 2, with_bn=with_bn, kernel_size=3, padding=1, dilate=1)
-        self.fc = nn.Conv3d(bs * 2, self.output_c, kernel_size=3, padding=1)
-
-        self.offset = 8
-
-        self.loss_func = focal_loss
-        self.loss_alpha = 0.75
-        self.num_features = v_conf["channels"]
+        self.fc = nn.Linear(bs * 2, self.output_c)
 
 
 ##################################################################
@@ -463,6 +411,96 @@ class PC_model_whole_voxel(nn.Module):
                            query_points[mask])
 
         gt_labels = sigmoid(gt_labels) > 0.5
+        mask = gt_labels.reshape(-1)
+        export_point_cloud(os.path.join(log_root, "{}_{}_gt.ply".format(idx, target_viz_name)),
+                           query_points[mask])
+        return
+
+
+##################################################################
+class Base_model_dilated_backup(nn.Module):
+    def __init__(self, v_conf):
+        super(Base_model_dilated_backup, self).__init__(v_conf)
+        self.need_normalize = v_conf["need_normalize"]
+
+        self.Maxpool = nn.MaxPool3d(kernel_size=2, stride=2)
+
+        ic = v_conf["channels"]  # input_channels
+        bs = 8  # base_channel
+        with_bn = v_conf["with_bn"]
+        self.output_c = v_conf["output_channels"]
+
+        self.conv1 = conv_block(ch_in=ic, ch_out=bs * 2, with_bn=with_bn, kernel_size=3, padding=5, dilate=5)
+        self.conv2 = conv_block(ch_in=bs * 2, ch_out=bs * 4, with_bn=with_bn, kernel_size=3, padding=2, dilate=2)
+        self.conv3 = conv_block(ch_in=bs * 4, ch_out=bs * 8, with_bn=with_bn, kernel_size=3, padding=1, dilate=1)
+        self.conv4 = conv_block(ch_in=bs * 8, ch_out=bs * 4, with_bn=with_bn, kernel_size=3, padding=1, dilate=1)
+        self.conv5 = conv_block(ch_in=bs * 4, ch_out=bs * 2, with_bn=with_bn, kernel_size=3, padding=1, dilate=1)
+        self.fc = nn.Conv3d(bs * 2, self.output_c, kernel_size=3, padding=1)
+
+        self.offset = 8
+
+        self.loss_func = focal_loss
+        self.loss_alpha = 0.75
+        self.num_features = v_conf["channels"]
+
+    def forward(self, v_data, v_training=False):
+        (feat_data, _), _ = v_data
+        bs = feat_data.shape[0]
+        num_mini_batch = feat_data.shape[1]
+        feat_data = feat_data.reshape((bs * num_mini_batch,) + feat_data.shape[2:])
+
+        if self.need_normalize:
+            udf = de_normalize_udf(feat_data[..., 0:1])
+            gradients = de_normalize_angles(feat_data[..., 1:3])
+            if feat_data.shape[-1] == 5 and self.num_features == 7:
+                normal = de_normalize_angles(feat_data[..., 3:5])
+                x = torch.cat([udf, gradients, normal], dim=-1).permute((0, 4, 1, 2, 3)).contiguous()
+            else:
+                x = torch.cat([udf, gradients], dim=-1).permute((0, 4, 1, 2, 3)).contiguous()
+        else:
+            x = feat_data[:, :self.num_features]
+
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.conv4(x)
+        x = self.conv5(x)
+        prediction = self.fc(x)
+
+        return prediction.reshape((bs, num_mini_batch,) + prediction.shape[1:])
+
+    def loss(self, v_predictions, v_input):
+        features, labels = v_input
+
+        with torch.autocast(device_type="cuda"):
+            loss = self.loss_func(v_predictions, labels, self.loss_alpha)
+        return {"total_loss": loss}
+
+    def compute_pr(self, v_pred, v_gt):
+        bs = v_pred.shape[0]
+        prob = torch.sigmoid(v_pred).reshape(bs, -1)
+        gt = v_gt.reshape(bs, -1).to(torch.long)
+        return prob, gt
+
+    def valid_output(self, idx, log_root, target_viz_name,
+                     gathered_prediction, gathered_gt, gathered_queries):
+        assert gathered_prediction.shape[0] == 64
+        v_resolution = 256
+        query_points = generate_coords(v_resolution).reshape(-1, 3)
+
+        predicted_labels = gathered_prediction.reshape(
+            (-1, 8, 8, 8, self.output_c, 32, 32, 32)).transpose((0, 1, 5, 2, 6, 3, 7, 4)).reshape(256, 256, 256, -1)
+        gt_labels = gathered_gt.reshape(
+            (-1, 8, 8, 8, self.output_c, 32, 32, 32)).transpose((0, 1, 5, 2, 6, 3, 7, 4)).reshape(256, 256, 256, -1)
+
+        predicted_labels = sigmoid(predicted_labels) > 0.5
+        predicted_labels = predicted_labels.max(axis=-1)
+        mask = predicted_labels.reshape(-1)
+        export_point_cloud(os.path.join(log_root, "{}_{}_pred.ply".format(idx, target_viz_name)),
+                           query_points[mask])
+
+        gt_labels = gt_labels > 0.5
+        gt_labels = gt_labels.max(axis=-1)
         mask = gt_labels.reshape(-1)
         export_point_cloud(os.path.join(log_root, "{}_{}_gt.ply".format(idx, target_viz_name)),
                            query_points[mask])

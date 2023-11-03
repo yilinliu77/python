@@ -14,6 +14,7 @@ import open3d as o3d
 
 from shared.common_utils import export_point_cloud
 
+
 try:
     sys.path.append("thirdparty")
     import cuda_distance
@@ -21,6 +22,18 @@ try:
 except:
     print("Cannot import cuda_distance, ignore this if you don't use 'ABC_dataset_test_mesh'")
 
+
+def de_normalize_angles(v_angles):
+    angles = (v_angles / 65535 * np.pi * 2)
+    dx = np.cos(angles[..., 0]) * np.sin(angles[..., 1])
+    dy = np.sin(angles[..., 0]) * np.sin(angles[..., 1])
+    dz = np.cos(angles[..., 1])
+    gradients = np.stack([dx, dy, dz], axis=-1)
+    return gradients
+
+
+def de_normalize_udf(v_udf):
+    return v_udf / 65535 * 2
 
 def normalize_points(v_points):
     min_xyz = v_points.min(axis=0)
@@ -47,6 +60,109 @@ def angle2vector(v_angles):
     return gradients
 
 
+class ABC_patch_fast_training(torch.utils.data.Dataset):
+    def __init__(self, v_data_root, v_training_mode, v_conf):
+        super(ABC_patch_fast_training, self).__init__()
+        self.data_root = v_data_root
+        self.mode = v_training_mode
+        self.conf = v_conf
+        self.patch_size = 32
+        with h5py.File(self.data_root, "r") as f:
+            self.num_items = f["features"].shape[0] // 10
+            self.resolution = f["features"].shape[1]
+            self.names = np.asarray(
+                ["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
+            self.feat_data = f["features"][:self.num_items].astype(np.float32)
+            self.flags = (f["flags"][:self.num_items] > 0).astype(np.float32)
+
+
+        udf = de_normalize_udf(self.feat_data[..., 0:1])
+        gradients = de_normalize_angles(self.feat_data[..., 1:3])
+        self.feat_data = np.concatenate([udf, gradients], axis=-1)
+
+        self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
+
+        self.is_bool_flag = self.conf["is_bool_flag"]
+
+        assert self.resolution % self.patch_size == 0
+        self.num_patch = self.resolution // self.patch_size
+        self.num_patches = self.num_patch ** 2
+
+        if self.mode == "training":
+            self.index = np.stack(np.meshgrid(
+                np.arange(self.num_items)[:self.validation_start],
+                np.arange(self.num_patches), indexing="ij"), axis=2)
+        elif self.mode == "validation":
+            self.index = np.stack(np.meshgrid(
+                np.arange(self.num_items)[self.validation_start:],
+                np.arange(self.num_patches), indexing="ij"), axis=2)
+        elif self.mode == "testing":
+            self.index = np.stack(np.meshgrid(
+                np.arange(self.num_items),
+                np.arange(self.num_patches), indexing="ij"), axis=2)
+        else:
+            raise ""
+        self.index = self.index.reshape((-1, 2))
+
+    def __len__(self):
+        return self.index.shape[0]
+
+    def get_patch(self, v_id_item, v_id_patch):
+        times = [0] * 10
+        cur_time = time.time()
+
+        ps = self.patch_size
+        x_start = (v_id_patch // self.num_patch) * ps
+        y_start = (v_id_patch % self.num_patch) * ps
+
+        features = self.feat_data[
+                       v_id_item,
+                       x_start:x_start + ps,
+                       y_start:y_start + ps,
+                       ]
+        flags = self.flags[
+                v_id_item,
+                x_start:x_start + ps,
+                y_start:y_start + ps,
+                ]
+
+        times[0] += time.time() - cur_time
+        cur_time = time.time()
+
+        features = features.reshape(ps, ps, self.num_patch, ps, -1).transpose(2, 4, 0, 1, 3)
+        flags = flags.reshape(-1, ps, ps, self.num_patch, ps).transpose(3, 0, 1, 2, 4)
+
+        times[1] += time.time() - cur_time
+        return features, flags
+
+    def __getitem__(self, idx):
+        id_object = self.index[idx, 0]
+        id_patch = self.index[idx, 1]
+
+        feat_data, flag_data = self.get_patch(id_object, id_patch)
+        return feat_data, flag_data, self.names[id_object], np.arange(flag_data.shape[0], dtype=np.int64) + id_patch * \
+                                                            flag_data.shape[0]
+
+    @staticmethod
+    def collate_fn(v_batches):
+        feat_data, flag_data, names, id_patch = [], [], [], []
+        for item in v_batches:
+            feat_data.append(item[0])
+            flag_data.append(item[1])
+            names.append(item[2])
+            id_patch.append(item[3])
+        feat_data = np.stack(feat_data, axis=0)
+        flag_data = np.stack(flag_data, axis=0)
+        id_patch = np.stack(id_patch, axis=0)
+        names = np.asarray(names)
+
+        return (
+            (torch.from_numpy(feat_data), torch.zeros(feat_data.shape[0], dtype=torch.float32)),
+            torch.from_numpy(flag_data),
+            names,
+            torch.from_numpy(id_patch),
+        )
+
 # Dataset for patch training
 class ABC_patch(torch.utils.data.Dataset):
     def __init__(self, v_data_root, v_training_mode, v_conf):
@@ -56,7 +172,7 @@ class ABC_patch(torch.utils.data.Dataset):
         self.conf = v_conf
         self.patch_size = 32
         with h5py.File(self.data_root, "r") as f:
-            self.num_items = f["features"].shape[0]
+            self.num_items = f["features"].shape[0] // 10
             self.resolution = f["features"].shape[1]
             self.names = np.asarray(
                 ["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])

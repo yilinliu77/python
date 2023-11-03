@@ -87,9 +87,11 @@ def save_line_cloud(v_file_path: str, v_segments: np.ndarray):
 
 
 def normalize_vector(v_vector):
-    length = np.linalg.norm(v_vector, axis=-1, keepdims=True) + 1e-8
-    # assert length != 0
-    return v_vector / length
+    length = np.linalg.norm(v_vector, axis=-1)
+    flag = length != 0
+    new_vector = np.copy(v_vector)
+    new_vector[flag] = new_vector[flag] / length[flag][...,None]
+    return new_vector
 
 
 def padding(array, desired_height, desired_width):
@@ -272,7 +274,7 @@ def ray_line_intersection2(v_plane_abcd, v_ray_origin, v_ray_direction):
 
 
 def sigmoid(z):
-    return 1 / (1 + np.exp(-z+1e-8))
+    return 1 / (1 + np.exp(-z))
 
 
 def export_point_cloud(v_file_path, v_pcs):

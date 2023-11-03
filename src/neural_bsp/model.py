@@ -21,23 +21,22 @@ from shared.common_utils import sigmoid, export_point_cloud
 
 # Adopt the implementation in pytorch, but prevent NaN values
 def focal_loss(inputs, targets, v_alpha=0.75, gamma: float = 2, ):
-    # loss = sigmoid_focal_loss(v_predictions, labels,
-    #                           alpha=v_alpha,
-    #                           reduction="mean"
-    #                           )
+    loss = sigmoid_focal_loss(inputs, targets,
+                              alpha=v_alpha,
+                              reduction="mean"
+                              )
 
-    p = torch.sigmoid(inputs)
     # p = torch.sigmoid(inputs.to(torch.float32))
-    ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
-    p_t = p * targets + (1 - p) * (1 - targets)
-    loss = ce_loss * ((1 - p_t) ** gamma)
-
-    if v_alpha >= 0:
-        alpha_t = v_alpha * targets + (1 - v_alpha) * (1 - targets)
-        loss = alpha_t * loss
-
+    # ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
+    # p_t = p * targets + (1 - p) * (1 - targets)
+    # loss = ce_loss * ((1 - p_t) ** gamma)
+    #
+    # if v_alpha >= 0:
+    #     alpha_t = v_alpha * targets + (1 - v_alpha) * (1 - targets)
+    #     loss = alpha_t * loss
+    #
     # Check reduction option and return loss accordingly
-    loss = loss.mean()
+    # loss = loss.mean()
     return loss
 
 

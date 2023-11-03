@@ -194,25 +194,24 @@ class Base_model(nn.Module):
         return prob, gt
 
     def valid_output(self, idx, log_root, target_viz_name,
-                     gathered_prediction, gathered_gt):
-        assert gathered_prediction.shape[0] == 225
+                     gathered_prediction, gathered_gt, gathered_queries):
+        assert gathered_prediction.shape[0] == 64
         v_resolution = 256
         query_points = generate_coords(v_resolution).reshape(-1, 3)
 
         predicted_labels = gathered_prediction.reshape(
-            (-1, 15, 15, 15, 16, 16, 16)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(240, 240, 240)
+            (-1, 8, 8, 8, self.output_c, 32, 32, 32)).transpose((0, 1, 5, 2, 6, 3, 7, 4)).reshape(256, 256, 256, -1)
         gt_labels = gathered_gt.reshape(
-            (-1, 15, 15, 15, 16, 16, 16)).transpose((0, 1, 4, 2, 5, 3, 6)).reshape(240, 240, 240)
-
-        predicted_labels = np.pad(predicted_labels, 8, mode="constant", constant_values=0)
-        gt_labels = np.pad(gt_labels, 8, mode="constant", constant_values=0)
+            (-1, 8, 8, 8, self.output_c, 32, 32, 32)).transpose((0, 1, 5, 2, 6, 3, 7, 4)).reshape(256, 256, 256, -1)
 
         predicted_labels = sigmoid(predicted_labels) > 0.5
+        predicted_labels = predicted_labels.max(axis=-1)
         mask = predicted_labels.reshape(-1)
         export_point_cloud(os.path.join(log_root, "{}_{}_pred.ply".format(idx, target_viz_name)),
                            query_points[mask])
 
-        gt_labels = sigmoid(gt_labels) > 0.5
+        gt_labels = gt_labels > 0.5
+        gt_labels = gt_labels.max(axis=-1)
         mask = gt_labels.reshape(-1)
         export_point_cloud(os.path.join(log_root, "{}_{}_gt.ply".format(idx, target_viz_name)),
                            query_points[mask])

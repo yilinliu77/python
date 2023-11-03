@@ -267,7 +267,7 @@ class Base_model_k7(Base_model):
         self.conv3 = conv_block(ch_in=bs * 4, ch_out=bs * 8, with_bn=with_bn, kernel_size=3, padding=1)
         self.conv4 = conv_block(ch_in=bs * 8, ch_out=bs * 4, with_bn=with_bn, kernel_size=3, padding=1)
         self.conv5 = conv_block(ch_in=bs * 4, ch_out=bs * 2, with_bn=with_bn, kernel_size=3, padding=1)
-        self.fc = nn.Linear(bs * 2, 1)
+        self.fc = nn.Conv3d(bs * 2, self.output_c, kernel_size=1, padding=0)
 
     def forward(self, v_data, v_training=False):
         (feat_data, _), _ = v_data
@@ -294,7 +294,7 @@ class Base_model_k7(Base_model):
         x = self.conv3(x)
         x = self.conv4(x)
         x = self.conv5(x)
-        prediction = self.fc(x.permute(0, 2, 3, 4, 1)).permute(0, 4, 1, 2, 3)
+        prediction = self.fc(x)
 
         return prediction.reshape((bs, num_mini_batch,) + prediction.shape[1:])
 
@@ -310,7 +310,7 @@ class Base_model_dilated(Base_model_k7):
         self.conv3 = conv_block(ch_in=bs * 4, ch_out=bs * 8, with_bn=with_bn, kernel_size=3, padding=1, dilate=1)
         self.conv4 = conv_block(ch_in=bs * 8, ch_out=bs * 4, with_bn=with_bn, kernel_size=3, padding=1, dilate=1)
         self.conv5 = conv_block(ch_in=bs * 4, ch_out=bs * 2, with_bn=with_bn, kernel_size=3, padding=1, dilate=1)
-        self.fc = nn.Linear(bs * 2, self.output_c)
+        self.fc = nn.Conv3d(bs * 2, self.output_c, kernel_size=1, padding=0)
 
 
 ##################################################################

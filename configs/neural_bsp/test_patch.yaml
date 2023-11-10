@@ -15,9 +15,10 @@ trainer:
   gpu: 1
 
   batch_size: 128
-  resume_from_checkpoint: output/neural_bsp/1016_v9_base_wo_normal.ckpt
+#  resume_from_checkpoint: output/neural_bsp/1101_v11_ndc_dilated_float32.ckpt
+  resume_from_checkpoint: output/neural_bsp/1101_v11_ndc_dilated_float32.ckpt
   output: .
-  accelerator: "16-mixed"
+  accelerator: "32-true"
 
 model:
   model_name: Base_model_dilated

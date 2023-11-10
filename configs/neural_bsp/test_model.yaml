@@ -1,10 +1,6 @@
 dataset:
-#  root: E:/GSP_v10_50k/training.h5
-  root: C:/repo/python/output/neural_bsp/training.h5
-  dataset_name: ABC_patch
-  is_bool_flag: true
-
-  test_list: []
+  root: G:/Dataset/GSP/test_data2
+  dataset_name: ABC_test_voxel
 
 trainer:
   learning_rate: 1e-4
@@ -12,24 +8,24 @@ trainer:
   num_worker: 0
 
   spawn: false
-  num_samples: 100
-  batch_size: 1
-  resume_from_checkpoint:
-  evaluate: false
+  num_samples: -1
+  batch_size: 128
+#  resume_from_checkpoint: output/neural_bsp/1016_v9_base_wo_normal.ckpt
+  resume_from_checkpoint: output/neural_bsp/1101_v11_ndc_dilated_float32.ckpt
+  evaluate: true
   output: .
   check_val_every_n_epoch: 1
   accelerator: "32-true"
 
 model:
   model_name: Base_model_dilated
-  with_bn: false
   channels: 4
+  need_normalize: false
+  with_bn: false
   output_channels: 1
-  need_normalize: true
 
   test_threshold: 0.5
-  focal_alpha: 0.75
-
+  test_resolution: 256
 
 hydra:
   run:

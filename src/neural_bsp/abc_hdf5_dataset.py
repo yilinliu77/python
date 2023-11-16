@@ -173,7 +173,7 @@ class ABC_patch(torch.utils.data.Dataset):
         self.conf = v_conf
         self.patch_size = 32
         with h5py.File(self.data_root, "r") as f:
-            self.num_items = f["features"].shape[0] // 10
+            self.num_items = f["features"].shape[0]
             self.resolution = f["features"].shape[1]
             self.names = np.asarray(
                 ["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])

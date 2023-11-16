@@ -32,7 +32,7 @@ class Visualizer:
         self.transformation = transformation
         self.tri_colors = [generate_random_color() for _ in range(100)]
 
-        self.viz_interval = 500
+        self.viz_interval = 200
         self.viz_debug_iter = []
 
         os.mkdir(os.path.join(self.log_root, "0total"))
@@ -83,7 +83,7 @@ class Visualizer:
 
         pass
 
-    def save_planes(self, file_path, planes, v_ray, id_vertexes, transform_to_world=True):
+    def save_planes(self, file_path, planes, v_ray, id_vertexes, transform_to_world=False):
         vertices = []
         polygons = []
         acc_num_vertices = 0
@@ -155,8 +155,8 @@ class Visualizer:
         num_triangles = num_sample_points_per_tri.shape[0] // num_sample
         num_img = len(self.imgs)
 
-        img_shape = self.imgs[0].shape[:2]
-        img_shape = img_shape[::-1]
+        img_shape = self.imgs[0].shape[:2]  # (h, w)
+        img_shape = img_shape[::-1]  # (w, h)
 
         input_imgs = [self.imgs[0].copy()] + [item.copy() for item in self.imgs[1:]]
         input_points_2d = []
@@ -227,8 +227,8 @@ class Visualizer:
                                 ),
                                 (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2, cv2.LINE_AA)
                 imgs.append(img)
-            total_img = np.stack(imgs, axis=0).reshape(10, 10, 968, 1296, 3)
-            total_img = np.transpose(total_img, (0, 2, 1, 3, 4)).reshape(968*10, 1296*10, 3)
+            total_img = np.stack(imgs, axis=0).reshape(10, 10, img_shape[1], img_shape[0], 3)
+            total_img = np.transpose(total_img, (0, 2, 1, 3, 4)).reshape(img_shape[1]*10, img_shape[0]*10, 3)
             cv2.imwrite(os.path.join(
                 self.log_root, "patch_{}/image_{}_iter_{}.png".format(v_patch_id, i_img, v_iter)), total_img)
             pass
@@ -248,8 +248,8 @@ class Visualizer:
 
         num_patch = planes.shape[0]
         num_img = len(self.imgs)
-        img_shape = self.imgs[0].shape[:2]
-        img_shape = img_shape[::-1]
+        img_shape = self.imgs[0].shape[:2]  # (h, w)
+        img_shape = img_shape[::-1]  # (w, h)
 
         all_intersection_end_points = intersection_of_ray_and_all_plane(planes,
                                                                         v_ray)
@@ -277,8 +277,8 @@ class Visualizer:
                          (0, 255, 0), 1)
         #total_img = np.stack(input_imgs[:10], axis=0).reshape(2, 5, 800, 800, 3)
         #total_img = np.transpose(total_img, (0, 2, 1, 3, 4)).reshape(1600, 4000, 3)
-        total_img = np.stack(input_imgs[:10], axis=0).reshape(2, 5, 968, 1296, 3)
-        total_img = np.transpose(total_img, (0, 2, 1, 3, 4)).reshape(968*2, 1296*5, 3)
+        total_img = np.stack(input_imgs[:10], axis=0).reshape(2, 5, img_shape[1], img_shape[0], 3)
+        total_img = np.transpose(total_img, (0, 2, 1, 3, 4)).reshape(img_shape[1]*2, img_shape[0]*5, 3)
         cv2.imwrite(os.path.join(
             self.log_root, "0total/iter_{}.png".format(v_iter,)), total_img)
 

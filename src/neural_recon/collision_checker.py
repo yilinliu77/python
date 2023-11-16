@@ -108,7 +108,7 @@ class Collision_checker:
         if self.triangles is None:
             return torch.zeros_like(v_origin[:, 0], dtype=torch.bool)
         else:
-            return torch.zeros_like(v_origin[:, 0], dtype=torch.bool)
+            # return torch.zeros_like(v_origin[:, 0], dtype=torch.bool)
             num_batches = (v_origin.shape[0] + batch_size - 1) // batch_size
             output = []
             for i in range(num_batches):

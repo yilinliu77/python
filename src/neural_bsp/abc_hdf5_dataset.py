@@ -66,13 +66,15 @@ class ABC_patch_pc(torch.utils.data.Dataset):
         self.mode = v_training_mode
         self.conf = v_conf
         self.mini_batch_size = v_conf["mini_batch_size"]
+        # self.pre_check_data()
         with h5py.File(self.data_root, "r") as f:
             assert f["points"].shape[1] % self.mini_batch_size == 0
             self.num_mini_batch = f["points"].shape[1] // self.mini_batch_size
             self.num_items = f["points"].shape[0]
             self.names = np.asarray(
                 ["{:08d}".format(f["names"][i]) for i in range(f["names"].shape[0])])
-
+        self.valid_flag = np.load(Path(self.data_root).parent/"precheck_flags.npy") # Items that have no invalid points
+        self.actual_num_items = np.sum(self.valid_flag)
         self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
 
         self.is_bool_flag = self.conf["is_bool_flag"]
@@ -81,17 +83,32 @@ class ABC_patch_pc(torch.utils.data.Dataset):
             self.index = np.stack(np.meshgrid(
                 np.arange(self.num_items)[:self.validation_start],
                 np.arange(self.num_mini_batch), indexing="ij"), axis=2)
+            self.valid_flag = self.valid_flag[:self.validation_start]
         elif self.mode == "validation":
             self.index = np.stack(np.meshgrid(
                 np.arange(self.num_items)[self.validation_start:],
                 np.arange(self.num_mini_batch), indexing="ij"), axis=2)
+            self.valid_flag = self.valid_flag[self.validation_start:]
         elif self.mode == "testing":
             self.index = np.stack(np.meshgrid(
                 np.arange(self.num_items),
                 np.arange(self.num_mini_batch), indexing="ij"), axis=2)
         else:
             raise ""
-        self.index = self.index.reshape((-1, 2))
+        self.index = self.index[self.valid_flag].reshape((-1, 2))
+
+
+    def pre_check_data(self):
+        precheck_flags = []
+        with h5py.File(self.data_root, "r") as f:
+            num_items = f["point_flags"].shape[0]
+            for i in tqdm(range(num_items)):
+                flags = (f["point_flags"][i] == 0).all(axis=1)
+                precheck_flags.append(flags)
+        precheck_flags = np.stack(precheck_flags)
+        precheck_flags = np.logical_not(precheck_flags.any(axis=1))
+        np.save("precheck_flags", precheck_flags)
+        return
 
     def __len__(self):
         return self.index.shape[0]

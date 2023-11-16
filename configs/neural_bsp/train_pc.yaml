@@ -1,5 +1,5 @@
 dataset:
-  root: C:\repo\python\output\neural_bsp/training.h5
+  root: G:\Dataset\GSP\v13_100k/training.h5
   dataset_name: ABC_patch_pc
   is_bool_flag: true
   mini_batch_size: 24

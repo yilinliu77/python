@@ -12,8 +12,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import open3d as o3d
 
-from shared.common_utils import export_point_cloud
-
+from shared.common_utils import export_point_cloud, check_dir
 
 try:
     sys.path.append("thirdparty")
@@ -60,46 +59,36 @@ def angle2vector(v_angles):
     return gradients
 
 
-class ABC_patch_fast_training(torch.utils.data.Dataset):
+class ABC_patch_pc(torch.utils.data.Dataset):
     def __init__(self, v_data_root, v_training_mode, v_conf):
-        super(ABC_patch_fast_training, self).__init__()
+        super(ABC_patch_pc, self).__init__()
         self.data_root = v_data_root
         self.mode = v_training_mode
         self.conf = v_conf
-        self.patch_size = 32
+        self.mini_batch_size = v_conf["mini_batch_size"]
         with h5py.File(self.data_root, "r") as f:
-            self.num_items = f["features"].shape[0] // 10
-            self.resolution = f["features"].shape[1]
+            assert f["points"].shape[1] % self.mini_batch_size == 0
+            self.num_mini_batch = f["points"].shape[1] // self.mini_batch_size
+            self.num_items = f["points"].shape[0]
             self.names = np.asarray(
-                ["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
-            self.feat_data = f["features"][:self.num_items].astype(np.float32)
-            self.flags = (f["flags"][:self.num_items] > 0).astype(np.float32)
-
-
-        udf = de_normalize_udf(self.feat_data[..., 0:1])
-        gradients = de_normalize_angles(self.feat_data[..., 1:3])
-        self.feat_data = np.concatenate([udf, gradients], axis=-1)
+                ["{:08d}".format(f["names"][i]) for i in range(f["names"].shape[0])])
 
         self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
 
         self.is_bool_flag = self.conf["is_bool_flag"]
 
-        assert self.resolution % self.patch_size == 0
-        self.num_patch = self.resolution // self.patch_size
-        self.num_patches = self.num_patch ** 2
-
         if self.mode == "training":
             self.index = np.stack(np.meshgrid(
                 np.arange(self.num_items)[:self.validation_start],
-                np.arange(self.num_patches), indexing="ij"), axis=2)
+                np.arange(self.num_mini_batch), indexing="ij"), axis=2)
         elif self.mode == "validation":
             self.index = np.stack(np.meshgrid(
                 np.arange(self.num_items)[self.validation_start:],
-                np.arange(self.num_patches), indexing="ij"), axis=2)
+                np.arange(self.num_mini_batch), indexing="ij"), axis=2)
         elif self.mode == "testing":
             self.index = np.stack(np.meshgrid(
                 np.arange(self.num_items),
-                np.arange(self.num_patches), indexing="ij"), axis=2)
+                np.arange(self.num_mini_batch), indexing="ij"), axis=2)
         else:
             raise ""
         self.index = self.index.reshape((-1, 2))
@@ -111,37 +100,32 @@ class ABC_patch_fast_training(torch.utils.data.Dataset):
         times = [0] * 10
         cur_time = time.time()
 
-        ps = self.patch_size
-        x_start = (v_id_patch // self.num_patch) * ps
-        y_start = (v_id_patch % self.num_patch) * ps
+        with h5py.File(self.data_root, "r") as f:
+            points = f["points"][
+                     v_id_item, v_id_patch * self.mini_batch_size:(v_id_patch + 1) * self.mini_batch_size]
+            point_flags = f["point_flags"][
+                          v_id_item, v_id_patch * self.mini_batch_size:(v_id_patch + 1) * self.mini_batch_size]
+            voronoi_flags = f["voronoi_flags"][
+                            v_id_item, v_id_patch * self.mini_batch_size:(v_id_patch + 1) * self.mini_batch_size]
 
-        features = self.feat_data[
-                       v_id_item,
-                       x_start:x_start + ps,
-                       y_start:y_start + ps,
-                       ]
-        flags = self.flags[
-                v_id_item,
-                x_start:x_start + ps,
-                y_start:y_start + ps,
-                ]
+            shifts = np.arange(8)[None,:].repeat(self.mini_batch_size, axis=0)
+            point_flags = ((point_flags[:, :, None] & (1 << shifts)[:, None, :]) > 0).reshape(
+                self.mini_batch_size, -1)
+            voronoi_flags = ((voronoi_flags[:, :, None] & (1 << shifts)[:, None, :]) > 0).reshape(
+                self.mini_batch_size, 1, 32, 32, 32).astype(np.float32)
 
         times[0] += time.time() - cur_time
         cur_time = time.time()
 
-        features = features.reshape(ps, ps, self.num_patch, ps, -1).transpose(2, 4, 0, 1, 3)
-        flags = flags.reshape(-1, ps, ps, self.num_patch, ps).transpose(3, 0, 1, 2, 4)
-
-        times[1] += time.time() - cur_time
-        return features, flags
+        return points, point_flags, voronoi_flags
 
     def __getitem__(self, idx):
         id_object = self.index[idx, 0]
         id_patch = self.index[idx, 1]
 
-        feat_data, flag_data = self.get_patch(id_object, id_patch)
-        return feat_data, flag_data, self.names[id_object], np.arange(flag_data.shape[0], dtype=np.int64) + id_patch * \
-                                                            flag_data.shape[0]
+        points, point_flags, voronoi_flags = self.get_patch(id_object, id_patch)
+        return np.concatenate([points, point_flags[:,:,None].astype(np.float32)],axis=-1), voronoi_flags, \
+            self.names[id_object], np.arange(point_flags.shape[0], dtype=np.int64) + id_patch * point_flags.shape[0]
 
     @staticmethod
     def collate_fn(v_batches):
@@ -859,6 +843,40 @@ class ABC_whole_pc_dynamic(torch.utils.data.Dataset):
         )
 
 
+def prepare_mesh(v_file, v_output_root, prefix):
+    if not os.path.exists(v_file):
+        print("Cannot find ", v_file)
+        raise
+    mesh = o3d.io.read_triangle_mesh(v_file)
+    points = np.asarray(mesh.vertices)
+    points = normalize_points(points)
+    mesh.vertices = o3d.utility.Vector3dVector(points)
+    if v_output_root is not None:
+        o3d.io.write_triangle_mesh(os.path.join(v_output_root, prefix + "_norm.ply"), mesh)
+    return mesh
+
+def prepare_udf(triangles, normals, query_points, v_resolution):
+    num_queries = query_points.shape[0]
+
+    query_result = cuda_distance.query(
+        triangles.reshape(-1),
+        query_points.reshape(-1),
+        512, 512 ** 3)
+
+    udf = np.asarray(query_result[0]).astype(np.float32)
+    closest_points = np.asarray(query_result[1]).reshape((num_queries, 3)).astype(np.float32)
+    dir = closest_points - query_points
+    dir = dir / np.linalg.norm(dir, axis=1, keepdims=True)
+
+    normals = normals[query_result[2]].astype(np.float32)
+
+    # Revised at 1004
+    feat_data = np.concatenate([udf[:, None], dir, normals], axis=1)
+    feat_data = feat_data.reshape(
+        (v_resolution, v_resolution, v_resolution, 7)).astype(np.float32)
+    return feat_data
+
+
 class ABC_test_mesh(torch.utils.data.Dataset):
     def __init__(self, v_data_root, v_batch_size, v_resolution=256, v_output_root=None):
         super(ABC_test_mesh, self).__init__()
@@ -867,62 +885,23 @@ class ABC_test_mesh(torch.utils.data.Dataset):
         self.resolution = v_resolution
 
         assert v_resolution % 32 == 0
-        num_patches_per_dim = v_resolution // 32
         self.coords = generate_coords(v_resolution).reshape(-1, 3)
         self.num_patches = (v_resolution // 32) ** 3
         assert self.num_patches % v_resolution == 0
         prefix = Path(v_data_root).stem
 
-        print("Prepare mesh data")
-        if not os.path.exists(v_data_root):
-            print("Cannot find ", v_data_root)
+        mesh = prepare_mesh(v_data_root, v_output_root, prefix)
 
-        mesh = o3d.io.read_triangle_mesh(v_data_root)
         mesh.compute_triangle_normals()
-        # Normalize
+        # v = np.asarray(mesh.vertices)
+        # v[:,0]=-v[:,0]
+        # mesh.vertices = o3d.utility.Vector3dVector(v)
+
+        # UDF
         points = np.asarray(mesh.vertices)
-        points = normalize_points(points)
-        mesh.vertices = o3d.utility.Vector3dVector(points)
-        if v_output_root is not None:
-            o3d.io.write_triangle_mesh(os.path.join(v_output_root, prefix+"_norm.ply"), mesh)
-
-        pc = mesh.sample_points_poisson_disk(10000)
-        points = np.asarray(pc.points)
-        normals = np.asarray(pc.normals)
-        self.poisson_points = np.concatenate([points, normals], axis=1)
-
-        use_dense_feature = True
-        if use_dense_feature:
-            points = np.asarray(mesh.vertices)
-            faces = np.asarray(mesh.triangles)
-            normals = np.asarray(mesh.triangle_normals)
-            triangles = points[faces]
-            num_triangles = triangles.shape[0]
-            num_queries = self.coords.shape[0]
-            query_result = cuda_distance.query(triangles.reshape(-1), self.coords.reshape(-1), 512, 512 ** 3)
-
-            udf = np.asarray(query_result[0]).astype(np.float32)
-            closest_points = np.asarray(query_result[1]).reshape((num_queries, 3)).astype(np.float32)
-            dir = closest_points - self.coords
-            dir = dir / np.linalg.norm(dir, axis=1, keepdims=True)
-
-            normals = normals[query_result[2]].astype(np.float32)
-        else:
-
-            index = faiss.IndexFlatL2(3)
-            index.add(points)
-            dists, indices = index.search(self.coords, 1)
-            closest_points = points[indices.reshape(-1)]
-            dir = closest_points - self.coords
-            dir = dir / np.linalg.norm(dir, axis=1, keepdims=True)
-            udf = np.sqrt(dists).reshape(-1)
-            normals = normals[indices.reshape(-1)]
-            normals = normals / np.linalg.norm(normals, axis=1, keepdims=True)
-
-        # Revised at 1004
-        feat_data = np.concatenate([udf[:, None], dir, normals], axis=1)
-        self.feat_data = feat_data.reshape(
-            (v_resolution, v_resolution, v_resolution, 7)).astype(np.float32)[:, :, :]
+        faces = np.asarray(mesh.triangles)
+        normals = np.asarray(mesh.triangle_normals)
+        self.feat_data = prepare_udf(points[faces], normals, self.coords, v_resolution)
 
         self.patch_size = 32
         self.patch_list = []
@@ -954,49 +933,129 @@ class ABC_test_mesh(torch.utils.data.Dataset):
         return features, id_list
 
 
-class ABC_test_voxel(torch.utils.data.Dataset):
+class ABC_test_mesh_aug(torch.utils.data.Dataset):
     def __init__(self, v_data_root, v_batch_size, v_resolution=256, v_output_root=None):
-        super(ABC_test_voxel, self).__init__()
+        super(ABC_test_mesh_aug, self).__init__()
         self.batch_size = v_batch_size
         self.data_root = v_data_root
         self.resolution = v_resolution
-        self.coords = generate_coords(v_resolution).reshape(-1,3)
-        print("Prepare mesh data")
-        if not os.path.exists(v_data_root):
-            print("Cannot find ", v_data_root)
-        mesh = o3d.io.read_triangle_mesh(v_data_root)
+
+        assert v_resolution % 32 == 0
+        self.coords = generate_coords(v_resolution).reshape(-1, 3)
+        self.num_patches = (v_resolution // 32) ** 3
+        assert self.num_patches % v_resolution == 0
         prefix = Path(v_data_root).stem
-        vertices = np.asarray(mesh.vertices)
-        vertices = normalize_points(vertices)
-        mesh.vertices = o3d.utility.Vector3dVector(vertices)
-        if v_output_root is not None:
-            o3d.io.write_triangle_mesh(os.path.join(v_output_root, prefix+"_norm.ply"), mesh)
-        # poisson sampling
-        pcd = mesh.sample_points_poisson_disk(10000)
-        points = np.asarray(pcd.points)
-        normals = np.asarray(pcd.normals)
-        self.poisson_points = points
 
-        index = faiss.IndexFlatL2(3)
-        index.add(points)
-        dists, indices = index.search(self.coords, 1)
-        closest_points = points[indices.reshape(-1)]
-        dir = closest_points - self.coords
-        dir = dir / np.linalg.norm(dir, axis=1, keepdims=True)
-        udf = np.sqrt(dists).reshape(-1)
-        normals = normals[indices.reshape(-1)]
-        normals = normals / np.linalg.norm(normals, axis=1, keepdims=True)
+        mesh = prepare_mesh(v_data_root, v_output_root, prefix)
 
-        # Revised at 1004
-        feat_data = np.concatenate([udf[:,None], dir, normals], axis=1)
-        self.feat_data = feat_data.astype(np.float32).reshape(v_resolution,v_resolution,v_resolution, -1)
-        self.coords.reshape(v_resolution,v_resolution,v_resolution, -1)
+        # UDF1
+        points = np.asarray(mesh.vertices)
+        faces = np.asarray(mesh.triangles)
+        mesh.compute_triangle_normals()
+        normals = np.asarray(mesh.triangle_normals)
+        feat_data1 = prepare_udf(points[faces], normals, self.coords, v_resolution)
+
+        # UDF2
+        points[:,0]=-points[:,0]
+        mesh.vertices = o3d.utility.Vector3dVector(points)
+        mesh.compute_triangle_normals()
+        normals = np.asarray(mesh.triangle_normals)
+        feat_data2 = prepare_udf(points[faces], normals, self.coords, v_resolution)
+
+        # UDF3
+        points[:,0]=-points[:,0]
+        points[:,1]=-points[:,1]
+        mesh.vertices = o3d.utility.Vector3dVector(points)
+        mesh.compute_triangle_normals()
+        normals = np.asarray(mesh.triangle_normals)
+        feat_data3 = prepare_udf(points[faces], normals, self.coords, v_resolution)
+
+        # UDF4
+        points[:,1]=-points[:,1]
+        points[:,2]=-points[:,2]
+        mesh.vertices = o3d.utility.Vector3dVector(points)
+        mesh.compute_triangle_normals()
+        normals = np.asarray(mesh.triangle_normals)
+        feat_data4 = prepare_udf(points[faces], normals, self.coords, v_resolution)
+
+        self.feat_data = np.stack([feat_data1, feat_data2, feat_data3, feat_data4], axis=0)
+
+        self.patch_size = 32
+        self.patch_list = []
+        for i_aug in range(4):
+            for x in range(0, v_resolution - self.patch_size + 1, self.patch_size // 2):
+                for y in range(0, v_resolution - self.patch_size + 1, self.patch_size // 2):
+                    for z in range(0, v_resolution - self.patch_size + 1, self.patch_size // 2):
+                        self.patch_list.append((i_aug, x, y, z))
+            if i_aug == 0:
+                self.num_patch_per_instance = len(self.patch_list)
+
+        pass
 
     def __len__(self):
-        return 1
+        return math.ceil(len(self.patch_list) / self.batch_size)
 
     def __getitem__(self, idx):
+        features = []
+        id_list = []
+        for i in range(self.batch_size):
+            id = idx * self.batch_size + i
+            if id >= len(self.patch_list):
+                break
+            feat_data = self.feat_data[
+                        self.patch_list[id][0],
+                        self.patch_list[id][1]:self.patch_list[id][1] + self.patch_size,
+                        self.patch_list[id][2]:self.patch_list[id][2] + self.patch_size,
+                        self.patch_list[id][3]:self.patch_list[id][3] + self.patch_size,
+                        ]
+            features.append(np.transpose(feat_data, [3, 0, 1, 2]))
+            id_list.append(self.patch_list[id])
+        features = np.stack(features, axis=0)
+        return features, id_list
+
+
+class ABC_test_voxel(torch.utils.data.Dataset):
+    def __init__(self, v_conf, v_resolution=256, batch_size=128):
+        super(ABC_test_voxel, self).__init__()
+        self.data_root = Path(v_conf["root"])
+        self.type = v_conf["type"]
+        self.resolution = v_resolution
+        self.batch_size=batch_size
+        self.coords = generate_coords(v_resolution).reshape(-1,3)
+
+        tasks = [self.data_root / "feat" / self.type / item for item in os.listdir(
+            self.data_root / "feat" / self.type)]
+        self.tasks = sorted(tasks)
+
+
+    def __len__(self):
+        return len(self.tasks)
+
+    def __getitem__(self, idx):
+        prefix = self.tasks[idx].stem
+        mesh_udf = np.load(
+            self.tasks[idx]
+        ).reshape(self.resolution, self.resolution, self.resolution, -1).astype(np.float32)
+
+        udf = de_normalize_udf((mesh_udf[..., 0:1]))
+        gradients = de_normalize_angles((mesh_udf[..., 1:3]))
+        normal = de_normalize_angles((mesh_udf[..., 3:5]))
+        mesh_udf = np.concatenate([udf, gradients, normal], axis=-1)
+
+        sliding_data = np.lib.stride_tricks.sliding_window_view(
+            mesh_udf, [32, 32, 32, 7])[::16, ::16, ::16].reshape(-1, 32, 32, 32, 7)
+
+        num_batch = sliding_data.shape[0] // self.batch_size
+        block_end = num_batch * self.batch_size
+        batched_data = np.split(sliding_data[:block_end], num_batch) + [sliding_data[block_end:]]
+
+        gt_flags = np.frombuffer(open(str(self.data_root / "gt" / "voronoi" / prefix), "rb").read(), dtype=np.int8)
+        gt_flags = (gt_flags[:, None] & (1 << np.arange(8))[None, :]) > 0
+        gt_flags = gt_flags.reshape(-1).reshape(256, 256, 256)
+
         return (
-            self.feat_data,
-            self.coords
+            prefix,
+            batched_data,
+            gt_flags,
+            mesh_udf
         )

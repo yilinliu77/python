@@ -27,8 +27,8 @@ def main(v_cfg: DictConfig):
     threshold = v_cfg["model"]["test_threshold"]
     res = v_cfg["model"]["test_resolution"]
     ps = v_cfg["dataset"]["patch_size"]
-    ps_2 = ps//2
-    ps_4 = ps//4
+    ps_2 = ps // 2
+    ps_4 = ps // 4
     num_patch_dim = res // ps * 2 - 1
     query_points = generate_coords(res)
 
@@ -70,26 +70,35 @@ def main(v_cfg: DictConfig):
 
         flags = np.concatenate(flags, axis=0)
 
-        final_flags = np.zeros((res, res, res), dtype=np.float32)
+        final_flags = np.zeros((4, res, res, res), dtype=np.float32)
         for i in range(flags.shape[0]):
-            x = i // num_patch_dim // num_patch_dim
-            y = i // num_patch_dim % num_patch_dim
-            z = i % num_patch_dim
+            i_patch = i // dataset.num_patch_per_instance
 
-            if x == 0 or x == num_patch_dim-1 or y == 0 or y == num_patch_dim-1 or z == 0 or z == num_patch_dim-1:
-                final_flags[x * ps_2:x * ps_2 + ps, y * ps_2:y * ps_2 + ps, z * ps_2:z * ps_2 + ps] = flags[i, 0]
-            else:
+            true_i = i % dataset.num_patch_per_instance
+            x = true_i // num_patch_dim // num_patch_dim
+            y = true_i // num_patch_dim % num_patch_dim
+            z = true_i % num_patch_dim
+
+            if x == 0 or x == num_patch_dim - 1 or y == 0 or y == num_patch_dim - 1 or z == 0 or z == num_patch_dim - 1:
                 final_flags[
+                i_patch, x * ps_2:x * ps_2 + ps, y * ps_2:y * ps_2 + ps, z * ps_2:z * ps_2 + ps] = flags[i, 0]
+            else:
+                final_flags[i_patch,
                 x * ps_2 + ps_4:x * ps_2 + ps_4 + ps_2,
                 y * ps_2 + ps_4:y * ps_2 + ps_4 + ps_2,
-                z * ps_2 + ps_4:z * ps_2 + ps_4 + ps_2] = flags[
-                                                          i, 0,
+                z * ps_2 + ps_4:z * ps_2 + ps_4 + ps_2] = flags[i, 0,
                                                           ps_4:ps_2 + ps_4,
                                                           ps_4:ps_2 + ps_4,
                                                           ps_4:ps_2 + ps_4]
 
+        final_flags[1] = np.flip(final_flags[1], axis=0)
+        final_flags[2] = np.flip(final_flags[2], axis=1)
+        final_flags[3] = np.flip(final_flags[3], axis=2)
+        final_flags = np.max(final_flags, axis=0)
+        # final_flags = final_flags[0]
+
         final_flags = sigmoid(final_flags) > threshold
-        final_features = dataset.feat_data
+        final_features = dataset.feat_data[0]
         valid_points = query_points[np.logical_and(final_flags, (final_features[..., 0] < 0.2))]
 
         export_point_cloud(os.path.join(output_root, "{}_pred_points.ply".format(name)),
@@ -100,7 +109,7 @@ def main(v_cfg: DictConfig):
 
         np.save(os.path.join(output_root, "{}_feat.npy".format(name)), gradients_and_udf)
         np.save(os.path.join(output_root, "{}_pred.npy".format(name)), predicted_labels)
-        export_point_cloud(os.path.join(output_root, "{}_points.ply".format(name)), dataset.poisson_points)
+        # export_point_cloud(os.path.join(output_root, "{}_points.ply".format(name)), dataset.poisson_points)
         print("Done")
 
 

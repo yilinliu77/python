@@ -12,7 +12,7 @@ trainer:
   num_worker: 0
 
   spawn: false
-  num_samples: 100
+  num_samples: -1
   batch_size: 1
   resume_from_checkpoint:
   evaluate: false
@@ -21,9 +21,9 @@ trainer:
   accelerator: "32-true"
 
 model:
-  model_name: Base_model_dilated
+  model_name: Base_model_UNet
   with_bn: false
-  channels: 4
+  channels: 1
   output_channels: 1
   need_normalize: true
 

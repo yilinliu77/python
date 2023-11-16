@@ -1,6 +1,8 @@
 dataset:
-  root: G:/Dataset/GSP/test_data2
+  root: G:/Dataset/GSP/test_data4
   dataset_name: ABC_test_voxel
+#  type: gt
+  type: ndc
 
 trainer:
   learning_rate: 1e-4
@@ -11,14 +13,15 @@ trainer:
   num_samples: -1
   batch_size: 128
 #  resume_from_checkpoint: output/neural_bsp/1016_v9_base_wo_normal.ckpt
-  resume_from_checkpoint: output/neural_bsp/1101_v11_ndc_dilated_float32.ckpt
+  resume_from_checkpoint: output/neural_bsp/1106_v11_ndc_unet.ckpt
   evaluate: true
   output: .
   check_val_every_n_epoch: 1
   accelerator: "32-true"
 
 model:
-  model_name: Base_model_dilated
+#  model_name: Base_model_dilated_backup
+  model_name: Base_model_UNet
   channels: 4
   need_normalize: false
   with_bn: false
@@ -26,6 +29,7 @@ model:
 
   test_threshold: 0.5
   test_resolution: 256
+  focal_alpha: 0.75
 
 hydra:
   run:

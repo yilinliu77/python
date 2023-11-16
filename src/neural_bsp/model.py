@@ -1,13 +1,15 @@
 import os
 
 import sys
+import time
 
 import numpy as np
 from torchvision.ops import sigmoid_focal_loss
 
 from src.neural_bsp.abc_hdf5_dataset import generate_coords
+# from thirdparty.Pointnet2_PyTorch.pointnet2.models.pointnet2_msg_sem import PointNet2SemSegMSG
 from thirdparty.Pointnet2_PyTorch.pointnet2_ops_lib.pointnet2_ops.pointnet2_modules import PointnetFPModule, \
-    PointnetSAModule
+    PointnetSAModule, PointnetSAModuleMSG
 
 sys.path.append("thirdparty/pvcnn")
 from thirdparty.pvcnn.modules import functional as pvcnn_F
@@ -313,6 +315,226 @@ class Base_model_dilated(Base_model_k7):
 
 
 ##################################################################
+
+class Voxelization(nn.Module):
+    def __init__(self, resolution, normalize=True, eps=0):
+        super().__init__()
+        self.r = int(resolution)
+        self.eps = eps
+
+    def forward(self, features, coords):
+        coords = coords.detach()
+        norm_coords = (coords + 1) / 2.0
+        norm_coords = torch.clamp(norm_coords * self.r, 0, self.r - 1)
+        vox_coords = torch.round(norm_coords).to(torch.int32)
+        return pvcnn_F.avg_voxelize(features, vox_coords, self.r), norm_coords
+
+    def extra_repr(self):
+        return 'resolution={}{}'.format(self.r, ', normalized eps = {}'.format(self.eps) if self.normalize else '')
+
+class U_Net_3D_2(nn.Module):
+    def __init__(self, img_ch=3, output_ch=1, v_pool_first=True, base_channel=[8,16,32,64,128], with_bn=True):
+        super(U_Net_3D_2, self).__init__()
+
+        self.Maxpool = nn.MaxPool3d(kernel_size=2, stride=2)
+
+        self.depths = len(base_channel)-1
+
+        self.conv = nn.ModuleList()
+        self.up = nn.ModuleList()
+        self.up_conv = nn.ModuleList()
+        if v_pool_first:
+            self.conv1 = nn.Sequential(
+                conv_block(ch_in=img_ch, ch_out=base_channel, with_bn=with_bn),
+                nn.MaxPool3d(kernel_size=4, stride=4),
+                conv_block(ch_in=base_channel, ch_out=base_channel, with_bn=with_bn),
+            )
+        elif with_bn:
+            self.conv1 = nn.Sequential(
+                nn.Conv3d(img_ch, base_channel[0], kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm3d(base_channel[0]),
+                nn.ReLU(inplace=True),
+            )
+        else:
+            self.conv1 = nn.Sequential(
+                nn.Conv3d(img_ch, base_channel[0], kernel_size=1, stride=1, padding=0),
+                nn.ReLU(inplace=True),
+            )
+        for i in range(self.depths):
+            self.conv.append(conv_block(ch_in=base_channel[i], ch_out=base_channel[i+1], with_bn=with_bn))
+
+            self.up.append(up_conv(ch_in=base_channel[i+1], ch_out=base_channel[i]))
+            self.up_conv.append(conv_block(ch_in=base_channel[i], ch_out=base_channel[i], with_bn=with_bn))
+
+        self.Conv_1x1 = nn.Conv3d(base_channel[0], output_ch, kernel_size=1, stride=1, padding=0)
+
+    def forward(self, v_input):
+        # encoding path
+        x1 = self.conv1(v_input)
+
+        x = [x1, ]
+        for i in range(self.depths):
+            x.append(self.Maxpool(self.conv[i](x[-1])))
+
+        up_x = [x[-1]]
+        for i in range(self.depths - 1, -1, -1):
+            item = self.up[i](up_x[-1])
+            if i >= 0:
+                item = item + x[i]
+            up_x.append(self.up_conv[i](item))
+
+        d1 = self.Conv_1x1(up_x[-1])
+
+        return d1
+
+
+class PC_model(Base_model):
+    def __init__(self, v_conf):
+        super(PC_model, self).__init__(v_conf)
+        hidden_dim = 32
+        channels = v_conf["channels"]
+        with_bn = v_conf["with_bn"]
+
+        self.SA_modules = nn.ModuleList()
+        # PointNet2
+        if True:
+            c_in = channels
+            self.SA_modules.append(
+                PointnetSAModuleMSG(
+                    npoint=1024,
+                    radii=[0.05, 0.1],
+                    nsamples=[16, 32],
+                    mlps=[[c_in, 16], [c_in, 32]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            c_out_0 = 16 + 32
+
+            c_in = c_out_0
+            self.SA_modules.append(
+                PointnetSAModuleMSG(
+                    npoint=256,
+                    radii=[0.1, 0.2],
+                    nsamples=[16, 32],
+                    mlps=[[c_in, 32], [c_in, 64]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            c_out_1 = 32 + 64
+
+            c_in = c_out_1
+            self.SA_modules.append(
+                PointnetSAModuleMSG(
+                    npoint=64,
+                    radii=[0.2, 0.4],
+                    nsamples=[16, 32],
+                    mlps=[[c_in, 64], [c_in, 128]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            c_out_2 = 64 + 128
+
+            c_in = c_out_2
+            self.SA_modules.append(
+                PointnetSAModuleMSG(
+                    npoint=16,
+                    radii=[0.4, 0.8],
+                    nsamples=[16, 32],
+                    mlps=[[c_in, 128], [c_in, 128]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            c_out_3 = 128 + 128
+
+            self.FP_modules = nn.ModuleList()
+            self.FP_modules.append(PointnetFPModule(mlp=[32 + channels, 32], bn=with_bn))
+            self.FP_modules.append(PointnetFPModule(mlp=[64 + c_out_0, 32], bn=with_bn))
+            self.FP_modules.append(PointnetFPModule(mlp=[128 + c_out_1, 64], bn=with_bn))
+            self.FP_modules.append(PointnetFPModule(mlp=[c_out_3 + c_out_2, 128], bn=with_bn))
+
+            self.fc_lyaer = nn.Sequential(
+                nn.Conv1d(32, 32, kernel_size=1, bias=False),
+                nn.BatchNorm1d(32) if with_bn else nn.Identity(),
+                nn.ReLU(True),
+                nn.Dropout(0.5),
+                nn.Conv1d(32, hidden_dim, kernel_size=1),
+            )
+
+        self.encoder = U_Net_3D_2(
+            img_ch=hidden_dim,
+            output_ch=self.output_c,
+            v_pool_first=False,
+            base_channel=[32,64,128,128],
+            with_bn=with_bn
+        )
+
+        self.voxelizer = Voxelization(32, False)
+
+    def forward(self, v_data, v_training=False):
+        (feat_data, _), _ = v_data
+        bs = feat_data.shape[0]
+        num_mini_batch = feat_data.shape[1]
+        feat_data = feat_data.reshape((bs * num_mini_batch,) + feat_data.shape[2:])
+
+        time_statics = [0] * 10
+        cur_time = time.time()
+        points = feat_data[..., 0:3]
+        points_flags = feat_data[..., 3:4].to(torch.bool)
+
+        if self.need_normalize:
+            points = points / 32767
+
+        time_statics[0]+=time.time() - cur_time
+        cur_time = time.time()
+
+        valid_numbers = (points_flags[...,0] == 1).sum(dim=1)
+        target_length = points.shape[1]
+        # Step 1: Create a tensor that represents a range from 0 to the maximum valid index for each example
+        max_indices = valid_numbers.squeeze() - 1
+        range_tensors = torch.arange(max_indices.max() + 1, device=points.device).unsqueeze(0).repeat(
+            valid_numbers.size(0), 1)
+        # Step 2: Truncate the range tensors to the maximum valid index for each example
+        truncated_range_tensors = range_tensors % (max_indices.unsqueeze(1) + 1)
+        # Step 3: Repeat and truncate to the target length
+        repeated_tensors = truncated_range_tensors.repeat(1, target_length // truncated_range_tensors.size(1) + 1)
+        index_tensors = repeated_tensors[:, :target_length]
+        xyz = torch.gather(points, 1, index_tensors[:, :, None].tile((1, 1, 3)))
+
+        time_statics[1]+=time.time() - cur_time
+        cur_time = time.time()
+        features = points.permute(0,2,1).contiguous()
+        l_xyz, l_features = [xyz], [features]
+        for i in range(len(self.SA_modules)):
+            li_xyz, li_features = self.SA_modules[i](l_xyz[i], l_features[i])
+            l_xyz.append(li_xyz)
+            l_features.append(li_features)
+
+        for i in range(-1, -(len(self.FP_modules) + 1), -1):
+            l_features[i - 1] = self.FP_modules[i](
+                l_xyz[i - 1], l_xyz[i], l_features[i - 1], l_features[i]
+            )
+
+        features =  self.fc_lyaer(l_features[0])
+        time_statics[2]+=time.time() - cur_time
+        cur_time = time.time()
+
+        voxel_features, voxel_coords = self.voxelizer(features, points)
+
+        prediction = self.encoder(voxel_features)
+        time_statics[3]+=time.time() - cur_time
+        return prediction.reshape((bs, num_mini_batch,) + prediction.shape[1:])
+
+    def valid_output(self, idx, log_root, target_viz_name,
+                     gathered_prediction, gathered_gt, gathered_queries):
+        return
+
+##################################################################
+
+
 class U_Net_3D2(nn.Module):
     def __init__(self, img_ch=3, output_ch=1, base_channel=16, with_bn=True):
         super(U_Net_3D2, self).__init__()
@@ -419,7 +641,7 @@ class PC_model_whole_voxel(nn.Module):
 ##################################################################
 class Base_model_dilated_backup(nn.Module):
     def __init__(self, v_conf):
-        super(Base_model_dilated_backup, self).__init__(v_conf)
+        super(Base_model_dilated_backup, self).__init__()
         self.need_normalize = v_conf["need_normalize"]
 
         self.Maxpool = nn.MaxPool3d(kernel_size=2, stride=2)

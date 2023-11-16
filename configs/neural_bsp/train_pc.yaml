@@ -1,7 +1,8 @@
 dataset:
-  root: E:/GSP_v10_50k/training.h5
-  dataset_name: ABC_whole_pc
+  root: C:\repo\python\output\neural_bsp/training.h5
+  dataset_name: ABC_patch_pc
   is_bool_flag: true
+  mini_batch_size: 24
 
   overfit: false
   max_training_sample: 262144
@@ -19,17 +20,18 @@ trainer:
   evaluate: false
   output: .
   check_val_every_n_epoch: 1
-  accelerator: "16-mixed"
+  accelerator: "32-true"
 
 model:
-  model_name: PC_model_whole_voxel
+  model_name: PC_model
   with_bn: true
-  channels: 7
+  channels: 3
   output_channels: 1
   need_normalize: true
   voxelize_res: 256
 
   test_threshold: 0.5
+  focal_alpha: 0.75
 
 hydra:
   run:

@@ -175,9 +175,14 @@ class ABC_patch(torch.utils.data.Dataset):
         with h5py.File(self.data_root, "r") as f:
             self.num_items = f["features"].shape[0]
             self.resolution = f["features"].shape[1]
+            self.total_names = f["names"][:]
             self.names = np.asarray(
                 ["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
-        self.validation_start = max(self.num_items // 10 * 9, self.num_items - 1000)
+
+        self.training_id = np.arange(self.num_items)[self.total_names<800000]
+        self.validation_id = np.arange(self.num_items)[np.logical_and(self.total_names<900000, self.total_names>800000)]
+
+        self.validation_start = self.validation_id[0]
 
         self.is_bool_flag = self.conf["is_bool_flag"]
 
@@ -187,11 +192,11 @@ class ABC_patch(torch.utils.data.Dataset):
 
         if self.mode == "training":
             self.index = np.stack(np.meshgrid(
-                np.arange(self.num_items)[:self.validation_start],
+                self.training_id,
                 np.arange(self.num_patches), indexing="ij"), axis=2)
         elif self.mode == "validation":
             self.index = np.stack(np.meshgrid(
-                np.arange(self.num_items)[self.validation_start:],
+                self.validation_id,
                 np.arange(self.num_patches), indexing="ij"), axis=2)
         elif self.mode == "testing":
             self.index = np.stack(np.meshgrid(
@@ -202,6 +207,7 @@ class ABC_patch(torch.utils.data.Dataset):
         self.index = self.index.reshape((-1, 2))
 
     def __len__(self):
+        # return 64
         return self.index.shape[0]
 
     def get_patch(self, v_id_item, v_id_patch):
@@ -214,8 +220,8 @@ class ABC_patch(torch.utils.data.Dataset):
 
         with h5py.File(self.data_root, "r") as f:
             if False:
-                feat = np.asarray(f["features"][0], dtype=np.float32)
-                flags = np.asarray(f["flags"][0], dtype=np.float32) > 0
+                feat = np.asarray(f["features"][v_id_item], dtype=np.float32)
+                flags = np.asarray(f["flags"][v_id_item], dtype=np.float32) > 0
                 udf = feat[:,:,:,0:1] / 65535 * 2
                 gradient = angle2vector(feat[:,:,:,1:3])
                 p = (generate_coords(256) + gradient * udf).reshape(-1,3)

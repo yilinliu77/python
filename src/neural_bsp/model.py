@@ -4,6 +4,7 @@ import sys
 import time
 
 import numpy as np
+import open3d
 from torchvision.ops import sigmoid_focal_loss
 
 from src.neural_bsp.abc_hdf5_dataset import generate_coords
@@ -84,12 +85,14 @@ class conv_block(nn.Module):
         self.conv1 = nn.Sequential(
             nn.Conv3d(ch_in, ch_out, kernel_size=kernel_size, stride=stride, padding=padding, bias=True,
                       dilation=dilate),
-            nn.InstanceNorm3d(ch_out) if with_bn else nn.Identity(),
+            nn.BatchNorm3d(ch_out) if with_bn else nn.Identity(),
+            # nn.InstanceNorm3d(ch_out) if with_bn else nn.Identity(),
             nn.ReLU(inplace=True),
         )
         self.conv2 = nn.Sequential(
             nn.Conv3d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True, dilation=1),
-            nn.InstanceNorm3d(ch_out) if with_bn else nn.Identity(),
+            nn.BatchNorm3d(ch_out) if with_bn else nn.Identity(),
+            # nn.InstanceNorm3d(ch_out) if with_bn else nn.Identity(),
             nn.ReLU(inplace=True)
         )
 
@@ -251,6 +254,21 @@ class Base_model_UNet(Base_model):
                 x = udf.permute((0, 4, 1, 2, 3)).contiguous()
         else:
             x = feat_data[:, :self.num_features]
+
+        # Debug
+        if False:
+            points = (np.arange(256) / 255) * 2 - 1
+            points = np.stack(np.meshgrid(points, points, points, indexing='ij'), axis=-1)
+            points = points[:32, :32, :]
+            import open3d as o3d
+            pcd = o3d.geometry.PointCloud()
+            udf = x[:, 0:1].permute(2,3,0,4,1).reshape(32,32,256,1).detach().cpu().numpy()
+            g = x[:, 1:4].permute(2,3,0,4,1).reshape(32,32,256,3).detach().cpu().numpy()
+            n = x[:, 4:7].permute(2,3,0,4,1).reshape(32,32,256,3).detach().cpu().numpy()
+            p = points + udf * g
+            pcd.points = o3d.utility.Vector3dVector(p.reshape(-1,3))
+            pcd.normals = o3d.utility.Vector3dVector(n.reshape(-1,3))
+            o3d.io.write_point_cloud("debug.ply", pcd)
 
         prediction = self.encoder(x)
 

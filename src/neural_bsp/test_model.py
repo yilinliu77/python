@@ -191,9 +191,10 @@ def main(v_cfg: DictConfig):
         np.save(str(data_root / "prediction" / type / (prefix+"_pred")), predicted_labels)
         # print("Done")
         bar.update(1)
-    print("Precision: {:.4f}".format(np.mean(precisions)))
-    print("Recall: {:.4f}".format(np.mean(recalls)))
-    print("F1: {:.4f}".format(np.mean(f1s)))
+    print("Precision: {:.4f}".format(np.nanmean(precisions)))
+    print("Recall: {:.4f}".format(np.nanmean(recalls)))
+    print("F1: {:.4f}".format(np.nanmean(f1s)))
+    print("NAN: {:.4f}/{:.4f}".format(np.isnan(f1s).sum(), len(f1s)))
 
 
 if __name__ == '__main__':

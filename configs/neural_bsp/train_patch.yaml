@@ -1,6 +1,6 @@
 dataset:
 #  root: E:/GSP_v10_50k/training.h5
-  root: C:/repo/python/output/neural_bsp/training.h5
+  root: e:/v14_parsenet_ndc_udf/training.h5
   dataset_name: ABC_patch
   is_bool_flag: true
 
@@ -13,7 +13,7 @@ trainer:
 
   spawn: false
   num_samples: -1
-  batch_size: 1
+  batch_size: 4
   resume_from_checkpoint:
   evaluate: false
   output: .
@@ -22,8 +22,8 @@ trainer:
 
 model:
   model_name: Base_model_UNet
-  with_bn: false
-  channels: 1
+  with_bn: true
+  channels: 7
   output_channels: 1
   need_normalize: true
 

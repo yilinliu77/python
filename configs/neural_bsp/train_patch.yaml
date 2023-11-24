@@ -13,7 +13,7 @@ trainer:
 
   spawn: false
   num_samples: -1
-  batch_size: 4
+  batch_size: 16
   resume_from_checkpoint:
   evaluate: false
   output: .

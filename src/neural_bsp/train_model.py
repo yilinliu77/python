@@ -80,7 +80,7 @@ class PC_phase(pl.LightningModule):
             self.hydra_conf["dataset"],
         )
         sampler = None if self.hydra_conf["trainer"]["num_samples"] <= 0 else RandomSampler(self.train_dataset, num_samples=self.hydra_conf["trainer"]["num_samples"])
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=False,
         # return MyDataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=False,
                           collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],

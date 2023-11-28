@@ -25,7 +25,7 @@ def main(v_cfg: DictConfig):
     seed_everything(0)
     torch.set_float32_matmul_precision("medium")
     print(OmegaConf.to_yaml(v_cfg))
-    data_root = Path(v_cfg["dataset"]["root"])
+    output_dir = Path(v_cfg["dataset"]["output_dir"])
 
     threshold = v_cfg["model"]["test_threshold"]
     res = v_cfg["model"]["test_resolution"]
@@ -48,7 +48,8 @@ def main(v_cfg: DictConfig):
         pin_memory=True,
         drop_last=False
     )
-    check_dir(Path(v_cfg["dataset"]["root"]) / "prediction" / v_cfg["dataset"]["type"])
+    # check_dir(Path(v_cfg["dataset"]["root"]) / "prediction" / v_cfg["dataset"]["type"])
+    check_dir(output_dir)
     data_root = dataset.data_root
     type = dataset.type
 
@@ -186,9 +187,9 @@ def main(v_cfg: DictConfig):
         predicted_labels = final_flags.astype(np.ubyte).reshape(res, res, res)
         gradients_and_udf = final_features
 
-        export_point_cloud(str(data_root / "prediction" / type / (prefix+".ply")), valid_points)
-        np.save(str(data_root / "prediction" / type / (prefix+"_feat")), gradients_and_udf)
-        np.save(str(data_root / "prediction" / type / (prefix+"_pred")), predicted_labels)
+        export_point_cloud(str(output_dir / (prefix+".ply")), valid_points)
+        np.save(str(output_dir / (prefix+"_feat")), gradients_and_udf)
+        np.save(str(output_dir / (prefix+"_pred")), predicted_labels)
         # print("Done")
         bar.update(1)
     print("Precision: {:.4f}".format(np.nanmean(precisions)))

@@ -12,11 +12,11 @@ from tqdm import tqdm
 import pyrender
 from PIL import Image
 
-from src.neural_bsp.abc_hdf5_dataset import normalize_points
+from src.neural_bsp.abc_hdf5_dataset import normalize_points, generate_coords, de_normalize_udf, de_normalize_angles
 from shared.common_utils import *
 
-def viz_training_data():
-    root_file = r"C:\repo\python\output\neural_bsp\training.h5"
+def viz_training_data_pc_patch_v13():
+    root_file = r"E:\v14_parsenet_ndc_udf\training.h5"
     # root_file = r"C:\repo\python\output\neural_bsp\training.h5"
 
     with h5py.File(root_file, 'r') as f:
@@ -65,5 +65,46 @@ def viz_training_data():
             # export_point_cloud("points.ply", points[point_flags])
             pass
 
+def viz_training_data_udf_patch_v14():
+    root_file = r"E:\v14_parsenet_ndc_udf\training.h5"
+    # root_file = r"C:\repo\python\output\neural_bsp\training.h5"
+
+    coords = generate_coords(256)
+    with h5py.File(root_file, 'r') as f:
+        num_items = f["features"].shape[0]
+        while True:
+            id1 = np.random.randint(0, num_items - 1)
+
+            # id1 = 876
+
+            print("{}_{}:{}".format(f["names"][id1], f["ids"][id1], id1))
+            features = f["features"][id1]
+            udf = de_normalize_udf(features[...,0:1])
+            g = de_normalize_angles(features[...,1:3])
+            n = de_normalize_angles(features[...,1:3])
+            point_flags = f["flags"][id1]>0
+
+            p = coords + udf * g
+
+            pc1 = o3d.geometry.PointCloud()
+            pc1.points=o3d.utility.Vector3dVector(p.reshape(-1,3))
+            pc1.normals = o3d.utility.Vector3dVector(n.reshape(-1,3))
+            pc1.colors = o3d.utility.Vector3dVector(np.zeros_like(p.reshape(-1,3)))
+
+            pc2 = o3d.geometry.PointCloud()
+            pc2.points = o3d.utility.Vector3dVector(coords[point_flags])
+
+            # coor = o3d.geometry.TriangleMesh.create_coordinate_frame()
+            # o3d.visualization.draw_geometries([pc1])
+            # o3d.visualization.draw_geometries([pc1, pc2, coor])
+
+            if point_flags.sum() == 0:
+                continue
+
+            o3d.io.write_point_cloud("points.ply", pc1)
+            o3d.io.write_point_cloud("voronoi.ply", pc2)
+            pass
+
 if __name__ == '__main__':
-    viz_training_data()
+    np.random.seed(0)
+    viz_training_data_udf_patch_v14()

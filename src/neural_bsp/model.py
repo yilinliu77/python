@@ -200,6 +200,7 @@ class Base_model(nn.Module):
 
     def valid_output(self, idx, log_root, target_viz_name,
                      gathered_prediction, gathered_gt, gathered_queries):
+        return
         assert gathered_prediction.shape[0] == 64
         v_resolution = 256
         query_points = generate_coords(v_resolution).reshape(-1, 3)

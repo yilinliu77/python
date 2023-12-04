@@ -168,6 +168,8 @@ class ABC_patch_pc(torch.utils.data.Dataset):
 class ABC_patch(torch.utils.data.Dataset):
     def __init__(self, v_data_root, v_training_mode, v_conf):
         super(ABC_patch, self).__init__()
+        if v_data_root is None:
+            return
         self.data_root = v_data_root
         self.mode = v_training_mode
         self.conf = v_conf
@@ -176,8 +178,9 @@ class ABC_patch(torch.utils.data.Dataset):
             self.num_items = f["features"].shape[0]
             self.resolution = f["features"].shape[1]
             self.total_names = f["names"][:]
+            self.ids = f["ids"][:]
             self.names = np.asarray(
-                ["{:08d}_{}".format(f["names"][i], f["ids"][i]) for i in range(f["names"].shape[0])])
+                ["{:08d}_{}".format(self.total_names[i], self.ids[i]) for i in range(f["names"].shape[0])])
 
         self.training_id = np.arange(self.num_items)[self.total_names<800000]
         self.validation_id = np.arange(self.num_items)[np.logical_and(self.total_names<900000, self.total_names>800000)]
@@ -281,6 +284,72 @@ class ABC_patch(torch.utils.data.Dataset):
             names,
             torch.from_numpy(id_patch),
         )
+
+class ABC_patch2(ABC_patch):
+    def __init__(self, v_data_root, v_training_mode, v_conf):
+        super(ABC_patch2, self).__init__(None,None,None)
+        self.data_root = v_conf["training_root"] if v_training_mode=="training" else v_conf["validation_root"]
+        self.mode = v_training_mode
+        self.conf = v_conf
+        with h5py.File(self.data_root, "r") as f:
+            self.num_items = f["features"].shape[0]
+            self.resolution = f["features"].shape[1]
+
+        self.validation_start = 0
+
+        self.augment = v_conf["augment"]
+        self.is_bool_flag = self.conf["is_bool_flag"]
+        self.mini_batch_size = self.conf["mini_batch_size"]
+        self.num_total_batches = self.num_items // self.mini_batch_size
+
+        self.index = np.arange(self.num_total_batches)
+
+    def get_patch(self, v_id_item, v_id_patch):
+        times = [0] * 10
+        cur_time = time.time()
+
+        id_start = v_id_item  * self.mini_batch_size
+
+        with h5py.File(self.data_root, "r") as f:
+            if False:
+                feat = np.asarray(f["features"][v_id_item], dtype=np.float32)
+                flags = np.asarray(f["flags"][v_id_item], dtype=np.float32) > 0
+                udf = feat[:,:,:,0:1] / 65535 * 2
+                gradient = angle2vector(feat[:,:,:,1:3])
+                p = (generate_coords(256) + gradient * udf).reshape(-1,3)
+                export_point_cloud("1.ply", p)
+                export_point_cloud("2.ply", generate_coords(256)[flags])
+
+            features = f["features"][id_start:id_start + self.mini_batch_size,].astype(np.float32)
+            flags = f["flags"][id_start:id_start + self.mini_batch_size,]
+            names = f["names"][id_start:id_start + self.mini_batch_size,]
+            if self.is_bool_flag:
+                flags = (flags>0).astype(bool).astype(np.float32)
+            else:
+                shifts = np.arange(26)
+                flags2 = (flags[None,] & (1<<shifts)[:,None,None,None]) > 0
+                flags = flags2.astype(np.float32)
+
+        times[0] += time.time() - cur_time
+        cur_time = time.time()
+
+        if self.augment:
+            axis = np.random.randint(1,4)
+            features = np.flip(features, axis)
+            flags = np.flip(flags, axis)
+
+        # features = features.transpose(0, 4, 1, 2, 3)
+        flags = flags[:,:,:,:,None].transpose(0, 4, 1, 2, 3)
+
+        times[1] += time.time() - cur_time
+        return features, flags, names
+
+    def __getitem__(self, idx):
+        id_object = self.index[idx]
+
+        feat_data, flag_data, names = self.get_patch(id_object, -1)
+        return feat_data, flag_data, names, np.arange(flag_data.shape[0], dtype=np.int64)
+
 
 # Whole field
 class ABC_whole_pc(torch.utils.data.Dataset):

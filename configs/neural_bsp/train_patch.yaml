@@ -1,8 +1,12 @@
 dataset:
 #  root: E:/GSP_v10_50k/training.h5
-  root: e:/v14_parsenet_ndc_udf/training.h5
-  dataset_name: ABC_patch
+  root: G:/Dataset/GSP/v16_quadric_whole_60k/training.h5
+  training_root: G:/Dataset/GSP/v15_parsenet_26k/validation_split.h5
+  validation_root: G:/Dataset/GSP/v15_parsenet_26k/validation_split.h5
+  dataset_name: ABC_patch2
   is_bool_flag: true
+  mini_batch_size: 16
+  augment: true
 
   test_list: []
 
@@ -13,7 +17,7 @@ trainer:
 
   spawn: false
   num_samples: -1
-  batch_size: 16
+  batch_size: 1
   resume_from_checkpoint:
   evaluate: false
   output: .

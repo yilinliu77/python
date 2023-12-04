@@ -96,7 +96,8 @@ class PC_phase(pl.LightningModule):
             "validation",
             self.hydra_conf["dataset"],
         )
-        self.target_viz_name = self.valid_dataset.names[self.id_viz + self.valid_dataset.validation_start]
+        # self.target_viz_name = self.valid_dataset.names[self.id_viz + self.valid_dataset.validation_start]
+        self.target_viz_name = 0
         return DataLoader(self.valid_dataset, batch_size=self.batch_size,
         # return MyDataLoader(self.valid_dataset, batch_size=1,
                           collate_fn=self.dataset_name.collate_fn,
@@ -136,12 +137,12 @@ class PC_phase(pl.LightningModule):
         id_patchs = batch[3]
         outputs = self.model(data, False)
         loss = self.model.loss(outputs, data)
-        for i in range(bs):
-            if names[i] == self.target_viz_name:
-                self.viz_data["prediction"].append(outputs[i:i+1])
-                self.viz_data["query"].append(data[0][1][i:i+1])
-                self.viz_data["gt"].append(data[1][i:i+1])
-                self.viz_data["id_patch"].append(id_patchs[i:i+1])
+        # for i in range(bs):
+        #     if names[i] == self.target_viz_name:
+        #         self.viz_data["prediction"].append(outputs[i:i+1])
+        #         self.viz_data["query"].append(data[0][1][i:i+1])
+        #         self.viz_data["gt"].append(data[1][i:i+1])
+        #         self.viz_data["id_patch"].append(id_patchs[i:i+1])
         for loss_name in loss:
             if loss_name == "total_loss":
                 self.log("Validation_Loss", loss[loss_name], prog_bar=True, logger=True, on_step=False, on_epoch=True,

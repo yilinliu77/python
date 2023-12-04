@@ -66,16 +66,16 @@ def viz_training_data_pc_patch_v13():
             pass
 
 def viz_training_data_udf_patch_v14():
-    root_file = r"E:\v14_parsenet_ndc_udf\training.h5"
+    root_file = r"G:\Dataset\GSP\GSP_debug\udf\training.h5"
     # root_file = r"C:\repo\python\output\neural_bsp\training.h5"
 
     coords = generate_coords(256)
     with h5py.File(root_file, 'r') as f:
         num_items = f["features"].shape[0]
         while True:
-            id1 = np.random.randint(0, num_items - 1)
+            # id1 = np.random.randint(0, num_items - 1)
 
-            # id1 = 876
+            id1 = 0
 
             print("{}_{}:{}".format(f["names"][id1], f["ids"][id1], id1))
             features = f["features"][id1]

@@ -26,6 +26,7 @@ trainer:
 
 model:
   model_name: Base_model_UNet
+  base_channel: 16
   with_bn: true
   channels: 7
   output_channels: 1

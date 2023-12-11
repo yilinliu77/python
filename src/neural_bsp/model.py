@@ -176,6 +176,8 @@ class U_Net_3D(nn.Module):
         return d1
 
 
+
+
 class Base_model(nn.Module):
     def __init__(self, v_conf):
         super(Base_model, self).__init__()
@@ -232,7 +234,7 @@ class Base_model_UNet(Base_model):
             output_ch=self.output_c,
             v_pool_first=False,
             v_depth=4,
-            base_channel=8,
+            base_channel=v_conf["base_channel"],
             with_bn=v_conf["with_bn"]
         )
 

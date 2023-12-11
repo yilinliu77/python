@@ -4,7 +4,6 @@ from pathlib import Path
 import sys
 import time
 
-import faiss
 import h5py
 import numpy as np
 import torch
@@ -18,6 +17,7 @@ try:
     sys.path.append("thirdparty")
     import cuda_distance
     import open3d as o3d
+    import faiss
 except:
     print("Cannot import cuda_distance, ignore this if you don't use 'ABC_dataset_test_mesh'")
 

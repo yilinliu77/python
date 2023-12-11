@@ -257,7 +257,7 @@ def compute_fitness(v_data, v_graph):
 
 
 def generate_training_data():
-    query_points = generate_query_points()
+    query_points = generate_query_points(v_resolution=100)
     target_vertices, id_primitives = generate_test_shape2()
 
     kdtree = faiss.IndexFlatL2(2)
@@ -272,23 +272,36 @@ def generate_training_data():
     udf = np.sqrt(squared_dis[:, 0])
 
     # Visualize the target shape
-    if True:
-        _, axes = plt.subplots(1, 2)
-        axes[0].scatter(target_vertices[:, 0], target_vertices[:, 1], s=1, c=(1, 0, 0))
+    if False:
+        figs, axes = plt.subplots(1, 2)
+        axes[0].scatter(target_vertices[:, 0], target_vertices[:, 1], s=3, c=np.array((242, 132, 130))/255)
         axes[0].set_title("Target shape")
         axes[0].axis('scaled')
         axes[0].set_xlim(-0.5, 0.5)
         axes[0].set_ylim(-0.5, 0.5)
         axes[0].tick_params(left=False, right=False, labelleft=False,
                             labelbottom=False, bottom=False)
-        axes[1].scatter(query_points[:, 0], query_points[:, 1], c=udf)
+
+        color1 = np.asarray([245, 202, 195]) / 255
+        color2 = np.asarray([132, 165, 157]) / 255
+        udf1 = udf.max()
+        udf2 = udf.min()
+        level = 1-np.exp(-3 * (udf-udf2)/(udf1-udf2))
+        color = (color2-color1)[None,:] * level[:,None] + color1
+        plt.cm.register_cmap('my_cm', matplotlib.colors.LinearSegmentedColormap.from_list('my_cm', [color1, color2]))
+        sc = axes[1].scatter(query_points[:, 0], query_points[:, 1], c=level, s=10, cmap="my_cm")
         axes[1].set_title("UDF")
         axes[1].axis('scaled')
         axes[1].set_xlim(-0.5, 0.5)
         axes[1].set_ylim(-0.5, 0.5)
         axes[1].tick_params(left=False, right=False, labelleft=False,
                             labelbottom=False, bottom=False)
+        divider = make_axes_locatable(axes[1])
+        cax = divider.append_axes('right', size='5%', pad=0.05)
+        figs.colorbar(sc, cax=cax, orientation='vertical')
 
+
+        plt.savefig("C:/Users/whats/Desktop/udf.png", dpi=600)
         plt.show(block=True)
 
     g, _, _, _ = calculate_gradients(query_points, udf, v_resolution=100)

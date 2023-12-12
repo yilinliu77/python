@@ -22,6 +22,8 @@ from src.neural_bsp.model import de_normalize_angles, de_normalize_udf
 @hydra.main(config_name="test_model.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
     # Predefined variables
+    if v_cfg["trainer"]["spawn"] is True:
+        torch.multiprocessing.set_start_method("spawn")
     seed_everything(0)
     torch.set_float32_matmul_precision("medium")
     print(OmegaConf.to_yaml(v_cfg))
@@ -44,7 +46,7 @@ def main(v_cfg: DictConfig):
         dataset,
         batch_size=1,
         shuffle=False,
-        num_workers=2,
+        num_workers=v_cfg["trainer"]["num_workers"],
         pin_memory=True,
         drop_last=False
     )

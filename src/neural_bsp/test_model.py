@@ -46,7 +46,7 @@ def main(v_cfg: DictConfig):
         dataset,
         batch_size=1,
         shuffle=False,
-        num_workers=v_cfg["trainer"]["num_workers"],
+        num_workers=v_cfg["trainer"]["num_worker"],
         pin_memory=True,
         drop_last=False
     )

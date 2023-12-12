@@ -23,11 +23,18 @@ except:
 
 
 def de_normalize_angles(v_angles):
-    angles = (v_angles / 65535 * np.pi * 2)
-    dx = np.cos(angles[..., 0]) * np.sin(angles[..., 1])
-    dy = np.sin(angles[..., 0]) * np.sin(angles[..., 1])
-    dz = np.cos(angles[..., 1])
-    gradients = np.stack([dx, dy, dz], axis=-1)
+    if isinstance(v_angles,torch.Tensor):
+        angles = (v_angles / 65535 * torch.pi * 2)
+        dx = torch.cos(angles[..., 0]) * torch.sin(angles[..., 1])
+        dy = torch.sin(angles[..., 0]) * torch.sin(angles[..., 1])
+        dz = torch.cos(angles[..., 1])
+        gradients = torch.stack([dx, dy, dz], dim=-1)
+    else:
+        angles = (v_angles / 65535 * np.pi * 2)
+        dx = np.cos(angles[..., 0]) * np.sin(angles[..., 1])
+        dy = np.sin(angles[..., 0]) * np.sin(angles[..., 1])
+        dz = np.cos(angles[..., 1])
+        gradients = np.stack([dx, dy, dz], axis=-1)
     return gradients
 
 
@@ -1130,10 +1137,13 @@ class ABC_test_voxel(torch.utils.data.Dataset):
             self.tasks[idx]
         ).reshape(self.resolution, self.resolution, self.resolution, -1).astype(np.float32)
 
+        mesh_udf = torch.from_numpy(mesh_udf).to("cuda")
+
         udf = de_normalize_udf((mesh_udf[..., 0:1]))
         gradients = de_normalize_angles((mesh_udf[..., 1:3]))
         normal = de_normalize_angles((mesh_udf[..., 3:5]))
-        mesh_udf = np.concatenate([udf, gradients, normal], axis=-1)
+
+        mesh_udf = torch.cat([udf, gradients, normal], dim=-1).cpu().numpy()
 
         sliding_data = np.lib.stride_tricks.sliding_window_view(
             mesh_udf, [32, 32, 32, 7])[::16, ::16, ::16].reshape(-1, 32, 32, 32, 7)

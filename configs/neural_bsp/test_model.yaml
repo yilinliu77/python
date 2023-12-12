@@ -8,9 +8,9 @@ dataset:
 trainer:
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 4
+  num_worker: 1
 
-  spawn: false
+  spawn: true
   num_samples: -1
   batch_size: 128
 #  resume_from_checkpoint: output/neural_bsp/1211_v15_parsenet_unet_base8_focal90_wonormal_channel4_float32.ckpt

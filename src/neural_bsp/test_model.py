@@ -1,5 +1,6 @@
 import importlib
 import os.path
+from multiprocessing import Process, Queue
 from pathlib import Path
 
 import hydra
@@ -18,6 +19,43 @@ from src.neural_bsp.model import de_normalize_angles, de_normalize_udf
 #
 # Test both mesh udf and udc udf in the testset
 #
+
+
+def write_mesh(queue, v_output_root, v_query_points):
+    precisions=[]
+    recalls=[]
+    f1s=[]
+    while True:
+        data = queue.get()
+        if data is None:
+            break
+        final_flags, prefix, mesh_udf, gt_flags = data
+
+        precision = (final_flags & gt_flags[8:-8, 8:-8, 8:-8]).sum() / final_flags.sum()
+        recall = (final_flags & gt_flags[8:-8, 8:-8, 8:-8]).sum() / gt_flags[8:-8, 8:-8, 8:-8].sum()
+        f1 = 2 * precision * recall / (precision + recall)
+        precisions.append(precision.cpu().numpy())
+        recalls.append(recall.cpu().numpy())
+        f1s.append(f1.cpu().numpy())
+
+        final_flags = torch.nn.functional.pad(final_flags, (8, 8, 8, 8, 8, 8), mode="constant", value=0).cpu().numpy()
+
+        final_features = mesh_udf
+        valid_points = v_query_points[np.logical_and(final_flags, (final_features[..., 0] < 0.4))]
+        # valid_points = query_points[np.logical_and(gt_flags, (final_features[..., 0] < 0.4))]
+
+        predicted_labels = final_flags.astype(np.ubyte).reshape(256, 256, 256)
+        gradients_and_udf = final_features
+
+        export_point_cloud(str(v_output_root / (prefix + ".ply")), valid_points)
+        np.save(str(v_output_root / (prefix + "_feat")), gradients_and_udf)
+        np.save(str(v_output_root / (prefix + "_pred")), predicted_labels)
+
+    print("Precision: {:.4f}".format(np.nanmean(precisions)))
+    print("Recall: {:.4f}".format(np.nanmean(recalls)))
+    print("F1: {:.4f}".format(np.nanmean(f1s)))
+    print("NAN: {:.4f}/{:.4f}".format(np.isnan(f1s).sum(), len(f1s)))
+    return
 
 @hydra.main(config_name="test_model.yaml", config_path="../../configs/neural_bsp/", version_base="1.1")
 def main(v_cfg: DictConfig):
@@ -67,12 +105,16 @@ def main(v_cfg: DictConfig):
     model.eval()
     torch.set_grad_enabled(False)
 
+    queue = Queue()
+    writer = Process(target=write_mesh, args=(queue, output_dir, query_points))
+    writer.start()
+
     # tasks = tasks[9:10]
     # Start inference
     bar = tqdm(total=len(dataloader))
-    precisions = []
-    recalls = []
-    f1s = []
+    precisions=[]
+    recalls=[]
+    f1s=[]
     for data in dataloader:
         prefix = data[0][0]
         batched_data = [item[0] for item in data[1]]
@@ -173,31 +215,30 @@ def main(v_cfg: DictConfig):
         #     final_flags = final_flags
         final_flags = torch.sigmoid(predictions) > threshold
 
-        precision = (final_flags & gt_flags[8:-8,8:-8,8:-8]).sum() / final_flags.sum()
-        recall = (final_flags & gt_flags[8:-8,8:-8,8:-8]).sum() / gt_flags[8:-8,8:-8,8:-8].sum()
-        f1 = 2 * precision * recall / (precision + recall)
-        precisions.append(precision.cpu().numpy())
-        recalls.append(recall.cpu().numpy())
-        f1s.append(f1.cpu().numpy())
+        queue.put((final_flags.cpu(), prefix, mesh_udf, gt_flags.cpu()))
 
-        final_flags = torch.nn.functional.pad(final_flags, (8,8,8,8,8,8), mode="constant", value=0).cpu().numpy()
-
-        final_features = mesh_udf
-        valid_points = query_points[np.logical_and(final_flags, (final_features[..., 0] < 0.4))]
-        # valid_points = query_points[np.logical_and(gt_flags, (final_features[..., 0] < 0.4))]
-
-        predicted_labels = final_flags.astype(np.ubyte).reshape(res, res, res)
-        gradients_and_udf = final_features
-
-        export_point_cloud(str(output_dir / (prefix+".ply")), valid_points)
-        np.save(str(output_dir / (prefix+"_feat")), gradients_and_udf)
-        np.save(str(output_dir / (prefix+"_pred")), predicted_labels)
-        # print("Done")
+        # precision = (final_flags & gt_flags[8:-8,8:-8,8:-8]).sum() / final_flags.sum()
+        # recall = (final_flags & gt_flags[8:-8,8:-8,8:-8]).sum() / gt_flags[8:-8,8:-8,8:-8].sum()
+        # f1 = 2 * precision * recall / (precision + recall)
+        # precisions.append(precision.cpu().numpy())
+        # recalls.append(recall.cpu().numpy())
+        # f1s.append(f1.cpu().numpy())
+        #
+        # final_flags = torch.nn.functional.pad(final_flags, (8,8,8,8,8,8), mode="constant", value=0).cpu().numpy()
+        #
+        # final_features = mesh_udf
+        # valid_points = query_points[np.logical_and(final_flags, (final_features[..., 0] < 0.4))]
+        # # valid_points = query_points[np.logical_and(gt_flags, (final_features[..., 0] < 0.4))]
+        #
+        # predicted_labels = final_flags.astype(np.ubyte).reshape(res, res, res)
+        # gradients_and_udf = final_features
+        #
+        # export_point_cloud(str(output_dir / (prefix+".ply")), valid_points)
+        # np.save(str(output_dir / (prefix+"_feat")), gradients_and_udf)
+        # np.save(str(output_dir / (prefix+"_pred")), predicted_labels)
         bar.update(1)
-    print("Precision: {:.4f}".format(np.nanmean(precisions)))
-    print("Recall: {:.4f}".format(np.nanmean(recalls)))
-    print("F1: {:.4f}".format(np.nanmean(f1s)))
-    print("NAN: {:.4f}/{:.4f}".format(np.isnan(f1s).sum(), len(f1s)))
+    queue.put(None)
+    writer.join()
 
 
 if __name__ == '__main__':

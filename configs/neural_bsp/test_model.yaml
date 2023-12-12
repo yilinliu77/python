@@ -8,15 +8,15 @@ dataset:
 trainer:
   learning_rate: 1e-4
   gpu: 1
-  num_worker: 0
+  num_worker: 4
 
   spawn: false
   num_samples: -1
   batch_size: 128
-  resume_from_checkpoint: output/neural_bsp/1211_v15_parsenet_unet_base8_focal90_wonormal_channel4.ckpt
+#  resume_from_checkpoint: output/neural_bsp/1211_v15_parsenet_unet_base8_focal90_wonormal_channel4.ckpt
 #  resume_from_checkpoint: output/neural_bsp/1127_v14_parsenet_unet.ckpt
 #  resume_from_checkpoint: output/neural_bsp/1016_v9_base_wo_normal.ckpt
-#  resume_from_checkpoint: output/neural_bsp/1106_v11_ndc_unet.ckpt
+  resume_from_checkpoint: output/neural_bsp/1106_v11_ndc_unet.ckpt
   evaluate: true
   output: .
   check_val_every_n_epoch: 1

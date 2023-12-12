@@ -1,9 +1,9 @@
 dataset:
-  root: G:/Dataset/GSP/test_data_whole
+  root: G:/Dataset/GSP/test_data4
   dataset_name: ABC_test_voxel
 #  type: gt
   type: ndc
-  output_dir: G:/Dataset/GSP/test_data_whole/pred_voronoi
+  output_dir: G:/Dataset/GSP/test_data4/pred_voronoi
 
 trainer:
   learning_rate: 1e-4
@@ -13,7 +13,8 @@ trainer:
   spawn: false
   num_samples: -1
   batch_size: 128
-  resume_from_checkpoint: output/neural_bsp/1127_v14_parsenet_unet.ckpt
+  resume_from_checkpoint: output/neural_bsp/1211_v15_parsenet_unet_base8_focal90_wonormal_channel4.ckpt
+#  resume_from_checkpoint: output/neural_bsp/1127_v14_parsenet_unet.ckpt
 #  resume_from_checkpoint: output/neural_bsp/1016_v9_base_wo_normal.ckpt
 #  resume_from_checkpoint: output/neural_bsp/1106_v11_ndc_unet.ckpt
   evaluate: true
@@ -25,13 +26,14 @@ model:
 #  model_name: Base_model_dilated_backup
   model_name: Base_model_UNet
   channels: 4
+  base_channel: 8
   need_normalize: false
   with_bn: true
   output_channels: 1
 
   test_threshold: 0.5
   test_resolution: 256
-  focal_alpha: 0.75
+  focal_alpha: 0.9
 
 hydra:
   run:

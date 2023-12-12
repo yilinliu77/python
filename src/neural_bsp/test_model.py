@@ -31,17 +31,18 @@ def write_mesh(queue, v_output_root, v_query_points):
             break
         final_flags, prefix, mesh_udf, gt_flags = data
 
-        precision = (final_flags & gt_flags[8:-8, 8:-8, 8:-8]).sum() / final_flags.sum()
-        recall = (final_flags & gt_flags[8:-8, 8:-8, 8:-8]).sum() / gt_flags[8:-8, 8:-8, 8:-8].sum()
+        valid_mask = (mesh_udf[..., 0] < 0.2)[8:-8, 8:-8, 8:-8]
+        precision = (final_flags & gt_flags[8:-8, 8:-8, 8:-8])[valid_mask].sum() / final_flags[valid_mask].sum()
+        recall = (final_flags & gt_flags[8:-8, 8:-8, 8:-8])[valid_mask].sum() / gt_flags[8:-8, 8:-8, 8:-8][valid_mask].sum()
         f1 = 2 * precision * recall / (precision + recall)
         precisions.append(precision.cpu().numpy())
         recalls.append(recall.cpu().numpy())
         f1s.append(f1.cpu().numpy())
 
-        final_flags = torch.nn.functional.pad(final_flags, (8, 8, 8, 8, 8, 8), mode="constant", value=0).cpu().numpy()
+        final_flags = torch.nn.functional.pad(final_flags, (8, 8, 8, 8, 8, 8), mode="constant", value=1).cpu().numpy()
 
         final_features = mesh_udf
-        valid_points = v_query_points[np.logical_and(final_flags, (final_features[..., 0] < 0.4))]
+        valid_points = v_query_points[np.logical_and(final_flags, (final_features[..., 0] < 0.2))]
         # valid_points = query_points[np.logical_and(gt_flags, (final_features[..., 0] < 0.4))]
 
         predicted_labels = final_flags.astype(np.ubyte).reshape(256, 256, 256)

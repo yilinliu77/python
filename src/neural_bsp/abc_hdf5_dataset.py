@@ -333,10 +333,11 @@ class ABC_patch2(ABC_patch):
         times[0] += time.time() - cur_time
         cur_time = time.time()
 
-        if self.augment:
-            axis = np.random.randint(1,4)
-            features = np.flip(features, axis)
-            flags = np.flip(flags, axis)
+        if self.augment and self.mode=="training":
+            axis = np.random.randint(0,4)
+            if axis >= 1:
+                features = np.flip(features, axis)
+                flags = np.flip(flags, axis)
 
         # features = features.transpose(0, 4, 1, 2, 3)
         flags = flags[:,:,:,:,None].transpose(0, 4, 1, 2, 3)

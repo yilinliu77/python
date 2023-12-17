@@ -32,9 +32,9 @@ def write_mesh(queue, v_output_root, v_query_points):
         final_flags, prefix, mesh_udf, gt_flags = data
 
         valid_mask = (mesh_udf[..., 0] < 0.2)[8:-8, 8:-8, 8:-8]
-        precision = (final_flags & gt_flags[8:-8, 8:-8, 8:-8])[valid_mask].sum() / final_flags[valid_mask].sum()
-        recall = (final_flags & gt_flags[8:-8, 8:-8, 8:-8])[valid_mask].sum() / gt_flags[8:-8, 8:-8, 8:-8][valid_mask].sum()
-        f1 = 2 * precision * recall / (precision + recall)
+        precision = (final_flags & gt_flags[8:-8, 8:-8, 8:-8])[valid_mask].sum() / (final_flags[valid_mask].sum() + 1e-6)
+        recall = (final_flags & gt_flags[8:-8, 8:-8, 8:-8])[valid_mask].sum() / (gt_flags[8:-8, 8:-8, 8:-8][valid_mask].sum()+1e-6)
+        f1 = 2 * precision * recall / (precision + recall + 1e-6)
         precisions.append(precision.cpu().numpy())
         recalls.append(recall.cpu().numpy())
         f1s.append(f1.cpu().numpy())

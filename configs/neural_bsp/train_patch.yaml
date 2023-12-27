@@ -6,7 +6,6 @@ dataset:
   dataset_name: ABC_patch2
   is_bool_flag: true
   mini_batch_size: 16
-  augment: true
 
   test_list: []
 
@@ -28,12 +27,13 @@ model:
   model_name: Base_model_UNet
   base_channel: 16
   with_bn: true
-  channels: 7
+  channels: 4
   output_channels: 1
   need_normalize: true
 
   test_threshold: 0.5
   focal_alpha: 0.75
+  augment: true
 
 
 hydra:

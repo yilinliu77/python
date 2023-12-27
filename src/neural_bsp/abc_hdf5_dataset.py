@@ -304,7 +304,8 @@ class ABC_patch2(ABC_patch):
 
         self.validation_start = 0
 
-        self.augment = v_conf["augment"]
+        # self.augment = v_conf["augment"]
+        # self.augment = False
         self.is_bool_flag = self.conf["is_bool_flag"]
         self.mini_batch_size = self.conf["mini_batch_size"]
         self.num_total_batches = self.num_items // self.mini_batch_size
@@ -340,11 +341,12 @@ class ABC_patch2(ABC_patch):
         times[0] += time.time() - cur_time
         cur_time = time.time()
 
-        if self.augment and self.mode=="training":
-            axis = np.random.randint(0,4)
-            if axis >= 1:
-                features = np.flip(features, axis)
-                flags = np.flip(flags, axis)
+        # Do this in training code
+        # if self.augment and self.mode=="training":
+        #     axis = np.random.randint(0,4)
+        #     if axis >= 1:
+        #         features = np.flip(features, axis)
+        #         flags = np.flip(flags, axis)
 
         # features = features.transpose(0, 4, 1, 2, 3)
         flags = flags[:,:,:,:,None].transpose(0, 4, 1, 2, 3)
@@ -1126,6 +1128,7 @@ class ABC_test_voxel(torch.utils.data.Dataset):
         tasks = [self.data_root / "feat" / self.type / item for item in os.listdir(
             self.data_root / "feat" / self.type)]
         self.tasks = sorted(tasks)
+        # self.tasks = self.tasks[-1:]
 
 
     def __len__(self):

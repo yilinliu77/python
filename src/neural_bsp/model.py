@@ -1,10 +1,11 @@
 import os
+import random
 
 import sys
 import time
 
 import numpy as np
-import open3d
+import open3d as o3d
 from torchvision.ops import sigmoid_focal_loss
 
 from src.neural_bsp.abc_hdf5_dataset import generate_coords
@@ -18,9 +19,7 @@ from thirdparty.pvcnn.modules import functional as pvcnn_F
 from torch import nn
 from torch.nn import functional as F
 import torch
-
 from shared.common_utils import sigmoid, export_point_cloud
-
 
 # Adopt the implementation in pytorch, but prevent NaN values
 def focal_loss(inputs, targets, v_alpha=0.75, gamma: float = 2, ):
@@ -183,18 +182,21 @@ class Base_model(nn.Module):
         super(Base_model, self).__init__()
         self.need_normalize = v_conf["need_normalize"]
         self.loss_func = focal_loss
+        self.augment = v_conf["augment"]
         self.loss_alpha = v_conf["focal_alpha"]
         self.num_features = v_conf["channels"]
         self.ic = v_conf["channels"]  # input_channels
         self.output_c = v_conf["output_channels"]
 
     def loss(self, v_predictions, v_input):
-        features, labels = v_input
+        predict_labels = v_predictions[0]
+        gt_labels = v_predictions[1]
 
-        loss = self.loss_func(v_predictions, labels, self.loss_alpha)
+        loss = self.loss_func(predict_labels, gt_labels, self.loss_alpha)
         return {"total_loss": loss}
 
     def compute_pr(self, v_pred, v_gt):
+        v_pred = v_pred[0]
         bs = v_pred.shape[0]
         prob = torch.sigmoid(v_pred).reshape(bs, -1)
         gt = v_gt.reshape(bs, -1).to(torch.long)
@@ -239,10 +241,11 @@ class Base_model_UNet(Base_model):
         )
 
     def forward(self, v_data, v_training=False):
-        (feat_data, _), _ = v_data
+        (feat_data, _), flag = v_data
         bs = feat_data.shape[0]
         num_mini_batch = feat_data.shape[1]
         feat_data = feat_data.reshape((bs * num_mini_batch,) + feat_data.shape[2:])
+        flag = flag.reshape((bs * num_mini_batch,) + flag.shape[2:])
 
         if self.need_normalize:
             udf = de_normalize_udf(feat_data[..., 0:1])
@@ -257,6 +260,33 @@ class Base_model_UNet(Base_model):
                 x = udf.permute((0, 4, 1, 2, 3)).contiguous()
         else:
             x = feat_data[:, :self.num_features]
+
+        if self.augment and v_training:
+            def visualize_it(v_x, v_flag):
+                i = 15
+                p = torch.stack(
+                    torch.meshgrid(torch.arange(0, 32), torch.arange(0, 32), torch.arange(0, 32), indexing="ij"),
+                    dim=-1)
+                p = p.to(x.device) / 255 * 2 - 1
+                dir = v_x[i, 1:4].permute(1, 2, 3, 0)
+                pp = p + dir * v_x[i, 0:1].permute(1, 2, 3, 0)
+
+                voronoi_edges = p[v_flag[i, 0] > 0]
+                import open3d as o3d
+                pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pp.reshape(-1, 3).cpu().numpy()))
+                o3d.io.write_point_cloud("debug1.ply", pcd)
+
+                pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(voronoi_edges.cpu().numpy()))
+                o3d.io.write_point_cloud("debug2.ply", pcd)
+
+            # visualize_it(x, flag)
+
+            axis = np.random.randint(0, 4)
+            if axis >= 1:
+                x = torch.flip(x, dims=[axis+1])
+                flag = torch.flip(flag, dims=[axis+1])
+                x[:,axis] *= -1
+            # visualize_it(new_x, new_flag)
 
         # Debug
         if False:
@@ -275,7 +305,8 @@ class Base_model_UNet(Base_model):
 
         prediction = self.encoder(x)
 
-        return prediction.reshape((bs, num_mini_batch,) + prediction.shape[1:])
+        return prediction.reshape((bs, num_mini_batch,) + prediction.shape[1:]),\
+                flag.reshape((bs, num_mini_batch,) + flag.shape[1:])
 
 
 class Base_model_k7(Base_model):

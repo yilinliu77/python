@@ -53,10 +53,11 @@ def cube_vertices():
 
 def sample_edges(v_vertices, v_resolution_meter=0.01):
     edges = np.stack((v_vertices, np.roll(v_vertices, -1, axis=0)), axis=1)
+    edges = edges[:-1]
     dir = edges[:, 1] - edges[:, 0]
     points = []
     num_primitives = []
-    for i_edge in range(v_vertices.shape[0]):
+    for i_edge in range(v_vertices.shape[0] - 1):
         num_sampled = int(np.linalg.norm(dir[i_edge]) / v_resolution_meter)
         sample_base = np.linspace(0, 1, num_sampled, dtype=np.float64)
         sample_base = np.delete(sample_base, 0)
@@ -104,6 +105,48 @@ def generate_test_shape2(v_resolution_meter=0.01):
     return points, num_primitives
 
 
+def generate_test_shape3(v_resolution_meter=0.01):
+    # Cube
+    ccube_vertices = np.array([
+        [0.05, 0.2], [-0.25, 0.2], [-0.25, -0.2], [0.25, -0.2], [0.25, 0.],
+    ], dtype=np.float64)
+    surface_points1, num_primitives1 = sample_edges(ccube_vertices, v_resolution_meter)
+    sample_points1 = np.concatenate((ccube_vertices, surface_points1), axis=0)
+    num_primitives1 = np.concatenate((np.ones(ccube_vertices.shape[0], dtype=np.int64), num_primitives1), axis=0)
+
+    # x^2+0.1x+0.0025+y^2-0.01=0
+    quadric_points1_x = np.linspace(0, np.pi / 2, int(np.pi / 2 / v_resolution_meter / 5), dtype=np.float64)
+    quadric_points1_y = np.sin(quadric_points1_x)
+    quadric_points1_x = np.cos(quadric_points1_x)
+    sample_points2 = np.stack((quadric_points1_x, quadric_points1_y), axis=1)
+    sample_points2 = sample_points2 * 0.2
+    sample_points2[:,0]+=0.05
+    num_primitives2 = np.array((sample_points2.shape[0],), dtype=np.int64)
+
+    # x^2+0.1x+0.0025+y^2-0.01=0
+    quadric_points2_x = np.linspace(0, 2 * np.pi, int(2 * np.pi / v_resolution_meter / 10), dtype=np.float64)
+    quadric_points2_y = np.sin(quadric_points2_x)
+    quadric_points2_x = np.cos(quadric_points2_x)
+    quadric_points2_x = np.concatenate((quadric_points2_x, quadric_points2_x), axis=0)
+    quadric_points2_y = np.concatenate((quadric_points2_y, -quadric_points2_y), axis=0)
+    sample_points3 = np.stack((quadric_points2_x, -quadric_points2_y), axis=1)
+    sample_points3 = sample_points3 * 0.09
+    num_primitives3 = np.array((sample_points3.shape[0],), dtype=np.int64)
+
+    points = np.concatenate((
+        sample_points1,
+        sample_points2,
+        sample_points3,
+    ), axis=0)
+    num_primitives = np.concatenate((
+        num_primitives1,
+        num_primitives2,
+        num_primitives3,
+    ), axis=0)
+
+    return points, num_primitives
+
+
 def calculate_distances(query_points, target_vertices):
     kdtree = faiss.IndexFlatL2(2)
     res = faiss.StandardGpuResources()
@@ -124,15 +167,36 @@ def visualize_raw_data(query_points, target_vertices, v_viz_flag):
     if not v_viz_flag:
         return
 
+    colormap = np.asarray([
+        (246,189,96),
+        # (247,237,226),
+        (210,180,140),
+        (245,202,195),
+        (132,165,157),
+        (242,132,130)]
+    )/255.
+
+    colormap = np.asarray([
+        (246,210,147),
+        # (247,237,226),
+        (210,192,168),
+        (245,224,221),
+        (150,166,163),
+        (242,182,180)]
+    )/255.
+
     N = 30
-    segmented_cmaps = matplotlib.colors.ListedColormap([plt.get_cmap("tab20")(i%20) for i in range(N)])
+    segmented_cmaps = matplotlib.colors.ListedColormap([
+        colormap[i%colormap.shape[0]] for i in range(N)
+    ])
 
     plt.scatter(query_points[:, 0], query_points[:, 1], s=5, c=id_nearest_primitive,
                     # cmap="tab20"
                     cmap=segmented_cmaps
                     )
-    plt.title("Generalized space partition")
+    # plt.title("Generalized space partition")
     # plt.colorbar()
+    target_vertices = np.load("1.npy")
     plt.scatter(target_vertices[:, 0], target_vertices[:, 1], s=3, color=(1, 0, 0))
     plt.axis('scaled')
     plt.xlim(-0.5, 0.5)
@@ -199,11 +263,12 @@ def construct_graph(v_resolution, is_eight_neighbour):
 def visualize_boundary_edge(query_points, target_vertices, boundary_edges, v_viz_flag):
     if not v_viz_flag:
         return
-    plt.title("Boundary edges")
+    # plt.title("Boundary edges")
+    # target_vertices = np.load("1.npy")
     # plt.scatter(target_vertices[:, 0], target_vertices[:, 1], s=3, color=(1, 0, 0))
     x_values = [query_points[boundary_edges[:, 0], 0], query_points[boundary_edges[:, 1], 0]]
     y_values = [query_points[boundary_edges[:, 0], 1], query_points[boundary_edges[:, 1], 1]]
-    plt.plot(x_values, y_values, 'g-')
+    plt.plot(x_values, y_values, '-', color=np.asarray((132,165,157))/255.)
     plt.xlim(-0.5, 0.5)
     plt.ylim(-0.5, 0.5)
     plt.tick_params(left=False, right=False, labelleft=False,
@@ -289,7 +354,7 @@ def visualize_udf(query_points, udf, v_viz_flag):
     plt.scatter(query_points[:, 0], query_points[:, 1], s=10, c=level, cmap="my_cm")
     plt.colorbar()
     plt.savefig("output/gsp_viz/0_udp.png", dpi=600, bbox_inches='tight')
-    plt.show(block=True)
+    # plt.show(block=True)
     plt.close()
 
 
@@ -320,11 +385,11 @@ def visualize_3th_derivative(query_points, target_vertices, magic_gg, v_viz_flag
     udf1 = magic_gg.max()
     udf2 = magic_gg.min()
     level = (magic_gg - udf2) / (udf1 - udf2)
-    plt.cm.register_cmap('my_cm',
-                         matplotlib.colors.LinearSegmentedColormap.from_list('my_cm', [color1, color2]))
+    plt.cm.register_cmap('my_cm1',
+                         matplotlib.colors.LinearSegmentedColormap.from_list('my_cm1', [color1, color2]))
 
     plt.title("3rd derivative")
-    plt.scatter(query_points[:, 0], query_points[:, 1], s=3, c=level, cmap="my_cm")
+    plt.scatter(query_points[:, 0], query_points[:, 1], s=3, c=level, cmap="my_cm1")
     plt.colorbar()
     # plt.scatter(target_vertices[:, 0], target_vertices[:, 1], s=5, c="r")
     plt.xlim(-0.5, 0.5)
@@ -460,10 +525,12 @@ if __name__ == '__main__':
 
     safe_check_dir("output/gsp_viz")
 
-    first_round = False
+    first_round = True
     resolution = 256 if first_round else 16
     query_points = generate_query_points(v_resolution=resolution)
-    target_vertices, num_primitives = generate_test_shape2(v_resolution_meter=0.0001)
+    # target_vertices, num_primitives = generate_test_shape2(v_resolution_meter=0.0001)
+    target_vertices, num_primitives = generate_test_shape3(v_resolution_meter=0.00001)
+    # target_vertices, num_primitives = generate_test_shape3(v_resolution_meter=0.03)
     id_primitives = np.arange(num_primitives.shape[0]).repeat(num_primitives)
 
     # Calculate distances

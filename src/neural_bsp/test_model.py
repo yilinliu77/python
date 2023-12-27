@@ -124,97 +124,37 @@ def main(v_cfg: DictConfig):
 
         bar.set_description(prefix)
 
-        predictions = []
-        for item in batched_data:
-            feat = item.cuda().permute((0, 4, 1, 2, 3)).unsqueeze(1)
-            feat = [(feat, torch.zeros(feat.shape[0])), None]
-            prediction = model(feat, False).reshape(-1, ps, ps, ps)
-            predictions.append(prediction)
-        predictions = torch.cat(predictions, dim=0).reshape(15,15,15,32,32,32)
-        predictions = predictions[:, :, :, 8:24, 8:24, 8:24].permute(0, 3, 1, 4, 2, 5).reshape(240, 240, 240)
-        # if True:
-        #     flags = -np.ones((res, res, res), dtype=np.float32) * 999
-        #     x_start = y_start = z_start = 0
-        #     while True:
-        #         flags[
-        #         x_start:x_start + ps,
-        #         y_start:y_start + ps,
-        #         z_start:z_start + ps
-        #         ] = np.maximum(prediction.cpu().numpy(), flags[
-        #                                                  x_start:x_start + ps,
-        #                                                  y_start:y_start + ps,
-        #                                                  z_start:z_start + ps
-        #                                                  ])
-        #
-        #         z_start += ps_2
-        #         if z_start + ps > res:
-        #             z_start = 0
-        #             y_start += ps_2
-        #         if y_start + ps > res:
-        #             y_start = 0
-        #             x_start += ps_2
-        #         if x_start + ps > res:
-        #             break
-        #
-        #     final_flags = flags
-        # else:
-        #     flags = []
-        #     x_start = y_start = z_start = 0
-        #     while True:
-        #         feat = mesh_udf[x_start:x_start + ps, y_start:y_start + ps, z_start:z_start + ps, :num_features]
-        #         feat = torch.from_numpy(feat).cuda().permute(3, 0, 1, 2).unsqueeze(0).unsqueeze(0)
-        #         feat = [(feat, torch.zeros(feat.shape[0])), None]
-        #
-        #         prediction = model(feat, False)
-        #         flags.append(prediction.detach().cpu().numpy()[0])
-        #
-        #         if False:
-        #             p = query_points[x_start:x_start + ps, y_start:y_start + ps, z_start:z_start + ps, :].reshape(
-        #                 -1, 3)
-        #             udf = feat[0][0][0, 0, 0].detach().cpu().numpy().reshape(-1, 1)
-        #             gradients = feat[0][0][0, 0, 1:].detach().cpu().numpy().reshape(3, -1).transpose(1, 0)
-        #             flag = sigmoid(prediction[0, 0, 0].detach().cpu().numpy().reshape(-1)) > threshold
-        #
-        #             pp = p + udf * gradients
-        #
-        #             export_point_cloud("surface.ply", pp)
-        #             export_point_cloud("query.ply", p)
-        #             export_point_cloud("pred.ply", p[flag])
-        #             pass
-        #
-        #         z_start += ps_2
-        #         if z_start + ps > res:
-        #             z_start = 0
-        #             y_start += ps_2
-        #         if y_start + ps > res:
-        #             y_start = 0
-        #             x_start += ps_2
-        #         if x_start + ps > res:
-        #             break
-        #
-        #     flags = np.concatenate(flags, axis=0)
-        #
-        #     final_flags = np.zeros((res, res, res), dtype=np.float32)
-        #     for i in range(flags.shape[0]):
-        #         x = i // num_patch_dim // num_patch_dim
-        #         y = i // num_patch_dim % num_patch_dim
-        #         z = i % num_patch_dim
-        #
-        #         if x == 0 or x == num_patch_dim - 1 or y == 0 or y == num_patch_dim - 1 or z == 0 or z == num_patch_dim - 1:
-        #             final_flags[x * ps_2:x * ps_2 + ps, y * ps_2:y * ps_2 + ps, z * ps_2:z * ps_2 + ps] = flags[
-        #                 i, 0]
-        #         else:
-        #             final_flags[
-        #             x * ps_2 + ps_4:x * ps_2 + ps_4 + ps_2,
-        #             y * ps_2 + ps_4:y * ps_2 + ps_4 + ps_2,
-        #             z * ps_2 + ps_4:z * ps_2 + ps_4 + ps_2] = flags[
-        #                                                       i, 0,
-        #                                                       ps_4:ps_2 + ps_4,
-        #                                                       ps_4:ps_2 + ps_4,
-        #                                                       ps_4:ps_2 + ps_4]
-        #
-        #     final_flags = final_flags
-        final_flags = torch.sigmoid(predictions) > threshold
+        # Without augment
+        if False:
+            predictions = []
+            for item in batched_data:
+                feat = item.cuda().permute((0, 4, 1, 2, 3)).unsqueeze(1)
+                feat = [(feat, torch.zeros(feat.shape[0])), None]
+                prediction = model(feat, False).reshape(-1, ps, ps, ps)
+                predictions.append(prediction)
+            predictions = torch.cat(predictions, dim=0).reshape(15,15,15,32,32,32)
+            predictions = predictions[:, :, :, 8:24, 8:24, 8:24].permute(0, 3, 1, 4, 2, 5).reshape(240, 240, 240)
+            predictions = torch.sigmoid(predictions)
+        # With augment
+        else:
+            aug_predictions = []
+            for i in range(4):
+                predictions = []
+                for item in batched_data:
+                    feat = item.cuda().permute((0, 4, 1, 2, 3)).unsqueeze(1)
+                    if i>=1:
+                        feat[:,:,i] *= -1
+                        feat = torch.flip(feat, dims=[2+i])
+                    feat = [(feat, torch.zeros(feat.shape[0])), None]
+                    prediction = model(feat, False).reshape(-1, ps, ps, ps)
+                    if i>=1:
+                        prediction = torch.flip(prediction, dims=[i])
+                    predictions.append(prediction)
+                predictions = torch.cat(predictions, dim=0).reshape(15, 15, 15, 32, 32, 32)
+                predictions = predictions[:, :, :, 8:24, 8:24, 8:24].permute(0, 3, 1, 4, 2, 5).reshape(240, 240, 240)
+                aug_predictions.append(torch.sigmoid(predictions))
+            predictions = torch.stack(aug_predictions, dim=0).mean(dim=0)
+        final_flags = predictions > threshold
 
         queue.put((final_flags.cpu(), prefix, mesh_udf, gt_flags.cpu()))
 

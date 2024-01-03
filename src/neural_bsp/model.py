@@ -1,5 +1,6 @@
 import os
 import random
+import shutil
 
 import sys
 import time
@@ -245,7 +246,8 @@ class Base_model_UNet(Base_model):
         bs = feat_data.shape[0]
         num_mini_batch = feat_data.shape[1]
         feat_data = feat_data.reshape((bs * num_mini_batch,) + feat_data.shape[2:])
-        flag = flag.reshape((bs * num_mini_batch,) + flag.shape[2:])
+        if flag is not None:
+            flag = flag.reshape((bs * num_mini_batch,) + flag.shape[2:])
 
         if self.need_normalize:
             udf = de_normalize_udf(feat_data[..., 0:1])
@@ -306,7 +308,7 @@ class Base_model_UNet(Base_model):
         prediction = self.encoder(x)
 
         return prediction.reshape((bs, num_mini_batch,) + prediction.shape[1:]),\
-                flag.reshape((bs, num_mini_batch,) + flag.shape[1:])
+                flag.reshape((bs, num_mini_batch,) + flag.shape[1:]) if flag is not None else None
 
 
 class Base_model_k7(Base_model):

@@ -146,7 +146,7 @@ def main(v_cfg: DictConfig):
                         feat[:,:,i] *= -1
                         feat = torch.flip(feat, dims=[2+i])
                     feat = [(feat, torch.zeros(feat.shape[0])), None]
-                    prediction = model(feat, False).reshape(-1, ps, ps, ps)
+                    prediction = model(feat, False)[0].reshape(-1, ps, ps, ps)
                     if i>=1:
                         prediction = torch.flip(prediction, dims=[i])
                     predictions.append(prediction)

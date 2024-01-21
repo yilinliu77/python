@@ -1130,7 +1130,6 @@ class ABC_test_voxel(torch.utils.data.Dataset):
         self.tasks = sorted(tasks)
         # self.tasks = self.tasks[-1:]
 
-
     def __len__(self):
         return len(self.tasks)
 
@@ -1155,9 +1154,10 @@ class ABC_test_voxel(torch.utils.data.Dataset):
         block_end = num_batch * self.batch_size
         batched_data = np.split(sliding_data[:block_end], num_batch) + [sliding_data[block_end:]]
 
-        gt_flags = np.frombuffer(open(str(self.data_root / "gt" / "voronoi" / prefix), "rb").read(), dtype=np.int8)
-        gt_flags = (gt_flags[:, None] & (1 << np.arange(8))[None, :]) > 0
-        gt_flags = gt_flags.reshape(-1).reshape(256, 256, 256)
+        gt_flags = torch.tensor((0,0),dtype=torch.int64)
+        # gt_flags = np.frombuffer(open(str(self.data_root / "gt" / "voronoi" / prefix), "rb").read(), dtype=np.int8)
+        # gt_flags = (gt_flags[:, None] & (1 << np.arange(8))[None, :]) > 0
+        # gt_flags = gt_flags.reshape(-1).reshape(256, 256, 256)
 
         return (
             prefix,

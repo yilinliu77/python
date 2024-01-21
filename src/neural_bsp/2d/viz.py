@@ -335,15 +335,18 @@ def visualize_udf(query_points, udf, v_viz_flag):
     if not v_viz_flag:
         return
 
-    color1 = np.asarray([245, 202, 195]) / 255
-    color2 = np.asarray([132, 165, 157]) / 255
+    # color2 = np.asarray([94,51,32]) / 255
+    # color1 = np.asarray([242,205,55]) / 255
+    color2 = np.asarray([47,87,122]) / 255
+    color1 = np.asarray([242,205,55]) / 255
     udf1 = udf.max()
     udf2 = udf.min()
     level = 1-np.exp(-3 * (udf-udf2)/(udf1-udf2))
+    # level = (udf-udf2)/(udf1-udf2)
     plt.cm.register_cmap('my_cm',
                          matplotlib.colors.LinearSegmentedColormap.from_list('my_cm', [color1, color2]))
 
-    plt.title("Unsigned distance field")
+    # plt.title("Unsigned distance field")
     plt.xlim(-0.5, 0.5)
     plt.ylim(-0.5, 0.5)
     plt.axis('scaled')
@@ -352,8 +355,9 @@ def visualize_udf(query_points, udf, v_viz_flag):
 
     # plt.scatter(target_vertices[:, 0], target_vertices[:, 1], s=3, color=(1, 0, 0))
     plt.scatter(query_points[:, 0], query_points[:, 1], s=10, c=level, cmap="my_cm")
-    plt.colorbar()
-    plt.savefig("output/gsp_viz/0_udp.png", dpi=600, bbox_inches='tight')
+    # plt.colorbar()
+    plt.savefig("output/gsp_viz/0_udf.pdf", dpi=600, bbox_inches='tight')
+    plt.savefig("output/gsp_viz/0_udf.png", dpi=600, bbox_inches='tight')
     # plt.show(block=True)
     plt.close()
 
@@ -380,17 +384,19 @@ def visualize_3th_derivative(query_points, target_vertices, magic_gg, v_viz_flag
     if not v_viz_flag:
         return
 
-    color2 = np.asarray([245, 202, 195]) / 255
-    color1 = np.asarray([132, 165, 157]) / 255
+    # color2 = np.asarray([245, 202, 195]) / 255
+    # color1 = np.asarray([132, 165, 157]) / 255
+    color1 = np.asarray([47,87,122]) / 255
+    color2 = np.asarray([242,205,55]) / 255
     udf1 = magic_gg.max()
     udf2 = magic_gg.min()
     level = (magic_gg - udf2) / (udf1 - udf2)
     plt.cm.register_cmap('my_cm1',
                          matplotlib.colors.LinearSegmentedColormap.from_list('my_cm1', [color1, color2]))
 
-    plt.title("3rd derivative")
+    # plt.title("3rd derivative")
     plt.scatter(query_points[:, 0], query_points[:, 1], s=3, c=level, cmap="my_cm1")
-    plt.colorbar()
+    # plt.colorbar()
     # plt.scatter(target_vertices[:, 0], target_vertices[:, 1], s=5, c="r")
     plt.xlim(-0.5, 0.5)
     plt.ylim(-0.5, 0.5)
@@ -398,6 +404,7 @@ def visualize_3th_derivative(query_points, target_vertices, magic_gg, v_viz_flag
     plt.tick_params(left=False, right=False, labelleft=False,
                     labelbottom=False, bottom=False)
     plt.savefig("output/gsp_viz/3_quantity.png", dpi=600, bbox_inches='tight')
+    plt.savefig("output/gsp_viz/3_quantity.pdf", dpi=600, bbox_inches='tight')
     plt.show(block=True)
     plt.close()
 
@@ -419,7 +426,7 @@ def visualize_gradient_move(query_points, target_vertices, g, v_resolution, v_vi
         g = g_
     # g = normalize(g, v_axis=-1)
 
-    plt.title("2nd derivative (Direction change along the chosen direction)")
+    # plt.title("2nd derivative (Direction change along the chosen direction)")
     # plt.scatter(target_vertices[:, 0], target_vertices[:, 1], color=(1, 0, 0), s=3)
     plt.quiver(query_points[:, 0], query_points[:, 1], g[:, 0], g[:, 1],
                angles='xy', scale_units='xy',
@@ -434,6 +441,7 @@ def visualize_gradient_move(query_points, target_vertices, g, v_resolution, v_vi
     plt.tick_params(left=False, right=False, labelleft=False,
                     labelbottom=False, bottom=False)
     plt.savefig("output/gsp_viz/2_direction_move.png", dpi=600, bbox_inches='tight')
+    plt.savefig("output/gsp_viz/2_direction_move.pdf", dpi=600, bbox_inches='tight')
     # plt.show(block=True)
     plt.close()
 
@@ -498,10 +506,10 @@ def visualize_gradient_direction(query_points, target_vertices, g, v_resolution,
                headlength=4,
                color=color
                )
-    if v_g_or_gn:
-        plt.title("1st derivative (gradient direction)")
-    else:
-        plt.title("Perpendicular direction")
+    # if v_g_or_gn:
+    #     plt.title("1st derivative (gradient direction)")
+    # else:
+    #     plt.title("Perpendicular direction")
     plt.xlim(-0.5, 0.5)
     plt.ylim(-0.5, 0.5)
     plt.axis('scaled')
@@ -511,8 +519,10 @@ def visualize_gradient_direction(query_points, target_vertices, g, v_resolution,
     # plt.scatter(target_vertices[:, 0], target_vertices[:, 1], s=3, color=(1, 0, 0))
     if v_g_or_gn:
         plt.savefig("output/gsp_viz/1_direction.png", dpi=600, bbox_inches='tight')
+        plt.savefig("output/gsp_viz/1_direction.pdf", dpi=600, bbox_inches='tight')
     else:
         plt.savefig("output/gsp_viz/1_perpendicular.png", dpi=600, bbox_inches='tight')
+        plt.savefig("output/gsp_viz/1_perpendicular.pdf", dpi=600, bbox_inches='tight')
     plt.show(block=True)
     plt.close()
 
@@ -525,7 +535,7 @@ if __name__ == '__main__':
 
     safe_check_dir("output/gsp_viz")
 
-    first_round = True
+    first_round = False
     resolution = 256 if first_round else 16
     query_points = generate_query_points(v_resolution=resolution)
     # target_vertices, num_primitives = generate_test_shape2(v_resolution_meter=0.0001)

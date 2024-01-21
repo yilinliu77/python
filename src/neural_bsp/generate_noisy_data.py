@@ -2,8 +2,8 @@ import numpy as np
 import open3d as o3d
 import os
 
-root = r"G:\Dataset\GSP\test_data_small2\poisson"
-output_root = r"G:\Dataset\GSP\test_data_small2\poisson_noise"
+root = r"G:/Dataset/GSP/test_data_final/poisson"
+output_root = r"G:/Dataset/GSP/test_data_final/poisson_noise"
 
 if __name__ == '__main__':
     os.makedirs(output_root, exist_ok=True)

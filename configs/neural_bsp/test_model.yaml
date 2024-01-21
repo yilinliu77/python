@@ -1,9 +1,10 @@
 dataset:
-  root: G:/Dataset/GSP/test_data_final
+#  root: G:/Dataset/GSP/test_data_final
+  root: G:/Dataset/GSP/Results/Real_world/abc103
   dataset_name: ABC_test_voxel
 #  type: gt
-  type: ndc
-  output_dir: G:/Dataset/GSP/Baselines/0102_v15++_aug
+  type: ndc10k
+  output_dir: G:/Dataset/GSP/Results/Real_world/abc103/pred_voronoi10k
 
 trainer:
   learning_rate: 1e-4
@@ -32,7 +33,7 @@ model:
   output_channels: 1
   augment: false
 
-  test_threshold: 0.5
+  test_threshold: 0.35
   test_resolution: 256
   focal_alpha: 0.75
 

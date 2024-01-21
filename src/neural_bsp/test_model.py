@@ -20,6 +20,7 @@ from src.neural_bsp.model import de_normalize_angles, de_normalize_udf
 # Test both mesh udf and udc udf in the testset
 #
 
+evaluate = False
 
 def write_mesh(queue, v_output_root, v_query_points):
     precisions=[]
@@ -32,12 +33,18 @@ def write_mesh(queue, v_output_root, v_query_points):
         final_flags, prefix, mesh_udf, gt_flags = data
 
         valid_mask = (mesh_udf[..., 0] < 0.2)[8:-8, 8:-8, 8:-8]
-        precision = (final_flags & gt_flags[8:-8, 8:-8, 8:-8])[valid_mask].sum() / (final_flags[valid_mask].sum() + 1e-6)
-        recall = (final_flags & gt_flags[8:-8, 8:-8, 8:-8])[valid_mask].sum() / (gt_flags[8:-8, 8:-8, 8:-8][valid_mask].sum()+1e-6)
-        f1 = 2 * precision * recall / (precision + recall + 1e-6)
-        precisions.append(precision.cpu().numpy())
-        recalls.append(recall.cpu().numpy())
-        f1s.append(f1.cpu().numpy())
+        res = mesh_udf.shape[0]
+        if evaluate:
+            precision = (final_flags & gt_flags[8:-8, 8:-8, 8:-8])[valid_mask].sum() / (final_flags[valid_mask].sum() + 1e-6)
+            recall = (final_flags & gt_flags[8:-8, 8:-8, 8:-8])[valid_mask].sum() / (gt_flags[8:-8, 8:-8, 8:-8][valid_mask].sum()+1e-6)
+            f1 = 2 * precision * recall / (precision + recall + 1e-6)
+            precisions.append(precision.cpu().numpy())
+            recalls.append(recall.cpu().numpy())
+            f1s.append(f1.cpu().numpy())
+        else:
+            precisions.append(0)
+            recalls.append(0)
+            f1s.append(0)
 
         final_flags = torch.nn.functional.pad(final_flags, (8, 8, 8, 8, 8, 8), mode="constant", value=1).cpu().numpy()
 
@@ -45,7 +52,7 @@ def write_mesh(queue, v_output_root, v_query_points):
         valid_points = v_query_points[np.logical_and(final_flags, (final_features[..., 0] < 0.2))]
         # valid_points = query_points[np.logical_and(gt_flags, (final_features[..., 0] < 0.4))]
 
-        predicted_labels = final_flags.astype(np.ubyte).reshape(256, 256, 256)
+        predicted_labels = final_flags.astype(np.ubyte).reshape(res, res, res)
         gradients_and_udf = final_features
 
         export_point_cloud(str(v_output_root / (prefix + ".ply")), valid_points)
@@ -86,7 +93,7 @@ def main(v_cfg: DictConfig):
         batch_size=1,
         shuffle=False,
         num_workers=v_cfg["trainer"]["num_worker"],
-        pin_memory=True,
+        pin_memory=False,
         drop_last=False
     )
     # check_dir(Path(v_cfg["dataset"]["root"]) / "prediction" / v_cfg["dataset"]["type"])
@@ -130,7 +137,7 @@ def main(v_cfg: DictConfig):
             for item in batched_data:
                 feat = item.cuda().permute((0, 4, 1, 2, 3)).unsqueeze(1)
                 feat = [(feat, torch.zeros(feat.shape[0])), None]
-                prediction = model(feat, False).reshape(-1, ps, ps, ps)
+                prediction = model(feat, False)[0].reshape(-1, ps, ps, ps)
                 predictions.append(prediction)
             predictions = torch.cat(predictions, dim=0).reshape(15,15,15,32,32,32)
             predictions = predictions[:, :, :, 8:24, 8:24, 8:24].permute(0, 3, 1, 4, 2, 5).reshape(240, 240, 240)
@@ -150,8 +157,11 @@ def main(v_cfg: DictConfig):
                     if i>=1:
                         prediction = torch.flip(prediction, dims=[i])
                     predictions.append(prediction)
-                predictions = torch.cat(predictions, dim=0).reshape(15, 15, 15, 32, 32, 32)
-                predictions = predictions[:, :, :, 8:24, 8:24, 8:24].permute(0, 3, 1, 4, 2, 5).reshape(240, 240, 240)
+                predictions = torch.cat(predictions, dim=0)
+                num_batches_dim = round(pow(predictions.shape[0], 1/3))
+                predictions = predictions.reshape(num_batches_dim, num_batches_dim,num_batches_dim, ps, ps, ps)
+                dim = num_batches_dim * 16
+                predictions = predictions[:, :, :, 8:24, 8:24, 8:24].permute(0, 3, 1, 4, 2, 5).reshape(dim, dim, dim)
                 aug_predictions.append(torch.sigmoid(predictions))
             predictions = torch.stack(aug_predictions, dim=0).mean(dim=0)
         final_flags = predictions > threshold

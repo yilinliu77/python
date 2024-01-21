@@ -7,16 +7,15 @@ import numpy as np
 
 from shared.common_utils import safe_check_dir
 
-def save_mesh(v_path, v_out_path):
-    mesh = trimesh.load(v_path)
-    mesh.export(v_out_path, include_texture=True)
 
 if __name__ == '__main__':
-    output_root = r"G:/Dataset/GSP/viz_output"
+    ours_root = r"G:/Dataset/GSP/Results/Ours/0112_total_mesh"
+    output_root = r"G:/Dataset/GSP/Results/viz_output/cameras_31"
     safe_check_dir(output_root)
-    gt_root = r"G:/Dataset/GSP/test_data_whole2/mesh"
-    viz_id = [file.strip() for file in open(r"G:/Dataset/GSP/Baselines/viz_ids.txt").readlines()]
+    viz_id = [file.strip() for file in open(r"G:/Dataset/GSP/List/viz_ids_small1.txt").readlines()]
     viz_id = sorted(viz_id)
+
+    viz_id = ["00990610"]
 
     vis = o3d.visualization.VisualizerWithKeyCallback()
     vis.create_window(width=1600,height=1600)
@@ -49,7 +48,7 @@ if __name__ == '__main__':
 
         file = viz_id[id_cur]
         prefix = file[:8]
-        mesh_cur = o3d.io.read_triangle_mesh(os.path.join(gt_root, file + ".ply"))
+        mesh_cur = o3d.io.read_triangle_mesh(os.path.join(ours_root, prefix, "mesh/0total_mesh.ply"))
         vis.clear_geometries()
         lineset = o3d.geometry.LineSet.create_from_triangle_mesh(mesh_cur)
         vis.add_geometry(mesh_cur)

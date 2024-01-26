@@ -105,14 +105,14 @@ class Collision_checker:
     # self.n_: M,3
     # self.d: M,
     def check_ray(self, patch_id_c, v_origin, v_direction, batch_size=20000):
-        if self.triangles is None:
+        if self.triangles is None or self.tri_to_patch.sum() == 0:
             return torch.zeros_like(v_origin[:, 0], dtype=torch.bool)
         else:
             # return torch.zeros_like(v_origin[:, 0], dtype=torch.bool)
             num_batches = (v_origin.shape[0] + batch_size - 1) // batch_size
             output = []
             for i in range(num_batches):
-                cur_batch_s = i*batch_size
+                cur_batch_s = i * batch_size
                 cur_batch_e = min((i + 1) * batch_size, v_origin.shape[0])
                 output.append(self.check_ray_batch(patch_id_c,
                                                    v_origin[cur_batch_s: cur_batch_e],
@@ -147,7 +147,7 @@ class Collision_checker:
             f.write("ply\n")
             f.write("format ascii 1.0\n")
             f.write("element vertex {}\nproperty float x\nproperty float y\nproperty float z\n".format(
-                acc_num_vertices))
+                    acc_num_vertices))
             f.write("element face {}\nproperty list uchar int vertex_index\n".format(len(polygons)))
             f.write("end_header\n")
             for ver in vertices:

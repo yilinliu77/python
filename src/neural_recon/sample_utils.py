@@ -3,7 +3,9 @@ import time
 import torch
 import numpy as np
 from shared.common_utils import normalize_tensor
-from src.neural_recon.geometric_util import vectors_to_angles, intersection_of_ray_and_plane, intersection_of_ray_and_all_plane
+from src.neural_recon.geometric_util import vectors_to_angles, intersection_of_ray_and_plane, \
+    intersection_of_ray_and_all_plane
+import math
 
 
 # cur_dir: (M, 3) M directions
@@ -19,7 +21,7 @@ def sample_edge(num_per_edge_m, cur_dir, start_point, num_max_sample=2000):
     times[1] += time.time() - cur_time
     cur_time = time.time()
     sampled_edge_points = torch.arange(num_edge_points.sum(), device=cur_dir.device) - num_edge_points_.cumsum(
-        dim=0).repeat_interleave(num_edge_points)
+            dim=0).repeat_interleave(num_edge_points)
     times[2] += time.time() - cur_time
     cur_time = time.time()
     sampled_edge_points = sampled_edge_points / ((num_edge_points - 1 + 1e-8).repeat_interleave(num_edge_points))
@@ -41,7 +43,7 @@ def sample_triangles(num_per_m2, p1, p2, p3, num_max_sample=500, v_sample_edge=T
     area = torch.linalg.norm(torch.cross(d1, d2) + 1e-6, dim=1).abs() / 2
 
     # num_per_m2 = num_per_m * num_per_m
-    num_tri_samples = torch.clamp((area * num_per_m2).to(torch.long), 1, num_max_sample * 4)
+    num_tri_samples = torch.clamp((area * num_per_m2).to(torch.long), 1, num_max_sample)
 
     # samples = torch.rand(num_tri_samples.sum(), 2, device=p1.device)
     g = torch.Generator(device=p1.device)
@@ -55,6 +57,7 @@ def sample_triangles(num_per_m2, p1, p2, p3, num_max_sample=500, v_sample_edge=T
     sampled_polygon_points = sampled_polygon_points + p1.repeat_interleave(num_tri_samples, dim=0)
 
     if v_sample_edge:
+        num_per_m = int(math.sqrt(num_per_m2))
         num_edge_points, edge_points = sample_edge(num_per_m,
                                                    torch.stack((d1, d2, p1 - p3), dim=1).reshape(-1, 3),
                                                    # torch.stack((d1,), dim=1).reshape(-1, 3),
@@ -74,7 +77,7 @@ def sample_triangles(num_per_m2, p1, p2, p3, num_max_sample=500, v_sample_edge=T
                      - (num_edge_points_ - num_total_points_cumsum).repeat_interleave(num_edge_points)
         tri_index = torch.arange(num_tri_samples.sum(), device=p1.device) \
                     - (num_tri_points_ - num_total_points_cumsum - num_edge_points).repeat_interleave(
-            num_tri_samples)
+                num_tri_samples)
         sampled_total_points[edge_index] = edge_points
         sampled_total_points[tri_index] = sampled_polygon_points
         return num_total_points, sampled_total_points
@@ -130,22 +133,17 @@ def LatinHypercubeSample(range_list=None, n_samples=100, device='cuda'):
     if range_list is None:
         range_list = [[0, 10], [-torch.pi, torch.pi]]
 
-    # 获取维度数量
     ndim = len(range_list)
 
-    # 转换 range_list 为 tensor，使其能够直接用于向量化计算
     range_tensor = torch.tensor(range_list).float()
-    lower_bounds = range_tensor[:, 0]  # 获取所有维度的下界
-    ranges = range_tensor[:, 1] - lower_bounds  # 获取所有维度的范围
+    lower_bounds = range_tensor[:, 0]
+    ranges = range_tensor[:, 1] - lower_bounds
 
-    # 计算每个维度的 delta
     delta = ranges / n_samples
 
-    # 对每个维度进行采样
     samples = torch.rand(n_samples, ndim) * delta + lower_bounds + torch.arange(n_samples).view(-1, 1).float() * delta
     samples = samples.to(device)
 
-    # 随机打乱样本
     for dim in range(ndim):
         samples[:, dim] = samples[torch.randperm(n_samples), dim]
 
@@ -168,8 +166,8 @@ def sample_new_distance(v_original_distances,
         t_ = new_distance[~sample_distance_mask]
         a = repeated_vertices_distances[~sample_distance_mask] + \
             scale_factor * torch.normal(
-            torch.zeros(t_.shape[0], dtype=t_.dtype, device=device),
-            torch.ones(t_.shape[0], dtype=t_.dtype, device=device), generator=v_random_g)
+                torch.zeros(t_.shape[0], dtype=t_.dtype, device=device),
+                torch.ones(t_.shape[0], dtype=t_.dtype, device=device), generator=v_random_g)
         new_distance[~sample_distance_mask] = a
         sample_distance_mask = torch.logical_and(new_distance > v_min, new_distance < v_max)
     # (B, (S + 1))
@@ -198,7 +196,7 @@ def sample_depth_and_angle(depth, angle, num_sample=100, scale_factor=1.0, v_ran
 
 
 def sample_new_planes(v_original_parameters, v_centroid_rays_c, id_neighbour_patches, patch_id_list,
-                      scale_factor=1.0, v_random_g=None):
+                      scale_factor=1.0, v_random_g=None, debug_gt=None):
     plane_angles = vectors_to_angles(v_original_parameters[:, :3])
     initial_centroids = intersection_of_ray_and_plane(v_original_parameters, v_centroid_rays_c)[1]
     init_depth = torch.linalg.norm(initial_centroids, dim=-1)
@@ -212,8 +210,19 @@ def sample_new_planes(v_original_parameters, v_centroid_rays_c, id_neighbour_pat
     sample_depth, sample_angle = sample_depth_and_angle(init_depth[patch_id_list],
                                                         plane_angles[patch_id_list],
                                                         scale_factor=scale_factor, v_random_g=v_random_g)
+    if len(patch_id_list) <= 1:
+        return sample_depth.contiguous(), sample_angle.contiguous()
+
+    if debug_gt is not None:
+        plane_angle_gt = vectors_to_angles(debug_gt[:, :3])
+        centroids_gt = intersection_of_ray_and_plane(debug_gt, v_centroid_rays_c)[1]
+        depth_gt = torch.linalg.norm(centroids_gt, dim=-1)
 
     for idx in range(len(patch_id_list)):
+        if debug_gt is not None:
+            sample_depth[idx, 1] = depth_gt[idx]
+            sample_angle[idx, 1] = plane_angle_gt[idx]
+
         patch_id = patch_id_list[idx]
         # propagation from neighbour, do not sample depth!
         id_neighbour_list = id_neighbour_patches[patch_id]
@@ -223,9 +232,9 @@ def sample_new_planes(v_original_parameters, v_centroid_rays_c, id_neighbour_pat
         propagated_depth = torch.linalg.norm(propagated_centroids, dim=-1)
 
         # depth_neighbour = init_depth[torch.tensor(id_neighbour_list)]
-        #sample_depth[patch_id, 1:1 + len(id_neighbour_list)] = init_depth[torch.tensor(id_neighbour_list)].clone()
-        sample_depth[idx, 1:1 + len(id_neighbour_list)] = propagated_depth.clone()
-        sample_angle[idx, 1:1 + len(id_neighbour_list)] = plane_angles[torch.tensor(id_neighbour_list)].clone()
+        # sample_depth[patch_id, 1:1 + len(id_neighbour_list)] = init_depth[torch.tensor(id_neighbour_list)].clone()
+        sample_depth[idx, 100 - len(id_neighbour_list):100] = propagated_depth.clone()
+        sample_angle[idx, 100 - len(id_neighbour_list):100] = plane_angles[torch.tensor(id_neighbour_list)].clone()
     return sample_depth.contiguous(), sample_angle.contiguous()
 
 
@@ -239,8 +248,6 @@ def sample_new_planes2(v_original_parameters1, v_original_parameters2, v_rays_c1
     sample_depths1 = sample_new_distance(depth, num_sample, v_random_g=v_random_g)
     sample_depths2 = sample_new_distance(depth, num_sample, v_random_g=v_random_g)
 
-
-
     # sample two angles
     # sample_angles1 = sample_new_distance(angle.reshape(-1), num_sample, scale_factor=torch.pi / 3, v_max=100,
     #                                     v_min=-100, v_random_g=v_random_g)
@@ -251,6 +258,5 @@ def sample_new_planes2(v_original_parameters1, v_original_parameters2, v_rays_c1
     #                                      v_min=-100, v_random_g=v_random_g)
     # sample_angles2 = sample_angles2.reshape(depth.shape[0], 2, num_sample) % (2 * torch.pi)
     # sample_angles2 = sample_angles2.permute(0, 2, 1)
-
 
     return sample_depth.contiguous(), sample_angle.contiguous()

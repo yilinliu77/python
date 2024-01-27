@@ -307,7 +307,7 @@ def save_mesh(mesh, v_out_path, prefix, id, rebuild_face=False, color_by_compone
 
 if __name__ == '__main__':
     if True:
-        mesh = trimesh.load(r"G:/Dataset/GSP/Results/App/0044/Sewed_shape.ply")
+        mesh = trimesh.load(r"G:/Dataset/GSP/Results/App/0044/after/after_surface.ply")
 
         if True:
             index = np.asarray([item[1] for item in mesh.metadata["_ply_raw"]["face"]["data"]], dtype=np.int32)
@@ -320,7 +320,7 @@ if __name__ == '__main__':
         index = index % color_table.shape[0]
         max_index = index.max()
 
-        with open("G:/Dataset/GSP/Results/App/0044/Sewed_shape.obj", "w") as f:
+        with open("G:/Dataset/GSP/Results/App/0044/after/after_surface.obj", "w") as f:
             f.write("mtllib mat.mtl\n")
             for v in mesh.vertices:
                 f.write("v {} {} {}\n".format(v[0], v[1], v[2]))
@@ -329,7 +329,7 @@ if __name__ == '__main__':
                 for face in mesh.faces[index == idx]:
                     f.write("f {} {} {}\n".format(face[0] + 1, face[1] + 1, face[2] + 1))
 
-        with open("G:/Dataset/GSP/Results/App/0044/mat.mtl", "w") as f:
+        with open("G:/Dataset/GSP/Results/App/0044/after/mat.mtl", "w") as f:
             for idx in range(color_table.shape[0]):
                 f.write("newmtl mat_{}\n".format(idx))
                 f.write(
@@ -342,8 +342,8 @@ if __name__ == '__main__':
                 f.write("Ns {}\n".format(1))
 
     random_flag = -1
-    output_root = r"G:/Dataset/GSP/Results/viz_output/0120_random_mesh"
-    viz_id = [file.strip() for file in open(r"G:/Dataset/GSP/List/vis_random.txt").readlines()]
+    output_root = r"G:/Dataset/GSP/Results/viz_output/0121_mesh"
+    viz_id = [file.strip() for file in open(r"G:/Dataset/GSP/List/vis31.txt").readlines()]
 
     # output_root = r"G:/Dataset/GSP/Results/viz_output/test2/Bright_color"
     # viz_id = [file.strip() for file in open(r"G:/Dataset/GSP/List/vis6.txt").readlines()]
@@ -353,7 +353,7 @@ if __name__ == '__main__':
 
     safe_check_dir(output_root)
     gt_root = r"G:/Dataset/GSP/test_data_final/mesh"
-    ours_root = r"G:/Dataset/GSP/Results/Ours/0112_total_mesh"
+    ours_root = r"G:/Dataset/GSP/Results/Ours/0121_total_mesh"
     hp_root = r"G:/Dataset/GSP/Results/Baselines/HP_mesh_1228"
     sed_root = r"G:/Dataset/GSP/Results/Baselines/SED_mesh_1228"
     complex_root = r"G:/Dataset/GSP/Results/Baselines/ComplexGen_prediction_0102"

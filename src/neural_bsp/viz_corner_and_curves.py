@@ -65,7 +65,7 @@ if __name__ == "__main__":
 
     viz_ids = [item.strip() for item in open(list_file).readlines()]
 
-    # tasks = ["00990023.ply", "00990042.ply", "00990383.ply", "00990602.ply", "00990610.ply", "00990738.ply"]
+    # tasks = ["00990390.ply"]
     for task in tqdm(tasks):
         if task[:8] not in viz_ids:
             continue
@@ -129,7 +129,7 @@ if __name__ == "__main__":
                 for i_curve in range(primitive_index.max() + 1):
                     curve = points[primitive_index == i_curve]
 
-                    if curve.shape[0] <= 10:
+                    if curve.shape[0] <= 30:
                         idx = np.asarray(range(curve.shape[0] - 1))
                         idy = np.asarray(range(1, curve.shape[0]))
                         id = np.stack([idx, idy], axis=1)
@@ -142,6 +142,8 @@ if __name__ == "__main__":
 
                     lines = curve[id]
                     for line in lines:
+                        # if lines.shape[0] == 2:
+                        #     continue
                         if lines.shape[0] != 2 and np.linalg.norm(line[0] - line[1]) > 1e-1:
                             continue
                         curves += create_pipe(line[0], line[1])
@@ -160,7 +162,7 @@ if __name__ == "__main__":
             o3d.io.write_triangle_mesh(
                 os.path.join(root, "../viz_curve_and_vertex/{}_corner.obj".format(task[:8])), vertices)
 
-        elif type=="complex":
+        elif type == "complex":
             curves = o3d.geometry.TriangleMesh()
             vertices = o3d.geometry.TriangleMesh()
             tasks = os.listdir(os.path.join(root, task))

@@ -15,17 +15,19 @@ from src.neural_recon.collision_checker import Collision_checker
 from src.neural_recon.geometric_util import angles_to_vectors, compute_plane_abcd, intersection_of_ray_and_all_plane, \
     intersection_of_ray_and_plane
 from src.neural_recon.io_utils import generate_random_color, save_plane
-from src.neural_recon.loss_utils import compute_regularization, Glue_loss_computer, \
-    Bilateral_ncc_computer, Edge_loss_computer, Regularization_loss_computer, Mutex_loss_computer, dilate_edge
+from src.neural_recon.loss_utils import (compute_regularization, Glue_loss_computer, Bilateral_ncc_computer,
+                                         Edge_loss_computer, Regularization_loss_computer, Mutex_loss_computer,
+                                         dilate_edge, get_projections, get_projections_batch)
 from src.neural_recon.sample_utils import sample_new_planes, sample_triangles
 
 import os
+import faiss
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 
 class CosineAnnealingScaleFactorScheduler:
-    def __init__(self, initial_sf=3.0, initial_sf_mult=0.99, T_0=12, T_mult=1.1, min_sf=0):
+    def __init__(self, initial_sf=3.0, initial_sf_mult=0.99, T_0=12, T_mult=1.01, min_sf=0.001):
         """Implements Cosine Annealing with Restarts learning rate scheduler.
         Args:
             initial_sf (float): Initial scale factor.
@@ -53,7 +55,7 @@ class CosineAnnealingScaleFactorScheduler:
             if self.cur_cycle != 0 and self.cur_cycle % 2 == 0:
                 self.initial_sf *= self.initial_sf_mult
 
-            self.init_sf_cur_cycle = self.initial_sf * np.clip(np.random.standard_cauchy(), 0.001, 5.0)
+            self.init_sf_cur_cycle = self.initial_sf * np.clip(np.random.standard_cauchy(), 0.001, 3.0)
             # self.init_sf_cur_cycle = self.initial_sf * np.random.uniform(0, 3)
 
             new_T_0 = int(self.T_0 * self.T_mult)
@@ -67,16 +69,15 @@ class CosineAnnealingScaleFactorScheduler:
         return sf
 
 
-def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, sub_faces_centroid_rays_c, dual_graph, imgs,
-                          transformation, extrinsic_ref_cam, intrinsic, v_c1_2_c2_list, v_log_root):
+def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, src_faces_centroid_rays_c,
+                          dual_graph, imgs, transformation, extrinsic_ref_cam, intrinsic, v_c1_2_c2_list,
+                          v_log_root, optimized_abcd_list=None):
     # Prepare some data
     device = initialized_planes.device
     patch_num = len(initialized_planes)
 
     patches_list = dual_graph.nodes  # each patch = id_vertexes
     patch_vertexes_id = [patches_list[i]['id_vertex'] for i in range(len(patches_list))]
-
-    optimized_abcd_list = initialized_planes.clone()
 
     dilated_gradients_list = []
     for i in range(0, len(imgs)):
@@ -88,22 +89,26 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, sub_f
     dilated_gradients_list = torch.stack(dilated_gradients_list, dim=0)
 
     # sub faces of each patch
-    sub_faces = [dual_graph.nodes[i]['sub_faces'] for i in range(patch_num)]
-    sub_faces_id = [dual_graph.nodes[i]['sub_faces_id'] for i in range(patch_num)]
-    for i in range(patch_num):
-        sub_faces_c = dual_graph.nodes[i]['sub_faces']
-        for sub_face in sub_faces_c:
-            pass
+    # sub_faces = [dual_graph.nodes[i]['sub_faces'] for i in range(patch_num)]
+    # sub_faces_id = [dual_graph.nodes[i]['sub_faces_id'] for i in range(patch_num)]
+    # for i in range(patch_num):
+    #     sub_faces_c = dual_graph.nodes[i]['sub_faces']
+    #     for sub_face in sub_faces_c:
+    #         pass
 
     # optimization loop control variables
     cur_iter = [0] * patch_num
     best_loss = [None] * patch_num
     delta = [None] * patch_num
-    MAX_ITER = 1000
-    MAX_TOLERENCE = 300
+    MAX_ITER = 1001
+    MAX_TOLERENCE = 100
     num_tolerence = [MAX_TOLERENCE] * patch_num
-
     num_plane_sample = 100
+
+    if optimized_abcd_list is None:
+        optimized_abcd_list = initialized_planes.clone()
+    else:
+        MAX_ITER = 1
 
     tri_colors = [generate_random_color() for _ in range(100)]
     sample_g = torch.Generator(device)
@@ -149,14 +154,18 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, sub_f
 
     # Start to optimize: patch based optimization
     # 1. partition the patches into several groups using the nx.greedy_color(dual_graph)
-    patch_color = nx.greedy_color(dual_graph)
-    groups = {}
-    for key, value in patch_color.items():
-        if value not in groups:
-            groups[value] = [key]
-        else:
-            groups[value].append(key)
-    groups = list(groups.values())
+    is_clusters = False
+    if is_clusters:
+        patch_color = nx.greedy_color(dual_graph)
+        groups = {}
+        for key, value in patch_color.items():
+            if value not in groups:
+                groups[value] = [key]
+            else:
+                groups[value].append(key)
+        groups = list(groups.values())
+    else:
+        groups = [list(range(patch_num))]
     group_idx = -1
     count = 0
 
@@ -185,7 +194,7 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, sub_f
         area_list.append(area.sum().item())
 
     debug_id_list = sorted(debug_id_list, key=lambda x: area_list[x], reverse=True)
-    debug_id_list = torch.tensor(debug_id_list[0:10]).to(device)
+    debug_id_list = torch.tensor(debug_id_list).to(device)
 
     visualizer = Visualizer(
             patch_num, v_log_root,
@@ -209,6 +218,7 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, sub_f
         # 1. Sample new hypothesis of all patch from 1) propagation 2) random perturbation
         # patch_id_list = torch.tensor(groups[group_idx]).to(device)
         patch_id_list = debug_id_list.clone()
+        patch_num = len(patch_id_list)
         samples_depth, samples_angle = sample_new_planes(optimized_abcd_list,
                                                          v_centroid_rays_c,
                                                          id_neighbour_patches,
@@ -221,6 +231,7 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, sub_f
 
         visualizer.update_timer("Sample")
         visualizer.update_sample_plane(patch_id_list, samples_abcd, v_rays_c, patch_vertexes_id, cur_iter[0])
+        visualizer.update_timer("SampleVis")
 
         if sum(end_flag) == patch_num:
             break
@@ -243,31 +254,37 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, sub_f
             local_vertex_pos = intersection_of_ray_and_all_plane(local_plane_parameter,
                                                                  v_rays_c[patch_vertexes_id[v_patch_id]])  # 100 * n * 3
             visualizer.update_timer("Construct_p1")
+            edges_idx = [[i, (i + 1) % num_vertex] for i in range(num_vertex)]
+            local_edge_pos = local_vertex_pos[:, edges_idx]
+            local_centroid = intersection_of_ray_and_all_plane(local_plane_parameter,
+                                                               v_centroid_rays_c[v_patch_id].unsqueeze(0))[:, 0]
+
+            visualizer.update_timer("Construct_p2")
+
             # 2. Construct the triangles
-            sub_faces_id_c, sub_faces_c = sub_faces_id[int(v_patch_id)], sub_faces[int(v_patch_id)]
+            sub_faces_id_c = dual_graph.nodes[int(v_patch_id)]['sub_faces_id']
+            sub_faces_c = dual_graph.nodes[int(v_patch_id)]['sub_faces']
+            triangles_pos_list = []
             triangles_num_per_face = []
             for sub_face_id, sub_face_vertices_id in zip(sub_faces_id_c, sub_faces_c):
                 vertex_pos_sub_face = intersection_of_ray_and_all_plane(local_plane_parameter,
                                                                         v_rays_c[sub_face_vertices_id])  # 100 * n * 3
                 num_vertex_sf = len(sub_face_vertices_id)
                 triangles_num_per_face.append(num_vertex_sf)
-                edges_idx = [[i, (i + 1) % num_vertex_sf] for i in range(num_vertex_sf)]
+                indices = torch.arange(num_vertex_sf)
+                edges_idx = torch.stack((indices, torch.roll(indices, shifts=-1)), dim=1).tolist()
+                visualizer.update_timer("Construct_p3")
                 edge_pos_sf = vertex_pos_sub_face[:, edges_idx]
-                centroid_ray_sf = sub_faces_centroid_rays_c[sub_face_id]
+                centroid_ray_sf = src_faces_centroid_rays_c[sub_face_id]
                 centroid_sf = intersection_of_ray_and_all_plane(local_plane_parameter,
                                                                 centroid_ray_sf.unsqueeze(0))[:, 0]
-                triangles_pos = torch.cat((edge_pos_sf, centroid_sf[:, None, None, :].tile(1, num_vertex_sf, 1, 1)), dim=2)
+                triangles_pos = torch.cat((edge_pos_sf, centroid_sf[:, None, None, :].tile(1, num_vertex_sf, 1, 1)),
+                                          dim=2)
+                triangles_pos_list.append(triangles_pos)  # (100,num_tri,3,3)
+                visualizer.update_timer("Construct_p4")
 
-            edges_idx = [[i, (i + 1) % num_vertex] for i in range(num_vertex)]
-            visualizer.update_timer("Construct_p2")
-            local_edge_pos = local_vertex_pos[:, edges_idx]
-            local_centroid = intersection_of_ray_and_all_plane(local_plane_parameter,
-                                                               v_centroid_rays_c[v_patch_id].unsqueeze(0))[:, 0]
-            visualizer.update_timer("Construct_p3")
-            triangles_pos = torch.cat((local_edge_pos, local_centroid[:, None, None, :].tile(1, num_vertex, 1, 1)),
-                                      dim=2)
-            triangles_pos = triangles_pos.view(-1, 3, 3)  # (100*num_tri,3,3)
-
+            triangles_pos_per_sample = torch.cat(triangles_pos_list, dim=1)  # (100,num_tri,3,3)
+            triangles_pos = triangles_pos_per_sample.view(-1, 3, 3)  # (100*num_tri,3,3)
             visualizer.update_timer("Construct")
 
             # 3. Sample points in this plane
@@ -300,7 +317,8 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, sub_f
             collision_flag = collision_checker.check_ray(
                     v_patch_id,
                     camera_coor_in_c1[:, None].tile(1, num_sp, 1).reshape(-1, 3),
-                    ray_dir.reshape(-1, 3))
+                    ray_dir.reshape(-1, 3),
+                    batch_size=1000000)
             collision_flag = collision_flag.reshape(-1, num_sp)
             remain_flag = torch.logical_not(collision_flag)
             # Skip this src_img if all points are in collision
@@ -312,7 +330,7 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, sub_f
             # 1) NCC loss
             points_ncc = ncc_loss_computer.compute_batch(
                     sample_points_on_face_src, triangle_normal_src,
-                    intrinsic, transformation, v_img1, imgs[1:])
+                    intrinsic, transformation, v_img1, imgs[1:], batch_size=1000000)
             # Set the loss of invisible points to 0,
             # we do not consider this point when calculating the loss of this face
             points_ncc[~remain_flag] = 0
@@ -414,6 +432,7 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, sub_f
                     num_sample_points_per_tri,
 
                     remain_flag,
+                    triangles_pos_per_sample,
                     local_edge_pos,
                     local_centroid,
 
@@ -458,18 +477,29 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, sub_f
         final_triangles_list = []
         tri_num_each_patch = []
         for v_patch_id in range(patch_num):
-            local_vertex_pos = intersection_of_ray_and_all_plane(optimized_abcd_list[v_patch_id:v_patch_id + 1],
-                                                                 v_rays_c[patch_vertexes_id[v_patch_id]])
-            num_vertex = len(patch_vertexes_id[v_patch_id])
-            tri_num_each_patch.append(num_vertex)
-            edges_idx = [[i, (i + 1) % num_vertex] for i in range(num_vertex)]
-            local_edge_pos = local_vertex_pos[:, edges_idx][0]
-            local_centroid = intersection_of_ray_and_plane(
-                    optimized_abcd_list[v_patch_id:v_patch_id + 1],
-                    v_centroid_rays_c[v_patch_id:v_patch_id + 1])[1]
-            triangles_pos = torch.cat((
-                local_edge_pos, local_centroid[:, None, :].tile(num_vertex, 1, 1)), dim=1)
-            final_triangles_list.append(triangles_pos)
+            sub_faces_id_c = dual_graph.nodes[int(v_patch_id)]['sub_faces_id']
+            sub_faces_c = dual_graph.nodes[int(v_patch_id)]['sub_faces']
+            triangles_pos_list = []
+            triangles_num_per_face = []
+            for sub_face_id, sub_face_vertices_id in zip(sub_faces_id_c, sub_faces_c):
+                vertex_pos_sub_face = intersection_of_ray_and_all_plane(optimized_abcd_list[v_patch_id:v_patch_id + 1],
+                                                                        v_rays_c[sub_face_vertices_id])  # 100 * n * 3
+                num_vertex_sf = len(sub_face_vertices_id)
+                triangles_num_per_face.append(num_vertex_sf)
+                indices = torch.arange(num_vertex_sf)
+                edges_idx = torch.stack((indices, torch.roll(indices, shifts=-1)), dim=1).tolist()
+                edge_pos_sf = vertex_pos_sub_face[:, edges_idx]
+                centroid_ray_sf = src_faces_centroid_rays_c[sub_face_id]
+                centroid_sf = intersection_of_ray_and_all_plane(optimized_abcd_list[v_patch_id:v_patch_id + 1],
+                                                                centroid_ray_sf.unsqueeze(0))[:, 0]
+                triangles_pos = torch.cat((edge_pos_sf, centroid_sf[:, None, None, :].tile(1, num_vertex_sf, 1, 1)),
+                                          dim=2)
+                triangles_pos_list.append(triangles_pos)  # (1,num_tri,3,3)
+
+            triangles_pos_per_sample = torch.cat(triangles_pos_list, dim=1)  # (1,num_tri,3,3)
+            tri_num_each_patch.append(triangles_pos_per_sample.shape[1])
+            final_triangles_list.append(triangles_pos_per_sample[0])
+
         final_triangles = torch.cat(final_triangles_list)
         tri_to_patch = torch.arange(patch_num).repeat_interleave(torch.from_numpy(np.array(tri_num_each_patch))).to(
                 device)
@@ -487,6 +517,10 @@ def optimize_planes_batch(initialized_planes, v_rays_c, v_centroid_rays_c, sub_f
     # save optimized_abcd_list
     save_plane(optimized_abcd_list, v_rays_c, patch_vertexes_id,
                file_path=os.path.join(v_log_root, "optimized.ply"))
+
+    # save the loss of each patch
+    for patch_id, loss in enumerate(best_loss):
+        dual_graph.nodes[patch_id]['loss'] = loss
 
     with open("output/optimized_abcd_list.pkl", "wb") as f:
         pickle.dump(optimized_abcd_list, f)

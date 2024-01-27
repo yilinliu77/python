@@ -9,6 +9,7 @@ from shared.common_utils import normalize_tensor, normalize_vector, to_homogeneo
 from src.neural_recon.geometric_util import compute_area, intersection_of_ray_and_plane
 from src.neural_recon.optimize_segment import sample_img
 
+
 def dilate_edge(v_gradient_img, v_num_iter=0):
     if isinstance(v_gradient_img, torch.Tensor):
         v_gradient_img = v_gradient_img.cpu().numpy()
@@ -47,31 +48,61 @@ def get_projections(v_points, v_intrinsic, v_transformation, ):
 
 
 # v_points: (M,3) M 3D points in the camera coordinate of image 1
-def get_projections_batch(v_points, v_intrinsic, v_transformation, ):
-    points_2d1 = (v_intrinsic @ v_points.T).T
-    points_2d1 = points_2d1[:, :2] / (points_2d1[:, 2:3] + 1e-8)
-    points_2d2 = (v_transformation @ to_homogeneous_tensor(v_points).T).transpose(1,2)
-    points_2d2 = points_2d2[:, :, :2] / (points_2d2[:, :, 2:3] + 1e-8)
+# def get_projections_batch(v_points, v_intrinsic, v_transformation, ):
+#     points_2d1 = (v_intrinsic @ v_points.T).T
+#     points_2d1 = points_2d1[:, :2] / (points_2d1[:, 2:3] + 1e-8)
+#     points_2d2 = (v_transformation @ to_homogeneous_tensor(v_points).T).transpose(1, 2)
+#     points_2d2 = points_2d2[:, :, :2] / (points_2d2[:, :, 2:3] + 1e-8)
+#
+#     valid_mask = torch.logical_and(points_2d2 < 1, points_2d2 > 0).all(dim=-1)
+#     points_2d2 = torch.clamp(points_2d2, 0, 0.999999)
+#
+#     return points_2d1, points_2d2, valid_mask
 
-    valid_mask = torch.logical_and(points_2d2 < 1, points_2d2 > 0).all(dim=-1)
-    points_2d2 = torch.clamp(points_2d2, 0, 0.999999)
+
+def get_projections_batch(v_points, v_intrinsic, v_transformation, batch_size=10000000):
+    num_points = v_points.shape[0]
+    num_batches = (num_points + batch_size - 1) // batch_size
+
+    results = []
+    for i in range(num_batches):
+        start_index = i * batch_size
+        end_index = min((i + 1) * batch_size, num_points)
+        batch_points = v_points[start_index:end_index]
+
+        points_2d1 = (v_intrinsic @ batch_points.T).T
+        points_2d1 = points_2d1[:, :2] / (points_2d1[:, 2:3] + 1e-8)
+        points_2d2 = (v_transformation @ to_homogeneous_tensor(batch_points).T).transpose(1, 2)
+        points_2d2 = points_2d2[:, :, :2] / (points_2d2[:, :, 2:3] + 1e-8)
+        valid_mask = torch.logical_and(points_2d2 < 1, points_2d2 > 0).all(dim=-1)
+        points_2d2 = torch.clamp(points_2d2, 0, 0.999999)
+
+        results.append((points_2d1, points_2d2, valid_mask))
+
+    points_2d1 = torch.cat([x[0] for x in results])
+    points_2d2 = torch.cat([x[1] for x in results], dim=1)
+    valid_mask = torch.cat([x[2] for x in results], dim=1)
 
     return points_2d1, points_2d2, valid_mask
+
 
 def sample_imgs(v_img1, v_img2, points_2d1, points_2d2):
     sample_img1 = sample_img(v_img1[None, :].permute(0, 3, 1, 2), points_2d1[None, :, :])
     sample_img2 = sample_img(v_img2[None, :].permute(0, 3, 1, 2), points_2d2[None, :, :])
     return sample_img1, sample_img2
 
+
 def sample_imgs_batch2(v_img2, points_2d2):
-    sample_img2 = sample_img(v_img2[:,:,:,None].permute(0, 3, 1, 2), points_2d2)
+    sample_img2 = sample_img(v_img2[:, :, :, None].permute(0, 3, 1, 2), points_2d2)
     return sample_img2
+
 
 def sample_imgs_batch(v_img1, v_img2, points_2d1, points_2d2):
     num_source = v_img2.shape[0]
     sample_img1 = sample_img(v_img1[None, :].permute(0, 3, 1, 2), points_2d1[None, :, :])
     sample_img2 = sample_img(v_img2.permute(0, 3, 1, 2), points_2d2)
     return sample_img1, sample_img2
+
 
 class Bilateral_ncc_computer:
     def __init__(self, v_enable_spatial_weights=True, v_enable_color_weights=True,
@@ -87,10 +118,10 @@ class Bilateral_ncc_computer:
         sigma_spatial = self.sigma_spatial
         spatial_normalization_ = 1. / (2. * sigma_spatial * sigma_spatial)
         spatial_weights = torch.stack(torch.meshgrid(
-            torch.arange(self.window_size, dtype=torch.float32),
-            torch.arange(self.window_size, dtype=torch.float32),
-            indexing="xy"
-        ), dim=2) - self.window_size // 2
+                torch.arange(self.window_size, dtype=torch.float32),
+                torch.arange(self.window_size, dtype=torch.float32),
+                indexing="xy"
+                ), dim=2) - self.window_size // 2
         spatial_weights = torch.linalg.norm(spatial_weights, dim=-1)
         self.spatial_weights = spatial_weights ** 2 * spatial_normalization_
 
@@ -129,8 +160,8 @@ class Bilateral_ncc_computer:
 
         ncc1 = torch.sum(norm_img1 * norm_img2, dim=[2, 3])
         ncc2 = torch.sqrt(torch.clamp_min(
-            torch.sum(norm_img1 ** 2, dim=[2, 3]) * torch.sum(norm_img2 ** 2, dim=[2, 3]),
-            1e-8))
+                torch.sum(norm_img1 ** 2, dim=[2, 3]) * torch.sum(norm_img2 ** 2, dim=[2, 3]),
+                1e-8))
         ncc2 = torch.clamp_min(ncc2, 1e-6)
         ncc = 1 - ncc1 / ncc2
         return ncc
@@ -153,14 +184,14 @@ class Bilateral_ncc_computer:
         index = torch.stack(torch.meshgrid(index, index, indexing="xy"), dim=2)
         window_points = \
             (index[:, :, 0].view(1, -1, 1) * right_vector[:, None, :] * resolution[:, None, None]).view(
-                num_points, self.window_size, self.window_size, 3) + \
+                    num_points, self.window_size, self.window_size, 3) + \
             (index[:, :, 1].view(1, -1, 1) * up_vector[:, None, :] * resolution[:, None, None]).view(
-                num_points, self.window_size, self.window_size, 3)
+                    num_points, self.window_size, self.window_size, 3)
         window_points = window_points + v_points_c[:, None, None, :]
 
         # 3. Project points in both images
         points_2d1, points_2d2, valid_mask = get_projections(
-            window_points.reshape(-1, 3), v_intrinsic, v_transformation)
+                window_points.reshape(-1, 3), v_intrinsic, v_transformation)
 
         sample_imgs1, sample_imgs2 = sample_imgs(v_img1[:, :, None], v_img2[:, :, None], points_2d1, points_2d2)
         sample_imgs1 = sample_imgs1.reshape(num_points, self.window_size, self.window_size)
@@ -168,7 +199,7 @@ class Bilateral_ncc_computer:
         valid_mask = valid_mask.reshape(num_points, self.window_size, self.window_size).all(dim=1).all(dim=1)
 
         # 4. Compute the ncc
-        ncc = self.bilateral_ncc_(sample_imgs1, sample_imgs2[None,:])[0]
+        ncc = self.bilateral_ncc_(sample_imgs1, sample_imgs2[None, :])[0]
 
         # Visualize
         if False:
@@ -190,17 +221,14 @@ class Bilateral_ncc_computer:
 
                 cv2.imshow("1", np.concatenate([
                     np.concatenate([img11, img21], axis=1),
-                ], axis=0))
+                    ], axis=0))
                 cv2.waitKey()
 
         ncc[~valid_mask] = torch.inf
         return ncc
 
     def compute_batch(self, v_points_c, v_normal_c, v_intrinsic, v_transformations,
-                      v_img_ref, v_img_source):
-        time_table = [0]*10
-        cur_time= time.time()
-
+                      v_img_ref, v_img_source, batch_size=1000000):
         # 1. Prepare variables
         device = v_points_c.device
         num_points = v_points_c.shape[0]
@@ -211,34 +239,40 @@ class Bilateral_ncc_computer:
 
         height, width = v_img_ref.shape[:2]
         resolution = 1 / min(height, width) * torch.linalg.norm(v_points_c, dim=-1)
-        time_table[0]+=time.time()-cur_time
-        cur_time = time.time()
 
         # 2. Sample points in the window
         index = torch.arange(self.window_size, device=device) - self.window_size // 2
         index = torch.stack(torch.meshgrid(index, index, indexing="xy"), dim=2)
         window_points = \
             (index[:, :, 0].view(1, -1, 1) * right_vector[:, None, :] * resolution[:, None, None]).view(
-                num_points, self.window_size, self.window_size, 3) + \
+                    num_points, self.window_size, self.window_size, 3) + \
             (index[:, :, 1].view(1, -1, 1) * up_vector[:, None, :] * resolution[:, None, None]).view(
-                num_points, self.window_size, self.window_size, 3)
+                    num_points, self.window_size, self.window_size, 3)
         window_points = window_points + v_points_c[:, None, None, :]
-        time_table[1] += time.time() - cur_time
-        cur_time = time.time()
 
         # 3. Project points in both images
         points_2d1, points_2d2, valid_mask = get_projections_batch(
-            window_points.reshape(-1, 3), v_intrinsic, v_transformations)
+                window_points.reshape(-1, 3), v_intrinsic, v_transformations)
 
-        sample_imgs1, sample_imgs2 = sample_imgs_batch(v_img_ref[:, :, None], v_img_source[:, :,:, None], points_2d1, points_2d2)
+        sample_imgs1, sample_imgs2 = sample_imgs_batch(v_img_ref[:, :, None], v_img_source[:, :, :, None], points_2d1,
+                                                       points_2d2)
         sample_imgs1 = sample_imgs1.reshape(num_points, self.window_size, self.window_size)
         sample_imgs2 = sample_imgs2.reshape(-1, num_points, self.window_size, self.window_size)
         valid_mask = valid_mask.reshape(-1, num_points, self.window_size, self.window_size).all(dim=2).all(dim=2)
-        time_table[2] += time.time() - cur_time
-        cur_time = time.time()
 
         # 4. Compute the ncc
-        ncc = self.bilateral_ncc_(sample_imgs1, sample_imgs2)
+        # batch compute
+        Num_sum = sample_imgs1.shape[0]
+        num_batches = (Num_sum + batch_size - 1) // batch_size
+        ncc_list = []
+        for i in range(num_batches):
+            start_index = i * batch_size
+            end_index = min((i + 1) * batch_size, Num_sum)
+            sample_imgs1_batch = sample_imgs1[start_index:end_index]
+            sample_imgs2_batch = sample_imgs2[:, start_index:end_index]
+            batch_ncc = self.bilateral_ncc_(sample_imgs1_batch, sample_imgs2_batch)
+            ncc_list.append(batch_ncc)
+        ncc = torch.cat(ncc_list, dim=-1)
 
         # Visualize, do not adapt to batch optimization yet
         if False:
@@ -260,16 +294,16 @@ class Bilateral_ncc_computer:
 
                 cv2.imshow("1", np.concatenate([
                     np.concatenate([img11, img21], axis=1),
-                ], axis=0))
+                    ], axis=0))
                 cv2.waitKey()
 
         ncc[~valid_mask] = torch.inf
-        time_table[3] += time.time() - cur_time
-        cur_time = time.time()
+
         return ncc
 
+    # v_max_gradient_norm: If the norm of the gradient direction less than this value, we reduce the influence of this pixel
 
-# v_max_gradient_norm: If the norm of the gradient direction less than this value, we reduce the influence of this pixel
+
 # v_edge_power: Final weight = torch.pow(weight, value). Higher value produces lower edge loss
 class Edge_loss_computer:
     def __init__(self, v_sample_density, v_max_gradient_norm=0.1, v_edge_power=2):
@@ -292,9 +326,9 @@ class Edge_loss_computer:
 
         # 2. Sample the same number of points along the segments
         num_horizontal = torch.clamp(
-            (torch.linalg.norm(v_edge_points[:, 0] - v_edge_points[:, 1], dim=-1) / self.sample_density).to(
-                torch.long),
-            2, 1000)
+                (torch.linalg.norm(v_edge_points[:, 0] - v_edge_points[:, 1], dim=-1) / self.sample_density).to(
+                        torch.long),
+                2, 1000)
 
         begin_idxes = num_horizontal.cumsum(dim=0)
         begin_idxes = begin_idxes.roll(1)
@@ -341,18 +375,18 @@ class Edge_loss_computer:
         weighted_edge_loss = weighted_edge_loss * weight_edge.repeat_interleave(num_horizontal)
         mean_edge_loss = scatter_mean(weighted_edge_loss,
                                       torch.arange(
-                                          num_horizontal.shape[0], device=edge_directions2.device
-                                      ).repeat_interleave(num_horizontal))
+                                              num_horizontal.shape[0], device=edge_directions2.device
+                                              ).repeat_interleave(num_horizontal))
 
         return mean_edge_loss, valid_mask, num_horizontal
 
     def compute_batch(self, v_edge_points, v_intrinsic, v_transformation,
-                v_gradient1, v_gradient2, img2s, v_num_hypothesis=100):
+                      v_gradient1, v_gradient2, img2s, v_num_hypothesis=100):
         num_edge, _, _ = v_edge_points.shape
 
         # 1. Get the projected points in both images
         points_2d1, points_2d2, valid_mask = get_projections_batch(v_edge_points.view(-1, 3),
-                                                             v_intrinsic, v_transformation)
+                                                                   v_intrinsic, v_transformation)
 
         points_2d1 = points_2d1.reshape(num_edge, 2, 2)
         points_2d2 = points_2d2.reshape(-1, num_edge, 2, 2)
@@ -360,9 +394,9 @@ class Edge_loss_computer:
 
         # 2. Sample the same number of points along the segments
         num_horizontal = torch.clamp(
-            (torch.linalg.norm(v_edge_points[:, 0] - v_edge_points[:, 1], dim=-1) / self.sample_density).to(
-                torch.long),
-            2, 1000)
+                (torch.linalg.norm(v_edge_points[:, 0] - v_edge_points[:, 1], dim=-1) / self.sample_density).to(
+                        torch.long),
+                2, 1000)
 
         begin_idxes = num_horizontal.cumsum(dim=0)
         begin_idxes = begin_idxes.roll(1)
@@ -374,34 +408,34 @@ class Edge_loss_computer:
         sampled_points1 = points_2d1[:, 0].repeat_interleave(num_horizontal, dim=0) \
                           + dx[:, None] * dir1.repeat_interleave(num_horizontal, dim=0)
 
-        dir2 = points_2d2[:,:, 1] - points_2d2[:,:, 0]
-        sampled_points2 = points_2d2[:,:, 0].repeat_interleave(num_horizontal, dim=1) \
-                          + dx[None,:, None] * dir2.repeat_interleave(num_horizontal, dim=1)
+        dir2 = points_2d2[:, :, 1] - points_2d2[:, :, 0]
+        sampled_points2 = points_2d2[:, :, 0].repeat_interleave(num_horizontal, dim=1) \
+                          + dx[None, :, None] * dir2.repeat_interleave(num_horizontal, dim=1)
 
         # 3. Sample pixel direction
         # The direction in first img is used to decide the weight of the edge loss
         # If it is not an edge in the first image, then we are unlikely to calculate the edge loss in the second img
         # Also we do not calculate black area
         sample_imgs1, sample_imgs2 = sample_imgs_batch(v_gradient1, v_gradient2,
-                                                 sampled_points1, sampled_points2)
+                                                       sampled_points1, sampled_points2)
         sample_pixel_imgs2 = sample_imgs_batch2(img2s, sampled_points2)
 
         edge_directions1 = normalize_tensor(points_2d1[:, 0] - points_2d1[:, 1])
 
-        #weight1 = torch.clamp_max(torch.norm(sample_imgs1, dim=-1) / self.max_gradient_norm, 1)
+        # weight1 = torch.clamp_max(torch.norm(sample_imgs1, dim=-1) / self.max_gradient_norm, 1)
         mean_edge_grad_norm = scatter_mean(torch.norm(sample_imgs1, dim=-1),
-                                      torch.arange(
-                                          num_horizontal.shape[0], device=sample_imgs1.device
-                                      ).repeat_interleave(num_horizontal), dim=1)
+                                           torch.arange(
+                                                   num_horizontal.shape[0], device=sample_imgs1.device
+                                                   ).repeat_interleave(num_horizontal), dim=1)
         valid_edge_mask = (mean_edge_grad_norm > 0.01)
-
+        # weight2 = 1 - (the similarity of edge sample points' grad and edge direction)
         weight2 = 1 - ((normalize_tensor(sample_imgs1) * edge_directions1.repeat_interleave(num_horizontal, dim=0))
                        .sum(dim=-1).abs())
 
         weight = torch.pow(weight2, self.edge_power)
 
         sample_imgs2 = normalize_tensor(sample_imgs2)
-        edge_directions2 = normalize_tensor(points_2d2[:,:, 0] - points_2d2[:,:, 1])
+        edge_directions2 = normalize_tensor(points_2d2[:, :, 0] - points_2d2[:, :, 1])
         edge_directions2 = edge_directions2.repeat_interleave(num_horizontal, dim=1)
         edge_loss2 = torch.abs(torch.sum(edge_directions2 * sample_imgs2, dim=-1))
 
@@ -417,11 +451,11 @@ class Edge_loss_computer:
         weight_edge = num_horizontal.reshape(v_num_hypothesis, -1)
         weight_edge = (weight_edge / weight_edge.sum(dim=1, keepdim=True)).reshape(-1)
         weighted_edge_loss = weighted_edge_loss * weight_edge.repeat_interleave(num_horizontal)
-        #weighted_edge_loss[black_mask] = 1
+        # weighted_edge_loss[black_mask] = 1
         mean_edge_loss = scatter_mean(weighted_edge_loss,
                                       torch.arange(
-                                          num_horizontal.shape[0], device=edge_directions2.device
-                                      ).repeat_interleave(num_horizontal), dim=1)
+                                              num_horizontal.shape[0], device=edge_directions2.device
+                                              ).repeat_interleave(num_horizontal), dim=1)
 
         mean_edge_loss[~valid_edge_mask.tile(mean_edge_loss.shape[0], 1)] = torch.nan
 
@@ -445,6 +479,7 @@ def compute_regularization(v_triangles, v_intrinsic, v_transformation):
     weight[weight > 1] = 1
     return weight
 
+
 def compute_regularization_batch(v_triangles, v_intrinsic, v_transformation):
     points_2d1 = (v_intrinsic @ v_triangles.reshape(-1, 3).T).T
     points_2d1 = points_2d1[:, :2] / (points_2d1[:, 2:3] + 1e-8)
@@ -466,28 +501,33 @@ def compute_regularization_batch(v_triangles, v_intrinsic, v_transformation):
 class Glue_loss_computer:
     def __init__(self, v_dual_graph: nx.Graph, v_rays_c):
         self.dual_graph = v_dual_graph
-        num_patch = v_dual_graph.number_of_nodes()
+        self.num_patch = v_dual_graph.number_of_nodes()
+        if self.num_patch == 1:
+            return
+
         # Prepare the index of planes and vertex in advance to avoid the for-loop when computing the glue loss
-        self.plane_index = [[] for _ in range(num_patch)]
-        self.rays = [[] for _ in range(num_patch)]
-        self.vertex_index = [[] for _ in range(num_patch)]
-        for id_patch in range(num_patch):
+        self.plane_index = [[] for _ in range(self.num_patch)]
+        self.rays = [[] for _ in range(self.num_patch)]
+        self.vertex_index = [[] for _ in range(self.num_patch)]
+        for id_patch in range(self.num_patch):
             for id_nearby_patch in v_dual_graph[id_patch]:
                 for id_vertex in v_dual_graph[id_patch][id_nearby_patch]["adjacent_vertices"]:
                     self.vertex_index[id_patch].append(
-                        np.where(np.array(v_dual_graph.nodes[id_patch]["id_vertex"]) == id_vertex)[0].item())
+                            np.where(np.array(v_dual_graph.nodes[id_patch]["id_vertex"]) == id_vertex)[0].item())
                     self.plane_index[id_patch].append(id_nearby_patch)
                     self.rays[id_patch].append(v_rays_c[id_vertex])
-            self.rays[id_patch] = torch.stack(self.rays[id_patch], dim=0)
+            self.rays[id_patch] = torch.stack(self.rays[id_patch])
 
     def compute(self, v_patch_id, v_optimized_abcd_list, v_vertex_pos):
+        if self.num_patch <= 1:
+            return torch.zeros(100, device=v_vertex_pos.device)
         nearby_points = intersection_of_ray_and_plane(
-            v_optimized_abcd_list[self.plane_index[v_patch_id]],
-            self.rays[v_patch_id]
-        )[1]
+                v_optimized_abcd_list[self.plane_index[v_patch_id]],
+                self.rays[v_patch_id]
+                )[1]
 
         delta_distances_ = v_vertex_pos[:, self.vertex_index[v_patch_id]] - nearby_points[None, :]
-        delta_distances = (delta_distances_ ** 2).sum(dim=2).mean(dim=1)
+        delta_distances = (delta_distances_ ** 2).sum(dim=2).max(dim=1)[0]
 
         return delta_distances
 
@@ -518,8 +558,9 @@ class Regularization_loss_computer:
         # 正则化项2: 平行约束 (n1与n2的点积接近1或-1)
         parallel_constraint = torch.abs(torch.abs(dot_product) - 1)
 
-        regularization_loss = torch.min(vertical_constraint,parallel_constraint)
+        regularization_loss = torch.min(vertical_constraint, parallel_constraint)
         return regularization_loss.sum().squeeze()
+
 
 class Mutex_loss_computer:
     def __init__(self):
@@ -534,5 +575,5 @@ class Mutex_loss_computer:
 
         # Mutex distance
         centroid = vertex_pos.mean(dim=1)
-        dis2centroid = torch.sqrt(((vertex_pos - centroid.unsqueeze(1))**2).sum(-1))
+        dis2centroid = torch.sqrt(((vertex_pos - centroid.unsqueeze(1)) ** 2).sum(-1))
         return 1 - dis2centroid.min(dim=1)[0] / dis2centroid.max(dim=1)[0]

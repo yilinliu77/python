@@ -1,10 +1,12 @@
 import torch
 
+
 def get_perpendicular_direction(v_dir):
-    up_vector = np.array((0,0,1), dtype=np.float32)
+    up_vector = np.array((0, 0, 1), dtype=np.float32)
     homo_dir = to_homogeneous_vector(v_dir)
-    perpendicular_vector = np.cross(homo_dir, up_vector)[:,:2]
+    perpendicular_vector = np.cross(homo_dir, up_vector)[:, :2]
     return perpendicular_vector
+
 
 def vectors_to_angles(normal_vectors):
     normal_vectors = normal_vectors / torch.norm(normal_vectors, dim=1, keepdim=True)
@@ -46,7 +48,8 @@ def intersection_of_ray_and_all_plane(planes_abcd, vertexes_ray):
     # 计算射线与平面的交点
     numerator = -planes_abcd_expanded[..., -1]
     denominator = torch.sum(planes_abcd_expanded[..., :3] * vertexes_ray_expanded, dim=-1)
-    t = torch.div(numerator, denominator, out=torch.empty_like(numerator))  # t = -(D) / (A * v_ray.x + B * v_ray.y + C * v_ray.z)
+    t = torch.div(numerator, denominator,
+                  out=torch.empty_like(numerator))  # t = -(D) / (A * v_ray.x + B * v_ray.y + C * v_ray.z)
     intersection_points = t.unsqueeze(-1) * vertexes_ray_expanded  # p = p0 + t * v_ray，这里我们假设 p0 为原点 (0, 0, 0)
     # n*m*3
     return intersection_points
@@ -78,3 +81,9 @@ def fit_plane_svd(points: torch.Tensor) -> torch.Tensor:
     d = -torch.dot(vh[-1], centroid)
     abcd = torch.cat((vh[-1], torch.tensor([d]).to(points.device)))
     return abcd
+
+
+def point_to_plane_distance(point: torch.Tensor, plane_params: torch.Tensor) -> torch.Tensor:
+    numerator = torch.abs(torch.dot(plane_params[:-1], point) + plane_params[-1])
+    denominator = torch.norm(plane_params[:-1])
+    return numerator / denominator

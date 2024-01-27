@@ -1,13 +1,17 @@
 dataset:
   # scene_boundary: [ -3, -3, -3, 10., 10., 5. ]
   # colmap_dir: "H:/Data/SIGA23/Baseline/data/Scene1"
-  scene_boundary: [0., 0., 0., 1., 1., 1.]
-  colmap_dir: "H:/Data/SIGA23/Baseline/data/Mechanism/00000952"
+  scene_boundary: [ 0., 0., 0., 1., 1., 1. ]
+  # colmap_dir: "H:/Data/SIGA23/Baseline/data/Mechanism/00000077"
+  # colmap_dir: "H:/Data/SIGA23/Baseline/data/Mechanism/00000952"
+  colmap_dir: "H:/Data/SIGA23/Baseline/data/ABC/ABC-NEF-COLMAP/00034430"
+  # colmap_dir: "H:/Data/SIGA23/Baseline/data/ABC/ABC-NEF-COLMAP/00016422"
+  # colmap_dir: "H:/Data/SIGA23/Baseline/data/ABC/ABC-NEF-COLMAP/00020409"
 
   only_train_target: true
-  id_viz_face: []
-  id_viz_edge: [9118]
-  v_reconstruct_data: true
+  id_viz_face: [ ]
+  id_viz_edge: [ 9118 ]
+  v_reconstruct_data: false
 
   max_error_for_initial_sfm: 1
 
@@ -18,13 +22,13 @@ trainer:
   num_worker: 0
   batch_size: 128
   auto_lr_find: false
-#  resume_from_checkpoint: outputs/2023_03_28_15_25_48/lightning_logs/version_0/checkpoints/epoch=12999-step=13000.ckpt
+  #  resume_from_checkpoint: outputs/2023_03_28_15_25_48/lightning_logs/version_0/checkpoints/epoch=12999-step=13000.ckpt
   resume_from_checkpoint:
   evaluate: false
   running_sanity_check: false
   output: .
 
-  loss_weight: [1, 0.01, 0] # similarity_weight, normal_weight, normalization_weight
+  loss_weight: [ 1, 0.01, 0 ] # similarity_weight, normal_weight, normalization_weight
   num_sample: 1000 # number of gaussian sample
   img_model: "sample" # ["model", "sample"]
 

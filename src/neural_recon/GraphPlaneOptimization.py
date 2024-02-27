@@ -13,7 +13,7 @@ from src.neural_recon.optimize_segment import compute_initial_normal, compute_ro
 
 from src.neural_recon.colmap_io import read_dataset, Image, Point_3d, check_visibility
 
-from src.neural_recon.sample_utils import sample_points_2d
+from src.neural_recon.sample_utils import sample_points_2d, Sample_new_planes
 
 import math
 import pickle
@@ -506,6 +506,8 @@ class GraphPlaneOptimiser:
         else:
             patch_id_list = self.get_optimization_order()
 
+        sampler = Sample_new_planes(self.id_neighbour_patches, patch_id_list)
+
         while True:
             if all(self.end_flag):
                 break
@@ -514,17 +516,19 @@ class GraphPlaneOptimiser:
                 patch_id_list = [patch_id for patch_id in self.groups[self.group_idx] if not self.end_flag[patch_id]]
                 self.group_idx = (self.group_idx + 1) % len(self.groups)
             else:
-                patch_id_list = [patch_id for patch_id in patch_id_list if not self.end_flag[patch_id]]
+                patch_id_list = [patch_id for patch_id in patch_id_list]
 
             self.visualizer.start_iter()
             # sample for all patches
-            samples_depth, samples_angle = sample_new_planes(self.optimized_abcd_list,
-                                                             self.centroid_rays_c,
-                                                             self.id_neighbour_patches,
-                                                             patch_id_list,
-                                                             self.CASF.get_sf(),
-                                                             v_random_g=self.sample_g,
-                                                             debug_gt=None, )
+            samples_depth, samples_angle = sampler.sample(
+                self.optimized_abcd_list, self.centroid_rays_c, self.CASF.get_sf(), self.sample_g, debug_gt=None, )
+            # samples_depth, samples_angle = sample_new_planes(self.optimized_abcd_list,
+            #                                                  self.centroid_rays_c,
+            #                                                  self.id_neighbour_patches,
+            #                                                  patch_id_list,
+            #                                                  self.CASF.get_sf(),
+            #                                                  v_random_g=self.sample_g,
+            #                                                  debug_gt=None, )
             # self.gt_abcd_list[torch.tensor(patch_id_list)]
 
             samples_abc = angles_to_vectors(samples_angle)  # n * 100 * 3
@@ -587,11 +591,12 @@ class GraphPlaneOptimiser:
         self.visualizer.update_timer("Construct")
 
         # 3. Sample points in this plane
-        num_sample_points_per_tri, sample_points_on_face_src = sample_triangles(1000,
+        num_sample_points_per_tri, sample_points_on_face_src = sample_triangles(100,
                                                                                 triangles_pos[:, 0, :],
                                                                                 triangles_pos[:, 1, :],
                                                                                 triangles_pos[:, 2, :],
-                                                                                v_sample_edge=False)
+                                                                                v_sample_edge=False,
+                                                                                num_max_sample=100)
 
         triangle_normal = normalize_tensor(torch.cross(triangles_pos[:, 0, :] - triangles_pos[:, 1, :],
                                                        triangles_pos[:, 1, :] - triangles_pos[:, 2, :]))
@@ -647,7 +652,8 @@ class GraphPlaneOptimiser:
                 self.gradients1,
                 self.gradients2,
                 self.imgs[1:],
-                v_num_hypothesis=local_edge_pos.shape[0])
+                v_num_hypothesis=local_edge_pos.shape[0],
+                v_num_max_samples=100)
         edge_loss[~edge_outer_mask] = torch.inf
 
         edge_loss = edge_loss.view(num_source, self.num_plane_sample, -1)

@@ -174,6 +174,32 @@ def sample_new_distance(v_original_distances,
     new_distance = torch.cat((v_original_distances[:, None], new_distance), dim=1)
     return new_distance
 
+def sample_new_distance2(v_original_distances,
+                        num_sample=100, scale_factor=1.0,
+                        v_max=20., v_min=0., v_random_g=None):
+    num_vertices = v_original_distances.shape[0]
+    num_channels = v_original_distances.shape[2]
+    device = v_original_distances.device
+
+    # (B, S-1, C)
+    new_distance = -torch.ones(
+        (num_vertices, num_sample - 1, num_channels), device=device, dtype=v_original_distances.dtype)
+    sample_distance_mask = torch.zeros_like(new_distance).to(torch.bool)
+    # (B, S-1, C)
+    repeated_vertices_distances = v_original_distances[:,1:].clone()
+
+    while not torch.all(sample_distance_mask):
+        t_ = new_distance[~sample_distance_mask]
+        a = repeated_vertices_distances[~sample_distance_mask] + \
+            scale_factor * torch.normal(
+                torch.zeros(t_.shape[0], dtype=t_.dtype, device=device),
+                torch.ones(t_.shape[0], dtype=t_.dtype, device=device), generator=v_random_g)
+        new_distance[~sample_distance_mask] = a
+        sample_distance_mask = torch.logical_and(new_distance > v_min, new_distance < v_max)
+    # (B, (S + 1))
+    new_distance = torch.cat((v_original_distances[:, 0:1], new_distance), dim=1)
+    return new_distance
+
 
 # def sample_depth_and_angle(depth, angle, num_sample=100, scale_factor=1.0, v_random_g=None):
 #     # sample depth
@@ -193,6 +219,16 @@ def sample_depth_and_angle(depth, angle, num_sample=100, scale_factor=1.0, v_ran
                                         v_max=100, v_min=-100, v_random_g=v_random_g)
     sample_angles = sample_angles.reshape(depth.shape[0], 2, num_sample) % (2 * torch.pi)
     return sample_depths, sample_angles.permute(0, 2, 1)
+
+def sample_depth_and_angle2(depth, angle, num_sample=100, scale_factor=1.0, v_random_g=None):
+    # sample depth
+    sample_depths = sample_new_distance2(
+        depth.unsqueeze(2), num_sample, scale_factor=scale_factor, v_random_g=v_random_g)
+    sample_angles = sample_new_distance2(angle, num_sample,
+                                        scale_factor=scale_factor * torch.pi / 3,
+                                        v_max=100, v_min=-100, v_random_g=v_random_g)
+    sample_angles = sample_angles % (2 * torch.pi)
+    return sample_depths[:,:,0], sample_angles
 
 
 def sample_new_planes(v_original_parameters, v_centroid_rays_c, id_neighbour_patches, patch_id_list,
@@ -237,26 +273,67 @@ def sample_new_planes(v_original_parameters, v_centroid_rays_c, id_neighbour_pat
         sample_angle[idx, 100 - len(id_neighbour_list):100] = plane_angles[torch.tensor(id_neighbour_list)].clone()
     return sample_depth.contiguous(), sample_angle.contiguous()
 
+class Sample_new_planes:
+    def __init__(self, id_neighbour_patches, patch_id_list):
+        self.patch_id_list = patch_id_list
+        self.id_neighbour_patches = id_neighbour_patches
+        coords = []
+        for idx in range(len(patch_id_list)):
+            patch_id = patch_id_list[idx]
+            # propagation from neighbour, do not sample depth!
+            num_neighbours = len(id_neighbour_patches[patch_id])
+            num_samples_per_neighbour = 100 // (num_neighbours + 1)
+            num_samples_remains = 100 % (num_neighbours + 1)
+            id_patch = torch.tensor(id_neighbour_patches[patch_id], dtype=torch.int64)
+            id_patch = torch.cat((torch.tensor([patch_id], dtype=torch.int64), id_patch))
+            repeat_times = torch.tensor(
+                [num_samples_per_neighbour + num_samples_remains] + [num_samples_per_neighbour] * num_neighbours,
+                dtype=torch.int64)
+            id_patch = id_patch.repeat_interleave(repeat_times)
+            coords.append(id_patch)
+        self.coords = torch.stack(coords, dim=0).cuda()
 
-def sample_new_planes2(v_original_parameters1, v_original_parameters2, v_rays_c1, v_rays_c2, v_random_g=None):
-    plane_angles = vectors_to_angles(v_original_parameters[:, :3])
-    initial_centroids = intersection_of_ray_and_plane(v_original_parameters, v_centroid_rays_c)[1]
-    init_depth = torch.linalg.norm(initial_centroids, dim=-1)
+    def sample(self, v_original_parameters, v_centroid_rays_c, scale_factor=1.0, v_random_g=None, debug_gt=None):
+        plane_angles = vectors_to_angles(v_original_parameters[:, :3])
+        initial_centroids = intersection_of_ray_and_plane(v_original_parameters, v_centroid_rays_c)[1]
+        init_depth = torch.linalg.norm(initial_centroids, dim=-1)
 
-    # sample two depth
-    num_sample = 100
-    sample_depths1 = sample_new_distance(depth, num_sample, v_random_g=v_random_g)
-    sample_depths2 = sample_new_distance(depth, num_sample, v_random_g=v_random_g)
+        init_depth[init_depth > 20] = 20
 
-    # sample two angles
-    # sample_angles1 = sample_new_distance(angle.reshape(-1), num_sample, scale_factor=torch.pi / 3, v_max=100,
-    #                                     v_min=-100, v_random_g=v_random_g)
-    # sample_angles1 = sample_angles1.reshape(depth.shape[0], 2, num_sample) % (2 * torch.pi)
-    # sample_angles1 = sample_angles1.permute(0, 2, 1)
-    #
-    # sample_angles2 = sample_new_distance(angle.reshape(-1), num_sample, scale_factor=torch.pi / 3, v_max=100,
-    #                                      v_min=-100, v_random_g=v_random_g)
-    # sample_angles2 = sample_angles2.reshape(depth.shape[0], 2, num_sample) % (2 * torch.pi)
-    # sample_angles2 = sample_angles2.permute(0, 2, 1)
+        seed_plane_angles = plane_angles[self.coords]
+        propagated_centroids = intersection_of_ray_and_plane(
+            v_original_parameters[self.coords].reshape(-1, 4),
+            v_centroid_rays_c[self.patch_id_list][:, None].repeat(1, self.coords.shape[1], 1).reshape(-1, 3)
+        )[1].reshape(self.coords.shape[0], self.coords.shape[1], 3)
+        propagated_depth = torch.linalg.norm(propagated_centroids, dim=-1)
+        seed_plane_depth = propagated_depth
 
-    return sample_depth.contiguous(), sample_angle.contiguous()
+        # Gather plane parameters for neighbouring patches
+        # for idx in range(len(self.patch_id_list)):
+        #     patch_id = self.patch_id_list[idx]
+        #     # propagation from neighbour, do not sample depth!
+        #     num_neighbours = len(id_neighbour_patches[patch_id])
+        #     num_samples_per_neighbour = 100 // (num_neighbours + 1)
+        #     num_samples_remains = 100 % (num_neighbours + 1)
+        #
+        #     id_neighbour_list = id_neighbour_patches[patch_id]
+        #     plane_parameter_neighbour = v_original_parameters[torch.tensor(id_neighbour_list)]
+        #     propagated_centroids = intersection_of_ray_and_all_plane(plane_parameter_neighbour,
+        #                                                              v_centroid_rays_c[patch_id].unsqueeze(0))[:, 0]
+        #     propagated_depth = torch.linalg.norm(propagated_centroids, dim=-1)
+        #
+        #     propagated_depth = propagated_depth.unsqueeze(1).repeat(1, num_samples_per_neighbour)
+        #
+        #     seed_plane_depth[idx, num_samples_per_neighbour + num_samples_remains:] = propagated_depth.reshape(-1)
+        #     seed_plane_angles[idx, num_samples_per_neighbour + num_samples_remains:] = torch.tile(
+        #         plane_angles[torch.tensor(id_neighbour_list)][:, None], (1, num_samples_per_neighbour, 1)
+        #     ).reshape(-1, 2)
+        #
+        #     pass
+
+        seed_plane_depth[seed_plane_depth > 20] = 20
+
+        sample_depth, sample_angle = sample_depth_and_angle2(seed_plane_depth,
+                                                             seed_plane_angles,
+                                                             scale_factor=scale_factor, v_random_g=v_random_g)
+        return sample_depth.contiguous(), sample_angle.contiguous()

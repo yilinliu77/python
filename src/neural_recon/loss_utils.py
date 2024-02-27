@@ -381,7 +381,9 @@ class Edge_loss_computer:
         return mean_edge_loss, valid_mask, num_horizontal
 
     def compute_batch(self, v_edge_points, v_intrinsic, v_transformation,
-                      v_gradient1, v_gradient2, img2s, v_num_hypothesis=100):
+                      v_gradient1, v_gradient2, img2s, v_num_hypothesis=100, v_num_max_samples=1000):
+        time_records = [0]*10
+        timer = time.time()
         num_edge, _, _ = v_edge_points.shape
 
         # 1. Get the projected points in both images
@@ -391,12 +393,14 @@ class Edge_loss_computer:
         points_2d1 = points_2d1.reshape(num_edge, 2, 2)
         points_2d2 = points_2d2.reshape(-1, num_edge, 2, 2)
         valid_mask = valid_mask.reshape(-1, num_edge, 2).all(dim=2)
+        time_records[0] = time.time() - timer
+        timer = time.time()
 
         # 2. Sample the same number of points along the segments
         num_horizontal = torch.clamp(
                 (torch.linalg.norm(v_edge_points[:, 0] - v_edge_points[:, 1], dim=-1) / self.sample_density).to(
                         torch.long),
-                2, 1000)
+                2, v_num_max_samples)
 
         begin_idxes = num_horizontal.cumsum(dim=0)
         begin_idxes = begin_idxes.roll(1)
@@ -411,6 +415,8 @@ class Edge_loss_computer:
         dir2 = points_2d2[:, :, 1] - points_2d2[:, :, 0]
         sampled_points2 = points_2d2[:, :, 0].repeat_interleave(num_horizontal, dim=1) \
                           + dx[None, :, None] * dir2.repeat_interleave(num_horizontal, dim=1)
+        time_records[1] = time.time() - timer
+        timer = time.time()
 
         # 3. Sample pixel direction
         # The direction in first img is used to decide the weight of the edge loss
@@ -419,6 +425,8 @@ class Edge_loss_computer:
         sample_imgs1, sample_imgs2 = sample_imgs_batch(v_gradient1, v_gradient2,
                                                        sampled_points1, sampled_points2)
         sample_pixel_imgs2 = sample_imgs_batch2(img2s, sampled_points2)
+        time_records[2] = time.time() - timer
+        timer = time.time()
 
         edge_directions1 = normalize_tensor(points_2d1[:, 0] - points_2d1[:, 1])
 
@@ -458,6 +466,8 @@ class Edge_loss_computer:
                                               ).repeat_interleave(num_horizontal), dim=1)
 
         mean_edge_loss[~valid_edge_mask.tile(mean_edge_loss.shape[0], 1)] = torch.nan
+        time_records[3] = time.time() - timer
+        timer = time.time()
 
         return mean_edge_loss, valid_mask, num_horizontal
 
@@ -527,7 +537,7 @@ class Glue_loss_computer:
                 )[1]
 
         delta_distances_ = v_vertex_pos[:, self.vertex_index[v_patch_id]] - nearby_points[None, :]
-        delta_distances = (delta_distances_ ** 2).sum(dim=2).max(dim=1)[0]
+        delta_distances = (delta_distances_ ** 2).sum(dim=2).mean(dim=1)[0]
 
         return delta_distances
 

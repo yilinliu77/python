@@ -4,7 +4,7 @@ dataset:
   scene_boundary: [ 0., 0., 0., 1., 1., 1. ]
   # colmap_dir: "H:/Data/SIGA23/Baseline/data/Mechanism/00000077"
   # colmap_dir: "H:/Data/SIGA23/Baseline/data/Mechanism/00000952"
-  colmap_dir: "H:/Data/SIGA23/Baseline/data/ABC/ABC-NEF-COLMAP/00034430"
+  colmap_dir: "G:/Projects/NeuralRecon/data/00016422"
   # colmap_dir: "H:/Data/SIGA23/Baseline/data/ABC/ABC-NEF-COLMAP/00016422"
   # colmap_dir: "H:/Data/SIGA23/Baseline/data/ABC/ABC-NEF-COLMAP/00020409"
 

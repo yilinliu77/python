@@ -712,7 +712,7 @@ def prepare_dataset_and_model(v_colmap_dir, v_viz_face, v_bounds, v_reconstruct_
         return points_3d_pos, projected_points
 
     final_graph_cache_name = "output/img_field_test/final_graph_cache.npy"
-    if os.path.exists(final_graph_cache_name) and not v_reconstruct_data:
+    if os.path.exists(final_graph_cache_name) and not v_reconstruct_data and False:
         graphs = np.load(final_graph_cache_name, allow_pickle=True)
     else:
         graph_cache_name = "output/img_field_test/graph_cache.npy"
@@ -1229,7 +1229,7 @@ def optimize_plane(v_data, v_log_root, plane_vertex_pos_gt=None):
 
     print("1. Plane Optimizing")
     for id_img1, graph in enumerate(v_graphs):
-        # if id_img1 != 22:
+        # if id_img1 != 0:
         #     continue
         v_log_root_c = os.path.join(os.path.normpath(v_log_root), '1.PlaneOptimizing', str(id_img1))
         os.makedirs(v_log_root_c, exist_ok=True)
@@ -1522,10 +1522,11 @@ def main(v_cfg: DictConfig):
     # tmp_path = r"G:\workplace\python\src\neural_recon\outputs\2023_12_19_22_41_39"
     # tmp_path = r"G:\workplace\python\src\neural_recon\outputs\2023_12_20_02_16_53"
 
-    tmp_path = r"G:\workplace\python\src\neural_recon\outputs\2024_01_10_16_58_40"
+    tmp_path = r"C:/repo/python/outputs/2024_02_21_12_24_49"
     # plane_vertex_pos_gt = get_plane_vertex_pos_gt(v_cfg["dataset"]["colmap_dir"])
     # save_as_wireframe_obj(plane_vertex_pos_gt, os.path.join(v_cfg["trainer"]["output"], "mesh_gt.obj"))
 
+    # optimize_plane(data, tmp_path, plane_vertex_pos_gt=None)
     optimize_plane(data, v_cfg["trainer"]["output"], plane_vertex_pos_gt=None)
 
     graph_matching(data, tmp_path)

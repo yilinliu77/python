@@ -9,6 +9,7 @@ from tqdm import tqdm
 data_root = Path(r"G:/Dataset/ABC/raw_data/abc_0000_obj_v00")
 max_ratio = 5
 
+
 @ray.remote(num_cpus=1)
 def filter_mesh(v_root, v_folders, max_ratio):
     valid_ids = [True] * len(v_folders)
@@ -39,30 +40,15 @@ def filter_mesh(v_root, v_folders, max_ratio):
 
     return valid_ids
 
-# Test all files under data_root
-# - Filter out empty meshes
-# - Filter out non-planar meshes
-# - Filter out cube meshes
-def get_splits(data_root):
+@ray.remote(num_cpus=1)
+def get_split_(folders):
     valid_ids = []
     cube_ids = []
-
-    for folder in tqdm(os.listdir(data_root)):
+    for folder in folders:
         for ff in os.listdir(data_root / folder):
             if ff.endswith(".yml") and "features" in ff:
-                # file = yaml.load(
-                #     open(os.path.join(r"G:/Dataset/ABC/raw_data/abc_0000_obj_v00", folder, ff), "r"),
-                # Loader=yaml.CLoader)
-                # is_pure_plane = True
-                # for item in file["surfaces"]:
-                #     if "plane" != item["type"]:
-                #         is_pure_plane=False
-                #         break
-                # if is_pure_plane:
-                #     print(folder)
-
                 is_pure_plane = True
-                str = open(os.path.join(r"G:/Dataset/ABC/raw_data/abc_0000_obj_v00", folder, ff), "r").read()
+                str = open(os.path.join(data_root, folder, ff), "r").read()
                 pos = -1
                 num_plane = 0
                 num_line = 0
@@ -83,8 +69,35 @@ def get_splits(data_root):
 
                 if num_plane == 6 and num_line == 12:
                     cube_ids.append(folder)
-
                 valid_ids.append(folder)
+
+    return valid_ids, cube_ids
+
+# Test all files under data_root
+# - Filter out empty meshes
+# - Filter out non-planar meshes
+# - Filter out cube meshes
+def get_splits(data_root):
+    ray.init()
+
+    folders = os.listdir(data_root)
+
+    num_batches = 80 # Larger than number of cpus for a more efficient task assignment
+    batch_size = len(folders) // num_batches + 1
+
+    valid_ids = []
+    cube_ids = []
+
+    tasks = []
+    for i in range(num_batches):
+        tasks.append(get_split_.remote(folders[i*batch_size:min((i+1)*batch_size, len(folders))]))
+
+    results = ray.get(tasks)
+    for item in results:
+        valid_ids += item[0]
+        cube_ids += item[1]
+    valid_ids = sorted(list(set(valid_ids)))
+    cube_ids = sorted(list(set(cube_ids)))
 
     with open("planar_shapes_id.txt", "w") as f:
         for item in valid_ids:
@@ -110,10 +123,10 @@ def test_obj(data_root, split_file):
     ids = sorted([item.strip() for item in open(split_file).readlines()])
 
     num_batches = 80 # Larger than number of cpus for a more efficient task assignment
-    batch_size = len(ids) // num_batches
+    batch_size = len(ids) // num_batches + 1
 
     tasks = []
-    for idx in range(num_batches + 1):
+    for idx in range(num_batches):
         task = filter_mesh.remote(data_root, ids[batch_size*idx:min(len(ids), batch_size*(idx+1))], max_ratio)
         # result = ray.get(filter_mesh.remote(data_root, item, max_ratio))
         tasks.append(task)
@@ -127,7 +140,6 @@ def test_obj(data_root, split_file):
                 f.write(ids[item] + "\n")
 
 if __name__ == '__main__':
-    test_obj(data_root, "planar_shapes_except_cube.txt")
-
-
+    get_splits(data_root)
+    # test_obj(data_root, "planar_shapes_except_cube.txt")
 

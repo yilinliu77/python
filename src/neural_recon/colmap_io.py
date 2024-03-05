@@ -109,7 +109,8 @@ def quaternion_rotation_matrix(Q):
 
 def read_world_points(original_img_id_to_current_img_id, bounds_center, bounds_size, line):
     pos = np.array([float(line[1]), float(line[2]), float(line[3])], dtype=np.float32)
-    pos = (pos - bounds_center) / bounds_size + 0.5
+    if bounds_center is not None:
+        pos = (pos - bounds_center) / bounds_size + 0.5
     error = float(line[7])
     assert (len(line) - 8) % 2 == 0
     num_track = (len(line) - 8) // 2
@@ -157,17 +158,21 @@ def read_dataset(v_colmap_dir, v_bounds):
     # v_colmap_dir = v_params["dataset"]["colmap_dir"]
     # v_superglue_dir = v_params["dataset"]["superglue_dir"]
     v_segments_dir = os.path.join(v_colmap_dir, "segments")
-    bounds_center = (v_bounds[0] + v_bounds[1]) / 2
-    bounds_size = (v_bounds[1] - v_bounds[0]).max()
 
-    model_matrix = np.zeros((4, 4),dtype=np.float32)
-    model_matrix[0, 0] = bounds_size
-    model_matrix[1, 1] = bounds_size
-    model_matrix[2, 2] = bounds_size
-    model_matrix[0, 3] = bounds_center[0] - bounds_size / 2
-    model_matrix[1, 3] = bounds_center[1] - bounds_size / 2
-    model_matrix[2, 3] = bounds_center[2] - bounds_size / 2
-    model_matrix[3, 3] = 1
+    model_matrix = np.eye(4, 4,dtype=np.float32)
+    bounds_center=None
+    bounds_size=None
+    if v_bounds is not None:
+        bounds_center = (v_bounds[0] + v_bounds[1]) / 2
+        bounds_size = (v_bounds[1] - v_bounds[0]).max()
+
+        model_matrix[0, 0] = bounds_size
+        model_matrix[1, 1] = bounds_size
+        model_matrix[2, 2] = bounds_size
+        model_matrix[0, 3] = bounds_center[0] - bounds_size / 2
+        model_matrix[1, 3] = bounds_center[1] - bounds_size / 2
+        model_matrix[2, 3] = bounds_center[2] - bounds_size / 2
+        model_matrix[3, 3] = 1
 
     def is_inside_scene(v_pos):
         return v_pos[0] > 0 and v_pos[1] > 0 and v_pos[2] > 0 and v_pos[0] < 1 and v_pos[1] < 1 and v_pos[2] < 1
@@ -192,17 +197,28 @@ def read_dataset(v_colmap_dir, v_bounds):
             p1 = 0
             p2 = 0
             K = np.zeros((3, 3), dtype=np.float32)
-            K[0, 0] = fx / width
+            K[0, 0] = fx
             K[0, 1] = 0
-            K[0, 2] = cx / width
+            K[0, 2] = cx
             K[1, 0] = 0
-            K[1, 1] = fy / height
-            K[1, 2] = cy / height
+            K[1, 1] = fy
+            K[1, 2] = cy
             K[2, 0] = 0
             K[2, 1] = 0
             K[2, 2] = 1
+            normalized_K = np.zeros((3, 3), dtype=np.float32)
+            normalized_K[0, 0] = fx / width
+            normalized_K[0, 1] = 0
+            normalized_K[0, 2] = cx / width
+            normalized_K[1, 0] = 0
+            normalized_K[1, 1] = fy / height
+            normalized_K[1, 2] = cy / height
+            normalized_K[2, 0] = 0
+            normalized_K[2, 1] = 0
+            normalized_K[2, 2] = 1
             camera_intrinsic[cam_id] = {}
-            camera_intrinsic[cam_id]["normalized_K"] = K
+            camera_intrinsic[cam_id]["K"] = K
+            camera_intrinsic[cam_id]["normalized_K"] = normalized_K
             camera_intrinsic[cam_id]["img_size"] = (width, height)
     print("Found {} cameras".format(len(camera_intrinsic)))
 
@@ -224,7 +240,8 @@ def read_dataset(v_colmap_dir, v_bounds):
             extrinsic_homo = np.concatenate([extrinsic, np.array([[0., 0., 0., 1.]])], axis=0, dtype=np.float32)
             extrinsic_homo_inv = np.linalg.inv(extrinsic_homo)
             imgs[id_img].pos = extrinsic_homo_inv[:3, 3]
-            imgs[id_img].pos = (imgs[id_img].pos - bounds_center) / bounds_size + 0.5
+            if v_bounds is not None:
+                imgs[id_img].pos = (imgs[id_img].pos - bounds_center) / bounds_size + 0.5
             projection_matrix = np.zeros((4, 4), dtype=np.float32)
             projection_matrix[:3, :3] = camera_intrinsic[cam_id]["normalized_K"]
             projection_matrix[3, 3] = 1

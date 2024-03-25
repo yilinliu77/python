@@ -10,7 +10,7 @@ from shared.common_utils import check_dir
 from src.neural_recon.colmap_io import read_dataset
 
 input_root = r"G:/Projects/img2brep/data/00016422"
-output_root = r"G:/Projects/img2brep/data/t_neus2"
+output_root = r"G:/Projects/img2brep/data/t_neus2_sparse/00016422"
 
 if __name__ == '__main__':
     check_dir(output_root)
@@ -21,13 +21,13 @@ if __name__ == '__main__':
         "w": 800,
         "h": 800,
         "aabb_scale": 1,
-        "scale": 1,
-        "offset": [0, 0, 0],
+        "scale": 0.5,
+        "offset": [0.25, 0.25, 0.25],
         "from_na": True,
     }
 
     cameras = []
-    for item in tqdm(dataset):
+    for item in tqdm(np.asarray(dataset)[[33,37,39]]):
         R = item.extrinsic[:3, :3]
         t = item.extrinsic[:3, 3:4]
         # Following code are from nerfstudio

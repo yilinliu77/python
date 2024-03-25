@@ -1,0 +1,42 @@
+dataset:
+  root: H:\Data\SIGA23\Baseline\data\0planar_shapes
+  dataset_name: ABC
+  overfit: false
+
+trainer:
+  learning_rate: 1e-6
+  gpu: 1
+  num_worker: 4
+
+  vis_recon_faces: true
+  train_transformer: true
+
+  spawn: false
+  num_samples: -1
+  batch_size: 2
+  checkpoint_autoencoder: G:\workplace\python\src\img2brep\meshgpt\tb_logs\my_model\version_5\checkpoints\last.ckpt
+  resume_from_checkpoint:
+  evaluate: false
+  output: .
+  check_val_every_n_epoch: 1
+  accelerator: "32-true"
+
+model:
+  model_name: PC_model
+  with_bn: true
+  channels: 3
+  output_channels: 1
+  need_normalize: true
+  voxelize_res: 256
+
+  test_threshold: 0.5
+  focal_alpha: 0.75
+
+hydra:
+  run:
+    dir: ./outputs/${now:%Y_%m_%d_%H_%M_%S}
+  job:
+    chdir: False
+#  output_subdir: null
+#  job_logging: disabled
+#  hydra_logging: disabled

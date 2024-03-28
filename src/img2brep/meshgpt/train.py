@@ -1,4 +1,5 @@
 import sys
+
 sys.path.append('../../../')
 import importlib
 import os.path
@@ -68,11 +69,11 @@ class MeshGPTTraining(pl.LightningModule):
         self.num_worker = self.hydra_conf["trainer"]["num_worker"]
         self.dataset_name = self.hydra_conf["dataset"]["dataset_name"]
         self.dataset_path = self.hydra_conf["dataset"]["root"]
-        
+
         self.vis_recon_faces = self.hydra_conf["trainer"]["vis_recon_faces"]
         self.is_train_transformer = self.hydra_conf["trainer"]["train_transformer"]
         self.condition_on_text = self.hydra_conf["trainer"]["condition_on_text"]
-        
+
         self.save_hyperparameters(hparams)
 
         self.log_root = Path(self.hydra_conf["trainer"]["output"])
@@ -85,21 +86,22 @@ class MeshGPTTraining(pl.LightningModule):
         if self.is_train_transformer:
             if self.hydra_conf["trainer"].checkpoint_autoencoder is None:
                 raise ValueError("checkpoint_autoencoder is None")
-            
+
             checkpoint_autoencoder = torch.load(self.hydra_conf["trainer"].checkpoint_autoencoder)["state_dict"]
             checkpoint_autoencoder_ = {k[12:]: v for k, v in checkpoint_autoencoder.items() if 'autoencoder' in k}
             self.autoencoder.load_state_dict(checkpoint_autoencoder_, strict=True)
-            self.transformer = MeshTransformer(self.autoencoder, 
-                                               max_seq_len=768, 
-                                               coarse_pre_gateloop_depth = 2, # Better performance using more gateloop layers
-                                               fine_pre_gateloop_depth= 2,
-                                               attn_depth = 12,
+            self.transformer = MeshTransformer(self.autoencoder,
+                                               max_seq_len=768,
+                                               coarse_pre_gateloop_depth=2,
+                                               # Better performance using more gateloop layers
+                                               fine_pre_gateloop_depth=2,
+                                               attn_depth=12,
                                                condition_on_text=self.condition_on_text)
             self.model = self.transformer
 
     def train_dataloader(self):
         if not self.is_train_transformer:
-            self.train_dataset = Auotoencoder_Dataset("training", self.hydra_conf["dataset"],)
+            self.train_dataset = Auotoencoder_Dataset("training", self.hydra_conf["dataset"], )
         else:
             self.train_dataset = Transformer_Dataset("training", self.hydra_conf["dataset"], self.autoencoder)
 
@@ -113,10 +115,10 @@ class MeshGPTTraining(pl.LightningModule):
 
     def val_dataloader(self):
         if not self.is_train_transformer:
-            self.valid_dataset = Auotoencoder_Dataset("validation", self.hydra_conf["dataset"],)
+            self.valid_dataset = Auotoencoder_Dataset("validation", self.hydra_conf["dataset"], )
         else:
             self.valid_dataset = Transformer_Dataset("validation", self.hydra_conf["dataset"], self.autoencoder)
-            
+
         return DataLoader(self.valid_dataset, batch_size=self.batch_size,
                           # collate_fn=self.dataset_name.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
@@ -127,9 +129,9 @@ class MeshGPTTraining(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = Adam(self.model.parameters(), lr=self.learning_rate)
-        #scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=40, T_mult=1, eta_min=1e-8, last_epoch=-1)
+        # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=40, T_mult=1, eta_min=1e-8, last_epoch=-1)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10000, gamma=0.1)
-        #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=100, verbose=True)
+        # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=100, verbose=True)
         return {
             'optimizer'   : optimizer,
             'lr_scheduler': {
@@ -140,15 +142,15 @@ class MeshGPTTraining(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         data = batch
-        
+
         if not self.is_train_transformer:
-            loss = self.model(vertices=data['vertices'], faces=data["faces"], face_edges=data['face_edges'],)
+            loss = self.model(vertices=data['vertices'], faces=data["faces"], face_edges=data['face_edges'], )
         else:
             if self.condition_on_text:
                 loss = self.model(vertices=None, faces=None, codes=data['codes'], text_embeds=data['img_embed'])
             else:
                 loss = self.model(vertices=None, faces=None, codes=data['codes'])
-                
+
         self.log("Training_Loss", loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True,
                  batch_size=self.batch_size)
@@ -159,13 +161,13 @@ class MeshGPTTraining(pl.LightningModule):
         data = batch
 
         if not self.is_train_transformer:
-            recon_faces, loss = self.model(vertices=data['vertices'], faces=data["faces"], 
+            recon_faces, loss = self.model(vertices=data['vertices'], faces=data["faces"],
                                            face_edges=data['face_edges'], return_recon_faces=True, )
-            
+
             if self.vis_recon_faces and self.current_epoch % 100 == 0:
                 vertices_batch = data["vertices"]
                 faces_batch = data["faces"]
-                
+
                 face_mask = reduce(faces_batch != self.autoencoder.pad_id, 'b nf c -> b nf', 'all')
                 mse_loss_sum = []
                 mse_loss = nn.MSELoss()
@@ -188,29 +190,34 @@ class MeshGPTTraining(pl.LightningModule):
                 self.log("Mse_Loss", mse_loss_mean, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                          sync_dist=True,
                          batch_size=self.batch_size)
-        
+
         else:
             if self.condition_on_text:
                 loss = self.model(vertices=None, faces=None, codes=data['codes'], text_embeds=data['img_embed'])
             else:
                 loss = self.model(vertices=None, faces=None, codes=data['codes'])
-                
+
             if self.vis_recon_faces and self.current_epoch != 0 and self.current_epoch % 100 == 0:
+                vertices_batch = data["vertices"]
+                faces_batch = data["faces"]
+
                 img_embed = data['img_embed']
                 mse_loss_sum = []
                 mse_loss = nn.MSELoss()
                 for i in tqdm.tqdm(range(vertices_batch.shape[0])):
                     triangles_c = vertices_batch[i][faces_batch[i]]
-                    
-                    recon_faces, face_mask = self.model.generate(text_embeds=img_embed[i].unsqueeze(0), temperature=0, cond_scale=1)
-                    
+
+                    recon_faces, face_mask = self.model.generate(text_embeds=img_embed[i].unsqueeze(0), temperature=0,
+                                                                 cond_scale=1)
+
                     recon_triangles_c = recon_faces[face_mask]
-                    
+
                     N = triangles_c.shape[0]
                     M = recon_triangles_c.shape[0]
-                    
+
                     if M < N:
-                        zeros_to_pad = torch.zeros((N - M, 3, 3), device=recon_triangles_c.device, dtype=recon_triangles_c.dtype)
+                        zeros_to_pad = torch.zeros((N - M, 3, 3), device=recon_triangles_c.device,
+                                                   dtype=recon_triangles_c.dtype)
                         recon_triangles_c = torch.cat((recon_triangles_c, zeros_to_pad), dim=0)
                     elif M > N:
                         recon_triangles_c = recon_triangles_c[:N, :, :]
@@ -222,7 +229,7 @@ class MeshGPTTraining(pl.LightningModule):
                                        self.log_root / f"batch{batch_idx}_{i}_epoch{self.current_epoch}_recon.ply")
 
                 mse_loss_mean = torch.mean(torch.stack(mse_loss_sum))
-                
+
                 self.log("Mse_Loss", mse_loss_mean, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                          sync_dist=True,
                          batch_size=self.batch_size)
@@ -274,13 +281,13 @@ def main(v_cfg: DictConfig):
             num_sanity_val_steps=2,
             check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
             precision=v_cfg["trainer"]["accelerator"],
-            accumulate_grad_batches = 1,
+            accumulate_grad_batches=1,
             )
 
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
         state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
-        
+
         if is_train_transformer:
             state_dict_ = {}
             for k, v in state_dict.items():
@@ -293,7 +300,6 @@ def main(v_cfg: DictConfig):
         del state_dict
 
         meshgptTraining.model.load_state_dict(state_dict_, strict=True)
-        
 
     if v_cfg["trainer"].evaluate:
         trainer.test(meshgptTraining)

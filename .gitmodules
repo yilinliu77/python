@@ -28,3 +28,6 @@
 [submodule "thirdparty/Pointnet2_PyTorch"]
 	path = thirdparty/Pointnet2_PyTorch
 	url = https://github.com/erikwijmans/Pointnet2_PyTorch
+[submodule "thirdparty/triposr"]
+	path = thirdparty/triposr
+	url = https://github.com/VAST-AI-Research/TripoSR

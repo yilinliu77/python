@@ -19,14 +19,11 @@ from pytorch_lightning.callbacks import LearningRateMonitor
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 
-from src.img2brep.meshgpt.dataset import Auotoencoder_Dataset, Transformer_Dataset
+from src.img2brep.brep.dataset import Auotoencoder_Dataset, Transformer_Dataset
 
 import torch.nn as nn
 
-from meshgpt_pytorch import (
-    MeshAutoencoder,
-    MeshTransformer
-    )
+from src.img2brep.brep.model import AutoEncoder
 
 import open3d as o3d
 import tqdm
@@ -51,9 +48,9 @@ def export_recon_faces(recon_faces, path):
     # print(f'Mesh saved to: {path}')
 
 
-class MeshGPTTraining(pl.LightningModule):
+class ModelTraining(pl.LightningModule):
     def __init__(self, hparams):
-        super(MeshGPTTraining, self).__init__()
+        super(ModelTraining, self).__init__()
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
@@ -71,24 +68,8 @@ class MeshGPTTraining(pl.LightningModule):
         if not os.path.exists(self.log_root):
             os.makedirs(self.log_root)
 
-        self.autoencoder = MeshAutoencoder(num_discrete_coors=128, pad_id=-1)
+        self.autoencoder = AutoEncoder()
         self.model = self.autoencoder
-
-        if self.is_train_transformer:
-            if self.hydra_conf["trainer"].checkpoint_autoencoder is None:
-                raise ValueError("checkpoint_autoencoder is None")
-
-            checkpoint_autoencoder = torch.load(self.hydra_conf["trainer"].checkpoint_autoencoder)["state_dict"]
-            checkpoint_autoencoder_ = {k[12:]: v for k, v in checkpoint_autoencoder.items() if 'autoencoder' in k}
-            self.autoencoder.load_state_dict(checkpoint_autoencoder_, strict=True)
-            self.transformer = MeshTransformer(self.autoencoder,
-                                               max_seq_len=768,
-                                               coarse_pre_gateloop_depth=2,
-                                               # Better performance using more gateloop layers
-                                               fine_pre_gateloop_depth=2,
-                                               attn_depth=12,
-                                               condition_on_text=self.condition_on_text)
-            self.model = self.transformer
 
     def train_dataloader(self):
         if not self.is_train_transformer:
@@ -134,13 +115,13 @@ class MeshGPTTraining(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         data = batch
 
-        if not self.is_train_transformer:
-            loss = self.model(vertices=data['vertices'], faces=data["faces"], face_edges=data['face_edges'], )
-        else:
-            if self.condition_on_text:
-                loss = self.model(vertices=None, faces=None, codes=data['codes'], text_embeds=data['img_embed'])
-            else:
-                loss = self.model(vertices=None, faces=None, codes=data['codes'])
+        sample_points_faces = data["sample_points_faces"]
+        sample_points_lines = data["sample_points_lines"]
+        edge_adj = data["edge_adj"]
+
+        mask = (sample_points_lines != -1).all(dim=-1)
+
+        loss = self.model(edge=sample_points_lines, edge_adj=edge_adj)
 
         self.log("Training_Loss", loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True,
@@ -151,79 +132,11 @@ class MeshGPTTraining(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         data = batch
 
-        if not self.is_train_transformer:
-            recon_faces, loss = self.model(vertices=data['vertices'], faces=data["faces"],
-                                           face_edges=data['face_edges'], return_recon_faces=True, )
+        sample_points_faces = data["sample_points_faces"]
+        sample_points_lines = data["sample_points_lines"]
+        edge_adj = data["edge_adj"]
 
-            if self.vis_recon_faces and self.current_epoch % 100 == 0:
-                vertices_batch = data["vertices"]
-                faces_batch = data["faces"]
-
-                face_mask = reduce(faces_batch != self.autoencoder.pad_id, 'b nf c -> b nf', 'all')
-                mse_loss_sum = []
-                mse_loss = nn.MSELoss()
-                for i in tqdm.tqdm(range(vertices_batch.shape[0])):
-                    triangles_c = vertices_batch[i][faces_batch[i]]
-                    recon_triangles_c = recon_faces[i]
-
-                    face_mask_c = face_mask[i]
-                    triangles_c = triangles_c[face_mask_c]
-                    recon_triangles_c = recon_triangles_c[face_mask_c]
-
-                    mse_loss_sum.append(mse_loss(triangles_c, recon_triangles_c))
-                    export_recon_faces(triangles_c,
-                                       self.log_root / f"batch{batch_idx}_{i}_epoch{self.current_epoch}_gt.ply")
-                    export_recon_faces(recon_triangles_c,
-                                       self.log_root / f"batch{batch_idx}_{i}_epoch{self.current_epoch}_recon.ply")
-
-                mse_loss_mean = torch.mean(torch.stack(mse_loss_sum))
-
-                self.log("Mse_Loss", mse_loss_mean, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                         sync_dist=True,
-                         batch_size=self.batch_size)
-
-        else:
-            if self.condition_on_text:
-                loss = self.model(vertices=None, faces=None, codes=data['codes'], text_embeds=data['img_embed'])
-            else:
-                loss = self.model(vertices=None, faces=None, codes=data['codes'])
-
-            if self.vis_recon_faces and self.current_epoch != 0 and self.current_epoch % 100 == 0:
-                vertices_batch = data["vertices"]
-                faces_batch = data["faces"]
-
-                img_embed = data['img_embed']
-                mse_loss_sum = []
-                mse_loss = nn.MSELoss()
-                for i in tqdm.tqdm(range(vertices_batch.shape[0])):
-                    triangles_c = vertices_batch[i][faces_batch[i]]
-
-                    recon_faces, face_mask = self.model.generate(text_embeds=img_embed[i].unsqueeze(0), temperature=0,
-                                                                 cond_scale=1)
-
-                    recon_triangles_c = recon_faces[face_mask]
-
-                    N = triangles_c.shape[0]
-                    M = recon_triangles_c.shape[0]
-
-                    if M < N:
-                        zeros_to_pad = torch.zeros((N - M, 3, 3), device=recon_triangles_c.device,
-                                                   dtype=recon_triangles_c.dtype)
-                        recon_triangles_c = torch.cat((recon_triangles_c, zeros_to_pad), dim=0)
-                    elif M > N:
-                        recon_triangles_c = recon_triangles_c[:N, :, :]
-
-                    mse_loss_sum.append(mse_loss(triangles_c, recon_triangles_c))
-                    export_recon_faces(triangles_c,
-                                       self.log_root / f"batch{batch_idx}_{i}_epoch{self.current_epoch}_gt.ply")
-                    export_recon_faces(recon_triangles_c,
-                                       self.log_root / f"batch{batch_idx}_{i}_epoch{self.current_epoch}_recon.ply")
-
-                mse_loss_mean = torch.mean(torch.stack(mse_loss_sum))
-
-                self.log("Mse_Loss", mse_loss_mean, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                         sync_dist=True,
-                         batch_size=self.batch_size)
+        loss = self.model(edge=sample_points_lines, edge_adj=edge_adj)
 
         self.log("Validation_Loss", loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True,
@@ -237,7 +150,7 @@ class MeshGPTTraining(pl.LightningModule):
         return
 
 
-@hydra.main(config_name="train_meshgpt.yaml", config_path="../../../configs/img2brep/", version_base="1.1")
+@hydra.main(config_name="train_brepgen.yaml", config_path="../../../configs/img2brep/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
     torch.set_float32_matmul_precision("medium")
@@ -245,16 +158,16 @@ def main(v_cfg: DictConfig):
 
     is_train_transformer = v_cfg["trainer"]["train_transformer"]
     if is_train_transformer:
-        logger = TensorBoardLogger("tb_logs", name="transformer")
+        logger = TensorBoardLogger("tb_logs_brepgen", name="transformer")
     else:
-        logger = TensorBoardLogger("tb_logs", name="autoencoder")
+        logger = TensorBoardLogger("tb_logs_brepgen", name="autoencoder")
 
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir']
     v_cfg["trainer"]["output"] = os.path.join(log_dir, v_cfg["trainer"]["output"])
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
-    meshgptTraining = MeshGPTTraining(v_cfg)
+    modelTraining = ModelTraining(v_cfg)
 
     mc = ModelCheckpoint(monitor="Validation_Loss", save_top_k=3, save_last=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
@@ -290,12 +203,12 @@ def main(v_cfg: DictConfig):
             state_dict_ = {k[12:]: v for k, v in state_dict.items() if 'autoencoder' in k}
         del state_dict
 
-        meshgptTraining.model.load_state_dict(state_dict_, strict=True)
+        modelTraining.model.load_state_dict(state_dict_, strict=True)
 
     if v_cfg["trainer"].evaluate:
-        trainer.test(meshgptTraining)
+        trainer.test(modelTraining)
     else:
-        trainer.fit(meshgptTraining)
+        trainer.fit(modelTraining)
 
 
 if __name__ == '__main__':

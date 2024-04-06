@@ -20,6 +20,8 @@ from einops import rearrange
 from meshgpt_pytorch import MeshAutoencoder
 from torch.nn.utils.rnn import pad_sequence
 
+import torch.nn.functional as F
+
 
 class Auotoencoder_Dataset(torch.utils.data.Dataset):
     def __init__(self, v_training_mode, v_conf):
@@ -28,99 +30,93 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
         self.conf = v_conf
         self.dataset_path = v_conf['root']
         self.device = torch.device("cpu")
+        self.max_face_num = -1
+        self.max_edge_num = -1
+        self.max_edge_adj_num = -1
 
         self.pad_id = -1
-        self.vertices_all, self.faces_all, self.face_edges_all = self.read_data_and_pool()
 
-        repeat_Num = 1
-        self.vertices_all = self.vertices_all.tile(repeat_Num, 1, 1)
-        self.faces_all = self.faces_all.tile(repeat_Num, 1, 1)
-        self.face_edges_all = self.face_edges_all.tile(repeat_Num, 1, 1)
+        # self.data_folders = [os.path.join(self.dataset_path, folder) for folder in os.listdir(self.dataset_path) if
+        #                      os.path.isdir(os.path.join(self.dataset_path, folder))]
 
-        self.sum_num = self.vertices_all.shape[0]
+        with open(os.path.join(self.dataset_path, "single_loop.txt"), "r") as f:
+            self.data_folders = [os.path.join(self.dataset_path, line.strip()) for line in f.readlines()]
+
+        self.check_max()
+
+        self.data_sum = len(self.data_folders)
 
         print("\nDataset INFO")
-        print("Vertices:", self.vertices_all.shape)
-        print("Faces:", self.faces_all.shape)
+        print("data_folders:", len(self.data_folders))
 
         # self.training_range = int(0.8 * self.sum_num)
         # self.validation_range = int(0.9 * self.sum_num)
 
-        self.training_range = [int(0 * self.sum_num), int(1.0 * self.sum_num)]
-        self.validation_range = [int(0 * self.sum_num), int(1.0 * self.sum_num)]
+        self.training_range = [int(0 * self.data_sum), int(1.0 * self.data_sum)]
+        self.validation_range = [int(0 * self.data_sum), int(1.0 * self.data_sum)]
 
         if self.mode == "training":
-            self.vertices_all = self.vertices_all[self.training_range[0]:self.training_range[1]]
-            self.faces_all = self.faces_all[self.training_range[0]:self.training_range[1]]
-            self.face_edges_all = self.face_edges_all[self.training_range[0]:self.training_range[1]]
+            self.data_folders = self.data_folders[self.training_range[0]:self.training_range[1]]
 
         elif self.mode == "validation":
-            self.vertices_all = self.vertices_all[self.validation_range[0]:self.validation_range[1]]
-            self.faces_all = self.faces_all[self.validation_range[0]:self.validation_range[1]]
-            self.face_edges_all = self.face_edges_all[self.validation_range[0]:self.validation_range[1]]
+            self.data_folders = self.data_folders[self.validation_range[0]:self.validation_range[1]]
 
         elif self.mode == "testing":
-            self.vertices_all = self.vertices_all[self.validation_range[0]:self.validation_range[1]]
-            self.faces_all = self.faces_all[self.validation_range[0]:self.validation_range[1]]
-            self.face_edges_all = self.face_edges_all[self.validation_range[0]:self.validation_range[1]]
+            self.data_folders = self.data_folders[self.validation_range[0]:self.validation_range[1]]
 
         else:
-            raise ""
+            raise
 
-    @property
-    def vertices(self) -> torch.Tensor:
-        return self.vertices_all
+    def check_max(self):
+        for folder_path in self.data_folders:
+            data_npz = np.load(os.path.join(folder_path, "data.npz"))
+            if data_npz['sample_points_faces'].shape[0] > self.max_face_num:
+                self.max_face_num = data_npz['sample_points_faces'].shape[0]
 
-    @property
-    def faces(self) -> torch.Tensor:
-        return self.faces_all
+            if data_npz['sample_points_lines'].shape[0] > self.max_edge_num:
+                self.max_edge_num = data_npz['sample_points_lines'].shape[0]
 
-    @property
-    def face_edges(self) -> torch.Tensor:
-        return self.face_edges_all
+            # if data_npz['edge_adj'].shape[1] > self.max_edge_adj_num:
+            #     self.max_edge_adj_num = data_npz['edge_adj'].shape[1]
 
-    def read_data_and_pool(self):
-        data_folders = os.listdir(self.dataset_path)
-        data_folders.sort()
+            edge_adj = data_npz['edge_adj']
+            if edge_adj[(edge_adj != -1).all(axis=-1)].shape[0] > self.max_edge_adj_num:
+                self.max_edge_adj_num = edge_adj[(edge_adj != -1).all(axis=-1)].shape[0]
 
-        vertices_tensor_list = []
-        faces_tensor_list = []
-        face_edges_list = []
-
-        for folder in data_folders:
-            # if folder not in ["00000325", "00000797"]:
-            #     continue
-            folder_path = os.path.join(self.dataset_path, folder)
-            tri_mesh_path = os.path.join(folder_path, "triangulation.ply")
-
-            tri_mesh = o3d.io.read_triangle_mesh(tri_mesh_path)
-
-            vertices = np.array(tri_mesh.vertices)
-            triangle_vertices_idx = np.array(tri_mesh.triangles)
-            triangle = vertices[triangle_vertices_idx]
-
-            if triangle.shape[0] > 100:
-                continue
-
-            vertices_tensor = torch.tensor(vertices, dtype=torch.float32).to(self.device)
-            faces_tensor = torch.tensor(triangle_vertices_idx, dtype=torch.long).to(self.device)
-            vertices_tensor_list.append(vertices_tensor)
-            faces_tensor_list.append(faces_tensor)
-
-            face_edges = derive_face_edges_from_faces(faces_tensor, pad_id=self.pad_id)
-            face_edges_list.append(face_edges)
-
-        vertices_tensor = pad_sequence(vertices_tensor_list, batch_first=True, padding_value=0)
-        faces_tensor = pad_sequence(faces_tensor_list, batch_first=True, padding_value=self.pad_id)
-        face_edges = pad_sequence(face_edges_list, batch_first=True, padding_value=self.pad_id)
-
-        return vertices_tensor, faces_tensor, face_edges
+        assert self.max_face_num > 0 and self.max_edge_num > 0
 
     def __len__(self):
-        return self.vertices.shape[0]
+        return self.data_sum
 
     def __getitem__(self, idx):
-        return {"vertices": self.vertices[idx], "faces": self.faces[idx], "face_edges": self.face_edges[idx]}
+        folder_path = self.data_folders[idx]
+
+        data_npz = np.load(os.path.join(folder_path, "data.npz"))
+
+        # (num_faces, max_num_edges)
+        face_edges_idx = torch.from_numpy(data_npz['face_edge_idx']).to(torch.int64).to(self.device)
+
+        # (num_faces, 400, 3)
+        sample_points_faces = torch.from_numpy(data_npz['sample_points_faces']).to(torch.float32).to(self.device)
+        sample_points_faces = F.pad(sample_points_faces,
+                                    (0, 0, 0, 0, 0, self.max_face_num - sample_points_faces.shape[0]), 'constant', -1)
+
+        # (num_lines, 20, 3)
+        sample_points_lines = torch.from_numpy(data_npz['sample_points_lines']).to(torch.float32).to(self.device)
+        sample_points_lines = F.pad(sample_points_lines,
+                                    (0, 0, 0, 0, 0, self.max_edge_num - sample_points_lines.shape[0]), 'constant', -1)
+
+        # (num_faces, max_num_edges, 2)
+        edge_adj = torch.from_numpy(data_npz['edge_adj']).to(torch.int64).to(self.device)
+        # edge_adj = F.pad(edge_adj,
+        #                  (0, 0, 0, self.max_edge_adj_num - edge_adj.shape[1], 0, self.max_face_num - edge_adj.shape[0]),
+        #                  'constant', -1)
+        edge_adj = edge_adj[(edge_adj != -1).all(dim=-1)]
+        edge_adj = F.pad(edge_adj, (0, 0, 0, self.max_edge_adj_num - edge_adj.shape[0]), 'constant', -1)
+
+        return {"sample_points_faces": sample_points_faces,
+                "sample_points_lines": sample_points_lines,
+                "edge_adj"           : edge_adj}
 
 
 class Transformer_Dataset(torch.utils.data.Dataset):

@@ -1,5 +1,5 @@
 dataset:
-  root: /mnt/d/meshgpt/0planar_shapes
+  root: /mnt/d/meshgpt/0planar_shapes_new
   dataset_name: ABC
   overfit: false
   tokenized_batch_size: 16
@@ -17,7 +17,7 @@ trainer:
   batch_size: 16
 
   spawn: false
-  checkpoint_autoencoder: /root/workspace/python/src/img2brep/meshgpt/tb_logs/autoencoder/version_1/checkpoints/epoch=566-step=2835.ckpt
+  checkpoint_autoencoder:
   resume_from_checkpoint:
   evaluate: false
   output: .

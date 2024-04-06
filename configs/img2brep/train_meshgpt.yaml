@@ -6,19 +6,19 @@ dataset:
 trainer:
   learning_rate: 1e-6
   gpu: 1
-  num_worker: 4
+  num_worker: 0
 
-  vis_recon_faces: true
-  train_transformer: true
+  vis_recon_faces: false
+  train_transformer: false
 
   spawn: false
   num_samples: -1
   batch_size: 2
-  checkpoint_autoencoder: G:\workplace\python\src\img2brep\meshgpt\tb_logs\my_model\version_5\checkpoints\last.ckpt
+  checkpoint_autoencoder:
   resume_from_checkpoint:
   evaluate: false
   output: .
-  check_val_every_n_epoch: 1
+  check_val_every_n_epoch: 10000
   accelerator: "32-true"
 
 model:

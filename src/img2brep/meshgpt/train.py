@@ -28,7 +28,7 @@ from torchmetrics.classification import BinaryPrecision, BinaryRecall, BinaryAve
 from src.img2brep.meshgpt.dataset import Single_obj_dataset, Dataset
 from src.neural_bsp.my_dataloader import MyDataLoader
 
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau, StepLR
 import torch.nn as nn
 
 from meshgpt_pytorch import (
@@ -83,7 +83,7 @@ class MeshGPTTraining(pl.LightningModule):
                 raise ValueError("checkpoint_autoencoder is None")
             checkpoint_autoencoder = torch.load(self.hydra_conf["trainer"].checkpoint_autoencoder)["state_dict"]
             self.autoencoder.load_state_dict(checkpoint_autoencoder, strict=False)
-            self.transformer = MeshTransformer(self.autoencoder, max_seq_len=15144)
+            self.transformer = MeshTransformer(self.autoencoder, max_seq_len=768, condition_on_text=True)
             self.model = self.transformer
 
     def train_dataloader(self):
@@ -115,7 +115,8 @@ class MeshGPTTraining(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = Adam(self.model.parameters(), lr=self.learning_rate)
-        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
+        # scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
+        scheduler = StepLR(optimizer, step_size=10000, gamma=0.1)
         return {
             'optimizer'   : optimizer,
             'lr_scheduler': {
@@ -126,7 +127,10 @@ class MeshGPTTraining(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         data = batch
-        loss = self.model(vertices=data[0], faces=data[1])
+        if not self.is_train_transformer:
+            loss = self.model(vertices=data[0], faces=data[1])
+        else:
+            loss = self.model(vertices=data[0], faces=data[1], text_embeds=torch.randn(2, 1024, 768).to(data[1].device))
         self.log("Training_Loss", loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True,
                  batch_size=self.batch_size)
@@ -136,10 +140,10 @@ class MeshGPTTraining(pl.LightningModule):
         data = batch
         vertices_batch, faces_batch = data[0], data[1]
 
-        if not self.is_train_transformer and self.vis_recon_faces:
+        if not self.is_train_transformer:
             recon_faces, loss = self.model(vertices=vertices_batch, faces=faces_batch, return_recon_faces=True, )
 
-            if self.current_epoch % 5 == 0:
+            if self.current_epoch % 5 == 0 and self.vis_recon_faces:
                 face_mask = reduce(faces_batch != self.autoencoder.pad_id, 'b nf c -> b nf', 'all')
                 mse_loss_sum = []
                 mse_loss = nn.MSELoss()
@@ -163,7 +167,8 @@ class MeshGPTTraining(pl.LightningModule):
                          sync_dist=True,
                          batch_size=self.batch_size)
         else:
-            loss = self.model(vertices=vertices_batch, faces=faces_batch)
+            loss = self.model(vertices=vertices_batch, faces=faces_batch,
+                              text_embeds=torch.randn(2, 1024, 768).to(faces_batch.device))
 
         self.log("Validation_Loss", loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True,
@@ -213,6 +218,7 @@ def main(v_cfg: DictConfig):
             num_sanity_val_steps=2,
             check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
             precision=v_cfg["trainer"]["accelerator"],
+            accumulate_grad_batches=32,
             # gradient_clip_val=0.5,
             )
     torch.find_unused_parameters = False

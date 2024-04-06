@@ -20,14 +20,19 @@ class Dataset(torch.utils.data.Dataset):
         super(Dataset, self).__init__()
         self.mode = v_training_mode
         self.conf = v_conf
-        self.dataset_path = r"H:\Data\SIGA23\Baseline\data\0planar_shapes"
+        self.dataset_path = v_conf['root']
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.pad_id = -1
         self.vertices_all, self.faces_all = self.read_data_and_pool()
         self._vertices = None
         self._faces = None
 
+        self.vertices_all = self.vertices_all[0:2]
+        self.faces_all = self.faces_all[0:2]
+
         self.sum_num = self.vertices_all.shape[0]
+
+        print(f"sum_num: {self.sum_num}")
 
         # self.training_range = int(0.8 * self.sum_num)
         # self.validation_range = int(0.9 * self.sum_num)
@@ -80,6 +85,9 @@ class Dataset(torch.utils.data.Dataset):
             vertices = np.array(tri_mesh.vertices)
             triangle_vertices_idx = np.array(tri_mesh.triangles)
             triangle = vertices[triangle_vertices_idx]
+
+            if triangle.shape[0] > 100:
+                continue
 
             vertices_tensor = torch.tensor(vertices, dtype=torch.float32).to(self.device)
             faces_tensor = torch.tensor(triangle_vertices_idx, dtype=torch.long).to(self.device)

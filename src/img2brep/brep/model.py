@@ -217,8 +217,8 @@ class AutoEncoder(nn.Module):
         self.dim_codebook = dim_codebook
         self.pad_id = -1
 
-        # encoder
-        # 1. project in (B N dim_codebook)
+        # 1. Convolutional encoder
+        # Map from (B*N, 20) to (B, dim_codebook(196))
         self.project_in = nn.Sequential(
                 nn.Conv1d(in_channels=3, out_channels=64, kernel_size=7, stride=1, padding=3),
                 nn.ReLU(),
@@ -254,14 +254,15 @@ class AutoEncoder(nn.Module):
             self.encoders.append(sage_conv)
             curr_dim = dim_layer
 
-        # decoder
+        # 3. Decoder
+        # Map from (B*N, 256) to (B*N, 256)
         init_decoder_dim, *decoder_dims_through_depth = decoder_dims_through_depth
         curr_dim = init_decoder_dim
 
         assert is_odd(init_decoder_conv_kernel)
 
         self.init_decoder_conv = nn.Sequential(
-                nn.Conv1d(256, init_decoder_dim,
+                nn.Conv1d(196, init_decoder_dim,
                           kernel_size=init_decoder_conv_kernel, padding=init_decoder_conv_kernel // 2),
                 nn.SiLU(),
                 Rearrange('b c n -> b n c'),
@@ -282,6 +283,9 @@ class AutoEncoder(nn.Module):
                 Rearrange('... (v c) -> ... v c', v=20)
                 )
 
+    # edge: (B, N, 20, 3)
+    # edge_mask: (B, N)
+    # edge_adj: (B, M, 2)
     def encode(self, edge, edge_mask, edge_adj):
         B, N, _, _ = edge.size()
 
@@ -289,7 +293,7 @@ class AutoEncoder(nn.Module):
 
         edge = rearrange(edge, 'b n e v -> (b n) v e')
 
-        # 1. project in (B N dim_codebook)
+        # 1. project in (B, N, dim_codebook)
         edge_embed = self.project_in(edge)
         edge_embed = rearrange(edge_embed, '(b n) d -> b n d', b=B, n=N)
 
@@ -338,12 +342,27 @@ class AutoEncoder(nn.Module):
 
         return rearrange(x, 'b d n -> b n d')
 
+    def encode_coords(self, edge, edge_mask):
+        B, N, _, _ = edge.size()
+
+        edge = edge.masked_fill(~repeat(edge_mask, 'b n -> b n v k', v=20, k=3), 0.)
+
+        edge = rearrange(edge, 'b n e v -> (b n) v e')
+
+        # 1. project in (B, N, dim_codebook)
+        edge_embed = self.project_in(edge)
+
+        edge_embed = rearrange(edge_embed, '(b n) v -> b n v', b=B)
+
+        return edge_embed
+
     def forward(self, edge, edge_adj, only_return_recon=False, only_return_loss=True, **kwargs):
         gt = edge.clone()
 
         edge_mask = (edge != -1).all(dim=-1).all(dim=-1)
 
-        embedding = self.encode(edge, edge_mask, edge_adj)
+        embedding = self.encode_coords(edge, edge_mask)
+        # embedding = self.encode(edge, edge_mask, edge_adj)
 
         reconstructed = self.decode(embedding, edge_mask)
 

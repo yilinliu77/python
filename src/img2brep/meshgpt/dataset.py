@@ -12,15 +12,21 @@ from tqdm import tqdm
 import open3d as o3d
 
 from shared.common_utils import export_point_cloud, check_dir
+from meshgpt_pytorch.data import derive_face_edges_from_faces
+
 from typing import Final
+from einops import rearrange
 
+from meshgpt_pytorch import MeshAutoencoder
+from torch.nn.utils.rnn import pad_sequence
 
-class Dataset(torch.utils.data.Dataset):
+class Auotoencoder_Dataset(torch.utils.data.Dataset):
     def __init__(self, v_training_mode, v_conf):
-        super(Dataset, self).__init__()
+        super(Auotoencoder_Dataset, self).__init__()
         self.mode = v_training_mode
         self.conf = v_conf
         self.dataset_path = v_conf['root']
+<<<<<<< HEAD
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.pad_id = -1
         self.vertices_all, self.faces_all = self.read_data_and_pool()
@@ -30,7 +36,23 @@ class Dataset(torch.utils.data.Dataset):
         self.vertices_all = self.vertices_all[0:2]
         self.faces_all = self.faces_all[0:2]
 
+=======
+        self.device = torch.device("cpu")
+        
+        self.pad_id = -1
+        self.vertices_all, self.faces_all, self.face_edges_all = self.read_data_and_pool()
+        
+        repeat_Num = 1
+        self.vertices_all = self.vertices_all.tile(repeat_Num, 1, 1)
+        self.faces_all = self.faces_all.tile(repeat_Num, 1, 1)
+        self.face_edges_all = self.face_edges_all.tile(repeat_Num, 1, 1)
+        
+>>>>>>> 44a5a0b09aae59bd191e804100522eb604991d44
         self.sum_num = self.vertices_all.shape[0]
+        
+        print("\nDataset INFO")
+        print("Vertices:", self.vertices_all.shape)
+        print("Faces:", self.faces_all.shape)
 
         print(f"sum_num: {self.sum_num}")
 
@@ -41,50 +63,57 @@ class Dataset(torch.utils.data.Dataset):
         self.validation_range = [int(0 * self.sum_num), int(1.0 * self.sum_num)]
 
         if self.mode == "training":
-            self._vertices = self.vertices_all[self.training_range[0]:self.training_range[1]]
-            self._faces = self.faces_all[self.training_range[0]:self.training_range[1]]
+            self.vertices_all = self.vertices_all[self.training_range[0]:self.training_range[1]]
+            self.faces_all = self.faces_all[self.training_range[0]:self.training_range[1]]
+            self.face_edges_all = self.face_edges_all[self.training_range[0]:self.training_range[1]]
+            
         elif self.mode == "validation":
-            self._vertices = self.vertices_all[self.validation_range[0]:self.validation_range[1]]
-            self._faces = self.faces_all[self.validation_range[0]:self.validation_range[1]]
+            self.vertices_all = self.vertices_all[self.validation_range[0]:self.validation_range[1]]
+            self.faces_all = self.faces_all[self.validation_range[0]:self.validation_range[1]]
+            self.face_edges_all = self.face_edges_all[self.validation_range[0]:self.validation_range[1]]
+            
         elif self.mode == "testing":
-            self._vertices = self.vertices_all[self.validation_range[0]:self.validation_range[1]]
-            self._faces = self.faces_all[self.validation_range[0]:self.validation_range[1]]
+            self.vertices_all = self.vertices_all[self.validation_range[0]:self.validation_range[1]]
+            self.faces_all = self.faces_all[self.validation_range[0]:self.validation_range[1]]
+            self.face_edges_all = self.face_edges_all[self.validation_range[0]:self.validation_range[1]]
+            
         else:
             raise ""
 
-        self._vertices = self._vertices.clone()
-        self._faces = self._faces.clone()
-
     @property
     def vertices(self) -> torch.Tensor:
-        return self._vertices
+        return self.vertices_all
 
     @property
     def faces(self) -> torch.Tensor:
-        return self._faces
-
-    @vertices.setter
-    def vertices(self, new_value):
-        if new_value != self._vertices:
-            print(f"Value is changing from {self._vertices} to {new_value}")
-            import pdb
-            pdb.set_trace()
+        return self.faces_all
+    
+    @property
+    def face_edges(self) -> torch.Tensor:
+        return self.face_edges_all
 
     def read_data_and_pool(self):
-        data_items = os.listdir(self.dataset_path)
-        data_items.sort()
-        max_vertices_num = 0
-        max_faces_num = 0
+        data_folders = os.listdir(self.dataset_path)
+        data_folders.sort()
+        
         vertices_tensor_list = []
         faces_tensor_list = []
-        for item in data_items:
-            item_path = os.path.join(self.dataset_path, item)
-            tri_mesh_path = os.path.join(item_path, "triangulation.ply")
+        face_edges_list = []
+        
+        for folder in data_folders:
+            # if folder not in ["00000325", "00000797"]:
+            #     continue
+            folder_path = os.path.join(self.dataset_path, folder)
+            tri_mesh_path = os.path.join(folder_path, "triangulation.ply")
+            
             tri_mesh = o3d.io.read_triangle_mesh(tri_mesh_path)
 
             vertices = np.array(tri_mesh.vertices)
             triangle_vertices_idx = np.array(tri_mesh.triangles)
             triangle = vertices[triangle_vertices_idx]
+            
+            if triangle.shape[0] > 100:
+                continue
 
             if triangle.shape[0] > 100:
                 continue
@@ -93,79 +122,144 @@ class Dataset(torch.utils.data.Dataset):
             faces_tensor = torch.tensor(triangle_vertices_idx, dtype=torch.long).to(self.device)
             vertices_tensor_list.append(vertices_tensor)
             faces_tensor_list.append(faces_tensor)
-            max_vertices_num = vertices.shape[0] if vertices.shape[0] > max_vertices_num else max_vertices_num
-            max_faces_num = triangle_vertices_idx.shape[0] if triangle_vertices_idx.shape[0] > max_faces_num \
-                else max_faces_num
+            
+            face_edges = derive_face_edges_from_faces(faces_tensor, pad_id = self.pad_id)
+            face_edges_list.append(face_edges)
 
-        # pool
-        for i in range(len(vertices_tensor_list)):
-            vertices = vertices_tensor_list[i]
-            faces = faces_tensor_list[i]
-            vertices_num = vertices.shape[0]
-            faces_num = faces.shape[0]
-            if vertices_num < max_vertices_num:
-                vertices_tensor_list[i] = torch.cat(
-                        [vertices, torch.zeros(max_vertices_num - vertices_num, 3).to(self.device)])
-            if faces_num < max_faces_num:
-                faces_tensor_list[i] = torch.cat(
-                        [faces, self.pad_id * torch.ones(max_faces_num - faces_num, 3).to(torch.long).to(self.device)])
+        vertices_tensor = pad_sequence(vertices_tensor_list, batch_first=True, padding_value=0)
+        faces_tensor = pad_sequence(faces_tensor_list, batch_first=True, padding_value=self.pad_id)
+        face_edges = pad_sequence(face_edges_list, batch_first=True, padding_value=self.pad_id)
 
-        return torch.stack(vertices_tensor_list), torch.stack(faces_tensor_list)
+        return vertices_tensor, faces_tensor, face_edges
 
     def __len__(self):
         return self.vertices.shape[0]
 
     def __getitem__(self, idx):
-        return self.vertices[idx], self.faces[idx]
-
-
-class Single_obj_dataset(torch.utils.data.Dataset):
-    def __init__(self, v_training_mode, v_conf):
-        super(Single_obj_dataset, self).__init__()
+        return {"vertices": self.vertices[idx], "faces": self.faces[idx], "face_edges": self.face_edges[idx]}
+    
+    
+class Transformer_Dataset(torch.utils.data.Dataset):
+    def __init__(self, v_training_mode, v_conf, autoencoder):
+        super(Transformer_Dataset, self).__init__()
         self.mode = v_training_mode
         self.conf = v_conf
-        self.dataset_path = r"H:\Data\SIGA23\Baseline\data\0planar_shapes"
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.vertices_tensor_list = []
-        self.faces_tensor_list = []
-        self.pre_data()
+        self.dataset_path = v_conf['root']
+        self.tokenized_batch_size = v_conf['tokenized_batch_size']
+        self.device = torch.device("cpu")
+        
+        self.autoencoder:MeshAutoencoder = autoencoder.cuda()
+        
+        self.pad_id = -1
+        self.codes_all, self.img_embed_all = self.read_data_and_pool()
+        
+        self.codes_all = self.codes_all.tile(10, 1, 1)
+        self.img_embed_all = self.img_embed_all.tile(10, 1, 1)
+        
+        self.sum_num = self.codes_all.shape[0]
+        
+        print("\nDataset INFO")
+        print("Codes:", self.codes_all.shape)
+        print("ImgEmbed:", self.img_embed_all.shape)
 
-        self.vertices_tensor = self.vertices_tensor_list[0].unsqueeze(0)
-        self.faces_tensor = self.faces_tensor_list[0].unsqueeze(0)
+        # self.training_range = int(0.8 * self.sum_num)
+        # self.validation_range = int(0.9 * self.sum_num)
+
+        self.training_range = [int(0 * self.sum_num), int(1.0 * self.sum_num)]
+        self.validation_range = [int(0 * self.sum_num), int(1.0 * self.sum_num)]
 
         if self.mode == "training":
-            pass
+            self.codes_all = self.codes_all[self.training_range[0]:self.training_range[1]]
+            self.img_embed_all = self.img_embed_all[self.training_range[0]:self.training_range[1]]
+            
         elif self.mode == "validation":
-            pass
+            self.codes_all = self.codes_all[self.validation_range[0]:self.validation_range[1]]
+            self.img_embed_all = self.img_embed_all[self.validation_range[0]:self.validation_range[1]]
+            
         elif self.mode == "testing":
-            pass
+            self.codes_all = self.codes_all[self.validation_range[0]:self.validation_range[1]]
+            self.img_embed_all = self.img_embed_all[self.validation_range[0]:self.validation_range[1]]
+            
         else:
             raise ""
 
-    def pre_data(self):
-        data_items = os.listdir(self.dataset_path)
-        data_items.sort()
+    @property
+    def codes(self) -> torch.Tensor:
+        return self.codes_all
+
+    @property
+    def img_embed(self) -> torch.Tensor:
+        return self.img_embed_all
+
+    def read_data_and_pool(self):
+        data_folders = os.listdir(self.dataset_path)
+        data_folders.sort()
+        
         vertices_tensor_list = []
         faces_tensor_list = []
-        for item in data_items:
-            item_path = os.path.join(self.dataset_path, item)
-            tri_mesh_path = os.path.join(item_path, "triangulation.ply")
+        img_embed_list = []
+        face_edges_list = []
+        codes_list = []
+        
+        for folder in data_folders:
+            # if folder not in ["00000325", "00000797"]:
+            #     continue
+            folder_path = os.path.join(self.dataset_path, folder)
+            tri_mesh_path = os.path.join(folder_path, "triangulation.ply")
+            
             tri_mesh = o3d.io.read_triangle_mesh(tri_mesh_path)
 
             vertices = np.array(tri_mesh.vertices)
             triangle_vertices_idx = np.array(tri_mesh.triangles)
+            
             triangle = vertices[triangle_vertices_idx]
+            
+            if triangle.shape[0] > 100:
+                continue
 
             vertices_tensor = torch.tensor(vertices, dtype=torch.float32).to(self.device)
             faces_tensor = torch.tensor(triangle_vertices_idx, dtype=torch.long).to(self.device)
-            self.vertices_tensor_list.append(vertices_tensor)
-            self.faces_tensor_list.append(faces_tensor)
+            faces_tensor, _ = torch.sort(faces_tensor, dim=1)
+            
+            vertices_tensor_list.append(vertices_tensor)
+            faces_tensor_list.append(faces_tensor)
+            
+            face_edges = derive_face_edges_from_faces(faces_tensor, pad_id = self.pad_id)
+            face_edges_list.append(face_edges)
+                
+            img_embed = np.load(os.path.join(folder_path, "train_embed_vb16.npy"))
+            img_embed = torch.tensor(img_embed, dtype=torch.float32).to(self.device)
+            img_embed = rearrange(img_embed, 'img_num patch_num embed_dim -> (img_num patch_num) embed_dim')
+
+            img_embed_list.append(img_embed)
+            
+        img_embed = torch.stack(img_embed_list)
+        
+        vertices_tensor = pad_sequence(vertices_tensor_list, batch_first=True, padding_value=0)
+        faces_tensor = pad_sequence(faces_tensor_list, batch_first=True, padding_value=self.pad_id)
+        face_edges = pad_sequence(face_edges_list, batch_first=True, padding_value=self.pad_id)
+
+        for i in range(0, vertices_tensor.shape[0], self.tokenized_batch_size):
+            vertices_tensor_batch = vertices_tensor[i:i+self.tokenized_batch_size]
+            faces_tensor_batch = faces_tensor[i:i+self.tokenized_batch_size]
+            face_edges_batch = face_edges[i:i+self.tokenized_batch_size]
+            
+            codes = self.autoencoder.tokenize(
+                vertices = vertices_tensor_batch.cuda(),
+                faces = faces_tensor_batch.cuda(),
+                face_edges = face_edges_batch.cuda(),
+            )
+            codes_list.append(codes.cpu())
+            
+        codes = torch.cat(codes_list, dim=0)
+        
+        return codes, img_embed
 
     def __len__(self):
-        if self.mode == "training":
-            return 100
-        else:
-            return 1
+        return self.codes.shape[0]
 
     def __getitem__(self, idx):
-        return self.vertices_tensor[0], self.faces_tensor[0]
+        return {'codes': self.codes[idx], 'img_embed': self.img_embed[idx]}
+
+
+

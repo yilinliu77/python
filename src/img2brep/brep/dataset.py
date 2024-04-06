@@ -100,6 +100,7 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
         sample_points_faces = torch.from_numpy(data_npz['sample_points_faces']).to(torch.float32).to(self.device)
         sample_points_faces = F.pad(sample_points_faces,
                                     (0, 0, 0, 0, 0, self.max_face_num - sample_points_faces.shape[0]), 'constant', -1)
+        sample_points_faces = rearrange(sample_points_faces, 'f (h w) dim -> f h w dim', h=20)
 
         # (num_lines, 20, 3)
         sample_points_lines = torch.from_numpy(data_npz['sample_points_lines']).to(torch.float32).to(self.device)

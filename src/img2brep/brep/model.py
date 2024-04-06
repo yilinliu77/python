@@ -411,11 +411,11 @@ class AutoEncoder(nn.Module):
         return edge_embed
 
     def encode_face_coords(self, face, face_mask):
-        B, N, _, _ = face.size()
+        B, N, _, _, _ = face.size()
 
-        face = face.masked_fill(~repeat(face_mask, 'b n -> b n v k', v=20 * 20, k=3), 0.)
+        face = face.masked_fill(~repeat(face_mask, 'b n -> b n w h k', w=20, h=20, k=3), 0.)
 
-        face = rearrange(face, 'b n (w h) v -> (b n) v w h', w=20, h=20)
+        face = rearrange(face, 'b n w h v -> (b n) v w h')
 
         # 1. project in (B, N, dim_codebook)
         face_embed = self.face_encoder(face)
@@ -434,7 +434,7 @@ class AutoEncoder(nn.Module):
 
         # Masks
         edge_mask = (sample_points_edges != -1).all(dim=-1).all(dim=-1)
-        face_mask = (sample_points_faces != -1).all(dim=-1).all(dim=-1)
+        face_mask = (sample_points_faces != -1).all(dim=-1).all(dim=-1).all(dim=-1)
 
         # Encode the edge and face points
         edge_embeddings = self.encode_edge_coords(sample_points_edges, edge_mask)
@@ -447,9 +447,9 @@ class AutoEncoder(nn.Module):
             return recon_edges, recon_faces
 
         recon_edges = recon_edges.masked_fill(~repeat(edge_mask, 'b n -> b n v k', v=20, k=3), 0.)
-        recon_faces = recon_faces.masked_fill(~repeat(face_mask, 'b n -> b n v k', v=20 * 20, k=3), 0.)
+        recon_faces = recon_faces.masked_fill(~repeat(face_mask, 'b n -> b n w h k', w=20, h=20, k=3), 0.)
         gt_edges = gt_edges.masked_fill(~repeat(edge_mask, 'b n -> b n v k', v=20, k=3), 0.)
-        gt_faces = gt_faces.masked_fill(~repeat(face_mask, 'b n -> b n v k', v=20 * 20, k=3), 0.)
+        gt_faces = gt_faces.masked_fill(~repeat(face_mask, 'b n -> b n w h k', w=20, h=20, k=3), 0.)
         loss_edge = F.mse_loss(recon_edges, gt_edges, reduction='mean')
         loss_face = F.mse_loss(recon_faces, gt_faces, reduction='mean')
         total_loss = loss_edge + loss_face

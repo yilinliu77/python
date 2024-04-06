@@ -1,16 +1,13 @@
 import sys
 
 sys.path.append('../../../')
-import importlib
 import os.path
 from pathlib import Path
 
-import h5py
 import hydra
 import numpy as np
 # import matplotlib
 # matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 from lightning_fabric import seed_everything
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Trainer
@@ -20,16 +17,10 @@ import torch
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import LearningRateMonitor
 from torch.optim import Adam
-from torch.utils.data import DataLoader, RandomSampler
-from torchmetrics import MetricCollection
-
-import torch.distributed as dist
-
-from torchmetrics.classification import BinaryPrecision, BinaryRecall, BinaryAveragePrecision, BinaryF1Score
+from torch.utils.data import DataLoader
 
 from src.img2brep.meshgpt.dataset import Auotoencoder_Dataset, Transformer_Dataset
 
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 import torch.nn as nn
 
 from meshgpt_pytorch import (
@@ -39,7 +30,7 @@ from meshgpt_pytorch import (
 
 import open3d as o3d
 import tqdm
-from einops import rearrange, repeat, reduce, pack, unpack
+from einops import reduce
 
 
 def export_recon_faces(recon_faces, path):

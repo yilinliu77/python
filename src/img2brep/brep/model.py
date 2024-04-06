@@ -396,7 +396,7 @@ class AutoEncoder(nn.Module):
 
         return recon_edges, recon_faces
 
-    def encode_edge_coords(self, edge, edge_mask):
+    def encode_edge_coords(self, edge, edge_mask, edge_adj):
         B, N, _, _ = edge.size()
 
         edge = edge.masked_fill(~repeat(edge_mask, 'b n -> b n v k', v=20, k=3), 0.)
@@ -407,6 +407,33 @@ class AutoEncoder(nn.Module):
         edge_embed = self.edge_encoder(edge)
 
         edge_embed = rearrange(edge_embed, '(b n) v -> b n v', b=B)
+
+        # 2. GCN
+        # needs to be offset by number of faces for each batch
+        edge_adj_mask = (edge_adj != -1).all(dim=-1)
+        edge_index_offsets = reduce(edge_mask.long(), 'b ne -> b', 'sum')
+        edge_index_offsets = F.pad(edge_index_offsets.cumsum(dim=0), (1, -1), value=0)
+        edge_index_offsets = rearrange(edge_index_offsets, 'b -> b 1 1')
+
+        edge_adj += edge_index_offsets
+        edge_adj = edge_adj[edge_adj_mask]
+        edge_adj = rearrange(edge_adj, 'be ij -> ij be')
+
+        # next prepare the face_mask for using masked_select and masked_scatter
+
+        orig_face_embed_shape = edge_embed.shape[:2]
+
+        edge_embed = edge_embed[edge_mask]
+
+        edge_embed = self.init_sage_conv(edge_embed, edge_adj)
+        edge_embed = self.init_encoder_act_and_norm(edge_embed)
+
+        for conv in self.encoders:
+            edge_embed = conv(edge_embed, edge_adj)
+
+        shape = (*orig_face_embed_shape, edge_embed.shape[-1])
+
+        edge_embed = edge_embed.new_zeros(shape).masked_scatter(rearrange(edge_mask, '... -> ... 1'), edge_embed)
 
         return edge_embed
 
@@ -437,7 +464,7 @@ class AutoEncoder(nn.Module):
         face_mask = (sample_points_faces != -1).all(dim=-1).all(dim=-1)
 
         # Encode the edge and face points
-        edge_embeddings = self.encode_edge_coords(sample_points_edges, edge_mask)
+        edge_embeddings = self.encode_edge_coords(sample_points_edges, edge_mask, edge_adj)
         face_embeddings = self.encode_face_coords(sample_points_faces, face_mask)
 
         # Reconstruct the edge and face points

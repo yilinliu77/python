@@ -136,20 +136,16 @@ class ModelTraining(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         data = batch
 
-        sample_points_faces = data["sample_points_faces"]
-        sample_points_lines = data["sample_points_lines"]
-        edge_adj = data["edge_adj"]
-
-        recon_edges, loss = self.model(edge=sample_points_lines, edge_adj=edge_adj, only_return_loss=False)
+        recon_edges, loss = self.model(data, only_return_loss=False)
 
         self.log("Validation_Loss", loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True,
                  batch_size=self.batch_size)
 
         if batch_idx == 0:
-            self.viz["sample_points_faces"] = sample_points_faces.cpu().numpy()
-            self.viz["sample_points_lines"] = sample_points_lines.cpu().numpy()
-            self.viz["edge_adj"] = edge_adj.cpu().numpy()
+            self.viz["sample_points_faces"] = data["sample_points_faces"].cpu().numpy()
+            self.viz["sample_points_lines"] = data["sample_points_lines"].cpu().numpy()
+            self.viz["edge_adj"] = data["edge_adj"].cpu().numpy()
             self.viz["reconstructed_edges"] = recon_edges.cpu().numpy()
 
         return loss

@@ -1,0 +1,30 @@
+dataset:
+  root: /mnt/d/meshgpt/0planar_shapes_new
+  dataset_name: ABC
+  overfit: false
+  tokenized_batch_size: 16
+trainer:
+  learning_rate: 0.0001
+  gpu: 1
+  num_worker: 0
+  vis_recon_faces: true
+  train_transformer: false
+  condition_on_text: true
+  num_samples: -1
+  batch_size: 16
+  spawn: false
+  checkpoint_autoencoder: null
+  resume_from_checkpoint: null
+  evaluate: false
+  output: /root/workspace/python/src/img2brep/brep/outputs/2024_04_05_11_21_08/.
+  check_val_every_n_epoch: 100
+  accelerator: 32-true
+model:
+  model_name: PC_model
+  with_bn: true
+  channels: 3
+  output_channels: 1
+  need_normalize: true
+  voxelize_res: 256
+  test_threshold: 0.5
+  focal_alpha: 0.75

@@ -6,7 +6,7 @@ import trimesh
 import yaml
 from tqdm import tqdm
 
-data_root = Path(r"G:/Dataset/ABC/raw_data/abc_0000_obj_v00")
+data_root = Path(r"/mnt/d/duoteng/ABC_raw/data")
 max_ratio = 5
 
 

@@ -26,17 +26,7 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
         self.mode = v_training_mode
         self.conf = v_conf
         self.dataset_path = v_conf['root']
-<<<<<<< HEAD
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.pad_id = -1
-        self.vertices_all, self.faces_all = self.read_data_and_pool()
-        self._vertices = None
-        self._faces = None
 
-        self.vertices_all = self.vertices_all[0:2]
-        self.faces_all = self.faces_all[0:2]
-
-=======
         self.device = torch.device("cpu")
         
         self.pad_id = -1
@@ -47,7 +37,6 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
         self.faces_all = self.faces_all.tile(repeat_Num, 1, 1)
         self.face_edges_all = self.face_edges_all.tile(repeat_Num, 1, 1)
         
->>>>>>> 44a5a0b09aae59bd191e804100522eb604991d44
         self.sum_num = self.vertices_all.shape[0]
         
         print("\nDataset INFO")
@@ -260,6 +249,3 @@ class Transformer_Dataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         return {'codes': self.codes[idx], 'img_embed': self.img_embed[idx]}
-
-
-

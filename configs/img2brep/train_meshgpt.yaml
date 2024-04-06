@@ -1,33 +1,16 @@
 dataset:
-  root: /mnt/d/meshgpt/0planar_shapes_100
+  root: /mnt/d/meshgpt/0planar_shapes
   dataset_name: ABC
   overfit: false
   tokenized_batch_size: 16
 
 trainer:
-<<<<<<< HEAD
-  learning_rate: 1e-6
-  gpu: 1
+  learning_rate: 1e-4
+  gpu: 1 #[0,1,2,3,4,5,6,7,8,9]
   num_worker: 0
 
-  vis_recon_faces: false
-  train_transformer: false
-
-  spawn: false
-  num_samples: -1
-  batch_size: 2
-  checkpoint_autoencoder:
-  resume_from_checkpoint:
-  evaluate: false
-  output: .
-  check_val_every_n_epoch: 10000
-=======
-  learning_rate: 1e-4
-  gpu: [0,1,2,3,4,5,6,7,8,9]
-  num_worker: 8
-
   vis_recon_faces: true
-  train_transformer: true
+  train_transformer: false
   condition_on_text: true
 
   num_samples: -1
@@ -39,7 +22,6 @@ trainer:
   evaluate: false
   output: .
   check_val_every_n_epoch: 100
->>>>>>> 44a5a0b09aae59bd191e804100522eb604991d44
   accelerator: "32-true"
 
 model:

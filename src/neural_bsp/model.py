@@ -103,10 +103,10 @@ class conv_block(nn.Module):
 
 
 class up_conv(nn.Module):
-    def __init__(self, ch_in, ch_out):
+    def __init__(self, ch_in, ch_out, sample_factor=2):
         super(up_conv, self).__init__()
         self.up = nn.Sequential(
-            nn.Upsample(scale_factor=2),
+            nn.Upsample(scale_factor=sample_factor),
             nn.Conv3d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
             # nn.BatchNorm3d(ch_out),
             nn.ReLU(inplace=True)

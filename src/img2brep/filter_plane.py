@@ -6,7 +6,7 @@ import trimesh
 import yaml
 from tqdm import tqdm
 
-data_root = Path(r"G:/Dataset/ABC/raw_data/abc_0000_obj_v00")
+data_root = Path(r"/mnt/d/duoteng/ABC_raw/data")
 max_ratio = 5
 
 
@@ -19,7 +19,7 @@ def filter_mesh(v_root, v_folders, max_ratio):
                 continue
             mesh = trimesh.load_mesh(v_root / v_folder / ff, process=False, maintain_order=True)
             if mesh.faces.shape[0] < 10 or mesh.vertices.shape[0] < 10:
-                valid_ids[idx]=False
+                valid_ids[idx] = False
                 continue
 
             if mesh.split().shape[0] != 1:
@@ -40,6 +40,7 @@ def filter_mesh(v_root, v_folders, max_ratio):
 
     return valid_ids
 
+
 @ray.remote(num_cpus=1)
 def get_split_(folders):
     valid_ids = []
@@ -56,9 +57,10 @@ def get_split_(folders):
                     pos = str.find("type:", pos + 1)
                     if pos == -1:
                         break
-                    if str[pos + 6:pos + 8] not in ["Li", "Pl"]:
-                        is_pure_plane = False
-                        break
+
+                    # if str[pos + 6:pos + 8] not in ["Li", "Pl"]:
+                    #     is_pure_plane = False
+                    #     break
                     if str[pos + 6:pos + 8] == "Pl":
                         num_plane += 1
                     else:
@@ -73,6 +75,7 @@ def get_split_(folders):
 
     return valid_ids, cube_ids
 
+
 # Test all files under data_root
 # - Filter out empty meshes
 # - Filter out non-planar meshes
@@ -81,8 +84,10 @@ def get_splits(data_root):
     ray.init()
 
     folders = os.listdir(data_root)
+    folders.sort()
+    folders = folders[0:10000]
 
-    num_batches = 80 # Larger than number of cpus for a more efficient task assignment
+    num_batches = 80  # Larger than number of cpus for a more efficient task assignment
     batch_size = len(folders) // num_batches + 1
 
     valid_ids = []
@@ -90,7 +95,7 @@ def get_splits(data_root):
 
     tasks = []
     for i in range(num_batches):
-        tasks.append(get_split_.remote(folders[i*batch_size:min((i+1)*batch_size, len(folders))]))
+        tasks.append(get_split_.remote(folders[i * batch_size:min((i + 1) * batch_size, len(folders))]))
 
     results = ray.get(tasks)
     for item in results:
@@ -112,6 +117,7 @@ def get_splits(data_root):
         for item in new_set:
             f.write(item + "\n")
 
+
 # Test all files under data_root
 # - Filter out small shapes
 # - Filter out meshes that contain multiple parts
@@ -122,24 +128,24 @@ def test_obj(data_root, split_file):
 
     ids = sorted([item.strip() for item in open(split_file).readlines()])
 
-    num_batches = 80 # Larger than number of cpus for a more efficient task assignment
+    num_batches = 80  # Larger than number of cpus for a more efficient task assignment
     batch_size = len(ids) // num_batches + 1
 
     tasks = []
     for idx in range(num_batches):
-        task = filter_mesh.remote(data_root, ids[batch_size*idx:min(len(ids), batch_size*(idx+1))], max_ratio)
+        task = filter_mesh.remote(data_root, ids[batch_size * idx:min(len(ids), batch_size * (idx + 1))], max_ratio)
         # result = ray.get(filter_mesh.remote(data_root, item, max_ratio))
         tasks.append(task)
 
     results = ray.get(tasks)
-    valid_ids = sum(results,[])
+    valid_ids = sum(results, [])
 
     with open("valid_planar_shapes_except_cube.txt", "w") as f:
         for item in range(len(valid_ids)):
             if valid_ids[item]:
                 f.write(ids[item] + "\n")
 
+
 if __name__ == '__main__':
     get_splits(data_root)
     # test_obj(data_root, "planar_shapes_except_cube.txt")
-

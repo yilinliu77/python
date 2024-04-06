@@ -27,6 +27,7 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
         self.mode = v_training_mode
         self.conf = v_conf
         self.dataset_path = v_conf['root']
+
         self.device = torch.device("cpu")
 
         self.pad_id = -1
@@ -42,6 +43,8 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
         print("\nDataset INFO")
         print("Vertices:", self.vertices_all.shape)
         print("Faces:", self.faces_all.shape)
+
+        print(f"sum_num: {self.sum_num}")
 
         # self.training_range = int(0.8 * self.sum_num)
         # self.validation_range = int(0.9 * self.sum_num)
@@ -98,6 +101,9 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
             vertices = np.array(tri_mesh.vertices)
             triangle_vertices_idx = np.array(tri_mesh.triangles)
             triangle = vertices[triangle_vertices_idx]
+
+            if triangle.shape[0] > 100:
+                continue
 
             if triangle.shape[0] > 100:
                 continue
@@ -243,4 +249,8 @@ class Transformer_Dataset(torch.utils.data.Dataset):
         return self.codes.shape[0]
 
     def __getitem__(self, idx):
+<<<<<<< HEAD
         return {'codes': self.codes[idx], 'img_embed': self.img_embed[idx]}
+=======
+        return {'codes': self.codes[idx], 'img_embed': self.img_embed[idx]}
+>>>>>>> fbd7c8689bf6603ae4cec2d847cb3c8766155c27

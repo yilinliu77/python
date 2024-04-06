@@ -318,6 +318,7 @@ def get_brep(v_root, output_root, v_folders):
                     # each loop begins with -1
                     face_egde_idx_c.append(-1)
                     face_edge_idx_list_c = []
+
                     for edge in zip(sequence, sequence[1:] + sequence[0:1]):
                         if edge not in edge_idx_to_line_idx:
                             raise "Error"

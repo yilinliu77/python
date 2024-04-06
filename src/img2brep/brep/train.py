@@ -1,5 +1,7 @@
 import sys
 
+from shared.common_utils import export_point_cloud
+
 sys.path.append('../../../')
 import os.path
 from pathlib import Path
@@ -71,6 +73,8 @@ class ModelTraining(pl.LightningModule):
         self.autoencoder = AutoEncoder()
         self.model = self.autoencoder
 
+        self.viz = {}
+
     def train_dataloader(self):
         if not self.is_train_transformer:
             self.train_dataset = Auotoencoder_Dataset("training", self.hydra_conf["dataset"], )
@@ -121,7 +125,7 @@ class ModelTraining(pl.LightningModule):
 
         mask = (sample_points_lines != -1).all(dim=-1)
 
-        loss = self.model(edge=sample_points_lines, edge_adj=edge_adj)
+        loss = self.model(edge=sample_points_lines, mask=mask, edge_adj=edge_adj)
 
         self.log("Training_Loss", loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True,
@@ -132,21 +136,37 @@ class ModelTraining(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         data = batch
 
-        sample_points_faces = data["sample_points_faces"]
-        sample_points_lines = data["sample_points_lines"]
-        edge_adj = data["edge_adj"]
-
-        loss = self.model(edge=sample_points_lines, edge_adj=edge_adj)
+        recon_edges, loss = self.model(data, only_return_loss=False)
 
         self.log("Validation_Loss", loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True,
                  batch_size=self.batch_size)
+
+        if batch_idx == 0:
+            self.viz["sample_points_faces"] = data["sample_points_faces"].cpu().numpy()
+            self.viz["sample_points_lines"] = data["sample_points_lines"].cpu().numpy()
+            self.viz["edge_adj"] = data["edge_adj"].cpu().numpy()
+            self.viz["reconstructed_edges"] = recon_edges.cpu().numpy()
 
         return loss
 
     def on_validation_epoch_end(self):
         if self.trainer.sanity_checking:
             return
+
+        gt_edges = self.viz["sample_points_lines"][0]
+        recon_edges = self.viz["reconstructed_edges"][0]
+        edge_adj = self.viz["edge_adj"][0]
+
+        valid_flag = (gt_edges != -1).all(axis=-1).all(axis=-1)
+        gt_edges = gt_edges[valid_flag]
+        recon_edges = recon_edges[valid_flag]
+
+        export_point_cloud(str(self.log_root / (str(self.trainer.current_epoch) + "_gt_edges.ply")),
+                           gt_edges.reshape(-1, 3), )
+        export_point_cloud(str(self.log_root / (str(self.trainer.current_epoch) + "_recon_edges.ply")),
+                           recon_edges.reshape(-1, 3))
+
         return
 
 

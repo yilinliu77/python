@@ -137,7 +137,7 @@ class ModelTraining(pl.LightningModule):
         data = batch
 
         total_loss, loss_edge, loss_face, recon_edges, recon_faces = self.model(data, only_return_loss=False)
-        
+
         self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True,
                  batch_size=self.batch_size)
@@ -158,8 +158,8 @@ class ModelTraining(pl.LightningModule):
         return total_loss
 
     def on_validation_epoch_end(self):
-        if self.trainer.sanity_checking:
-            return
+        # if self.trainer.sanity_checking:
+        #     return
 
         gt_edges = self.viz["sample_points_lines"][0]
         gt_faces = self.viz["sample_points_faces"][0]
@@ -175,24 +175,23 @@ class ModelTraining(pl.LightningModule):
         gt_faces = gt_faces[valid_flag]
         recon_faces = recon_faces[valid_flag]
 
-        points = np.concatenate((
-            gt_edges.reshape(-1, 3),
-            recon_edges.reshape(-1, 3),
-            gt_faces.reshape(-1, 3),
-            recon_faces.reshape(-1, 3)
-            ), axis=0)
+        edge_points = np.concatenate((gt_edges, recon_edges), axis=0).reshape(-1, 3)
+        edge_colors = np.concatenate(
+                (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0] * 20, axis=0),
+                 np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0] * 20, axis=0)), axis=0)
 
-        color = np.concatenate((
-            np.repeat(np.array([[1, 0, 0]]), gt_edges.shape[0], axis=0),
-            np.repeat(np.array([[0, 1, 0]]), recon_edges.shape[0], axis=0),
-            np.repeat(np.array([[0, 0, 1]]), gt_faces.shape[0], axis=0),
-            np.repeat(np.array([[1, 1, 0]]), recon_faces.shape[0], axis=0),
-            ), axis=0)
+        face_points = np.concatenate((gt_faces, recon_faces), axis=0).reshape(-1, 3)
+        face_colors = np.concatenate(
+                (np.repeat(np.array([[0, 0, 255]], dtype=np.uint8), gt_faces.shape[0] * 400, axis=0),
+                 np.repeat(np.array([[255, 255, 0]], dtype=np.uint8), recon_faces.shape[0] * 400, axis=0)), axis=0)
 
         pc = o3d.geometry.PointCloud()
-        pc.points = o3d.utility.Vector3dVector(points)
-        pc.colors = o3d.utility.Vector3dVector(color)
-        o3d.io.write_point_cloud(str(self.log_root / (str(self.trainer.current_epoch) + "_viz.ply")), pc)
+        pc.points = o3d.utility.Vector3dVector(edge_points)
+        pc.colors = o3d.utility.Vector3dVector(edge_colors)
+        o3d.io.write_point_cloud(str(self.log_root / (str(self.trainer.current_epoch) + "_viz_edges.ply")), pc)
+        pc.points = o3d.utility.Vector3dVector(face_points)
+        pc.colors = o3d.utility.Vector3dVector(face_colors)
+        o3d.io.write_point_cloud(str(self.log_root / (str(self.trainer.current_epoch) + "_viz_faces.ply")), pc)
         return
 
 

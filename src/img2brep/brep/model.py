@@ -440,6 +440,8 @@ class AutoEncoder(nn.Module):
         edge_embeddings = self.encode_edge_coords(sample_points_edges, edge_mask)
         face_embeddings = self.encode_face_coords(sample_points_faces, face_mask)
 
+
+
         # Reconstruct the edge and face points
         recon_edges, recon_faces = self.decode(edge_embeddings, edge_mask, face_embeddings, face_mask)
 

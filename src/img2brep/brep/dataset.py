@@ -33,6 +33,7 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
         self.max_face_num = -1
         self.max_edge_num = -1
         self.max_edge_adj_num = -1
+        self.face_edges_idx_shape1 = -1
 
         self.pad_id = -1
 
@@ -83,6 +84,9 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
             if edge_adj[(edge_adj != -1).all(axis=-1)].shape[0] > self.max_edge_adj_num:
                 self.max_edge_adj_num = edge_adj[(edge_adj != -1).all(axis=-1)].shape[0]
 
+            if data_npz['face_edge_idx'].shape[1] > self.face_edges_idx_shape1:
+                self.face_edges_idx_shape1 = data_npz['face_edge_idx'].shape[1]
+
         assert self.max_face_num > 0 and self.max_edge_num > 0
 
     def __len__(self):
@@ -93,13 +97,17 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
 
         data_npz = np.load(os.path.join(folder_path, "data.npz"))
 
-        # (num_faces, max_num_edges)
-        face_edges_idx = torch.from_numpy(data_npz['face_edge_idx']).to(torch.int64).to(self.device)
+        # (num_faces, max_num_edges_this_face)
+        face_edge_idx = torch.from_numpy(data_npz['face_edge_idx']).to(torch.int64).to(self.device)
+        face_edge_idx = F.pad(face_edge_idx, (0, self.face_edges_idx_shape1 - face_edge_idx.shape[1],
+                                              0, self.max_face_num - face_edge_idx.shape[0]), 'constant', -1)
+        face_edge_idx = face_edge_idx[:, 1:]  # remove the faca idx
 
         # (num_faces, 400, 3)
         sample_points_faces = torch.from_numpy(data_npz['sample_points_faces']).to(torch.float32).to(self.device)
         sample_points_faces = F.pad(sample_points_faces,
                                     (0, 0, 0, 0, 0, self.max_face_num - sample_points_faces.shape[0]), 'constant', -1)
+
         sample_points_faces = rearrange(sample_points_faces, 'f (h w) dim -> f h w dim', h=20)
 
         # (num_lines, 20, 3)
@@ -115,9 +123,23 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
         edge_adj = edge_adj[(edge_adj != -1).all(dim=-1)]
         edge_adj = F.pad(edge_adj, (0, 0, 0, self.max_edge_adj_num - edge_adj.shape[0]), 'constant', -1)
 
-        return {"sample_points_faces": sample_points_faces,
-                "sample_points_lines": sample_points_lines,
-                "edge_adj"           : edge_adj}
+        # (num_faces, num_faces)
+        face_adj = torch.from_numpy(data_npz['face_adj']).to(torch.int64).to(self.device)
+        face_adj = F.pad(face_adj, (0, self.max_face_num - face_adj.shape[0], 0, self.max_face_num - face_adj.shape[1]),
+                         'constant', -1)
+
+        # (num_edges, 2)
+        edge_face_idx = torch.from_numpy(data_npz['edge_face_idx']).to(torch.int64).to(self.device)
+        edge_face_idx = F.pad(edge_face_idx, (0, 0, 0, self.max_edge_num - edge_face_idx.shape[0]), 'constant', -1)
+
+        return {
+            "face_edge_idx"      : face_edge_idx,
+            "sample_points_faces": sample_points_faces,
+            "sample_points_lines": sample_points_lines,
+            "edge_adj"           : edge_adj,
+            "face_adj"           : face_adj,
+            "edge_face_idx"      : edge_face_idx,
+            }
 
 
 class Transformer_Dataset(torch.utils.data.Dataset):

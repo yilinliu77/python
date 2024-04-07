@@ -177,13 +177,13 @@ class ModelTraining(pl.LightningModule):
 
         edge_points = np.concatenate((gt_edges, recon_edges), axis=0).reshape(-1, 3)
         edge_colors = np.concatenate(
-            (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0]*20, axis=0),
-                  np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0]*20, axis=0)), axis=0)
+                (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0] * 20, axis=0),
+                 np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0] * 20, axis=0)), axis=0)
 
         face_points = np.concatenate((gt_faces, recon_faces), axis=0).reshape(-1, 3)
         face_colors = np.concatenate(
-            (np.repeat(np.array([[0, 0, 255]], dtype=np.uint8), gt_faces.shape[0]*400, axis=0),
-                    np.repeat(np.array([[255, 255, 0]], dtype=np.uint8), recon_faces.shape[0]*400, axis=0)), axis=0)
+                (np.repeat(np.array([[0, 0, 255]], dtype=np.uint8), gt_faces.shape[0] * 400, axis=0),
+                 np.repeat(np.array([[255, 255, 0]], dtype=np.uint8), recon_faces.shape[0] * 400, axis=0)), axis=0)
 
         pc = o3d.geometry.PointCloud()
         pc.points = o3d.utility.Vector3dVector(edge_points)

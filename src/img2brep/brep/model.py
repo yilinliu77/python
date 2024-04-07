@@ -199,7 +199,8 @@ class ResnetBlock(Module):
 class AutoEncoder(nn.Module):
     def __init__(self,
                  max_length=100,
-                 dim_codebook=196,
+                 dim_codebook_edge=256,
+                 dim_codebook_face=256,
                  encoder_dims_through_depth: Tuple[int, ...] = (
                          64, 128, 256, 256
                          ),
@@ -214,7 +215,8 @@ class AutoEncoder(nn.Module):
                  ):
         super(AutoEncoder, self).__init__()
         self.max_length = max_length
-        self.dim_codebook = dim_codebook
+        self.dim_codebook_edge = dim_codebook_edge
+        self.dim_codebook_face = dim_codebook_face
         self.pad_id = -1
 
         # 1. Convolutional encoder
@@ -227,7 +229,7 @@ class AutoEncoder(nn.Module):
                 nn.ReLU(),
                 nn.AdaptiveAvgPool1d(1),
                 nn.Flatten(),
-                nn.Linear(128, dim_codebook)
+                nn.Linear(128, dim_codebook_edge)
                 )
         self.face_encoder = nn.Sequential(
                 nn.Conv2d(in_channels=3, out_channels=64, kernel_size=7, stride=1, padding=3),
@@ -237,14 +239,14 @@ class AutoEncoder(nn.Module):
                 nn.ReLU(),
                 nn.AdaptiveAvgPool2d((1, 1)),
                 nn.Flatten(),
-                nn.Linear(128, dim_codebook)
+                nn.Linear(128, dim_codebook_face)
                 )
 
         # 2. GCN
         init_encoder_dim, *encoder_dims_through_depth = encoder_dims_through_depth
         curr_dim = init_encoder_dim
 
-        self.init_sage_conv = SAGEConv(dim_codebook, init_encoder_dim, normalize=True, project=True)
+        self.init_sage_conv = SAGEConv(dim_codebook_edge, init_encoder_dim, normalize=True, project=True)
 
         self.init_encoder_act_and_norm = nn.Sequential(
                 nn.SiLU(),
@@ -273,7 +275,7 @@ class AutoEncoder(nn.Module):
 
         # For edges
         self.edge_decoder_init = nn.Sequential(
-                nn.Conv1d(196, init_decoder_dim,
+                nn.Conv1d(dim_codebook_edge, init_decoder_dim,
                           kernel_size=init_decoder_conv_kernel, padding=init_decoder_conv_kernel // 2),
                 nn.SiLU(),
                 Rearrange('b c n -> b n c'),
@@ -296,7 +298,7 @@ class AutoEncoder(nn.Module):
 
         # For faces
         self.face_decoder_init = nn.Sequential(
-                nn.Conv1d(196, init_decoder_dim,
+                nn.Conv1d(dim_codebook_face, init_decoder_dim,
                           kernel_size=init_decoder_conv_kernel, padding=init_decoder_conv_kernel // 2),
                 nn.SiLU(),
                 Rearrange('b c n -> b n c'),
@@ -317,6 +319,8 @@ class AutoEncoder(nn.Module):
                 nn.Linear(curr_dim, 20 * 20 * 3),
                 Rearrange('... (v w c) -> ... v w c', v=20, w=20)
                 )
+
+        self.null_intersection = nn.Parameter(torch.rand(dim_codebook_edge))
 
     # edge: (B, N, 20, 3)
     # edge_mask: (B, N)
@@ -396,6 +400,43 @@ class AutoEncoder(nn.Module):
 
         return recon_edges, recon_faces
 
+    def decode_edge(self, edge_embeddings, edge_mask):
+        B, N, _ = edge_embeddings.size()
+
+        # Decode edges
+        edge_mask = rearrange(edge_mask, 'b n -> b 1 n')
+        x = edge_embeddings
+
+        x = rearrange(x, 'b n d -> b d n')
+        x = x.masked_fill(~edge_mask, 0.)
+        x = self.edge_decoder_init(x)
+        for resnet_block in self.edge_decoder:
+            x = resnet_block(x, mask=edge_mask)
+
+        recon_edges = x * edge_mask
+        recon_edges = rearrange(recon_edges, 'b d n -> b n d')
+        recon_edges = self.to_edge(recon_edges)
+
+        return recon_edges
+
+    def decode_face(self, face_embeddings, face_mask):
+        # Decode faces
+        face_mask = rearrange(face_mask, 'b n -> b 1 n')
+        x = face_embeddings
+
+        x = rearrange(x, 'b n d -> b d n')
+        x = x.masked_fill(~face_mask, 0.)
+        x = self.face_decoder_init(x)
+        for resnet_block in self.face_decoder:
+            x = resnet_block(x, mask=face_mask)
+
+        # Mask out invalide points
+        recon_faces = x * face_mask
+        recon_faces = rearrange(recon_faces, 'b d n -> b n d')
+        recon_faces = self.to_face(recon_faces)
+
+        return recon_faces
+
     def encode_edge_coords(self, edge, edge_mask):
         B, N, _, _ = edge.size()
 
@@ -423,10 +464,29 @@ class AutoEncoder(nn.Module):
 
         return face_embed
 
+    def intersection(self, face_embeddings, edge_face_idx):
+        edge_face_idx_mask = edge_face_idx != -1
+        edge_face_idx[~edge_face_idx_mask] = 0
+
+        edge_face_embeddings = torch.gather(face_embeddings[:, None].repeat((1, edge_face_idx.shape[1], 1, 1)), dim=2,
+                                            index=edge_face_idx[:, ..., None].repeat(
+                                                    (1, 1, 1, face_embeddings.shape[-1])))
+
+        face_embeddings1 = edge_face_embeddings[:, :, 0, :]
+        face_embeddings2 = edge_face_embeddings[:, :, 1, :]
+
+        intersection_embedding = face_embeddings1 * face_embeddings2
+        intersection_embedding[~edge_face_idx_mask.all(dim=-1)] = 0
+
+        return intersection_embedding
+
     def forward(self, v_data, only_return_recon=False, only_return_loss=True, **kwargs):
+        face_edge_idx = v_data["face_edge_idx"]
         sample_points_faces = v_data["sample_points_faces"]
         sample_points_edges = v_data["sample_points_lines"]
         edge_adj = v_data["edge_adj"]
+        face_adj = v_data["face_adj"]
+        edge_face_idx = v_data["edge_face_idx"]  # N * 2  (face_idx1, face_idx2)
 
         # GT
         gt_edges = sample_points_edges.clone()
@@ -436,14 +496,58 @@ class AutoEncoder(nn.Module):
         edge_mask = (sample_points_edges != -1).all(dim=-1).all(dim=-1)
         face_mask = (sample_points_faces != -1).all(dim=-1).all(dim=-1).all(dim=-1)
 
-        # Encode the edge and face points
+        # 1. Encode the edge and face points
         edge_embeddings = self.encode_edge_coords(sample_points_edges, edge_mask)
         face_embeddings = self.encode_face_coords(sample_points_faces, face_mask)
 
+        # 2. GCN
+        # needs to be offset by number of faces for each batch
+        edge_adj_mask = (edge_adj != -1).all(dim=-1)
+        edge_index_offsets = reduce(edge_mask.long(), 'b ne -> b', 'sum')
+        edge_index_offsets = F.pad(edge_index_offsets.cumsum(dim=0), (1, -1), value=0)
+        edge_index_offsets = rearrange(edge_index_offsets, 'b -> b 1 1')
 
+        edge_adj += edge_index_offsets
+        edge_adj = edge_adj[edge_adj_mask]
+        edge_adj = rearrange(edge_adj, 'be ij -> ij be')
 
-        # Reconstruct the edge and face points
-        recon_edges, recon_faces = self.decode(edge_embeddings, edge_mask, face_embeddings, face_mask)
+        # next prepare the face_mask for using masked_select and masked_scatter
+        orig_face_embed_shape = edge_embeddings.shape[:2]
+
+        edge_embeddings = edge_embeddings[edge_mask]
+
+        edge_embeddings = self.init_sage_conv(edge_embeddings, edge_adj)
+        edge_embeddings = self.init_encoder_act_and_norm(edge_embeddings)
+
+        for conv in self.encoders:
+            edge_embeddings = conv(edge_embeddings, edge_adj)
+
+        shape = (*orig_face_embed_shape, edge_embeddings.shape[-1])
+
+        edge_embeddings = edge_embeddings.new_zeros(shape).masked_scatter(rearrange(edge_mask, '... -> ... 1'),
+                                                                          edge_embeddings)
+
+        # aggregate the egde embeddings to face embeddings plus
+        face_edge_idx_mask = face_edge_idx != -1
+        face_edge_idx[~face_edge_idx_mask] = 0
+        face_embeddings_plus = torch.gather(edge_embeddings[:, None].repeat((1, face_edge_idx.shape[1], 1, 1)), dim=2,
+                                            index=face_edge_idx[:, ..., None].repeat(
+                                                    (1, 1, 1, edge_embeddings.shape[-1])))
+        face_edge_idx[~face_edge_idx_mask] = -1
+
+        # mask out invalids to 0
+        face_embeddings_plus[~face_edge_idx_mask] = 0
+        face_embeddings_plus = face_embeddings_plus.sum(dim=2) / face_edge_idx_mask.sum(dim=2, keepdim=True).clamp(
+                min=1e-5)
+        face_embeddings += face_embeddings_plus
+
+        # 3. Reconstruct the edge and face points
+        recon_faces = self.decode_face(face_embeddings, face_mask)
+        intersection_edge_embeddings = self.intersection(face_embeddings, edge_face_idx)
+        recon_edges = self.decode_edge(intersection_edge_embeddings, edge_mask)
+        # null_intersection_edge_embeddings = self.null_intersection(face_embeddings, face_edge_idx)
+
+        # recon_edges, recon_faces = self.decode(edge_embeddings, edge_mask, face_embeddings, face_mask)
 
         if only_return_recon:
             return recon_edges, recon_faces

@@ -19,9 +19,10 @@ from src.img2brep.sample_points import sample_points_on_line, sample_points_on_p
 
 from scipy.interpolate import BSpline
 
-data_root = Path(r"H:\Data\SIGA23\Baseline\data\ABC_DATA")
-data_split = r"valid_planar_shapes_except_cube.txt"
-output_root = Path(r"H:\Data\SIGA23\Baseline\data\0planar_shapes_new")
+data_root = Path(r"G:/Dataset/ABC/raw_data/abc_0000_obj_v00")
+# data_split = r"valid_planar_shapes_except_cube.txt"
+data_split = r"C:/repo/python/src/img2brep/data/train_split_deepcad_10000.txt"
+output_root = Path(r"G:/Dataset/img2brep/deepcad_10000/main_data")
 
 
 # data_root = Path(r"H:\Data\SIGA23\Baseline\data\abc_0000_obj_v00")

@@ -1,6 +1,6 @@
 dataset:
-  root: /mnt/d/meshgpt/0planar_shapes_new
-  #  root: G:/Projects/img2brep/data/0planar_shapes_new
+  #  root: /mnt/d/meshgpt/0planar_shapes_new
+  root: G:/Projects/img2brep/data/0planar_shapes_new
   dataset_name: ABC
   overfit: false
   tokenized_batch_size: 16
@@ -22,7 +22,7 @@ trainer:
   resume_from_checkpoint:
   evaluate: false
   output: .
-  check_val_every_n_epoch: 100
+  check_val_every_n_epoch: 10
   accelerator: "32-true"
 
 model:

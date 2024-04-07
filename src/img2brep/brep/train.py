@@ -119,26 +119,32 @@ class ModelTraining(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         data = batch
 
-        sample_points_faces = data["sample_points_faces"]
-        sample_points_lines = data["sample_points_lines"]
-        edge_adj = data["edge_adj"]
+        total_loss, loss_edge, loss_face = self.model(data, only_return_loss=True)
 
-        mask = (sample_points_lines != -1).all(dim=-1)
-
-        loss = self.model(edge=sample_points_lines, mask=mask, edge_adj=edge_adj)
-
-        self.log("Training_Loss", loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
+        self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
+                 sync_dist=True,
+                 batch_size=self.batch_size)
+        self.log("Training_Edge_Loss", loss_edge, prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                 sync_dist=True,
+                 batch_size=self.batch_size)
+        self.log("Training_Face_Loss", loss_face, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True,
                  batch_size=self.batch_size)
 
-        return loss
+        return total_loss
 
     def validation_step(self, batch, batch_idx):
         data = batch
 
-        recon_edges, loss = self.model(data, only_return_loss=False)
-
-        self.log("Validation_Loss", loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
+        total_loss, loss_edge, loss_face, recon_edges, recon_faces = self.model(data, only_return_loss=False)
+        
+        self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                 sync_dist=True,
+                 batch_size=self.batch_size)
+        self.log("Validation_Edge_Loss", loss_edge, prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                 sync_dist=True,
+                 batch_size=self.batch_size)
+        self.log("Validation_Face_Loss", loss_face, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True,
                  batch_size=self.batch_size)
 
@@ -147,26 +153,46 @@ class ModelTraining(pl.LightningModule):
             self.viz["sample_points_lines"] = data["sample_points_lines"].cpu().numpy()
             self.viz["edge_adj"] = data["edge_adj"].cpu().numpy()
             self.viz["reconstructed_edges"] = recon_edges.cpu().numpy()
+            self.viz["reconstructed_faces"] = recon_faces.cpu().numpy()
 
-        return loss
+        return total_loss
 
     def on_validation_epoch_end(self):
         if self.trainer.sanity_checking:
             return
 
         gt_edges = self.viz["sample_points_lines"][0]
+        gt_faces = self.viz["sample_points_faces"][0]
         recon_edges = self.viz["reconstructed_edges"][0]
+        recon_faces = self.viz["reconstructed_faces"][0]
         edge_adj = self.viz["edge_adj"][0]
 
         valid_flag = (gt_edges != -1).all(axis=-1).all(axis=-1)
         gt_edges = gt_edges[valid_flag]
         recon_edges = recon_edges[valid_flag]
 
-        export_point_cloud(str(self.log_root / (str(self.trainer.current_epoch) + "_gt_edges.ply")),
-                           gt_edges.reshape(-1, 3), )
-        export_point_cloud(str(self.log_root / (str(self.trainer.current_epoch) + "_recon_edges.ply")),
-                           recon_edges.reshape(-1, 3))
+        valid_flag = (gt_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)
+        gt_faces = gt_faces[valid_flag]
+        recon_faces = recon_faces[valid_flag]
 
+        points = np.concatenate((
+            gt_edges.reshape(-1, 3),
+            recon_edges.reshape(-1, 3),
+            gt_faces.reshape(-1, 3),
+            recon_faces.reshape(-1, 3)
+            ), axis=0)
+
+        color = np.concatenate((
+            np.repeat(np.array([[1, 0, 0]]), gt_edges.shape[0], axis=0),
+            np.repeat(np.array([[0, 1, 0]]), recon_edges.shape[0], axis=0),
+            np.repeat(np.array([[0, 0, 1]]), gt_faces.shape[0], axis=0),
+            np.repeat(np.array([[1, 1, 0]]), recon_faces.shape[0], axis=0),
+            ), axis=0)
+
+        pc = o3d.geometry.PointCloud()
+        pc.points = o3d.utility.Vector3dVector(points)
+        pc.colors = o3d.utility.Vector3dVector(color)
+        o3d.io.write_point_cloud(str(self.log_root / (str(self.trainer.current_epoch) + "_viz.ply")), pc)
         return
 
 

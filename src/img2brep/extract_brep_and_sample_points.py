@@ -51,9 +51,34 @@ def pad_to_numpy2(arrays, pad_value=-1):
     return padded_arrays
 
 
+def loops_to_obj(loops, mesh_vertex, obj_file_path):
+    with open(obj_file_path, 'w') as file:
+        # Write vertices to the file
+        for vertex in mesh_vertex:
+            file.write(f"v {vertex[0]} {vertex[1]} {vertex[2]}\n")
+
+        # Write faces to the file
+        for loop in loops:
+            # OBJ files are 1-indexed, so we add 1 to each index
+            face_indices = [str(idx + 1) for idx in loop]
+            file.write("f " + " ".join(face_indices) + "\n")
+
+
+def calculate_curve_length(points):
+    # Calculate the differences between adjacent points
+    diff = np.diff(points, axis=0)
+
+    # Calculate the Euclidean distance between adjacent points
+    distances = np.linalg.norm(diff, axis=1)
+
+    # Sum up the distances to get the total length
+    total_length = np.sum(distances)
+
+    return total_length
+
+
 # @ray.remote(num_cpus=1)
 def get_brep(v_root, output_root, v_folders):
-    # v_folders = ["00000325"]
     single_loop_folder = []
 
     sample_points_lines_list = []
@@ -308,6 +333,8 @@ def get_brep(v_root, output_root, v_folders):
 
             face_edge_idx = []
             edge_adj = []
+
+            face_edge_idx_lists = []
             for face_idx in range(len(plane_to_line)):
                 # each begins with face_idx
                 face_egde_idx_c = [face_idx]
@@ -318,8 +345,7 @@ def get_brep(v_root, output_root, v_folders):
                 for sequence in plane:
                     # each loop begins with -1
                     face_egde_idx_c.append(-1)
-                    face_edge_idx_list_c = []
-
+                    face_edge_idx_list_c = [face_idx]
                     for edge in zip(sequence, sequence[1:] + sequence[0:1]):
                         if edge not in edge_idx_to_line_idx:
                             raise "Error"
@@ -327,8 +353,11 @@ def get_brep(v_root, output_root, v_folders):
                         face_egde_idx_c.append(line_idx)
                         face_edge_idx_list_c.append(line_idx)
 
+                    face_edge_idx_lists.append(face_edge_idx_list_c)
+
                     # adj line idx mean adj
-                    edge_adj_c = np.column_stack((face_edge_idx_list_c, np.roll(face_edge_idx_list_c, -1)))  # N * 2
+                    edge_adj_c = np.column_stack(
+                            (face_edge_idx_list_c[1::], np.roll(face_edge_idx_list_c[1::], -1)))  # N * 2
                     edge_adj_c_list.append(edge_adj_c)
 
                 edge_adj.append(np.concatenate(edge_adj_c_list, axis=0))
@@ -340,11 +369,63 @@ def get_brep(v_root, output_root, v_folders):
 
             # np.save(output_root / v_folder / "face_edge_idx.npy", face_edge_idx)
 
+            # we now suggest two loop at most
+            edge_face_idx = -1 * np.ones((len(sample_points_lines), 2), dtype=np.int32)
+            face_adj = np.zeros((len(planes), len(planes)), dtype=bool)
+
+            for face_idx1, edge_sequence1 in enumerate(face_edge_idx_lists):
+                for face_idx2, edge_sequence2 in enumerate(face_edge_idx_lists):
+                    face_idx1, face_idx2 = edge_sequence1[0], edge_sequence2[0]
+                    if face_idx1 == face_idx2:
+                        face_adj[face_idx1, face_idx2] = True
+                        continue
+
+                    intersection = list(set(edge_sequence1[1::]) & set(edge_sequence2[1::]))
+
+                    for edge_idx in intersection:
+                        edge_face_idx[edge_idx, 0] = face_idx1
+                        edge_face_idx[edge_idx, 1] = face_idx2
+                        face_adj[face_idx1, face_idx2] = True
+
+                    # if len(intersection) == 0:
+                    #     continue
+                    #
+                    # elif len(intersection) == 1:
+                    #     face_adj[face_idx1, face_idx2] = intersection[0]
+                    #     face_adj[face_idx2, face_idx1] = intersection[0]
+                    #
+                    # elif len(intersection) == 2:
+                    #     length1 = calculate_curve_length(sample_points_lines[intersection[0]])
+                    #     length2 = calculate_curve_length(sample_points_lines[intersection[1]])
+                    #     intersection = intersection[0] if length1 > length2 else intersection[1]
+                    #     face_adj[face_idx1, face_idx2] = intersection
+                    #     face_adj[face_idx2, face_idx1] = intersection
+                    #
+                    # else:
+                    #     print(v_folder)
+                    #     print(face_idx1, face_idx2)
+                    #     print(edge_sequence1[1::], edge_sequence2[1::])
+                    #     print(intersection)
+                    #
+                    #     mesh_vertex = np.array(mesh.vertices)
+                    #
+                    #     loops_to_obj(plane_to_line[face_idx1], mesh_vertex, output_root / v_folder / "error_loop1.obj")
+                    #     loops_to_obj(plane_to_line[face_idx2], mesh_vertex, output_root / v_folder / "error_loop2.obj")
+                    #
+                    #     raise ValueError("Error: intersection > 2")
+
+            # check each edge in face adj
+            assert edge_face_idx.min() != -1
+
+            face_edge_idx = face_edge_idx[:, 1:]
+
             data_dict = {
                 'face_edge_idx'      : face_edge_idx,
                 'sample_points_lines': np.stack(sample_points_lines),
                 'sample_points_faces': np.stack(sample_points_faces),
-                'edge_adj'           : edge_adj
+                'edge_adj'           : edge_adj,
+                'edge_face_idx'      : edge_face_idx,
+                'face_adj'           : face_adj,
                 }
 
             np.savez_compressed(output_root / v_folder / "data.npz", **data_dict)
@@ -430,6 +511,7 @@ if __name__ == '__main__':
 
     # single process
     if False:
+        total_ids = ["00000325"]
         get_brep(data_root, output_root, total_ids)
     else:
         ray.init(

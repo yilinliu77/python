@@ -7,6 +7,7 @@ import open3d as o3d
 import numpy as np
 import yaml
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
+from OCC.Core.NCollection import NCollection_Map
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX, TopAbs_WIRE
 from OCC.Core.GeomAbs import (GeomAbs_Circle, GeomAbs_Line, GeomAbs_BSplineCurve, GeomAbs_Ellipse,
                               GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone,
@@ -40,7 +41,7 @@ num_max_primitives = 100000
 
 # @ray.remote(num_cpus=1)
 def get_brep(v_root, output_root, v_folders):
-    # v_folders = ["00000325"]
+    # v_folders = ["00001000"]
     single_loop_folder = []
 
     for idx, v_folder in enumerate(v_folders):
@@ -82,20 +83,21 @@ def get_brep(v_root, output_root, v_folders):
                     explorer.Next()
 
             # Explore and list faces, edges, and vertices
-            all_faces = list(explore_shape(shape, TopAbs_FACE))
-            num_faces = len(set([face.HashCode(num_max_primitives) for face in all_faces]))
-            all_edges = list(explore_shape(shape, TopAbs_EDGE))
-            num_edges = len(set([edge.HashCode(num_max_primitives) for edge in all_edges]))
+            face_dict = {}
+            for face in explore_shape(shape, TopAbs_FACE):
+                if face not in face_dict and face.Reversed() not in face_dict:
+                    face_dict[face] = len(face_dict)
+            num_faces = len(face_dict)
+            edge_dict = {}
+            for edge in explore_shape(shape, TopAbs_EDGE):
+                if edge not in edge_dict and edge.Reversed() not in edge_dict:
+                    edge_dict[edge] = len(edge_dict)
+            num_edges = len(edge_dict)
             all_vertices = list(explore_shape(shape, TopAbs_VERTEX))
 
             # Sample points in face
-            face_dict = {}
             face_sample_points = []
-            for face in explore_shape(shape, TopAbs_FACE):
-                hash_face = face.HashCode(num_max_primitives)
-                if hash_face in face_dict:
-                    continue
-                face_dict[hash_face] = len(face_dict)
+            for face in face_dict:
                 surface = BRepAdaptor_Surface(face)
 
                 if surface.GetType() not in [GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone,
@@ -117,19 +119,14 @@ def get_brep(v_root, output_root, v_folders):
                 face_sample_points.append(np.stack(points, axis=0).reshape(20, 20, 3))
             face_sample_points = np.stack(face_sample_points, axis=0)
             face_sample_points = transform(face_sample_points)
-            assert len(face_dict) == num_faces
+            assert len(face_dict) == num_faces == face_sample_points.shape[0]
 
             # Sample points in edges
-            edge_dict = {}
             edge_sample_points = []
-            for edge in explore_shape(shape, TopAbs_EDGE):
+            for edge in edge_dict:
                 curve = BRepAdaptor_Curve(edge)
                 if curve.GetType() not in [GeomAbs_Circle, GeomAbs_Line, GeomAbs_Ellipse, GeomAbs_BSplineCurve]:
                     raise ValueError("Unsupported curve type: {}".format(curve.GetType()))
-                hash_curve = edge.HashCode(num_max_primitives)
-                if hash_curve in edge_dict:
-                    continue
-                edge_dict[hash_curve] = len(edge_dict)
                 # Sample 20 points along it
                 range_start = curve.FirstParameter()
                 range_end = curve.LastParameter()
@@ -141,38 +138,39 @@ def get_brep(v_root, output_root, v_folders):
                 edge_sample_points.append(np.stack(sample_points, axis=0))
             edge_sample_points = np.stack(edge_sample_points, axis=0)
             edge_sample_points = transform(edge_sample_points)
-            assert len(edge_dict) == num_edges
+            assert len(edge_dict) == num_edges == edge_sample_points.shape[0]
 
             # (N, X) shows every loop with each face, -2 denotes a start token and pad with -1
             face_edge_connectivity = []
-            for face in explore_shape(shape, TopAbs_FACE):
+            for face in face_dict:
                 loops = []
 
                 for wire in explore_shape(face, TopAbs_WIRE):
                     loops.append(-2)
                     for edge in explore_shape(wire, TopAbs_EDGE):
-                        if edge.HashCode(100000) not in edge_dict:
-                            raise
-                        loops.append(edge_dict[edge.HashCode(100000)])
+                        if edge in edge_dict:
+                            loops.append(edge_dict[edge])
+                        elif edge.Reversed() in edge_dict:
+                            loops.append(edge_dict[edge.Reversed()])
+                        else:
+                            raise ValueError("Edge not in edge_dict")
                 face_edge_connectivity.append(loops)
 
             # (M, 2) shows the indexes of all the connected edges
             edge_connectivity = []
             edge_vertex_map = {}
-            for edge in explore_shape(shape, TopAbs_EDGE):
-                hash_edge = edge.HashCode(num_max_primitives)
-                if hash_edge not in edge_dict:
-                    raise ValueError("Edge not in edge_dict")
+            for edge in edge_dict:
                 # Get vertices of the current edge
                 for vertex in explore_shape(edge, TopAbs_VERTEX):
                     if vertex not in edge_vertex_map:
-                        edge_vertex_map[vertex] = [hash_edge]
+                        edge_vertex_map[vertex] = [edge]
                     else:
-                        edge_vertex_map[vertex].append(hash_edge)
+                        edge_vertex_map[vertex].append(edge)
             for vertex, edges in edge_vertex_map.items():
                 for i in range(len(edges)):
-                    id1 = edge_dict[edges[i]]
-                    id2 = edge_dict[edges[(i + 1) % len(edges)]]
+                    id1 = edge_dict[edges[i]] if edges[i] in edge_dict else edge_dict[edges[i].Reversed()]
+                    edge2 = edges[(i + 1) % len(edges)]
+                    id2 = edge_dict[edge2] if edge2 in edge_dict else edge_dict[edge2.Reversed()]
                     if id1 < id2:
                         edge_connectivity.append([id1, id2])
                     else:
@@ -183,27 +181,29 @@ def get_brep(v_root, output_root, v_folders):
             face_edge_map = {}
             # (M, 2) shows the index of faces to intersect with an edge
             edge_face_idx = np.zeros((len(edge_dict), 2), dtype=np.int32)
-            for face in explore_shape(shape, TopAbs_FACE):
-                hash_face = face.HashCode(num_max_primitives)
-                if hash_face not in face_dict:
-                    raise ValueError("Face not in face_dict")
+            for face in face_dict:
                 # Get edges of the current face
                 for edge in explore_shape(face, TopAbs_EDGE):
-                    hash_edge = edge.HashCode(num_max_primitives)
-                    if hash_edge not in face_edge_map:
-                        face_edge_map[hash_edge] = [hash_face]
+                    if edge in face_edge_map:
+                        face_edge_map[edge].append(face)
+                    elif edge.Reversed() in face_edge_map:
+                        face_edge_map[edge.Reversed()].append(face)
                     else:
-                        face_edge_map[hash_edge].append(hash_face)
+                        face_edge_map[edge] = [face]
             for item in face_edge_map:
                 if len(face_edge_map[item]) != 2:
                     raise ValueError("Edge results by more than 2 faces.")
             for edge, faces in face_edge_map.items():
-                id1 = face_dict[faces[0]]
-                id2 = face_dict[faces[1]]
+                id1 = face_dict[faces[0]] if faces[0] in face_dict else face_dict[faces[0].Reversed()]
+                id2 = face_dict[faces[1]] if faces[1] in face_dict else face_dict[faces[1].Reversed()]
                 face_connectivity[id1, id2] = 1
                 face_connectivity[id2, id1] = 1
-                edge_face_idx[edge_dict[edge], 0] = id1
-                edge_face_idx[edge_dict[edge], 1] = id2
+                if edge in edge_dict:
+                    edge_face_idx[edge_dict[edge], 0] = id1
+                    edge_face_idx[edge_dict[edge], 1] = id2
+                else:
+                    edge_face_idx[edge_dict[edge.Reversed()], 0] = id1
+                    edge_face_idx[edge_dict[edge.Reversed()], 1] = id2
 
             max_length = max(len(lst) for lst in face_edge_connectivity)
             face_edge_connectivity = np.array(

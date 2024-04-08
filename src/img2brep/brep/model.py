@@ -320,7 +320,7 @@ class AutoEncoder(nn.Module):
                 Rearrange('... (v w c) -> ... v w c', v=20, w=20)
                 )
 
-        self.null_intersection = nn.Parameter(torch.rand(dim_codebook_edge))
+        self.null_intersection = nn.Parameter(torch.rand(dim_codebook_face))  # now it is face_embed * face_embed
 
     # edge: (B, N, 20, 3)
     # edge_mask: (B, N)
@@ -464,10 +464,11 @@ class AutoEncoder(nn.Module):
 
         return face_embed
 
-    def intersection(self, face_embeddings, edge_face_idx, face_adj):
-        edge_face_idx_mask = edge_face_idx == 1
+    def intersection(self, face_embeddings, edge_face_idx, face_adj, is_sample=False, max_zero_sample_num=100):
+        edge_face_idx_mask = (edge_face_idx != -1)
         edge_face_idx[~edge_face_idx_mask] = 0
 
+        # get the intersection_embedding of the two faces
         edge_face_embeddings = torch.gather(face_embeddings[:, None].repeat((1, edge_face_idx.shape[1], 1, 1)), dim=2,
                                             index=edge_face_idx[:, ..., None].repeat(
                                                     (1, 1, 1, face_embeddings.shape[-1])))
@@ -478,7 +479,48 @@ class AutoEncoder(nn.Module):
         intersection_embedding = face_embeddings1 * face_embeddings2
         intersection_embedding[~edge_face_idx_mask.all(dim=-1)] = 0
 
-        return intersection_embedding
+        # sample some zero intersection_embedding
+        B, N = face_adj.shape[0], face_adj.shape[1]
+        face_adj[:, torch.arange(N), torch.arange(N)] = 1  # not sample diagonal
+        zero_positions = (face_adj == 0).nonzero()
+
+        # all
+        if not is_sample:
+            face_embeddings1_idx = zero_positions[:, [0, 1]]
+            face_embeddings2_idx = zero_positions[:, [0, 2]]
+
+            face_embeddings1 = face_embeddings[face_embeddings1_idx[:, 0], face_embeddings1_idx[:, 1], :]
+            face_embeddings2 = face_embeddings[face_embeddings2_idx[:, 0], face_embeddings2_idx[:, 1], :]
+
+            null_intersection_embedding = face_embeddings1 * face_embeddings2
+
+            # if null_intersection_embedding.shape[0] > intersection_embedding.shape[0] * intersection_embedding.shape[1]:
+            #     sample_num = intersection_embedding.shape[0] * intersection_embedding.shape[1]
+            #     indices = torch.randperm(null_intersection_embedding.shape[0])[:sample_num]
+            #     null_intersection_embedding = null_intersection_embedding[indices]
+
+        else:
+            # sample
+            zero_counts = (face_adj == 0).sum(dim=(1, 2))
+            max_zero_sample_num = min(max_zero_sample_num, zero_counts.min())
+
+            indices = torch.stack([torch.randperm(zero_counts[b])[:max_zero_sample_num] for b in range(B)])
+            non_edge_face_idx = torch.cat([zero_positions[zero_positions[:, 0] == b][indices[b]] for b in range(B)])
+            non_edge_face_idx = non_edge_face_idx.reshape(B, max_zero_sample_num, 3)[:, :, 1::]
+
+            non_edge_face_embeddings = torch.gather(
+                    face_embeddings[:, None].repeat((1, non_edge_face_idx.shape[1], 1, 1)),
+                    dim=2,
+                    index=non_edge_face_idx[:, ..., None].repeat(
+                            (1, 1, 1, face_embeddings.shape[-1])))
+
+            face_embeddings1 = non_edge_face_embeddings[:, :, 0, :]
+            face_embeddings2 = non_edge_face_embeddings[:, :, 1, :]
+
+            null_intersection_embedding = face_embeddings1 * face_embeddings2
+            null_intersection_embedding = rearrange(null_intersection_embedding, 'b n dim -> (b n) dim')
+
+        return intersection_embedding, null_intersection_embedding
 
     def forward(self, v_data, only_return_recon=False, only_return_loss=True, **kwargs):
         face_edge_idx = v_data["face_edge_idx"]
@@ -528,7 +570,7 @@ class AutoEncoder(nn.Module):
                                                                           edge_embeddings)
 
         # aggregate the egde embeddings to face embeddings plus
-        face_edge_idx_mask = face_edge_idx != -1
+        face_edge_idx_mask = torch.logical_and(face_edge_idx != -1, face_edge_idx != -2)
         face_edge_idx[~face_edge_idx_mask] = 0
         face_embeddings_plus = torch.gather(edge_embeddings[:, None].repeat((1, face_edge_idx.shape[1], 1, 1)), dim=2,
                                             index=face_edge_idx[:, ..., None].repeat(
@@ -543,26 +585,29 @@ class AutoEncoder(nn.Module):
 
         # 3. Reconstruct the edge and face points
         recon_faces = self.decode_face(face_embeddings, face_mask)
-        intersection_edge_embeddings = self.intersection(face_embeddings, edge_face_idx, face_adj)
+        intersection_edge_embeddings, null_intersection_edge_embeddings = self.intersection(face_embeddings,
+                                                                                            edge_face_idx, face_adj)
         recon_edges = self.decode_edge(intersection_edge_embeddings, edge_mask)
-        # null_intersection_edge_embeddings = self.null_intersection(face_embeddings, face_edge_idx)
-
-        # recon_edges, recon_faces = self.decode(edge_embeddings, edge_mask, face_embeddings, face_mask)
 
         if only_return_recon:
             return recon_edges, recon_faces
 
+        # recon loss
         recon_edges = recon_edges.masked_fill(~repeat(edge_mask, 'b n -> b n v k', v=20, k=3), 0.)
         recon_faces = recon_faces.masked_fill(~repeat(face_mask, 'b n -> b n w h k', w=20, h=20, k=3), 0.)
         gt_edges = gt_edges.masked_fill(~repeat(edge_mask, 'b n -> b n v k', v=20, k=3), 0.)
         gt_faces = gt_faces.masked_fill(~repeat(face_mask, 'b n -> b n w h k', w=20, h=20, k=3), 0.)
         loss_edge = F.mse_loss(recon_edges, gt_edges, reduction='mean')
         loss_face = F.mse_loss(recon_faces, gt_faces, reduction='mean')
-        total_loss = loss_edge + loss_face
-        if only_return_loss:
-            return total_loss, loss_edge, loss_face
 
-        return total_loss, loss_edge, loss_face, recon_edges, recon_faces
+        loss_null_intersection = F.mse_loss(null_intersection_edge_embeddings, self.null_intersection[None, :].repeat(
+                null_intersection_edge_embeddings.shape[0], 1), reduction='mean')
+
+        total_loss = loss_edge + loss_face + loss_null_intersection
+        if only_return_loss:
+            return total_loss, loss_edge, loss_face, loss_null_intersection
+
+        return total_loss, loss_edge, loss_face, loss_null_intersection, recon_edges, recon_faces
 
 
 def test():

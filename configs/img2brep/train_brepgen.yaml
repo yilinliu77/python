@@ -1,6 +1,6 @@
 dataset:
   #  root: /mnt/d/meshgpt/0planar_shapes_new
-  root: /mnt/d/meshgpt/deepcad_10000
+  root: /mnt/d/meshgpt/deepcad_10000/main_data
   #  root: G:/Projects/img2brep/data/0planar_shapes_new
   dataset_name: ABC
   overfit: false
@@ -8,15 +8,15 @@ dataset:
 
 trainer:
   learning_rate: 1e-4
-  gpu: 1 #[0,1,2,3,4,5,6,7,8,9]
-  num_worker: 0
+  gpu: [ 0,1,2,3,4,5,6,7,8,9 ]
+  num_worker: 8
 
   vis_recon_faces: true
   train_transformer: false
   condition_on_text: true
 
   num_samples: -1
-  batch_size: 4
+  batch_size: 16
 
   spawn: false
   checkpoint_autoencoder:

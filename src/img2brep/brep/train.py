@@ -119,34 +119,33 @@ class ModelTraining(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         data = batch
 
-        total_loss, loss_edge, loss_face = self.model(data, only_return_loss=True)
+        total_loss, loss_edge, loss_face, loss_null_intersection = self.model(data, only_return_loss=True)
 
         self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
-                 sync_dist=True,
-                 batch_size=self.batch_size)
+                 sync_dist=True, batch_size=self.batch_size)
         self.log("Training_Edge_Loss", loss_edge, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True,
-                 batch_size=self.batch_size)
+                 sync_dist=True, batch_size=self.batch_size)
         self.log("Training_Face_Loss", loss_face, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True,
-                 batch_size=self.batch_size)
+                 sync_dist=True, batch_size=self.batch_size)
+        self.log("Training_Null_Intersection_Loss", loss_null_intersection, prog_bar=True, logger=True, on_step=False,
+                 on_epoch=True, sync_dist=True, batch_size=self.batch_size)
 
         return total_loss
 
     def validation_step(self, batch, batch_idx):
         data = batch
 
-        total_loss, loss_edge, loss_face, recon_edges, recon_faces = self.model(data, only_return_loss=False)
+        total_loss, loss_edge, loss_face, loss_null_intersection, \
+            recon_edges, recon_faces = self.model(data, only_return_loss=False)
 
         self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True,
-                 batch_size=self.batch_size)
+                 sync_dist=True, batch_size=self.batch_size)
         self.log("Validation_Edge_Loss", loss_edge, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True,
-                 batch_size=self.batch_size)
+                 sync_dist=True, batch_size=self.batch_size)
         self.log("Validation_Face_Loss", loss_face, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True,
-                 batch_size=self.batch_size)
+                 sync_dist=True, batch_size=self.batch_size)
+        self.log("Validation_Null_Intersection_Loss", loss_null_intersection, prog_bar=True, logger=True, on_step=False,
+                 on_epoch=True, sync_dist=True, batch_size=self.batch_size)
 
         if batch_idx == 0:
             self.viz["sample_points_faces"] = data["sample_points_faces"].cpu().numpy()
@@ -187,10 +186,10 @@ class ModelTraining(pl.LightningModule):
 
         pc = o3d.geometry.PointCloud()
         pc.points = o3d.utility.Vector3dVector(edge_points)
-        pc.colors = o3d.utility.Vector3dVector(edge_colors)
+        pc.colors = o3d.utility.Vector3dVector(edge_colors / 255.0)
         o3d.io.write_point_cloud(str(self.log_root / (str(self.trainer.current_epoch) + "_viz_edges.ply")), pc)
         pc.points = o3d.utility.Vector3dVector(face_points)
-        pc.colors = o3d.utility.Vector3dVector(face_colors)
+        pc.colors = o3d.utility.Vector3dVector(face_colors / 255.0)
         o3d.io.write_point_cloud(str(self.log_root / (str(self.trainer.current_epoch) + "_viz_faces.ply")), pc)
         return
 
@@ -230,7 +229,7 @@ def main(v_cfg: DictConfig):
             num_sanity_val_steps=2,
             check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
             precision=v_cfg["trainer"]["accelerator"],
-            accumulate_grad_batches=1,
+            accumulate_grad_batches=4,
             )
 
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":

@@ -50,7 +50,7 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
 
         # self.training_range = int(0.8 * self.sum_num)
         # self.validation_range = int(0.9 * self.sum_num)
-
+        
         self.training_range = [int(0 * self.data_sum), int(1.0 * self.data_sum)]
         self.validation_range = [int(0 * self.data_sum), int(1.0 * self.data_sum)]
 

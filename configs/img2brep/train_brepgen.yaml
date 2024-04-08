@@ -1,6 +1,7 @@
 dataset:
   #  root: /mnt/d/meshgpt/0planar_shapes_new
-  root: G:/Projects/img2brep/data/0planar_shapes_new
+  root: /mnt/d/meshgpt/deepcad_10000
+  #  root: G:/Projects/img2brep/data/0planar_shapes_new
   dataset_name: ABC
   overfit: false
   tokenized_batch_size: 16

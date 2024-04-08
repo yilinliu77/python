@@ -464,8 +464,8 @@ class AutoEncoder(nn.Module):
 
         return face_embed
 
-    def intersection(self, face_embeddings, edge_face_idx):
-        edge_face_idx_mask = edge_face_idx != -1
+    def intersection(self, face_embeddings, edge_face_idx, face_adj):
+        edge_face_idx_mask = edge_face_idx == 1
         edge_face_idx[~edge_face_idx_mask] = 0
 
         edge_face_embeddings = torch.gather(face_embeddings[:, None].repeat((1, edge_face_idx.shape[1], 1, 1)), dim=2,
@@ -543,7 +543,7 @@ class AutoEncoder(nn.Module):
 
         # 3. Reconstruct the edge and face points
         recon_faces = self.decode_face(face_embeddings, face_mask)
-        intersection_edge_embeddings = self.intersection(face_embeddings, edge_face_idx)
+        intersection_edge_embeddings = self.intersection(face_embeddings, edge_face_idx, face_adj)
         recon_edges = self.decode_edge(intersection_edge_embeddings, edge_mask)
         # null_intersection_edge_embeddings = self.null_intersection(face_embeddings, face_edge_idx)
 

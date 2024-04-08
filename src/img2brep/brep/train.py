@@ -82,7 +82,7 @@ class ModelTraining(pl.LightningModule):
             self.train_dataset = Transformer_Dataset("training", self.hydra_conf["dataset"], self.autoencoder)
 
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
-                          # collate_fn=self.dataset_name.collate_fn,
+                          collate_fn=Auotoencoder_Dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           # pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
@@ -96,7 +96,7 @@ class ModelTraining(pl.LightningModule):
             self.valid_dataset = Transformer_Dataset("validation", self.hydra_conf["dataset"], self.autoencoder)
 
         return DataLoader(self.valid_dataset, batch_size=self.batch_size,
-                          # collate_fn=self.dataset_name.collate_fn,
+                          collate_fn=Auotoencoder_Dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           # pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,

@@ -119,7 +119,7 @@ class ModelTraining(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         data = batch
 
-        total_loss, loss_edge, loss_face, loss_null_intersection = self.model(data, only_return_loss=True)
+        total_loss, loss_edge, loss_face, loss_null_divided_nonnull = self.model(data, only_return_loss=True)
 
         self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
@@ -127,16 +127,16 @@ class ModelTraining(pl.LightningModule):
                  sync_dist=True, batch_size=self.batch_size)
         self.log("Training_Face_Loss", loss_face, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
-        self.log("Training_Null_Intersection_Loss", loss_null_intersection, prog_bar=True, logger=True, on_step=False,
-                 on_epoch=True, sync_dist=True, batch_size=self.batch_size)
+        self.log("Training_Null_divided_NonNull_Loss", loss_null_divided_nonnull, prog_bar=True, logger=True,
+                 on_step=False, on_epoch=True, sync_dist=True, batch_size=self.batch_size)
 
         return total_loss
 
     def validation_step(self, batch, batch_idx):
         data = batch
 
-        total_loss, loss_edge, loss_face, loss_null_intersection, \
-            recon_edges, recon_faces = self.model(data, only_return_loss=False)
+        total_loss, loss_edge, loss_face, loss_null_divided_nonnull, \
+            recon_edges, recon_faces = self.model(data, only_return_loss=False, is_inference=False)
 
         self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
@@ -144,8 +144,8 @@ class ModelTraining(pl.LightningModule):
                  sync_dist=True, batch_size=self.batch_size)
         self.log("Validation_Face_Loss", loss_face, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
-        self.log("Validation_Null_Intersection_Loss", loss_null_intersection, prog_bar=True, logger=True, on_step=False,
-                 on_epoch=True, sync_dist=True, batch_size=self.batch_size)
+        self.log("Validation_Null_divided_NonNull_Loss", loss_null_divided_nonnull, prog_bar=True, logger=True,
+                 on_step=False, on_epoch=True, sync_dist=True, batch_size=self.batch_size)
 
         if batch_idx == 0:
             self.viz["sample_points_faces"] = data["sample_points_faces"].cpu().numpy()
@@ -229,7 +229,7 @@ def main(v_cfg: DictConfig):
             num_sanity_val_steps=2,
             check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
             precision=v_cfg["trainer"]["accelerator"],
-            accumulate_grad_batches=4,
+            accumulate_grad_batches=1,
             )
 
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
@@ -247,7 +247,7 @@ def main(v_cfg: DictConfig):
             state_dict_ = {k[12:]: v for k, v in state_dict.items() if 'autoencoder' in k}
         del state_dict
 
-        modelTraining.model.load_state_dict(state_dict_, strict=True)
+        modelTraining.model.load_state_dict(state_dict_, strict=False)
 
     if v_cfg["trainer"].evaluate:
         trainer.test(modelTraining)

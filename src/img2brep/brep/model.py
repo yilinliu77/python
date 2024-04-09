@@ -6,6 +6,7 @@ import torch
 from torch import nn, Tensor, einsum
 from torch.nn import Module, ModuleList
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pad_sequence
 from torch.utils.checkpoint import checkpoint
 from torch.cuda.amp import autocast
 from torch_geometric.nn import SAGEConv
@@ -20,180 +21,9 @@ from beartype.typing import Union, Tuple, Callable, Optional, List, Dict, Any
 from einops import rearrange, repeat, reduce, pack, unpack
 from einops.layers.torch import Rearrange
 
-
-def exists(v):
-    return v is not None
-
-
-def default(v, d):
-    return v if exists(v) else d
-
-
-def first(it):
-    return it[0]
-
-
-def divisible_by(num, den):
-    return (num % den) == 0
-
-
-def is_odd(n):
-    return not divisible_by(n, 2)
-
-
-def is_empty(l):
-    return len(l) == 0
-
-
-def is_tensor_empty(t: Tensor):
-    return t.numel() == 0
-
-
-def set_module_requires_grad_(
-        module: Module,
-        requires_grad: bool
-        ):
-    for param in module.parameters():
-        param.requires_grad = requires_grad
-
-
-def l1norm(t):
-    return F.normalize(t, dim=-1, p=1)
-
-
-def l2norm(t):
-    return F.normalize(t, dim=-1, p=2)
-
-
-def safe_cat(tensors, dim):
-    tensors = [*filter(exists, tensors)]
-
-    if len(tensors) == 0:
-        return None
-    elif len(tensors) == 1:
-        return first(tensors)
-
-    return torch.cat(tensors, dim=dim)
-
-
-def pad_at_dim(t, padding, dim=-1, value=0):
-    ndim = t.ndim
-    right_dims = (ndim - dim - 1) if dim >= 0 else (-dim - 1)
-    zeros = (0, 0) * right_dims
-    return F.pad(t, (*zeros, *padding), value=value)
-
-
-def pad_to_length(t, length, dim=-1, value=0, right=True):
-    curr_length = t.shape[dim]
-    remainder = length - curr_length
-
-    if remainder <= 0:
-        return t
-
-    padding = (0, remainder) if right else (remainder, 0)
-    return pad_at_dim(t, padding, dim=dim, value=value)
-
-
-# resnet block
-
-class PixelNorm(Module):
-    def __init__(self, dim, eps=1e-4):
-        super().__init__()
-        self.dim = dim
-        self.eps = eps
-
-    def forward(self, x):
-        dim = self.dim
-        return F.normalize(x, dim=dim, eps=self.eps) * sqrt(x.shape[dim])
-
-
-class SqueezeExcite(Module):
-    def __init__(
-            self,
-            dim,
-            reduction_factor=4,
-            min_dim=16
-            ):
-        super().__init__()
-        dim_inner = max(dim // reduction_factor, min_dim)
-
-        self.net = nn.Sequential(
-                nn.Linear(dim, dim_inner),
-                nn.SiLU(),
-                nn.Linear(dim_inner, dim),
-                nn.Sigmoid(),
-                Rearrange('b c -> b c 1')
-                )
-
-    def forward(self, x, mask=None):
-        if exists(mask):
-            x = x.masked_fill(~mask, 0.)
-
-            num = reduce(x, 'b c n -> b c', 'sum')
-            den = reduce(mask.float(), 'b 1 n -> b 1', 'sum')
-            avg = num / den.clamp(min=1e-5)
-        else:
-            avg = reduce(x, 'b c n -> b c', 'mean')
-
-        return x * self.net(avg)
-
-
-class Block(Module):
-    def __init__(
-            self,
-            dim,
-            dim_out=None,
-            dropout=0.
-            ):
-        super().__init__()
-        dim_out = default(dim_out, dim)
-
-        self.proj = nn.Conv1d(dim, dim_out, 3, padding=1)
-        self.norm = PixelNorm(dim=1)
-        self.dropout = nn.Dropout(dropout)
-        self.act = nn.SiLU()
-
-    def forward(self, x, mask=None):
-        if exists(mask):
-            x = x.masked_fill(~mask, 0.)
-
-        x = self.proj(x)
-
-        if exists(mask):
-            x = x.masked_fill(~mask, 0.)
-
-        x = self.norm(x)
-        x = self.act(x)
-        x = self.dropout(x)
-
-        return x
-
-
-class ResnetBlock(Module):
-    def __init__(
-            self,
-            dim,
-            dim_out=None,
-            *,
-            dropout=0.
-            ):
-        super().__init__()
-        dim_out = default(dim_out, dim)
-        self.block1 = Block(dim, dim_out, dropout=dropout)
-        self.block2 = Block(dim_out, dim_out, dropout=dropout)
-        self.excite = SqueezeExcite(dim_out)
-        self.residual_conv = nn.Conv1d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
-
-    def forward(
-            self,
-            x,
-            mask=None
-            ):
-        res = self.residual_conv(x)
-        h = self.block1(x, mask=mask)
-        h = self.block2(h, mask=mask)
-        h = self.excite(h, mask=mask)
-        return h + res
+from torch.nn import TransformerEncoder, TransformerEncoderLayer
+from src.img2brep.brep.common import *
+from src.img2brep.brep.cross_attention import MultiLayerCrossAttention
 
 
 class AutoEncoder(nn.Module):
@@ -319,6 +149,8 @@ class AutoEncoder(nn.Module):
                 nn.Linear(curr_dim, 20 * 20 * 3),
                 Rearrange('... (v w c) -> ... v w c', v=20, w=20)
                 )
+
+        self.cross_attn_intersection = MultiLayerCrossAttention(dim=dim_codebook_face, num_heads=4, num_layers=2)
 
         self.null_intersection = nn.Parameter(torch.rand(dim_codebook_face))  # now it is face_embed * face_embed
 
@@ -476,7 +308,10 @@ class AutoEncoder(nn.Module):
         face_embeddings1 = edge_face_embeddings[:, :, 0, :]
         face_embeddings2 = edge_face_embeddings[:, :, 1, :]
 
-        intersection_embedding = face_embeddings1 * face_embeddings2
+        intersection_embedding = self.cross_attn_intersection(face_embeddings1, face_embeddings2)
+
+        # intersection_embedding = face_embeddings1 * face_embeddings2
+
         intersection_embedding[~edge_face_idx_mask.all(dim=-1)] = 0
 
         # sample some zero intersection_embedding
@@ -492,7 +327,14 @@ class AutoEncoder(nn.Module):
             face_embeddings1 = face_embeddings[face_embeddings1_idx[:, 0], face_embeddings1_idx[:, 1], :]
             face_embeddings2 = face_embeddings[face_embeddings2_idx[:, 0], face_embeddings2_idx[:, 1], :]
 
-            null_intersection_embedding = face_embeddings1 * face_embeddings2
+            # null_intersection_embedding = face_embeddings1 * face_embeddings2
+            # null_edge_num = (face_adj == 0).sum(dim=(-1, -2))
+            # cumsum = torch.cumsum(null_edge_num, dim=0)[0:-1]
+            # start_idx = torch.cat((torch.tensor([0], device=cumsum.device), cumsum))
+
+            null_intersection_embedding = self.cross_attn_intersection(face_embeddings1.unsqueeze(1),
+                                                                       face_embeddings2.unsqueeze(1))
+            null_intersection_embedding = rearrange(null_intersection_embedding, 'b 1 dim -> b dim')
 
             # if null_intersection_embedding.shape[0] > intersection_embedding.shape[0] * intersection_embedding.shape[1]:
             #     sample_num = intersection_embedding.shape[0] * intersection_embedding.shape[1]
@@ -522,7 +364,7 @@ class AutoEncoder(nn.Module):
 
         return intersection_embedding, null_intersection_embedding
 
-    def forward(self, v_data, only_return_recon=False, only_return_loss=True, **kwargs):
+    def forward(self, v_data, is_inference=False, only_return_recon=False, only_return_loss=True, **kwargs):
         face_edge_idx = v_data["face_edge_idx"]
         sample_points_faces = v_data["sample_points_faces"]
         sample_points_edges = v_data["sample_points_lines"]
@@ -585,9 +427,36 @@ class AutoEncoder(nn.Module):
 
         # 3. Reconstruct the edge and face points
         recon_faces = self.decode_face(face_embeddings, face_mask)
-        intersection_edge_embeddings, null_intersection_edge_embeddings = self.intersection(face_embeddings,
-                                                                                            edge_face_idx, face_adj)
-        recon_edges = self.decode_edge(intersection_edge_embeddings, edge_mask)
+
+        if is_inference:
+            intersection_edge_embeddings = torch.einsum('b i d, b j d -> b i j d', face_embeddings, face_embeddings)
+            null_intersection_embeddings = self.null_intersection[None, None, None, :].repeat(
+                    intersection_edge_embeddings.shape[0], intersection_edge_embeddings.shape[1],
+                    intersection_edge_embeddings.shape[2], 1)
+            # simlarity = torch.einsum('b i j d, b i j d -> b i j', intersection_edge_embeddings,
+            #                          null_intersection_embeddings)
+            cosine_similarity = F.cosine_similarity(intersection_edge_embeddings, null_intersection_embeddings, dim=-1)
+            mse_similarity = F.mse_loss(intersection_edge_embeddings, null_intersection_embeddings,
+                                        reduction='none').sum(-1)
+
+            non_null_mask = torch.logical_and(0.001 < mse_similarity, mse_similarity < 0.05)
+
+            non_null_edge_embeddings = []
+            for i in range(intersection_edge_embeddings.shape[0]):
+                non_null_edge_embeddings_c = intersection_edge_embeddings[i][non_null_mask[i]]
+                non_null_edge_embeddings.append(non_null_edge_embeddings_c)
+
+            non_null_edge_embeddings = pad_sequence(non_null_edge_embeddings, batch_first=True, padding_value=-1)
+            mask = (non_null_edge_embeddings != -1).all(dim=-1)
+            non_null_edge_embeddings[~mask] = 0
+            recon_edges = self.decode_edge(non_null_edge_embeddings, mask)
+
+            return recon_edges, mask, recon_faces, face_mask
+
+        else:
+            intersection_edge_embeddings, null_intersection_edge_embeddings = self.intersection(face_embeddings,
+                                                                                                edge_face_idx, face_adj)
+            recon_edges = self.decode_edge(intersection_edge_embeddings, edge_mask)
 
         if only_return_recon:
             return recon_edges, recon_faces
@@ -603,11 +472,25 @@ class AutoEncoder(nn.Module):
         loss_null_intersection = F.mse_loss(null_intersection_edge_embeddings, self.null_intersection[None, :].repeat(
                 null_intersection_edge_embeddings.shape[0], 1), reduction='mean')
 
-        total_loss = loss_edge + loss_face + loss_null_intersection
-        if only_return_loss:
-            return total_loss, loss_edge, loss_face, loss_null_intersection
+        # sample some non null intersection_embedding
+        # non_null_position = edge_mask.nonzero()
+        # sample_num = min(null_intersection_edge_embeddings.shape[0], non_null_position.shape[0])
+        # sample_position = torch.randperm(non_null_position.shape[0])[:sample_num]
+        # non_null_position = non_null_position[sample_position]
+        # sample_intersection_edge_embeddings = intersection_edge_embeddings[non_null_position[:, 0], non_null_position[:, 1]]
 
-        return total_loss, loss_edge, loss_face, loss_null_intersection, recon_edges, recon_faces
+        loss_non_null_intersection = F.mse_loss(intersection_edge_embeddings,
+                                                self.null_intersection[None, None, :].repeat(
+                                                        intersection_edge_embeddings.shape[0],
+                                                        intersection_edge_embeddings.shape[1], 1), reduction='mean')
+
+        loss_null_divided_nonnull = loss_null_intersection / loss_non_null_intersection
+
+        total_loss = loss_edge + loss_face + loss_null_divided_nonnull
+        if only_return_loss:
+            return total_loss, loss_edge, loss_face, loss_null_divided_nonnull
+
+        return total_loss, loss_edge, loss_face, loss_null_divided_nonnull, recon_edges, recon_faces
 
 
 def test():

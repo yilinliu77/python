@@ -20,7 +20,7 @@ trainer:
 
   spawn: false
   checkpoint_autoencoder:
-  resume_from_checkpoint:
+  resume_from_checkpoint: #/root/workspace/python/src/img2brep/brep/tb_logs_brepgen/autoencoder/version_0/checkpoints/epoch=5599-step=112000.ckpt
   evaluate: false
   output: .
   check_val_every_n_epoch: 100

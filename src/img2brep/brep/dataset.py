@@ -39,6 +39,7 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
 
         self.data_folders = [os.path.join(self.dataset_path, folder) for folder in os.listdir(self.dataset_path) if
                              os.path.isdir(os.path.join(self.dataset_path, folder))]
+        self.data_folders.sort()
 
         # with open(os.path.join(self.dataset_path, "single_loop.txt"), "r") as f:
         #     self.data_folders = [os.path.join(self.dataset_path, line.strip()) for line in f.readlines()]
@@ -50,7 +51,7 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
 
         # self.training_range = int(0.8 * self.sum_num)
         # self.validation_range = int(0.9 * self.sum_num)
-        
+
         self.training_range = [int(0 * self.data_sum), int(1.0 * self.data_sum)]
         self.validation_range = [int(0 * self.data_sum), int(1.0 * self.data_sum)]
 

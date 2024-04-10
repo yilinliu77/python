@@ -1,9 +1,9 @@
 dataset:
   #  root: /mnt/d/meshgpt/0planar_shapes_new
-  root: /mnt/d/meshgpt/deepcad_10000/main_data
-  #  root: G:/Projects/img2brep/data/0planar_shapes_new
+  #  root: /mnt/d/meshgpt/deepcad_10000/main_data
+  root: G:/Dataset/img2brep/deepcad_10000/main_data
   dataset_name: ABC
-  overfit: false
+  overfit: true
   tokenized_batch_size: 16
 
 trainer:
@@ -39,7 +39,7 @@ model:
 
 hydra:
   run:
-    dir: ./outputs/${now:%Y_%m_%d_%H_%M_%S}
+    dir: ./outputs_img2brep/${now:%Y_%m_%d_%H_%M_%S}
   job:
     chdir: False
 #  output_subdir: null

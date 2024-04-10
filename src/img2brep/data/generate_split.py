@@ -6,7 +6,7 @@ import trimesh
 import yaml
 from tqdm import tqdm
 
-data_root = Path(r"/mnt/d/duoteng/ABC_raw/data")
+data_root = Path(r"G:/Dataset/ABC/raw_data/abc_0000_obj_v00")
 max_ratio = 5
 
 
@@ -104,15 +104,15 @@ def get_splits(data_root):
     valid_ids = sorted(list(set(valid_ids)))
     cube_ids = sorted(list(set(cube_ids)))
 
-    with open("planar_shapes_id.txt", "w") as f:
+    with open("../planar_shapes_id.txt", "w") as f:
         for item in valid_ids:
             f.write(item + "\n")
 
-    with open("cube_ids.txt", "w") as f:
+    with open("../cube_ids.txt", "w") as f:
         for item in cube_ids:
             f.write(item + "\n")
 
-    with open("planar_shapes_except_cube.txt", "w") as f:
+    with open("../planar_shapes_except_cube.txt", "w") as f:
         new_set = set(valid_ids) - set(cube_ids)
         for item in new_set:
             f.write(item + "\n")
@@ -140,12 +140,125 @@ def test_obj(data_root, split_file):
     results = ray.get(tasks)
     valid_ids = sum(results, [])
 
-    with open("valid_planar_shapes_except_cube.txt", "w") as f:
+    with open("../valid_planar_shapes_except_cube.txt", "w") as f:
         for item in range(len(valid_ids)):
             if valid_ids[item]:
                 f.write(ids[item] + "\n")
 
+@ray.remote(num_cpus=1)
+def remove_multiple_component_ids_(v_root, folders):
+    valid_flags = [False] * len(folders)
+    for idx, v_folder in enumerate(folders):
+        for ff in os.listdir(v_root / v_folder):
+            if not ff.endswith(".obj"):
+                continue
+            mesh = trimesh.load_mesh(v_root / v_folder / ff, process=False, maintain_order=True)
+            if mesh.faces.shape[0] < 10 or mesh.vertices.shape[0] < 10:
+                continue
+
+            if mesh.split().shape[0] != 1:
+                continue
+
+            valid_flags[idx]=True
+
+    return valid_flags
+
+# Test all files under data_root
+# - Record shape id that without an obj file
+# - Record shape id that contains multiple parts
+def remove_multiple_component_ids(v_id_cubes=None):
+    ray.init(
+        # local_mode=True,
+        # num_cpus=1,
+    )
+
+    folders = os.listdir(data_root)
+    folders.sort()
+    folders = folders[0:100]
+
+    # Except for the cubes
+    if v_id_cubes is not None:
+        cube_ids = [item.strip() for item in open(v_id_cubes).readlines()]
+        folders = list(set(folders) - set(cube_ids))
+        folders.sort()
+        print("Has {} ids after removing {} cubes".format(len(folders), len(cube_ids)))
+
+    num_batches = 80  # Larger than number of cpus for a more efficient task assignment
+    batch_size = len(folders) // num_batches + 1
+
+    tasks = []
+    for idx in range(num_batches):
+        task = remove_multiple_component_ids_.remote(
+            data_root, folders[batch_size * idx:min(len(folders), batch_size * (idx + 1))])
+        # result = ray.get(filter_mesh.remote(data_root, item, max_ratio))
+        tasks.append(task)
+
+    results = ray.get(tasks)
+    valid_ids = sum(results, [])
+
+    with open("id_shapes_with_multiple_component_or_few_faces.txt", "w") as f:
+        for item in range(len(valid_ids)):
+            if not valid_ids[item]:
+                f.write(folders[item] + "\n")
+
+@ray.remote(num_cpus=1)
+def remove_other_shape_(v_root, v_folders):
+    valid_ids = [True] * len(v_folders)
+    for idx, folder in enumerate(v_folders):
+        for ff in os.listdir(v_root / folder):
+            if ff.endswith(".yml") and "features" in ff:
+                str = open(os.path.join(data_root, folder, ff), "r").read()
+                pos = str.find("type: Ot", 0)
+                if pos != -1:
+                    valid_ids[idx] = False
+                    break
+
+                pos = str.find("type: Ex", 0)
+                if pos != -1:
+                    valid_ids[idx] = False
+                    break
+
+                pos = str.find("type: Re", 0)
+                if pos != -1:
+                    valid_ids[idx] = False
+                    break
+
+    return valid_ids
+
+# Test all files under data_root
+# - Record shape id that has type "other"
+def remove_other_shape():
+    ray.init(
+        # local_mode=True,
+        # num_cpus=1,
+        dashboard_port=15000,
+        dashboard_host="0.0.0.0"
+    )
+
+    folders = os.listdir(data_root)
+    folders.sort()
+    folders = folders
+
+    num_batches = 80  # Larger than number of cpus for a more efficient task assignment
+    batch_size = len(folders) // num_batches + 1
+
+    tasks = []
+    for idx in range(num_batches):
+        task = remove_other_shape_.remote(
+            data_root, folders[batch_size * idx:min(len(folders), batch_size * (idx + 1))])
+        # result = ray.get(filter_mesh.remote(data_root, item, max_ratio))
+        tasks.append(task)
+
+    results = ray.get(tasks)
+    valid_ids = sum(results, [])
+
+    with open("id_shapes_with_others.txt", "w") as f:
+        for item in range(len(valid_ids)):
+            if not valid_ids[item]:
+                f.write(folders[item] + "\n")
 
 if __name__ == '__main__':
-    get_splits(data_root)
+    # remove_multiple_component_ids(r"C:/repo/python/src/img2brep/data/cube_ids_in_abc.txt")
+    remove_other_shape()
+    # get_splits(data_root)
     # test_obj(data_root, "planar_shapes_except_cube.txt")

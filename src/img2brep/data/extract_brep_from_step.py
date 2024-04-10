@@ -6,6 +6,7 @@ import ray, trimesh
 import open3d as o3d
 import numpy as np
 import yaml
+from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCC.Core.NCollection import NCollection_Map
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX, TopAbs_WIRE
@@ -27,6 +28,7 @@ from src.img2brep.sample_points import sample_points_on_line, sample_points_on_p
 
 from scipy.interpolate import BSpline
 
+write_debug_data = False
 data_root = Path(r"G:/Dataset/ABC/raw_data/abc_0000_obj_v00")
 # data_split = r"valid_planar_shapes_except_cube.txt"
 data_split = r"C:/repo/python/src/img2brep/data/deepcad_train_10000.txt"
@@ -38,6 +40,7 @@ exception_files = [
 output_root = Path(r"G:/Dataset/img2brep/deepcad_10000/main_data")
 
 num_max_primitives = 100000
+
 
 # @ray.remote(num_cpus=1)
 def get_brep(v_root, output_root, v_folders):
@@ -93,7 +96,10 @@ def get_brep(v_root, output_root, v_folders):
                 if edge not in edge_dict and edge.Reversed() not in edge_dict:
                     edge_dict[edge] = len(edge_dict)
             num_edges = len(edge_dict)
-            all_vertices = list(explore_shape(shape, TopAbs_VERTEX))
+            vertex_dict = {}
+            for vertex in explore_shape(shape, TopAbs_VERTEX):
+                if vertex not in vertex_dict and vertex.Reversed() not in vertex_dict:
+                    vertex_dict[vertex] = len(vertex_dict)
 
             # Sample points in face
             face_sample_points = []
@@ -140,8 +146,16 @@ def get_brep(v_root, output_root, v_folders):
             edge_sample_points = transform(edge_sample_points)
             assert len(edge_dict) == num_edges == edge_sample_points.shape[0]
 
+            # Sample points in vertices
+            vertex_sample_points = []
+            for vertex in vertex_dict:
+                pnt = BRep_Tool.Pnt(vertex)
+                vertex_sample_points.append(np.array([pnt.X(), pnt.Y(), pnt.Z()], dtype=np.float32))
+            vertex_sample_points = np.stack(vertex_sample_points, axis=0)
+            vertex_sample_points = transform(vertex_sample_points)
+
             # (N, X) shows every loop with each face, -2 denotes a start token and pad with -1
-            face_edge_connectivity = []
+            face_edge_loop = []
             for face in face_dict:
                 loops = []
 
@@ -154,33 +168,41 @@ def get_brep(v_root, output_root, v_folders):
                             loops.append(edge_dict[edge.Reversed()])
                         else:
                             raise ValueError("Edge not in edge_dict")
-                face_edge_connectivity.append(loops)
+                face_edge_loop.append(loops)
 
-            # (M, 2) shows the indexes of all the connected edges
-            edge_connectivity = []
             edge_vertex_map = {}
+            # (L, 2) shows the index of curves to intersect with a vertex
+            vertex_edge_connectivity = []
             for edge in edge_dict:
                 # Get vertices of the current edge
                 for vertex in explore_shape(edge, TopAbs_VERTEX):
-                    if vertex not in edge_vertex_map:
-                        edge_vertex_map[vertex] = [edge]
-                    else:
+                    if vertex in edge_vertex_map:
                         edge_vertex_map[vertex].append(edge)
+                    elif vertex.Reversed() in edge_vertex_map:
+                        edge_vertex_map[vertex.Reversed()].append(edge)
+                    else:
+                        edge_vertex_map[vertex] = [edge]
             for vertex, edges in edge_vertex_map.items():
                 for i in range(len(edges)):
-                    id1 = edge_dict[edges[i]] if edges[i] in edge_dict else edge_dict[edges[i].Reversed()]
-                    edge2 = edges[(i + 1) % len(edges)]
-                    id2 = edge_dict[edge2] if edge2 in edge_dict else edge_dict[edge2.Reversed()]
-                    if id1 < id2:
-                        edge_connectivity.append([id1, id2])
-                    else:
-                        edge_connectivity.append([id2, id1])
+                    for j in range(i + 1, len(edges)):
+                        id1 = edge_dict[edges[i]] if edges[i] in edge_dict else edge_dict[edges[i].Reversed()]
+                        id2 = edge_dict[edges[j]] if edges[j] in edge_dict else edge_dict[edges[j].Reversed()]
+                        id_vertex = vertex_dict[vertex] if vertex in vertex_dict else vertex_dict[vertex.Reversed()]
+                        if id1 == id2:
+                            continue
+                        if id1 < id2:
+                            vertex_edge_connectivity.append([id_vertex, id1, id2])
+                        elif id1 > id2:
+                            vertex_edge_connectivity.append([id_vertex, id2, id1])
+
+            vertex_edge_connectivity = list(set([tuple(item) for item in vertex_edge_connectivity]))
+            vertex_edge_connectivity = np.asarray(vertex_edge_connectivity, dtype=np.int32)
 
             # (N, N) shows the adjacency of faces
             face_connectivity = np.zeros((num_faces, num_faces), dtype=np.int8)
             face_edge_map = {}
             # (M, 2) shows the index of faces to intersect with an edge
-            edge_face_idx = np.zeros((len(edge_dict), 2), dtype=np.int32)
+            edge_face_connectivity = []
             for face in face_dict:
                 # Get edges of the current face
                 for edge in explore_shape(face, TopAbs_EDGE):
@@ -196,32 +218,38 @@ def get_brep(v_root, output_root, v_folders):
             for edge, faces in face_edge_map.items():
                 id1 = face_dict[faces[0]] if faces[0] in face_dict else face_dict[faces[0].Reversed()]
                 id2 = face_dict[faces[1]] if faces[1] in face_dict else face_dict[faces[1].Reversed()]
+                id_edge = edge_dict[edge] if edge in edge_dict else edge_dict[edge.Reversed()]
+                if id1 > id2:
+                    id1, id2 = id2, id1
+                elif id1 == id2:
+                    continue
                 face_connectivity[id1, id2] = 1
                 face_connectivity[id2, id1] = 1
-                if edge in edge_dict:
-                    edge_face_idx[edge_dict[edge], 0] = id1
-                    edge_face_idx[edge_dict[edge], 1] = id2
-                else:
-                    edge_face_idx[edge_dict[edge.Reversed()], 0] = id1
-                    edge_face_idx[edge_dict[edge.Reversed()], 1] = id2
 
-            max_length = max(len(lst) for lst in face_edge_connectivity)
-            face_edge_connectivity = np.array(
-                [i + [-1]*(max_length-len(i)) for i in face_edge_connectivity], dtype=np.int32)
+                edge_face_connectivity.append([id_edge, id1, id2])
 
-            edge_connectivity = np.asarray(edge_connectivity, dtype=np.int32)
+            edge_face_connectivity = list(set([tuple(item) for item in edge_face_connectivity]))
+            edge_face_connectivity = np.asarray(edge_face_connectivity, dtype=np.int32)
+
+            max_length = max(len(lst) for lst in face_edge_loop)
+            face_edge_loop = np.array(
+                [i + [-1] * (max_length - len(i)) for i in face_edge_loop], dtype=np.int32)
 
             data_dict = {
-                'face_edge_idx'      : face_edge_connectivity,
-                'sample_points_lines': edge_sample_points,
-                'sample_points_faces': face_sample_points,
-                'edge_adj'           : edge_connectivity,
-                'face_adj'           : face_connectivity,
-                'edge_face_idx'           : edge_face_idx,
-                }
+                'sample_points_vertices': vertex_sample_points.astype(np.float32),
+                'sample_points_lines': edge_sample_points.astype(np.float32),
+                'sample_points_faces': face_sample_points.astype(np.float32),
+
+                'face_edge_loop': face_edge_loop.astype(np.int64),
+                'face_adj': face_connectivity.astype(np.int8),
+                'edge_face_connectivity': edge_face_connectivity.astype(np.int64),
+                'vertex_edge_connectivity': vertex_edge_connectivity.astype(np.int64),
+            }
 
             np.savez_compressed(output_root / v_folder / "data.npz", **data_dict)
             # continue
+            if not write_debug_data:
+                continue
 
             # Check
             # Write face
@@ -233,9 +261,9 @@ def get_brep(v_root, output_root, v_folders):
             o3d.io.write_point_cloud(str(output_root / v_folder / "edge_sample_points.ply"), pc_model)
 
             check_dir(output_root / v_folder / "debug_topology")
-            for i in range(face_edge_connectivity.shape[0]):
+            for i in range(face_edge_loop.shape[0]):
                 points = []
-                for item in face_edge_connectivity[i]:
+                for item in face_edge_loop[i]:
                     if item == -1 or item == -2:
                         continue
                     points.append(edge_sample_points[item])
@@ -278,16 +306,18 @@ if __name__ == '__main__':
         get_brep(data_root, output_root, total_ids)
     else:
         ray.init(
-                num_cpus=1,
-                local_mode=True
-                )
+            dashboard_host="0.0.0.0",
+            dashboard_port=15000,
+            # num_cpus=1,
+            # local_mode=True
+        )
         num_batches = 40
         batch_size = len(total_ids) // num_batches + 1
         tasks = []
         for i in range(num_batches):
             tasks.append(
-                    get_brep_ray.remote(data_root,
-                                        output_root,
-                                        total_ids[i * batch_size:min(len(total_ids), (i + 1) * batch_size)]))
+                get_brep_ray.remote(data_root,
+                                    output_root,
+                                    total_ids[i * batch_size:min(len(total_ids), (i + 1) * batch_size)]))
         ray.get(tasks)
         print("Done")

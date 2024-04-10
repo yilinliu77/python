@@ -32,24 +32,6 @@ import tqdm
 from einops import reduce
 
 
-def export_recon_faces(recon_faces, path):
-    recon_faces = recon_faces.detach().cpu().numpy()
-    vertices = recon_faces.reshape(-1, 3)
-
-    # 生成三角形顶点索引，例如: [[0, 1, 2], [3, 4, 5], ...]
-    triangles_indices = np.arange(vertices.shape[0]).reshape(-1, 3)
-
-    mesh = o3d.geometry.TriangleMesh()
-    mesh.vertices = o3d.utility.Vector3dVector(vertices)
-    mesh.triangles = o3d.utility.Vector3iVector(triangles_indices)
-
-    mesh.compute_vertex_normals()
-
-    o3d.io.write_triangle_mesh(str(path), mesh)
-
-    # print(f'Mesh saved to: {path}')
-
-
 class ModelTraining(pl.LightningModule):
     def __init__(self, hparams):
         super(ModelTraining, self).__init__()
@@ -95,7 +77,7 @@ class ModelTraining(pl.LightningModule):
         else:
             self.valid_dataset = Transformer_Dataset("validation", self.hydra_conf["dataset"], self.autoencoder)
 
-        return DataLoader(self.valid_dataset, batch_size=self.batch_size,
+        return DataLoader(self.valid_dataset, batch_size=1,
                           collate_fn=Auotoencoder_Dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           # pin_memory=True,
@@ -106,53 +88,49 @@ class ModelTraining(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = Adam(self.model.parameters(), lr=self.learning_rate)
         # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=40, T_mult=1, eta_min=1e-8, last_epoch=-1)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10000, gamma=0.1)
+        # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10000, gamma=0.1)
         # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=100, verbose=True)
         return {
             'optimizer'   : optimizer,
-            'lr_scheduler': {
-                'scheduler': scheduler,
-                'monitor'  : 'Validation_Loss',
-                }
+            # 'lr_scheduler': {
+                # 'scheduler': scheduler,
+            #     'monitor'  : 'Validation_Loss',
+            #     }
             }
 
     def training_step(self, batch, batch_idx):
         data = batch
 
-        total_loss, loss_edge, loss_face, loss_null_intersection = self.model(data, only_return_loss=True)
-
+        loss = self.model(data, only_return_loss=True, training=True)
+        total_loss = loss["total_loss"]
+        for key in loss:
+            if key == "total_loss":
+                continue
+            self.log(f"Training_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                     sync_dist=True, batch_size=self.batch_size)
         self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
-        self.log("Training_Edge_Loss", loss_edge, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True, batch_size=self.batch_size)
-        self.log("Training_Face_Loss", loss_face, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True, batch_size=self.batch_size)
-        self.log("Training_Null_Intersection_Loss", loss_null_intersection, prog_bar=True, logger=True, on_step=False,
-                 on_epoch=True, sync_dist=True, batch_size=self.batch_size)
 
         return total_loss
 
     def validation_step(self, batch, batch_idx):
         data = batch
 
-        total_loss, loss_edge, loss_face, loss_null_intersection, \
-            recon_edges, recon_faces = self.model(data, only_return_loss=False)
-
+        loss, recon_data = self.model(data, only_return_loss=False, training=False)
+        total_loss = loss["total_loss"]
+        for key in loss:
+            if key == "total_loss":
+                continue
+            self.log(f"Validation_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                     sync_dist=True, batch_size=self.batch_size)
         self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
-        self.log("Validation_Edge_Loss", loss_edge, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True, batch_size=self.batch_size)
-        self.log("Validation_Face_Loss", loss_face, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True, batch_size=self.batch_size)
-        self.log("Validation_Null_Intersection_Loss", loss_null_intersection, prog_bar=True, logger=True, on_step=False,
-                 on_epoch=True, sync_dist=True, batch_size=self.batch_size)
 
         if batch_idx == 0:
             self.viz["sample_points_faces"] = data["sample_points_faces"].cpu().numpy()
             self.viz["sample_points_lines"] = data["sample_points_lines"].cpu().numpy()
-            self.viz["edge_adj"] = data["edge_adj"].cpu().numpy()
-            self.viz["reconstructed_edges"] = recon_edges.cpu().numpy()
-            self.viz["reconstructed_faces"] = recon_faces.cpu().numpy()
+            self.viz["reconstructed_edges"] = recon_data["recon_edges"].cpu().numpy()
+            self.viz["reconstructed_faces"] = recon_data["recon_faces"].cpu().numpy()
 
         return total_loss
 
@@ -162,17 +140,16 @@ class ModelTraining(pl.LightningModule):
 
         gt_edges = self.viz["sample_points_lines"][0]
         gt_faces = self.viz["sample_points_faces"][0]
-        recon_edges = self.viz["reconstructed_edges"][0]
-        recon_faces = self.viz["reconstructed_faces"][0]
-        edge_adj = self.viz["edge_adj"][0]
+        recon_edges = self.viz["reconstructed_edges"]
+        recon_faces = self.viz["reconstructed_faces"]
 
         valid_flag = (gt_edges != -1).all(axis=-1).all(axis=-1)
         gt_edges = gt_edges[valid_flag]
-        recon_edges = recon_edges[valid_flag]
+        recon_edges = recon_edges
 
         valid_flag = (gt_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)
         gt_faces = gt_faces[valid_flag]
-        recon_faces = recon_faces[valid_flag]
+        recon_faces = recon_faces
 
         edge_points = np.concatenate((gt_edges, recon_edges), axis=0).reshape(-1, 3)
         edge_colors = np.concatenate(
@@ -201,10 +178,10 @@ def main(v_cfg: DictConfig):
     print(OmegaConf.to_yaml(v_cfg))
 
     is_train_transformer = v_cfg["trainer"]["train_transformer"]
-    if is_train_transformer:
-        logger = TensorBoardLogger("tb_logs_brepgen", name="transformer")
-    else:
-        logger = TensorBoardLogger("tb_logs_brepgen", name="autoencoder")
+    # if is_train_transformer:
+    #     logger = TensorBoardLogger("tb_logs_brepgen", name="transformer")
+    # else:
+    #     logger = TensorBoardLogger("tb_logs_brepgen", name="autoencoder")
 
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir']
@@ -218,7 +195,7 @@ def main(v_cfg: DictConfig):
 
     trainer = Trainer(
             default_root_dir=log_dir,
-            logger=logger,
+            # logger=logger,
             accelerator='gpu',
             strategy="auto",
             devices=v_cfg["trainer"].gpu,

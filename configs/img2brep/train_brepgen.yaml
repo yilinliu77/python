@@ -1,14 +1,14 @@
 dataset:
   #  root: /mnt/d/meshgpt/0planar_shapes_new
-  root: /mnt/d/meshgpt/deepcad_10000/main_data
-  #  root: G:/Projects/img2brep/data/0planar_shapes_new
+#  root: /mnt/d/meshgpt/deepcad_10000/main_data
+  root: G:/Dataset/img2brep/deepcad_10000/main_data
   dataset_name: ABC
-  overfit: false
+  overfit: true
   tokenized_batch_size: 16
 
 trainer:
   learning_rate: 1e-4
-  gpu: [ 0,1,2,3,4,5,6,7,8,9 ]
+  gpu: 1
   num_worker: 8
 
   vis_recon_faces: true
@@ -16,7 +16,7 @@ trainer:
   condition_on_text: true
 
   num_samples: -1
-  batch_size: 16
+  batch_size: 4
 
   spawn: false
   checkpoint_autoencoder:
@@ -38,7 +38,7 @@ model:
 
 hydra:
   run:
-    dir: ./outputs/${now:%Y_%m_%d_%H_%M_%S}
+    dir: ./outputs_img2brep/${now:%Y_%m_%d_%H_%M_%S}
   job:
     chdir: False
 #  output_subdir: null

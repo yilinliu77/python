@@ -106,7 +106,7 @@ class ModelTraining(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = Adam(self.model.parameters(), lr=self.learning_rate)
         # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=40, T_mult=1, eta_min=1e-8, last_epoch=-1)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10000, gamma=0.1)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.1)
         # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=100, verbose=True)
         return {
             'optimizer'   : optimizer,
@@ -247,7 +247,7 @@ def main(v_cfg: DictConfig):
             state_dict_ = {k[12:]: v for k, v in state_dict.items() if 'autoencoder' in k}
         del state_dict
 
-        modelTraining.model.load_state_dict(state_dict_, strict=False)
+        modelTraining.model.load_state_dict(state_dict_, strict=True)
 
     if v_cfg["trainer"].evaluate:
         trainer.test(modelTraining)

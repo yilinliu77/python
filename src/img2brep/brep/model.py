@@ -304,6 +304,7 @@ class AutoEncoder(nn.Module):
         edge_face_embeddings = torch.gather(face_embeddings[:, None].repeat((1, edge_face_idx.shape[1], 1, 1)), dim=2,
                                             index=edge_face_idx[:, ..., None].repeat(
                                                     (1, 1, 1, face_embeddings.shape[-1])))
+        edge_face_idx[~edge_face_idx_mask] = -1
 
         face_embeddings1 = edge_face_embeddings[:, :, 0, :]
         face_embeddings2 = edge_face_embeddings[:, :, 1, :]
@@ -335,6 +336,7 @@ class AutoEncoder(nn.Module):
             null_intersection_embedding = self.cross_attn_intersection(face_embeddings1.unsqueeze(1),
                                                                        face_embeddings2.unsqueeze(1))
             null_intersection_embedding = rearrange(null_intersection_embedding, 'b 1 dim -> b dim')
+            # null_intersection_embedding = face_embeddings1 * face_embeddings2
 
             # if null_intersection_embedding.shape[0] > intersection_embedding.shape[0] * intersection_embedding.shape[1]:
             #     sample_num = intersection_embedding.shape[0] * intersection_embedding.shape[1]
@@ -439,7 +441,13 @@ class AutoEncoder(nn.Module):
             mse_similarity = F.mse_loss(intersection_edge_embeddings, null_intersection_embeddings,
                                         reduction='none').sum(-1)
 
-            non_null_mask = torch.logical_and(0.001 < mse_similarity, mse_similarity < 0.05)
+            non_null_mask_infer = torch.logical_and(0.0001 < mse_similarity, mse_similarity < 0.03)
+            non_null_mask_gt = (face_adj == 1)
+            tri_mask = torch.triu(torch.ones(face_adj.shape[1], face_adj.shape[1], dtype=torch.uint8))[None, :,
+                       :].repeat(face_adj.shape[0], 1, 1)
+            non_null_mask_gt = torch.logical_and(non_null_mask_gt, tri_mask)
+
+            non_null_mask = non_null_mask_infer
 
             non_null_edge_embeddings = []
             for i in range(intersection_edge_embeddings.shape[0]):

@@ -33,17 +33,19 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
                              os.path.isdir(os.path.join(self.dataset_path, folder))]
         self.data_folders.sort()
 
+        self.src_data_sum = len(self.data_folders)
+
+        self.check_data()
+
         self.data_sum = len(self.data_folders)
 
         print("\nDataset INFO")
-        print("data_folders:", len(self.data_folders))
-
-        # self.training_range = int(0.8 * self.sum_num)
-        # self.validation_range = int(0.9 * self.sum_num)
+        print("Src data_folders:", self.src_data_sum)
+        print("After removing:", self.data_sum)
 
         self.training_range = [int(0 * self.data_sum), int(0.9 * self.data_sum)]
         self.validation_range = [int(0.9 * self.data_sum), int(1.0 * self.data_sum)]
-        self.test_range = [int(0.0 * self.data_sum), int(1.0 * self.data_sum)]
+        self.test_range = [int(0 * self.data_sum), int(1.0 * self.data_sum)]
 
         if self.is_overfit or self.mode == "testing":
             self.data_folders = self.data_folders[self.test_range[0]:self.test_range[1]]
@@ -55,7 +57,19 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
             raise
 
     def __len__(self):
-        return self.data_sum
+        return len(self.data_folders)
+
+    def check_data(self):
+        miss = []
+        for folder_path in self.data_folders:
+            if not os.path.exists(os.path.join(folder_path, "data.npz")):
+                miss.append(folder_path)
+                # print("Missing data.npz in", folder_path)
+
+        if len(miss) > 0:
+            for folder_path in miss:
+                self.data_folders.remove(folder_path)
+            print("Remove missing data.npz folders:", len(miss))
 
     def __getitem__(self, idx):
         folder_path = self.data_folders[idx]

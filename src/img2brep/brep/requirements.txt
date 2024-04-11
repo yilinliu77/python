@@ -13,3 +13,5 @@ torch==2.2.1
 torch_geometric==2.5.2
 torchtyping==0.1.4
 tqdm==4.66.1
+opencv-python
+TensorBoard==2.6.0

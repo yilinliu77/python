@@ -1,30 +1,34 @@
 dataset:
   #  root: /mnt/d/meshgpt/0planar_shapes_new
   #  root: /mnt/d/meshgpt/deepcad_10000/main_data
-  root: G:/Dataset/img2brep/deepcad_10000/main_data
+  #  root: /mnt/d/meshgpt/deepcad_whole
+  root: /mnt/d/yilin/img2brep/deepcad_whole
   dataset_name: ABC
-  overfit: true
+  overfit: false
   tokenized_batch_size: 16
 
 trainer:
   learning_rate: 1e-4
-  #  gpu: [ 2,3,4,5,6,7,8,9 ]
-  gpu: 1
+  #  gpu: [ 0,1 ]
+  #  num_worker: 32
+  #  batch_size: 256
+
+  gpu: [ 1 ]
   num_worker: 0
+  batch_size: 4
 
   vis_recon_faces: true
   train_transformer: false
   condition_on_text: true
 
   num_samples: -1
-  batch_size: 4
 
   spawn: false
   checkpoint_autoencoder:
-  resume_from_checkpoint: /root/workspace/python/src/img2brep/brep/tb_logs_brepgen/autoencoder/0409_big_success/checkpoints/epoch=4399-step=88000.ckpt
+  resume_from_checkpoint: #/root/workspace/python/src/img2brep/brep/tb_logs_brepgen/autoencoder/0409_big_success/checkpoints/epoch=4399-step=88000.ckpt
   evaluate: false
   output: .
-  check_val_every_n_epoch: 100
+  check_val_every_n_epoch: 10
   accelerator: "32-true"
 
 model:

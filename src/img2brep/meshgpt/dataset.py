@@ -249,8 +249,4 @@ class Transformer_Dataset(torch.utils.data.Dataset):
         return self.codes.shape[0]
 
     def __getitem__(self, idx):
-<<<<<<< HEAD
         return {'codes': self.codes[idx], 'img_embed': self.img_embed[idx]}
-=======
-        return {'codes': self.codes[idx], 'img_embed': self.img_embed[idx]}
->>>>>>> fbd7c8689bf6603ae4cec2d847cb3c8766155c27

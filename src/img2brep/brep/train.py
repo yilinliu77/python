@@ -1,7 +1,5 @@
 import sys
 
-from shared.common_utils import export_point_cloud
-
 sys.path.append('../../../')
 import os.path
 from pathlib import Path
@@ -73,7 +71,7 @@ class ModelTraining(pl.LightningModule):
         if not self.is_train_transformer:
             self.valid_dataset = Auotoencoder_Dataset("validation", self.hydra_conf["dataset"], )
 
-        return DataLoader(self.valid_dataset, batch_size=1,
+        return DataLoader(self.valid_dataset, batch_size=self.batch_size,
                           collate_fn=Auotoencoder_Dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           # pin_memory=True,
@@ -173,10 +171,6 @@ def main(v_cfg: DictConfig):
     print(OmegaConf.to_yaml(v_cfg))
 
     is_train_transformer = v_cfg["trainer"]["train_transformer"]
-    # if is_train_transformer:
-    #     logger = TensorBoardLogger("tb_logs_brepgen", name="transformer")
-    # else:
-    #     logger = TensorBoardLogger("tb_logs_brepgen", name="autoencoder")
 
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir']
@@ -188,11 +182,17 @@ def main(v_cfg: DictConfig):
     mc = ModelCheckpoint(monitor="Validation_Loss", save_top_k=3, save_last=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
+    if is_train_transformer:
+        logger = TensorBoardLogger(os.path.join(log_dir, "tb_logs_brepgen"), name="transformer")
+    else:
+        logger = TensorBoardLogger(os.path.join(log_dir, "tb_logs_brepgen"), name="autoencoder")
+
     trainer = Trainer(
             default_root_dir=log_dir,
-            # logger=logger,
+            logger=logger,
             accelerator='gpu',
-            strategy="auto",
+            # strategy="ddp_find_unused_parameters_false" if v_cfg["trainer"].gpu > 1 else "auto",
+            strategy="ddp_find_unused_parameters_true",
             devices=v_cfg["trainer"].gpu,
             log_every_n_steps=25,
             enable_model_summary=False,

@@ -319,106 +319,27 @@ class AttnFaceEmbedding(nn.Module):
         return face_embeddings
 
 
-class AutoEncoder(nn.Module):
+class Decoder(nn.Module):
     def __init__(self,
-                 max_length=100,
-                 dim_codebook_edge=256,
-                 dim_codebook_face=256,
-                 encoder_dims_through_depth: Tuple[int, ...] = (
-                         64, 128, 256, 256
-                         ),
-                 decoder_dims_through_depth: Tuple[int, ...] = (
-                         128, 128, 128, 128,
-                         192, 192, 192, 192,
-                         256, 256, 256, 256, 256, 256,
-                         384, 384, 384
-                         ),
-                 init_decoder_conv_kernel=7,
-                 resnet_dropout=0,
-                 num_discrete_coors=128,
-                 dim_coor_embed=64,
+                 decoder_dims_through_depth,
+                 init_decoder_conv_kernel,
+                 init_decoder_dim,
+                 dim_codebook_edge,
+                 dim_codebook_face,
+                 resnet_dropout
                  ):
-        super(AutoEncoder, self).__init__()
-        self.max_length = max_length
-        self.dim_codebook_edge = dim_codebook_edge
-        self.dim_codebook_face = dim_codebook_face
-        self.pad_id = -1
-
-        self.time_statics = [0 for _ in range(10)]
-
-        # 0. discretize && coords embedding
-        # self.discretize_coords = partial(discretize, continuous_range=(-1, 1), num_discrete=128)
-        # self.coor_embed = nn.Embedding(num_discrete_coors, dim_coor_embed)
-
-        # 1. Convolutional encoder
-        # Map from (B*N, 20) to (B, dim_codebook(196))
-        self.edge_encoder = nn.Sequential(
-                nn.Conv1d(in_channels=3, out_channels=64, kernel_size=7, stride=1, padding=3),
-                nn.ReLU(),
-                nn.MaxPool1d(kernel_size=4, stride=4),
-                nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.AdaptiveAvgPool1d(1),
-                nn.Flatten(),
-                nn.Linear(128, dim_codebook_edge)
-                )
-        self.face_encoder = nn.Sequential(
-                nn.Conv2d(in_channels=3, out_channels=64, kernel_size=7, stride=1, padding=3),
-                nn.ReLU(),
-                nn.MaxPool2d(kernel_size=4, stride=4),
-                nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.AdaptiveAvgPool2d((1, 1)),
-                nn.Flatten(),
-                nn.Linear(128, dim_codebook_face)
-                )
-
-        # 2. GCN
-        init_encoder_dim, *encoder_dims_through_depth = encoder_dims_through_depth
-        curr_dim = init_encoder_dim
-
-        self.init_sage_conv = SAGEConv(dim_codebook_edge, init_encoder_dim, normalize=True, project=True)
-
-        self.init_encoder_act_and_norm = nn.Sequential(
-                nn.SiLU(),
-                nn.LayerNorm(init_encoder_dim)
-                )
-
-        self.encoders = ModuleList([])
-
-        for dim_layer in encoder_dims_through_depth:
-            sage_conv = SAGEConv(
-                    curr_dim,
-                    dim_layer,
-                    normalize=True,
-                    project=True
-                    )
-
-            self.encoders.append(sage_conv)
-            curr_dim = dim_layer
-
-        # 3. Decoder
-        # Map from (B*N, 256) to (B*N, 256)
-        init_decoder_dim, *decoder_dims_through_depth = decoder_dims_through_depth
-        curr_dim = init_decoder_dim
-
-        assert is_odd(init_decoder_conv_kernel)
-
+        super(Decoder, self).__init__()
         # For edges
         self.edge_decoder_init = nn.Sequential(
-                nn.Conv1d(dim_codebook_edge, init_decoder_dim,
-                          kernel_size=init_decoder_conv_kernel, padding=init_decoder_conv_kernel // 2),
+                nn.Linear(dim_codebook_edge, init_decoder_dim),
                 nn.SiLU(),
-                Rearrange('b c n -> b n c'),
                 nn.LayerNorm(init_decoder_dim),
-                Rearrange('b n c -> b c n')
                 )
 
         self.edge_decoder = ModuleList([])
-
+        curr_dim = init_decoder_dim
         for dim_layer in decoder_dims_through_depth:
             resnet_block = ResnetBlock(curr_dim, dim_layer, dropout=resnet_dropout)
-
             self.edge_decoder.append(resnet_block)
             curr_dim = dim_layer
 
@@ -451,104 +372,252 @@ class AutoEncoder(nn.Module):
                 Rearrange('... (v w c) -> ... v w c', v=20, w=20)
                 )
 
-        self.null_intersection = nn.Parameter(torch.rand(dim_codebook_face))
-
-        self.intersector = AttnIntersector(dim=dim_codebook_face, num_heads=4, num_layers=6)
-
-        self.face_embed_atten = AttnFaceEmbedding(dim=dim_codebook_face, num_heads=4, num_layers=6)
-
-    # edge: (B, N, 20, 3)
-    # edge_mask: (B, N)
-    # edge_adj: (B, M, 2)
-    def encode(self, edge, edge_mask, edge_adj):
-        B, N, _, _ = edge.size()
-
-        edge = edge.masked_fill(~repeat(edge_mask, 'b n -> b n v k', v=20, k=3), 0.)
-
-        edge = rearrange(edge, 'b n e v -> (b n) v e')
-
-        # 1. project in (B, N, dim_codebook)
-        edge_embed = self.edge_encoder(edge)
-        edge_embed = rearrange(edge_embed, '(b n) d -> b n d', b=B, n=N)
-
-        # 2. GCN
-        # first handle edges
-        # needs to be offset by number of faces for each batch
-        edge_adj_mask = (edge_adj != -1).all(dim=-1)
-        edge_index_offsets = reduce(edge_mask.long(), 'b ne -> b', 'sum')
-        edge_index_offsets = F.pad(edge_index_offsets.cumsum(dim=0), (1, -1), value=0)
-        edge_index_offsets = rearrange(edge_index_offsets, 'b -> b 1 1')
-
-        edge_adj += edge_index_offsets
-        edge_adj = edge_adj[edge_adj_mask]
-        edge_adj = rearrange(edge_adj, 'be ij -> ij be')
-
-        # next prepare the face_mask for using masked_select and masked_scatter
-
-        orig_face_embed_shape = edge_embed.shape[:2]
-
-        edge_embed = edge_embed[edge_mask]
-
-        edge_embed = self.init_sage_conv(edge_embed, edge_adj)
-        edge_embed = self.init_encoder_act_and_norm(edge_embed)
-
-        for conv in self.encoders:
-            edge_embed = conv(edge_embed, edge_adj)
-
-        shape = (*orig_face_embed_shape, edge_embed.shape[-1])
-
-        edge_embed = edge_embed.new_zeros(shape).masked_scatter(rearrange(edge_mask, '... -> ... 1'), edge_embed)
-
-        return edge_embed
-
-    def decode(self, edge_embeddings, edge_mask, face_embeddings, face_mask):
-        B, N, _ = edge_embeddings.size()
-
-        # Decode edges
-        edge_mask = rearrange(edge_mask, 'b n -> b 1 n')
-        x = edge_embeddings
-
-        x = rearrange(x, 'b n d -> b d n')
-        x = x.masked_fill(~edge_mask, 0.)
-        x = self.edge_decoder_init(x)
-        for resnet_block in self.edge_decoder:
-            x = resnet_block(x, mask=edge_mask)
-
-        recon_edges = x * edge_mask
-        recon_edges = rearrange(recon_edges, 'b d n -> b n d')
-        recon_edges = self.to_edge(recon_edges)
-
-        # Decode faces
-        face_mask = rearrange(face_mask, 'b n -> b 1 n')
-        x = face_embeddings
-
-        x = rearrange(x, 'b n d -> b d n')
-        x = x.masked_fill(~face_mask, 0.)
-        x = self.face_decoder_init(x)
-        for resnet_block in self.face_decoder:
-            x = resnet_block(x, mask=face_mask)
-
-        # Mask out invalide points
-        recon_faces = x * face_mask
-        recon_faces = rearrange(recon_faces, 'b d n -> b n d')
-        recon_faces = self.to_face(recon_faces)
-
-        return recon_edges, recon_faces
-
-    def decode_edge(self, edge_embeddings):
-        x = self.edge_decoder_init(edge_embeddings[:, :, None])
+    def forward(self, v_edge_embeddings, v_face_embeddings):
+        x = self.edge_decoder_init(v_edge_embeddings[:, :, None])
         for resnet_block in self.edge_decoder:
             x = resnet_block(x)
         recon_edges = self.to_edge(x[..., 0])
-        return recon_edges
 
-    def decode_face(self, face_embeddings):
-        # Decode faces
-        x = self.face_decoder_init(face_embeddings[:, :, None])
+        x = self.face_decoder_init(v_face_embeddings[:, :, None])
         for resnet_block in self.face_decoder:
             x = resnet_block(x)
         recon_faces = self.to_face(x[..., 0])
-        return recon_faces
+        return recon_edges, recon_faces
+
+
+class Small_decoder(nn.Module):
+    def __init__(self,
+                 dim_codebook_edge,
+                 dim_codebook_face,
+                 resnet_dropout
+                 ):
+        super(Small_decoder, self).__init__()
+        # For edges
+        self.edge_decoder = nn.Sequential(
+                nn.Linear(dim_codebook_edge, 384),
+                nn.SiLU(),
+                nn.Dropout(resnet_dropout),
+                nn.LayerNorm(384),
+                nn.Linear(384, 384),
+                nn.SiLU(),
+                nn.Dropout(resnet_dropout),
+                nn.LayerNorm(384),
+                nn.Linear(384, 384),
+                nn.SiLU(),
+                nn.Dropout(resnet_dropout),
+                nn.LayerNorm(384),
+                nn.Linear(384, 20 * 3),
+                Rearrange('... (v c) -> ... v c', v=20)
+                )
+
+        # For faces
+        self.face_decoder = nn.Sequential(
+                nn.Linear(dim_codebook_face, 384),
+                nn.SiLU(),
+                nn.Dropout(resnet_dropout),
+                nn.LayerNorm(384),
+                nn.Linear(384, 768),
+                nn.SiLU(),
+                nn.Dropout(resnet_dropout),
+                nn.LayerNorm(768),
+                nn.Linear(768, 768),
+                nn.SiLU(),
+                nn.Dropout(resnet_dropout),
+                nn.LayerNorm(768),
+                nn.Linear(768, 20 * 20 * 3),
+                Rearrange('... (v w c) -> ... v w c', v=20, w=20)
+                )
+
+    def forward(self, v_edge_embeddings, v_face_embeddings):
+        recon_edges = self.edge_decoder(v_edge_embeddings)
+        recon_faces = self.face_decoder(v_face_embeddings)
+        return recon_edges, recon_faces
+
+
+class Fuser(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        pass
+
+    def forward(self, v_face_edge_loop, v_face_mask,
+                v_edge_embedding, v_face_embedding):
+        return
+
+
+class Simple_fuser(Fuser):
+    def __init__(self, dim_codebook_face=256):
+        super().__init__()
+        self.face_embed_atten = AttnFaceEmbedding(dim=dim_codebook_face, num_heads=4, num_layers=6)
+        pass
+
+    def forward(self, v_face_edge_loop, v_face_mask,
+                v_edge_embedding, v_face_embedding):
+        face_edge_relations = v_face_edge_loop[v_face_mask].clone()
+        face_edge_relations_mask = torch.logical_and(face_edge_relations != -1, face_edge_relations != -2)
+        face_edge_relations[~face_edge_relations_mask] = 0
+        face_embeddings_plus = v_edge_embedding[face_edge_relations]
+        # mask out invalids to 0
+        face_embeddings_plus[~face_edge_relations_mask] = 0
+        face_embeddings_plus = face_embeddings_plus.sum(dim=1) / face_edge_relations_mask.long().sum(
+                dim=1, keepdim=True).clamp(min=1e-5)
+
+        # fusion the face_embedding and face_embedding_puls
+        face_embeddings = torch.stack([v_face_embedding, face_embeddings_plus], dim=1)
+        face_embeddings = self.face_embed_atten(face_embeddings)
+        face_embeddings = face_embeddings.mean(dim=1)
+        return face_embeddings
+
+
+class Attn_fuser(Fuser):
+    def __init__(self):
+        super().__init__()
+        self.atten = nn.ModuleList([
+            nn.MultiheadAttention(
+                    embed_dim=256,
+                    num_heads=2,
+                    dropout=0.1,
+                    batch_first=True
+                    ),
+            nn.MultiheadAttention(
+                    embed_dim=256,
+                    num_heads=2,
+                    dropout=0.1,
+                    batch_first=True
+                    ),
+            nn.MultiheadAttention(
+                    embed_dim=256,
+                    num_heads=2,
+                    dropout=0.1,
+                    batch_first=True
+                    ),
+            nn.MultiheadAttention(
+                    embed_dim=256,
+                    num_heads=2,
+                    dropout=0.1,
+                    batch_first=True
+                    )
+            ])
+        pass
+
+    def forward(self, v_face_edge_loop, v_face_mask,
+                v_edge_embedding, v_face_embedding):
+        L, _ = v_face_embedding.shape
+        S, _ = v_edge_embedding.shape
+        face_edge_attn_mask = torch.zeros(
+                L, S + 1, device=v_face_embedding.device, dtype=torch.bool
+                )
+        face_edge_relations = v_face_edge_loop[v_face_mask].clone()
+        valid_relation_mask = torch.logical_and(face_edge_relations != -1, face_edge_relations != -2)
+        face_edge_relations[~valid_relation_mask] = S
+        face_edge_attn_mask = face_edge_attn_mask.scatter(1, face_edge_relations, True)
+        face_edge_attn_mask = face_edge_attn_mask[:, :S]
+
+        x = v_face_embedding
+        for layer in self.atten:
+            x = layer(
+                    query=x,
+                    key=v_edge_embedding,
+                    value=v_edge_embedding,
+                    attn_mask=face_edge_attn_mask,
+                    )[0]
+
+        return x
+
+
+class AutoEncoder(nn.Module):
+    def __init__(self,
+                 max_length=100,
+                 dim_codebook_edge=256,
+                 dim_codebook_face=256,
+                 encoder_dims_through_depth: Tuple[int, ...] = (
+                         64, 128, 256, 256
+                         ),
+                 ):
+        super(AutoEncoder, self).__init__()
+        self.max_length = max_length
+        self.dim_codebook_edge = dim_codebook_edge
+        self.dim_codebook_face = dim_codebook_face
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # 1. Convolutional encoder
+        # Out: `dim_codebook_edge` and `dim_codebook_face`
+        self.edge_encoder = nn.Sequential(
+                nn.Conv1d(in_channels=3, out_channels=64, kernel_size=7, stride=1, padding=3),
+                nn.ReLU(),
+                nn.MaxPool1d(kernel_size=4, stride=4),
+                nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.AdaptiveAvgPool1d(1),
+                nn.Flatten(),
+                nn.Linear(128, dim_codebook_edge)
+                )
+        self.face_encoder = nn.Sequential(
+                nn.Conv2d(in_channels=3, out_channels=64, kernel_size=7, stride=1, padding=3),
+                nn.ReLU(),
+                nn.MaxPool2d(kernel_size=4, stride=4),
+                nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+                nn.AdaptiveAvgPool2d((1, 1)),
+                nn.Flatten(),
+                nn.Linear(128, dim_codebook_face)
+                )
+
+        # 2. GCN to distribute edge features to the nearby edges
+        # Out: curr_dim
+        init_encoder_dim, *encoder_dims_through_depth = encoder_dims_through_depth
+        gcn_out_dims = init_encoder_dim
+        self.init_sage_conv = SAGEConv(dim_codebook_edge, init_encoder_dim, normalize=True, project=True)
+        self.init_encoder_act_and_norm = nn.Sequential(
+                nn.SiLU(),
+                nn.LayerNorm(init_encoder_dim)
+                )
+
+        self.gcn_layers = ModuleList([])
+        for dim_layer in encoder_dims_through_depth:
+            sage_conv = SAGEConv(
+                    gcn_out_dims,
+                    dim_layer,
+                    normalize=True,
+                    project=True
+                    )
+            self.gcn_layers.append(sage_conv)
+            gcn_out_dims = dim_layer
+
+        # 3. Fuser
+        # Inject edge features to the corresponding face
+        # This is the true latent code we want to obtain during the generation
+        # self.fuser = Simple_fuser()
+        self.fuser = Attn_fuser()
+
+        # 4. Intersection
+        # Use face features and connectivity to obtain the edge latent
+        self.intersector = AttnIntersector(dim=dim_codebook_face, num_heads=4, num_layers=6)
+        self.null_intersection = nn.Parameter(torch.rand(dim_codebook_face))
+
+        # 5. Decoder
+        # Get BSpline surfaces and edges based on the true latent code
+        pass
+        # self.decoder = Decoder(
+        #     decoder_dims_through_depth=(
+        #         128, 128, 128, 128,
+        #         192, 192, 192, 192,
+        #         256, 256, 256, 256, 256, 256,
+        #         384, 384, 384
+        #     ),
+        #     init_decoder_conv_kernel=7,
+        #     init_decoder_dim=256,
+        #     dim_codebook_edge=dim_codebook_edge,
+        #     dim_codebook_face=dim_codebook_face,
+        #     resnet_dropout=0,
+        # )
+        self.decoder = Small_decoder(
+                dim_codebook_edge=dim_codebook_edge,
+                dim_codebook_face=dim_codebook_face,
+                resnet_dropout=0.1,
+                )
 
     def encode_edge_coords(self, edge):
         # Project in
@@ -566,7 +635,7 @@ class AutoEncoder(nn.Module):
 
         edge_embeddings = self.init_encoder_act_and_norm(edge_embeddings)
 
-        for conv in self.encoders:
+        for conv in self.gcn_layers:
             edge_embeddings = conv(edge_embeddings, edge_adj)
         return edge_embeddings
 
@@ -700,27 +769,29 @@ class AutoEncoder(nn.Module):
         self.time_statics[2] += delta_time
 
         # aggregate the egde embeddings to face embeddings plus
-        face_edge_relations = face_edge_loop[face_mask].clone()
-        face_edge_relations_mask = torch.logical_and(face_edge_relations != -1, face_edge_relations != -2)
-        face_edge_relations[~face_edge_relations_mask] = 0
-        face_embeddings_plus = edge_embeddings_plus[face_edge_relations]
-        # mask out invalids to 0
-        face_embeddings_plus[~face_edge_relations_mask] = 0
-        face_embeddings_plus = face_embeddings_plus.sum(dim=1) / face_edge_relations_mask.long().sum(
-                dim=1, keepdim=True).clamp(min=1e-5)
-
-        # fusion the face_embedding and face_embedding_puls
-        face_embeddings = torch.stack([face_embeddings, face_embeddings_plus], dim=1)
-        face_embeddings = self.face_embed_atten(face_embeddings)
-        face_embeddings = face_embeddings.mean(dim=1)
+        face_embeddings = self.fuser(
+                v_face_edge_loop=face_edge_loop,
+                v_face_mask=face_mask,
+                v_edge_embedding=edge_embeddings,
+                v_face_embedding=face_embeddings
+                )
 
         delta_time, timer = profile_time(timer, v_print=False)
         self.time_statics[3] += delta_time
 
         # 3. Reconstruct the edge and face points
-        recon_faces = self.decode_face(face_embeddings)
+        intersected_edge_features, null_features = self.intersection(
+                face_embeddings,
+                edge_face_connectivity,
+                face_adj,
+                face_mask
+                )
         delta_time, timer = profile_time(timer, v_print=False)
         self.time_statics[4] += delta_time
+
+        recon_edges, recon_faces = self.decoder(intersected_edge_features, face_embeddings)
+        delta_time, timer = profile_time(timer, v_print=False)
+        self.time_statics[5] += delta_time
 
         if not is_inference:
             intersected_edge_features, null_features = self.intersection(
@@ -779,29 +850,29 @@ class AutoEncoder(nn.Module):
         total_loss = loss_edge + loss_face + loss_intersection
 
         loss = {
-            "total_loss"  : total_loss,
-            "edge"        : loss_edge,
-            "face"        : loss_face,
-            "intersection": loss_intersection,
+
+            "total_loss"       : total_loss,
+            "edge"             : loss_edge,
+            "face"             : loss_face,
+            "null_intersection": loss_null_intersection
             }
 
-        recon_edges_full = torch.zeros_like(sample_points_edges)
-        temp = torch.zeros_like(recon_edges_full[edge_mask])
-        temp[edge_face_connectivity[..., 0]] = recon_edges
-        recon_edges_full[edge_mask] = temp
-        recon_edges[recon_edges == 0] = -1
+        recon_edges_full = -torch.ones_like(sample_points_edges)
+        bbb = torch.zeros_like(recon_edges_full[edge_mask])
+        bbb[edge_face_connectivity[..., 0]] = recon_edges
+        recon_edges_full[edge_mask] = bbb
 
-        recon_faces = sample_points_faces.new_zeros(sample_points_faces.shape).masked_scatter(
+        recon_faces_full = sample_points_faces.new_zeros(sample_points_faces.shape).masked_scatter(
                 face_mask[:, :, None, None, None].repeat(1, 1, 20, 20, 3), recon_faces)
-        recon_faces[~face_mask] = -1
+        recon_faces_full[~face_mask] = -1
 
         data = {
-            "recon_edges": recon_edges,
-            "recon_faces": recon_faces
+            "recon_edges": recon_edges_full,
+            "recon_faces": recon_faces_full
             }
 
         if only_return_loss:
             return loss
         delta_time, timer = profile_time(timer, v_print=False)
-        self.time_statics[7] += delta_time
+        self.time_statics[6] += delta_time
         return loss, data

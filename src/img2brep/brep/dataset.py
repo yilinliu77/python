@@ -33,6 +33,8 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
                              os.path.isdir(os.path.join(self.dataset_path, folder))]
         self.data_folders.sort()
 
+        self.data_folders = self.data_folders[0:100]
+
         self.src_data_sum = len(self.data_folders)
 
         self.check_data()
@@ -91,7 +93,6 @@ class Auotoencoder_Dataset(torch.utils.data.Dataset):
         edge_face_connectivity = torch.from_numpy(data_npz['edge_face_connectivity'])
         #  Which of two edges intersect and produce a vertex (num_intersection, (id_vertex, id_edge1, id_edge2))
         vertex_edge_connectivity = torch.from_numpy(data_npz['vertex_edge_connectivity'])
-
         return (sample_points_faces, sample_points_lines, sample_points_vertices,
                 face_edge_loop, face_adj, edge_face_connectivity, vertex_edge_connectivity)
 

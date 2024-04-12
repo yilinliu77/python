@@ -9,12 +9,9 @@ dataset:
 
 trainer:
   learning_rate: 1e-4
-  #  gpu: [ 0,1 ]
-  #  num_worker: 32
-  #  batch_size: 256
 
-  gpu: [ 1 ]
-  num_worker: 0
+  gpu: [ 0, 1 ]
+  num_worker: 4
   batch_size: 4
 
   vis_recon_faces: true
@@ -28,7 +25,7 @@ trainer:
   resume_from_checkpoint: #/root/workspace/python/src/img2brep/brep/tb_logs_brepgen/autoencoder/0409_big_success/checkpoints/epoch=4399-step=88000.ckpt
   evaluate: false
   output: .
-  check_val_every_n_epoch: 10
+  check_val_every_n_epoch: 100
   accelerator: "32-true"
 
 model:

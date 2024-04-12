@@ -553,7 +553,7 @@ class AutoEncoder(nn.Module):
 
         return edge_features, null_features
 
-    def forward_batch(self, v_data, only_return_recon=False, only_return_loss=True, **kwargs):
+    def forward(self, v_data, only_return_recon=False, only_return_loss=True, **kwargs):
         sample_points_faces = v_data["sample_points_faces"]
         sample_points_edges = v_data["sample_points_lines"]
         sample_points_vertices = v_data["sample_points_vertices"]
@@ -682,9 +682,18 @@ class AutoEncoder(nn.Module):
             "null_intersection": loss_null_intersection
             }
 
-        # recon_edges = recon_edges.new_zeros(gt_edges.shape).masked_scatter(edge_mask, recon_edges)
-        # recon_edges_mask = edge_mask.masked_scatter(edge_mask, recon_edges)
-        # edge_mask.nonzero()[edge_face_connectivity[..., 0]]
+        edge_mask_flatten = edge_mask.flatten()
+        recon_edges_idx = edge_mask_flatten.nonzero().squeeze()[edge_face_connectivity[..., 0]]
+        recon_edges_mask = edge_mask_flatten.new_zeros(edge_mask_flatten.shape)
+        recon_edges_mask[recon_edges_idx] = True
+        recon_edges_mask = rearrange(recon_edges_mask, '(b n) -> b n', b=edge_mask.shape[0], n=edge_mask.shape[1])
+        recon_edges = sample_points_edges.new_zeros(sample_points_edges.shape).masked_scatter(
+                recon_edges_mask[:, :, None, None].repeat(1, 1, 20, 3), recon_edges)
+        recon_edges[~recon_edges_mask] = -1
+
+        recon_faces = sample_points_faces.new_zeros(sample_points_faces.shape).masked_scatter(
+                face_mask[:, :, None, None, None].repeat(1, 1, 20, 20, 3), recon_faces)
+        recon_faces[~face_mask] = -1
 
         data = {
             "recon_edges": recon_edges,
@@ -695,130 +704,4 @@ class AutoEncoder(nn.Module):
             return loss
         delta_time, timer = profile_time(timer, v_print=False)
         self.time_statics[7] += delta_time
-        return loss, data
-
-    def forward(self, v_data, only_return_recon=False, only_return_loss=True, training=False, **kwargs):
-        if training:
-            return self.forward_batch(v_data, only_return_recon=only_return_recon, only_return_loss=only_return_loss,
-                                      **kwargs)
-        else:
-            return self.forward_batch(v_data, only_return_recon=only_return_recon, only_return_loss=only_return_loss,
-                                      **kwargs)
-
-        # Inference code
-        assert v_data["sample_points_faces"].shape[0] == 1
-        sample_points_faces = v_data["sample_points_faces"]
-        sample_points_edges = v_data["sample_points_lines"]
-        sample_points_vertices = v_data["sample_points_vertices"]
-
-        v_face_edge_loop = v_data["face_edge_loop"]
-        face_adj = v_data["face_adj"]
-        v_edge_face_connectivity = v_data["edge_face_connectivity"]
-        v_vertex_edge_connectivity = v_data["vertex_edge_connectivity"]
-
-        # GT
-        gt_edges = sample_points_edges.clone()
-
-        # Flatten all the features to accelerate computation
-        edge_mask = (sample_points_edges != -1).all(dim=-1).all(dim=-1)
-        face_mask = (sample_points_faces != -1).all(dim=-1).all(dim=-1).all(dim=-1)
-
-        # Face
-        flatten_faces = sample_points_faces[face_mask]
-        gt_faces = flatten_faces.clone()
-
-        # Solve the edge_face_connectivity: first dimension (id_edge)
-        edge_face_connectivity = v_edge_face_connectivity.clone()
-        edge_face_connectivity_valid = (v_edge_face_connectivity != -1).all(dim=-1)
-        edge_index_offsets = reduce(edge_mask.long(), 'b ne -> b', 'sum')
-        edge_index_offsets = F.pad(edge_index_offsets.cumsum(dim=0), (1, -1), value=0)
-        edge_face_connectivity[..., 0] += edge_index_offsets[:, None]
-
-        # Solve the edge_face_connectivity: last two dimension (id_face)
-        face_index_offsets = reduce(face_mask.long(), 'b ne -> b', 'sum')
-        face_index_offsets = F.pad(face_index_offsets.cumsum(dim=0), (1, -1), value=0)
-        edge_face_connectivity[..., 1:] += face_index_offsets[:, None, None]
-        edge_face_connectivity[~edge_face_connectivity_valid] = -1
-        edge_face_connectivity = edge_face_connectivity[edge_face_connectivity_valid]
-
-        face_edge_loop = v_face_edge_loop.clone()
-        original_1 = v_face_edge_loop == -1
-        original_2 = v_face_edge_loop == -2
-        face_edge_loop += edge_index_offsets[:, None, None]
-        face_edge_loop[original_1] = -1
-        face_edge_loop[original_2] = -2
-
-        # Edges
-        flatten_edges = sample_points_edges[edge_mask]
-        # Solve the vertex_edge_connectivity: first dimension (id_vertex)
-        pass
-
-        # Solve the edge_face_connectivity: last two dimension (id_edge)
-        vertex_edge_connectivity_valid = (v_vertex_edge_connectivity != -1).all(dim=-1)
-        vertex_edge_connectivity = v_vertex_edge_connectivity.clone()
-        vertex_edge_connectivity[..., 1:] += edge_index_offsets[:, None, None]
-        vertex_edge_connectivity = vertex_edge_connectivity[vertex_edge_connectivity_valid]
-
-        # 1. Encode the edge and face points
-        edge_embeddings = self.encode_edge_coords(flatten_edges)
-        face_embeddings = self.encode_face_coords(flatten_faces)
-
-        # 2. GCN on edges
-        edge_embeddings_plus = self.gcn_on_edges(edge_embeddings, vertex_edge_connectivity[..., 1:].permute(1, 0))
-
-        # aggregate the egde embeddings to face embeddings plus
-        face_edge_relations = face_edge_loop[face_mask].clone()
-        face_edge_relations_mask = torch.logical_and(face_edge_relations != -1, face_edge_relations != -2)
-        face_edge_relations[~face_edge_relations_mask] = 0
-        face_embeddings_plus = edge_embeddings_plus[face_edge_relations]
-        # mask out invalids to 0
-        face_embeddings_plus[~face_edge_relations_mask] = 0
-        face_embeddings_plus = face_embeddings_plus.sum(dim=1) / face_edge_relations_mask.long().sum(dim=1,
-                                                                                                     keepdim=True).clamp(
-                min=1e-5)
-        face_embeddings += face_embeddings_plus
-
-        # 3. Reconstruct the edge and face points
-        recon_faces = self.decode_face(face_embeddings)
-        intersected_edge_features, null_features = self.intersection(
-                face_embeddings,
-                edge_face_connectivity,
-                face_adj,
-                face_mask
-                )
-        recon_edges = self.decode_edge(intersected_edge_features)
-
-        if only_return_recon:
-            return recon_edges, recon_faces
-
-        # recon loss
-        used_edges = gt_edges[edge_mask][edge_face_connectivity[..., 0]]
-        loss_edge = F.mse_loss(recon_edges, used_edges, reduction='mean')
-        loss_face = F.mse_loss(recon_faces, gt_faces, reduction='mean')
-
-        # Intersection
-        normalized_intersection = l2norm(intersected_edge_features)
-        normalized_null = l2norm(null_features)
-        normalized_token = l2norm(self.null_intersection)
-
-        loss_null_intersection = ((normalized_intersection * normalized_token).sum(dim=-1).abs().mean() +
-                                  (1 - (normalized_null * normalized_token).sum(dim=-1)).abs().mean())
-
-        total_loss = loss_edge + loss_face + loss_null_intersection
-
-        loss = {
-            "total_loss"       : total_loss,
-            "edge"             : loss_edge,
-            "face"             : loss_face,
-            "null_intersection": loss_null_intersection
-            }
-
-        data = {
-            "recon_edges": recon_edges,
-            "recon_faces": recon_faces
-            }
-
-        if only_return_loss:
-            return loss
-
         return loss, data

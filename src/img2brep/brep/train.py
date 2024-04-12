@@ -95,7 +95,7 @@ class ModelTraining(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         data = batch
 
-        loss = self.model(data, only_return_loss=True, training=True)
+        loss = self.model(data, only_return_loss=True)
         total_loss = loss["total_loss"]
         for key in loss:
             if key == "total_loss":
@@ -109,7 +109,7 @@ class ModelTraining(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         data = batch
 
-        loss, recon_data = self.model(data, only_return_loss=False, training=False)
+        loss, recon_data = self.model(data, only_return_loss=False)
         total_loss = loss["total_loss"]
         for key in loss:
             if key == "total_loss":
@@ -131,36 +131,46 @@ class ModelTraining(pl.LightningModule):
         # if self.trainer.sanity_checking:
         #     return
 
-        gt_edges = self.viz["sample_points_lines"][0]
-        gt_faces = self.viz["sample_points_faces"][0]
-        recon_edges = self.viz["reconstructed_edges"]
-        recon_faces = self.viz["reconstructed_faces"]
+        v_gt_edges = self.viz["sample_points_lines"]
+        v_gt_faces = self.viz["sample_points_faces"]
+        v_recon_edges = self.viz["reconstructed_edges"]
+        v_recon_faces = self.viz["reconstructed_faces"]
 
-        valid_flag = (gt_edges != -1).all(axis=-1).all(axis=-1)
-        gt_edges = gt_edges[valid_flag]
-        recon_edges = recon_edges
+        for idx in range(min(v_gt_edges.shape[0], 4)):
+            gt_edges = v_gt_edges[idx]
+            gt_faces = v_gt_faces[idx]
+            recon_edges = v_recon_edges[idx]
+            recon_faces = v_recon_faces[idx]
 
-        valid_flag = (gt_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)
-        gt_faces = gt_faces[valid_flag]
-        recon_faces = recon_faces
+            valid_flag = (gt_edges != -1).all(axis=-1).all(axis=-1)
+            gt_edges = gt_edges[valid_flag]
+            valid_flag = (recon_edges != -1).all(axis=-1).all(axis=-1)
+            recon_edges = recon_edges[valid_flag]
+            valid_flag = (gt_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)
+            gt_faces = gt_faces[valid_flag]
+            valid_flag = (recon_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)
+            recon_faces = recon_faces[valid_flag]
 
-        edge_points = np.concatenate((gt_edges, recon_edges), axis=0).reshape(-1, 3)
-        edge_colors = np.concatenate(
-                (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0] * 20, axis=0),
-                 np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0] * 20, axis=0)), axis=0)
+            edge_points = np.concatenate((gt_edges, recon_edges), axis=0).reshape(-1, 3)
+            edge_colors = np.concatenate(
+                    (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0] * 20, axis=0),
+                     np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0] * 20, axis=0)), axis=0)
 
-        face_points = np.concatenate((gt_faces, recon_faces), axis=0).reshape(-1, 3)
-        face_colors = np.concatenate(
-                (np.repeat(np.array([[0, 0, 255]], dtype=np.uint8), gt_faces.shape[0] * 400, axis=0),
-                 np.repeat(np.array([[255, 255, 0]], dtype=np.uint8), recon_faces.shape[0] * 400, axis=0)), axis=0)
+            face_points = np.concatenate((gt_faces, recon_faces), axis=0).reshape(-1, 3)
+            face_colors = np.concatenate(
+                    (np.repeat(np.array([[0, 0, 255]], dtype=np.uint8), gt_faces.shape[0] * 400, axis=0),
+                     np.repeat(np.array([[255, 255, 0]], dtype=np.uint8), recon_faces.shape[0] * 400, axis=0)), axis=0)
 
-        pc = o3d.geometry.PointCloud()
-        pc.points = o3d.utility.Vector3dVector(edge_points)
-        pc.colors = o3d.utility.Vector3dVector(edge_colors / 255.0)
-        o3d.io.write_point_cloud(str(self.log_root / (str(self.trainer.current_epoch) + "_viz_edges.ply")), pc)
-        pc.points = o3d.utility.Vector3dVector(face_points)
-        pc.colors = o3d.utility.Vector3dVector(face_colors / 255.0)
-        o3d.io.write_point_cloud(str(self.log_root / (str(self.trainer.current_epoch) + "_viz_faces.ply")), pc)
+            pc = o3d.geometry.PointCloud()
+            pc.points = o3d.utility.Vector3dVector(edge_points)
+            pc.colors = o3d.utility.Vector3dVector(edge_colors / 255.0)
+            o3d.io.write_point_cloud(
+                    str(self.log_root / f"{self.trainer.current_epoch:05}_idx_{idx:02}_viz_edges.ply"), pc)
+
+            pc.points = o3d.utility.Vector3dVector(face_points)
+            pc.colors = o3d.utility.Vector3dVector(face_colors / 255.0)
+            o3d.io.write_point_cloud(
+                    str(self.log_root / f"{self.trainer.current_epoch:05}_idx_{idx:02}_viz_faces.ply"), pc)
         return
 
 
@@ -192,7 +202,7 @@ def main(v_cfg: DictConfig):
             logger=logger,
             accelerator='gpu',
             # strategy="ddp_find_unused_parameters_false" if v_cfg["trainer"].gpu > 1 else "auto",
-            strategy="ddp_find_unused_parameters_true",
+            strategy="auto",
             devices=v_cfg["trainer"].gpu,
             log_every_n_steps=25,
             enable_model_summary=False,

@@ -100,6 +100,60 @@ def pad_to_length(t, length, dim=-1, value=0, right=True):
     return pad_at_dim(t, padding, dim=dim, value=value)
 
 
+def discretize(
+        t: Tensor,
+        continuous_range: Tuple[float, float],
+        num_discrete: int = 128
+        ) -> Tensor:
+    lo, hi = continuous_range
+    assert hi > lo
+
+    t = (t - lo) / (hi - lo)
+    t *= num_discrete
+    t -= 0.5
+
+    return t.round().long().clamp(min=0, max=num_discrete - 1)
+
+
+def undiscretize(
+        t: Tensor,
+        continuous_range=Tuple[float, float],
+        num_discrete: int = 128
+        ) -> Tensor:
+    lo, hi = continuous_range
+    assert hi > lo
+
+    t = t.float()
+    t += 0.5
+    t /= num_discrete
+
+    return t * (hi - lo) + lo
+
+
+def gaussian_blur_1d(
+        t: Tensor,
+        sigma: float = 1.
+        ) -> Tensor:
+
+    _, _, channels, device, dtype = *t.shape, t.device, t.dtype
+
+    width = int(ceil(sigma * 5))
+    width += (width + 1) % 2
+    half_width = width // 2
+
+    distance = torch.arange(-half_width, half_width + 1, dtype=dtype, device=device)
+
+    gaussian = torch.exp(-(distance ** 2) / (2 * sigma ** 2))
+    gaussian = l1norm(gaussian)
+
+    kernel = repeat(gaussian, 'n -> c 1 n', c=channels)
+
+    t = rearrange(t, 'b n c -> b c n')
+    out = F.conv1d(t, kernel, padding=half_width, groups=channels)
+
+    return rearrange(out, 'b c n -> b n c')
+
+
 # resnet block
 
 class PixelNorm(Module):
@@ -223,10 +277,11 @@ class SinalAttenBlock(nn.Module):
         super().__init__()
         self.model = nn.MultiheadAttention(embed_dim=dim, num_heads=num_heads, dropout=dropout, batch_first=True)
         self.layers_norm = nn.LayerNorm(dim)
+        self.linear = nn.Linear(dim, dim)
 
     def forward(self, v_embeddings):
         v_embeddings_atten_output, _ = self.model(v_embeddings, v_embeddings, v_embeddings, need_weights=True)
-        v_embeddings_atten_output = v_embeddings + self.layers_norm(v_embeddings_atten_output)
+        v_embeddings_atten_output = v_embeddings + self.linear(self.layers_norm(v_embeddings_atten_output))
 
         return v_embeddings_atten_output
 
@@ -238,17 +293,16 @@ class AttnIntersector(nn.Module):
         for _ in range(num_layers):
             self.layers.append(SinalAttenBlock(dim=dim, num_heads=num_heads, dropout=dropout))
 
-    def forward(self, v_embeddings, v_null_embeddings, num_max_items=200):
-        if v_null_embeddings.shape[0] > num_max_items:
-            indices = torch.randperm(v_null_embeddings.shape[0])[:num_max_items]
-            v_null_embeddings = v_null_embeddings[indices]
+    def forward(self, v_embeddings, num_max_items=None):
+        if num_max_items is not None and v_embeddings.shape[0] > num_max_items:
+            indices = torch.randperm(v_embeddings.shape[0])[:num_max_items]
+            v_embeddings = v_embeddings[indices]
 
         # share a AttnIntersector model
         for layer in self.layers:
             v_embeddings = layer(v_embeddings)
-            v_null_embeddings = layer(v_null_embeddings)
 
-        return v_embeddings, v_null_embeddings
+        return v_embeddings
 
 
 class AttnFaceEmbedding(nn.Module):
@@ -281,6 +335,8 @@ class AutoEncoder(nn.Module):
                          ),
                  init_decoder_conv_kernel=7,
                  resnet_dropout=0,
+                 num_discrete_coors=128,
+                 dim_coor_embed=64,
                  ):
         super(AutoEncoder, self).__init__()
         self.max_length = max_length
@@ -289,6 +345,10 @@ class AutoEncoder(nn.Module):
         self.pad_id = -1
 
         self.time_statics = [0 for _ in range(10)]
+
+        # 0. discretize && coords embedding
+        # self.discretize_coords = partial(discretize, continuous_range=(-1, 1), num_discrete=128)
+        # self.coor_embed = nn.Embedding(num_discrete_coors, dim_coor_embed)
 
         # 1. Convolutional encoder
         # Map from (B*N, 20) to (B, dim_codebook(196))
@@ -544,14 +604,32 @@ class AutoEncoder(nn.Module):
         face_embeddings2 = face_embeddings[face_embeddings2_idx[:, 0], face_embeddings2_idx[:, 1], :]
         null_intersection_embedding = torch.stack([face_embeddings1, face_embeddings2], dim=1)
 
-        true_attened_features, null_features = self.intersector(intersection_embedding, null_intersection_embedding)
+        true_attened_features = self.intersector(intersection_embedding)
+        null_features = self.intersector(null_intersection_embedding)
 
         edge_features = true_attened_features.mean(dim=1)
         null_features = null_features.mean(dim=1)
 
         return edge_features, null_features
 
-    def forward(self, v_data, only_return_recon=False, only_return_loss=True, **kwargs):
+    def infer_intersection(self, v_face_embeddings, face_mask):
+        B, L = face_mask.shape
+        face_embeddings_full = v_face_embeddings.new_zeros(
+                (face_mask.shape[0], face_mask.shape[1], v_face_embeddings.shape[1]),
+                )
+        face_embeddings_full = face_embeddings_full.masked_scatter(rearrange(face_mask, 'b n -> b n 1'),
+                                                                   v_face_embeddings)
+        idx = torch.combinations(torch.arange(face_embeddings_full.shape[1]), 2)
+
+        gathered_features = face_embeddings_full[:, idx]
+
+        attened_features = self.intersector(rearrange(gathered_features, 'b n c d -> (b n) c d'))
+        attened_features = attened_features.mean(dim=1).view(B, -1, v_face_embeddings.shape[1])
+        mask = gathered_features.all(dim=[-1, -2])
+
+        return attened_features, mask
+
+    def forward(self, v_data, only_return_recon=False, only_return_loss=True, is_inference=False, **kwargs):
         sample_points_faces = v_data["sample_points_faces"]
         sample_points_edges = v_data["sample_points_lines"]
         sample_points_vertices = v_data["sample_points_vertices"]
@@ -643,51 +721,75 @@ class AutoEncoder(nn.Module):
         recon_faces = self.decode_face(face_embeddings)
         delta_time, timer = profile_time(timer, v_print=False)
         self.time_statics[4] += delta_time
-        intersected_edge_features, null_features = self.intersection(
-                face_embeddings,
-                edge_face_connectivity,
-                face_adj,
-                face_mask
-                )
-        delta_time, timer = profile_time(timer, v_print=False)
-        self.time_statics[5] += delta_time
-        recon_edges = self.decode_edge(intersected_edge_features)
-        delta_time, timer = profile_time(timer, v_print=False)
-        self.time_statics[6] += delta_time
 
-        if only_return_recon:
-            return recon_edges, recon_faces
+        if not is_inference:
+            intersected_edge_features, null_features = self.intersection(
+                    face_embeddings,
+                    edge_face_connectivity,
+                    face_adj,
+                    face_mask
+                    )
 
-        # recon loss
-        used_edges = gt_edges[edge_mask][edge_face_connectivity[..., 0]]
-        loss_edge = F.mse_loss(recon_edges, used_edges, reduction='mean')
-        loss_face = F.mse_loss(recon_faces, gt_faces, reduction='mean')
+            delta_time, timer = profile_time(timer, v_print=False)
+            self.time_statics[5] += delta_time
+            recon_edges = self.decode_edge(intersected_edge_features)
+            delta_time, timer = profile_time(timer, v_print=False)
+            self.time_statics[6] += delta_time
 
-        # Intersection
-        normalized_intersection = l2norm(intersected_edge_features)
-        normalized_null = l2norm(null_features)
-        normalized_token = l2norm(self.null_intersection)
+            if only_return_recon:
+                return recon_edges, recon_faces
 
-        loss_null_intersection = ((normalized_intersection * normalized_token).sum(dim=-1).abs().mean() +
-                                  (1 - (normalized_null * normalized_token).sum(dim=-1)).abs().mean())
+            # recon loss
+            used_edges = gt_edges[edge_mask][edge_face_connectivity[..., 0]]
+            loss_edge = F.mse_loss(recon_edges, used_edges, reduction='mean')
+            loss_face = F.mse_loss(recon_faces, gt_faces, reduction='mean')
 
-        total_loss = loss_edge + loss_face + loss_null_intersection
+            intersection_feature = torch.cat([intersected_edge_features, null_features])
+            gt_label = torch.cat(
+                    [-torch.ones_like(intersected_edge_features[:, 0]), torch.ones_like(null_features[:, 0])])
+            loss_intersection = F.cosine_embedding_loss(intersection_feature, self.null_intersection, gt_label,
+                                                        margin=0.5)
+        else:
+            intersected_edge_features, mask = self.infer_intersection(face_embeddings, face_mask)
+            cos_simarility = torch.cosine_similarity(intersected_edge_features[mask], self.null_intersection, dim=-1)
+            intersected_mask = mask.new_zeros(mask.shape).masked_scatter(mask, cos_simarility < 0.5)
+
+            intersected_edge_features = intersected_edge_features[intersected_mask]
+
+            delta_time, timer = profile_time(timer, v_print=False)
+            self.time_statics[5] += delta_time
+            recon_edges = self.decode_edge(intersected_edge_features)
+            delta_time, timer = profile_time(timer, v_print=False)
+            self.time_statics[6] += delta_time
+
+            if only_return_recon:
+                return recon_edges, recon_faces
+
+            # recon loss
+            used_edges = gt_edges[edge_mask][edge_face_connectivity[..., 0]]
+            loss_edge = F.mse_loss(recon_edges, used_edges, reduction='mean')
+            loss_face = F.mse_loss(recon_faces, gt_faces, reduction='mean')
+
+            intersection_feature = torch.cat([intersected_edge_features, null_features])
+            gt_label = torch.cat(
+                    [-torch.ones_like(intersected_edge_features[:, 0]), torch.ones_like(null_features[:, 0])])
+            loss_intersection = F.cosine_embedding_loss(intersection_feature, self.null_intersection, gt_label,
+                                                        margin=0.5)
+
+        total_loss = loss_edge + loss_face + loss_intersection
 
         loss = {
-            "total_loss"       : total_loss,
-            "edge"             : loss_edge,
-            "face"             : loss_face,
-            "null_intersection": loss_null_intersection
+            "total_loss"  : total_loss,
+            "edge"        : loss_edge,
+            "face"        : loss_face,
+            "intersection": loss_intersection,
             }
 
-        edge_mask_flatten = edge_mask.flatten()
-        recon_edges_idx = edge_mask_flatten.nonzero().squeeze()[edge_face_connectivity[..., 0]]
-        recon_edges_mask = edge_mask_flatten.new_zeros(edge_mask_flatten.shape)
-        recon_edges_mask[recon_edges_idx] = True
-        recon_edges_mask = rearrange(recon_edges_mask, '(b n) -> b n', b=edge_mask.shape[0], n=edge_mask.shape[1])
-        recon_edges = sample_points_edges.new_zeros(sample_points_edges.shape).masked_scatter(
-                recon_edges_mask[:, :, None, None].repeat(1, 1, 20, 3), recon_edges)
-        recon_edges[~recon_edges_mask] = -1
+        recon_edges_full = torch.zeros_like(sample_points_edges)
+        temp = torch.zeros_like(recon_edges_full[edge_mask])
+        temp[edge_face_connectivity[..., 0]] = recon_edges
+        recon_edges_full[edge_mask] = temp
+        recon_edges[recon_edges == 0] = -1
 
         recon_faces = sample_points_faces.new_zeros(sample_points_faces.shape).masked_scatter(
                 face_mask[:, :, None, None, None].repeat(1, 1, 20, 20, 3), recon_faces)

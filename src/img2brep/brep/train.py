@@ -109,7 +109,7 @@ class ModelTraining(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         data = batch
 
-        loss, recon_data = self.model(data, only_return_loss=False)
+        loss, recon_data = self.model(data, only_return_loss=False, is_inference=True)
         total_loss = loss["total_loss"]
         for key in loss:
             if key == "total_loss":

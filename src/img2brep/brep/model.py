@@ -690,7 +690,7 @@ class AutoEncoder(nn.Module):
 
         attened_features = self.intersector(rearrange(gathered_features, 'b n c d -> (b n) c d'))
         intersected_edge_features = attened_features.mean(dim=1).view(B, -1, v_face_embeddings.shape[2])
-        intersected_edge_mask = gathered_features.all(dim=[-1, -2])
+        intersected_edge_mask = gathered_features.all(dim=-1).all(dim=-1)
 
         cos_simarility = torch.cosine_similarity(intersected_edge_features[intersected_edge_mask], self.null_intersection, dim=-1)
         intersected_mask = intersected_edge_mask.new_zeros(intersected_edge_mask.shape).masked_scatter(intersected_edge_mask, cos_simarility < 0.5)

@@ -674,7 +674,7 @@ class AutoEncoder(nn.Module):
         null_intersection_embedding = torch.stack([face_embeddings1, face_embeddings2], dim=1)
 
         true_attened_features = self.intersector(intersection_embedding)
-        null_features = self.intersector(null_intersection_embedding)
+        null_features = self.intersector(null_intersection_embedding, num_max_items=500)
 
         edge_features = true_attened_features.mean(dim=1)
         null_features = null_features.mean(dim=1)

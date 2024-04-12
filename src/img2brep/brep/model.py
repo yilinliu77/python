@@ -223,12 +223,10 @@ class SinalAttenBlock(nn.Module):
         super().__init__()
         self.model = nn.MultiheadAttention(embed_dim=dim, num_heads=num_heads, dropout=dropout, batch_first=True)
         self.layers_norm = nn.LayerNorm(dim)
-        self.linear = nn.Linear(dim, dim)
 
     def forward(self, v_embeddings):
         v_embeddings_atten_output, _ = self.model(v_embeddings, v_embeddings, v_embeddings, need_weights=True)
-        v_embeddings_atten_output = v_embeddings + self.linear(v_embeddings_atten_output)
-        v_embeddings_atten_output = self.layers_norm(v_embeddings_atten_output)
+        v_embeddings_atten_output = v_embeddings + self.layers_norm(v_embeddings_atten_output)
 
         return v_embeddings_atten_output
 

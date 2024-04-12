@@ -116,10 +116,11 @@ class ModelTraining(pl.LightningModule):
                  sync_dist=True, batch_size=self.batch_size)
 
         if batch_idx == 0:
+            recon_edges, recon_faces = self.model.inference(recon_data["face_embeddings"])
             self.viz["sample_points_faces"] = data["sample_points_faces"].cpu().numpy()
             self.viz["sample_points_lines"] = data["sample_points_lines"].cpu().numpy()
-            self.viz["reconstructed_edges"] = recon_data["recon_edges"].cpu().numpy()
-            self.viz["reconstructed_faces"] = recon_data["recon_faces"].cpu().numpy()
+            self.viz["reconstructed_edges"] = recon_edges.cpu().numpy()
+            self.viz["reconstructed_faces"] = recon_faces.cpu().numpy()
 
         return total_loss
 
@@ -154,8 +155,8 @@ class ModelTraining(pl.LightningModule):
 
             face_points = np.concatenate((gt_faces, recon_faces), axis=0).reshape(-1, 3)
             face_colors = np.concatenate(
-                    (np.repeat(np.array([[0, 0, 255]], dtype=np.uint8), gt_faces.shape[0] * 400, axis=0),
-                     np.repeat(np.array([[255, 255, 0]], dtype=np.uint8), recon_faces.shape[0] * 400, axis=0)), axis=0)
+                    (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_faces.shape[0] * 400, axis=0),
+                     np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_faces.shape[0] * 400, axis=0)), axis=0)
 
             pc = o3d.geometry.PointCloud()
             pc.points = o3d.utility.Vector3dVector(edge_points)

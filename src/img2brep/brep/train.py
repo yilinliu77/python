@@ -8,26 +8,22 @@ import hydra
 import numpy as np
 # import matplotlib
 # matplotlib.use('Agg')
-from lightning_fabric import seed_everything
+import open3d as o3d
 from omegaconf import DictConfig, OmegaConf
+
+import torch
+from torch.utils.data import DataLoader
+from torch.optim import Adam
+
+import pytorch_lightning as pl
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
-import pytorch_lightning as pl
-import torch
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import LearningRateMonitor
-from torch.optim import Adam
-from torch.utils.data import DataLoader
+from lightning_fabric import seed_everything
 
 from src.img2brep.brep.dataset import Auotoencoder_Dataset
-
-import torch.nn as nn
-
 from src.img2brep.brep.model import AutoEncoder
-
-import open3d as o3d
-import tqdm
-from einops import reduce
 
 
 class ModelTraining(pl.LightningModule):
@@ -86,10 +82,10 @@ class ModelTraining(pl.LightningModule):
         # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=100, verbose=True)
         return {
             'optimizer'   : optimizer,
-            'lr_scheduler': {
-                'scheduler': scheduler,
-                'monitor'  : 'Validation_Loss',
-                }
+            # 'lr_scheduler': {
+            #     'scheduler': scheduler,
+            #     'monitor'  : 'Validation_Loss',
+            #     }
             }
 
     def training_step(self, batch, batch_idx):
@@ -191,8 +187,8 @@ def main(v_cfg: DictConfig):
             default_root_dir=log_dir,
             logger=logger,
             accelerator='gpu',
-            # strategy="ddp_find_unused_parameters_false" if v_cfg["trainer"].gpu > 1 else "auto",
-            strategy="ddp_find_unused_parameters_true",
+            strategy="ddp_find_unused_parameters_false" if v_cfg["trainer"].gpu > 1 else "auto",
+            # strategy="ddp_find_unused_parameters_true",
             devices=v_cfg["trainer"].gpu,
             log_every_n_steps=25,
             enable_model_summary=False,
@@ -201,7 +197,7 @@ def main(v_cfg: DictConfig):
             num_sanity_val_steps=2,
             check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
             precision=v_cfg["trainer"]["accelerator"],
-            accumulate_grad_batches=1,
+            # accumulate_grad_batches=1,
             )
 
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":

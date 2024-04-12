@@ -2,7 +2,8 @@ dataset:
   #  root: /mnt/d/meshgpt/0planar_shapes_new
   #  root: /mnt/d/meshgpt/deepcad_10000/main_data
   #  root: /mnt/d/meshgpt/deepcad_whole
-  root: /mnt/d/yilin/img2brep/deepcad_whole
+#  root: /mnt/d/yilin/img2brep/deepcad_whole
+  root: G:/Dataset/img2brep/deepcad_10000/main_data
   dataset_name: ABC
   overfit: false
   tokenized_batch_size: 16
@@ -13,9 +14,9 @@ trainer:
   #  num_worker: 32
   #  batch_size: 256
 
-  gpu: [ 1 ]
+  gpu: 1
   num_worker: 0
-  batch_size: 4
+  batch_size: 16
 
   vis_recon_faces: true
   train_transformer: false

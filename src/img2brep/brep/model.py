@@ -58,7 +58,7 @@ def is_tensor_empty(t: Tensor):
 def set_module_requires_grad_(
         module: Module,
         requires_grad: bool
-        ):
+):
     for param in module.parameters():
         param.requires_grad = requires_grad
 
@@ -119,17 +119,17 @@ class SqueezeExcite(Module):
             dim,
             reduction_factor=4,
             min_dim=16
-            ):
+    ):
         super().__init__()
         dim_inner = max(dim // reduction_factor, min_dim)
 
         self.net = nn.Sequential(
-                nn.Linear(dim, dim_inner),
-                nn.SiLU(),
-                nn.Linear(dim_inner, dim),
-                nn.Sigmoid(),
-                Rearrange('b c -> b c 1')
-                )
+            nn.Linear(dim, dim_inner),
+            nn.SiLU(),
+            nn.Linear(dim_inner, dim),
+            nn.Sigmoid(),
+            Rearrange('b c -> b c 1')
+        )
 
     def forward(self, x, mask=None):
         if exists(mask):
@@ -150,7 +150,7 @@ class Block(Module):
             dim,
             dim_out=None,
             dropout=0.
-            ):
+    ):
         super().__init__()
         dim_out = default(dim_out, dim)
 
@@ -182,7 +182,7 @@ class ResnetBlock(Module):
             dim_out=None,
             *,
             dropout=0.
-            ):
+    ):
         super().__init__()
         dim_out = default(dim_out, dim)
         self.block1 = Block(dim, dim_out, dropout=dropout)
@@ -194,7 +194,7 @@ class ResnetBlock(Module):
             self,
             x,
             mask=None
-            ):
+    ):
         res = self.residual_conv(x)
         h = self.block1(x, mask=mask)
         h = self.block2(h, mask=mask)
@@ -267,6 +267,121 @@ class AttnFaceEmbedding(nn.Module):
         return face_embeddings
 
 
+class Decoder(nn.Module):
+    def __init__(self,
+                 decoder_dims_through_depth,
+                 init_decoder_conv_kernel,
+                 init_decoder_dim,
+                 dim_codebook_edge,
+                 dim_codebook_face,
+                 resnet_dropout
+                 ):
+        super(Decoder, self).__init__()
+        # For edges
+        self.edge_decoder_init = nn.Sequential(
+            nn.Linear(dim_codebook_edge, init_decoder_dim),
+            nn.SiLU(),
+            nn.LayerNorm(init_decoder_dim),
+        )
+
+        self.edge_decoder = ModuleList([])
+        curr_dim = init_decoder_dim
+        for dim_layer in decoder_dims_through_depth:
+            resnet_block = ResnetBlock(curr_dim, dim_layer, dropout=resnet_dropout)
+            self.edge_decoder.append(resnet_block)
+            curr_dim = dim_layer
+
+        self.to_edge = nn.Sequential(
+            nn.Linear(curr_dim, 20 * 3),
+            Rearrange('... (v c) -> ... v c', v=20)
+        )
+
+        # For faces
+        self.face_decoder_init = nn.Sequential(
+            nn.Conv1d(dim_codebook_face, init_decoder_dim,
+                      kernel_size=init_decoder_conv_kernel, padding=init_decoder_conv_kernel // 2),
+            nn.SiLU(),
+            Rearrange('b c n -> b n c'),
+            nn.LayerNorm(init_decoder_dim),
+            Rearrange('b n c -> b c n')
+        )
+
+        self.face_decoder = ModuleList([])
+
+        curr_dim = init_decoder_dim
+        for dim_layer in decoder_dims_through_depth:
+            resnet_block = ResnetBlock(curr_dim, dim_layer, dropout=resnet_dropout)
+
+            self.face_decoder.append(resnet_block)
+            curr_dim = dim_layer
+
+        self.to_face = nn.Sequential(
+            nn.Linear(curr_dim, 20 * 20 * 3),
+            Rearrange('... (v w c) -> ... v w c', v=20, w=20)
+        )
+
+    def forward(self, v_edge_embeddings, v_face_embeddings):
+        x = self.edge_decoder_init(v_edge_embeddings[:, :, None])
+        for resnet_block in self.edge_decoder:
+            x = resnet_block(x)
+        recon_edges = self.to_edge(x[..., 0])
+
+        x = self.face_decoder_init(v_face_embeddings[:, :, None])
+        for resnet_block in self.face_decoder:
+            x = resnet_block(x)
+        recon_faces = self.to_face(x[..., 0])
+        return recon_edges, recon_faces
+
+
+class Small_decoder(nn.Module):
+    def __init__(self,
+                 dim_codebook_edge,
+                 dim_codebook_face,
+                 resnet_dropout
+                 ):
+        super(Small_decoder, self).__init__()
+        # For edges
+        self.edge_decoder = nn.Sequential(
+            nn.Linear(dim_codebook_edge, 384),
+            nn.SiLU(),
+            nn.Dropout(resnet_dropout),
+            nn.LayerNorm(384),
+            nn.Linear(384, 384),
+            nn.SiLU(),
+            nn.Dropout(resnet_dropout),
+            nn.LayerNorm(384),
+            nn.Linear(384, 384),
+            nn.SiLU(),
+            nn.Dropout(resnet_dropout),
+            nn.LayerNorm(384),
+            nn.Linear(384, 20 * 3),
+            Rearrange('... (v c) -> ... v c', v=20)
+        )
+
+        # For faces
+        self.face_decoder = nn.Sequential(
+            nn.Linear(dim_codebook_face, 384),
+            nn.SiLU(),
+            nn.Dropout(resnet_dropout),
+            nn.LayerNorm(384),
+            nn.Linear(384, 768),
+            nn.SiLU(),
+            nn.Dropout(resnet_dropout),
+            nn.LayerNorm(768),
+            nn.Linear(768, 768),
+            nn.SiLU(),
+            nn.Dropout(resnet_dropout),
+            nn.LayerNorm(768),
+            nn.Linear(768, 20 * 20 * 3),
+            Rearrange('... (v w c) -> ... v w c', v=20, w=20)
+        )
+
+
+    def forward(self, v_edge_embeddings, v_face_embeddings):
+        recon_edges = self.edge_decoder(v_edge_embeddings)
+        recon_faces = self.face_decoder(v_face_embeddings)
+        return recon_edges, recon_faces
+
 class AutoEncoder(nn.Module):
     def __init__(self,
                  max_length=100,
@@ -274,15 +389,8 @@ class AutoEncoder(nn.Module):
                  dim_codebook_face=256,
                  encoder_dims_through_depth: Tuple[int, ...] = (
                          64, 128, 256, 256
-                         ),
-                 decoder_dims_through_depth: Tuple[int, ...] = (
-                         128, 128, 128, 128,
-                         192, 192, 192, 192,
-                         256, 256, 256, 256, 256, 256,
-                         384, 384, 384
-                         ),
-                 init_decoder_conv_kernel=7,
-                 resnet_dropout=0,
+                 ),
+
                  ):
         super(AutoEncoder, self).__init__()
         self.max_length = max_length
@@ -295,25 +403,25 @@ class AutoEncoder(nn.Module):
         # 1. Convolutional encoder
         # Map from (B*N, 20) to (B, dim_codebook(196))
         self.edge_encoder = nn.Sequential(
-                nn.Conv1d(in_channels=3, out_channels=64, kernel_size=7, stride=1, padding=3),
-                nn.ReLU(),
-                nn.MaxPool1d(kernel_size=4, stride=4),
-                nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.AdaptiveAvgPool1d(1),
-                nn.Flatten(),
-                nn.Linear(128, dim_codebook_edge)
-                )
+            nn.Conv1d(in_channels=3, out_channels=64, kernel_size=7, stride=1, padding=3),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=4, stride=4),
+            nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool1d(1),
+            nn.Flatten(),
+            nn.Linear(128, dim_codebook_edge)
+        )
         self.face_encoder = nn.Sequential(
-                nn.Conv2d(in_channels=3, out_channels=64, kernel_size=7, stride=1, padding=3),
-                nn.ReLU(),
-                nn.MaxPool2d(kernel_size=4, stride=4),
-                nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1),
-                nn.ReLU(),
-                nn.AdaptiveAvgPool2d((1, 1)),
-                nn.Flatten(),
-                nn.Linear(128, dim_codebook_face)
-                )
+            nn.Conv2d(in_channels=3, out_channels=64, kernel_size=7, stride=1, padding=3),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=4, stride=4),
+            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(128, dim_codebook_face)
+        )
 
         # 2. GCN
         init_encoder_dim, *encoder_dims_through_depth = encoder_dims_through_depth
@@ -322,76 +430,42 @@ class AutoEncoder(nn.Module):
         self.init_sage_conv = SAGEConv(dim_codebook_edge, init_encoder_dim, normalize=True, project=True)
 
         self.init_encoder_act_and_norm = nn.Sequential(
-                nn.SiLU(),
-                nn.LayerNorm(init_encoder_dim)
-                )
+            nn.SiLU(),
+            nn.LayerNorm(init_encoder_dim)
+        )
 
         self.encoders = ModuleList([])
 
         for dim_layer in encoder_dims_through_depth:
             sage_conv = SAGEConv(
-                    curr_dim,
-                    dim_layer,
-                    normalize=True,
-                    project=True
-                    )
+                curr_dim,
+                dim_layer,
+                normalize=True,
+                project=True
+            )
 
             self.encoders.append(sage_conv)
             curr_dim = dim_layer
 
         # 3. Decoder
-        # Map from (B*N, 256) to (B*N, 256)
-        init_decoder_dim, *decoder_dims_through_depth = decoder_dims_through_depth
-        curr_dim = init_decoder_dim
-
-        assert is_odd(init_decoder_conv_kernel)
-
-        # For edges
-        self.edge_decoder_init = nn.Sequential(
-                nn.Conv1d(dim_codebook_edge, init_decoder_dim,
-                          kernel_size=init_decoder_conv_kernel, padding=init_decoder_conv_kernel // 2),
-                nn.SiLU(),
-                Rearrange('b c n -> b n c'),
-                nn.LayerNorm(init_decoder_dim),
-                Rearrange('b n c -> b c n')
-                )
-
-        self.edge_decoder = ModuleList([])
-
-        for dim_layer in decoder_dims_through_depth:
-            resnet_block = ResnetBlock(curr_dim, dim_layer, dropout=resnet_dropout)
-
-            self.edge_decoder.append(resnet_block)
-            curr_dim = dim_layer
-
-        self.to_edge = nn.Sequential(
-                nn.Linear(curr_dim, 20 * 3),
-                Rearrange('... (v c) -> ... v c', v=20)
-                )
-
-        # For faces
-        self.face_decoder_init = nn.Sequential(
-                nn.Conv1d(dim_codebook_face, init_decoder_dim,
-                          kernel_size=init_decoder_conv_kernel, padding=init_decoder_conv_kernel // 2),
-                nn.SiLU(),
-                Rearrange('b c n -> b n c'),
-                nn.LayerNorm(init_decoder_dim),
-                Rearrange('b n c -> b c n')
-                )
-
-        self.face_decoder = ModuleList([])
-
-        curr_dim = init_decoder_dim
-        for dim_layer in decoder_dims_through_depth:
-            resnet_block = ResnetBlock(curr_dim, dim_layer, dropout=resnet_dropout)
-
-            self.face_decoder.append(resnet_block)
-            curr_dim = dim_layer
-
-        self.to_face = nn.Sequential(
-                nn.Linear(curr_dim, 20 * 20 * 3),
-                Rearrange('... (v w c) -> ... v w c', v=20, w=20)
-                )
+        # self.decoder = Decoder(
+        #     decoder_dims_through_depth=(
+        #         128, 128, 128, 128,
+        #         192, 192, 192, 192,
+        #         256, 256, 256, 256, 256, 256,
+        #         384, 384, 384
+        #     ),
+        #     init_decoder_conv_kernel=7,
+        #     init_decoder_dim=256,
+        #     dim_codebook_edge=dim_codebook_edge,
+        #     dim_codebook_face=dim_codebook_face,
+        #     resnet_dropout=0,
+        # )
+        self.decoder = Small_decoder(
+            dim_codebook_edge=dim_codebook_edge,
+            dim_codebook_face=dim_codebook_face,
+            resnet_dropout=0.1,
+        )
 
         self.null_intersection = nn.Parameter(torch.rand(dim_codebook_face))
 
@@ -476,21 +550,6 @@ class AutoEncoder(nn.Module):
         recon_faces = self.to_face(recon_faces)
 
         return recon_edges, recon_faces
-
-    def decode_edge(self, edge_embeddings):
-        x = self.edge_decoder_init(edge_embeddings[:, :, None])
-        for resnet_block in self.edge_decoder:
-            x = resnet_block(x)
-        recon_edges = self.to_edge(x[..., 0])
-        return recon_edges
-
-    def decode_face(self, face_embeddings):
-        # Decode faces
-        x = self.face_decoder_init(face_embeddings[:, :, None])
-        for resnet_block in self.face_decoder:
-            x = resnet_block(x)
-        recon_faces = self.to_face(x[..., 0])
-        return recon_faces
 
     def encode_edge_coords(self, edge):
         # Project in
@@ -631,7 +690,7 @@ class AutoEncoder(nn.Module):
         # mask out invalids to 0
         face_embeddings_plus[~face_edge_relations_mask] = 0
         face_embeddings_plus = face_embeddings_plus.sum(dim=1) / face_edge_relations_mask.long().sum(
-                dim=1, keepdim=True).clamp(min=1e-5)
+            dim=1, keepdim=True).clamp(min=1e-5)
 
         # fusion the face_embedding and face_embedding_puls
         face_embeddings = torch.stack([face_embeddings, face_embeddings_plus], dim=1)
@@ -642,20 +701,18 @@ class AutoEncoder(nn.Module):
         self.time_statics[3] += delta_time
 
         # 3. Reconstruct the edge and face points
-        recon_faces = self.decode_face(face_embeddings)
+        intersected_edge_features, null_features = self.intersection(
+            face_embeddings,
+            edge_face_connectivity,
+            face_adj,
+            face_mask
+        )
         delta_time, timer = profile_time(timer, v_print=False)
         self.time_statics[4] += delta_time
-        intersected_edge_features, null_features = self.intersection(
-                face_embeddings,
-                edge_face_connectivity,
-                face_adj,
-                face_mask
-                )
+
+        recon_edges, recon_faces = self.decoder(intersected_edge_features, face_embeddings)
         delta_time, timer = profile_time(timer, v_print=False)
         self.time_statics[5] += delta_time
-        recon_edges = self.decode_edge(intersected_edge_features)
-        delta_time, timer = profile_time(timer, v_print=False)
-        self.time_statics[6] += delta_time
 
         if only_return_recon:
             return recon_edges, recon_faces
@@ -676,11 +733,11 @@ class AutoEncoder(nn.Module):
         total_loss = loss_edge + loss_face + loss_null_intersection
 
         loss = {
-            "total_loss"       : total_loss,
-            "edge"             : loss_edge,
-            "face"             : loss_face,
+            "total_loss": total_loss,
+            "edge": loss_edge,
+            "face": loss_face,
             "null_intersection": loss_null_intersection
-            }
+        }
 
         # recon_edges = recon_edges.new_zeros(gt_edges.shape).masked_scatter(edge_mask, recon_edges)
         # recon_edges_mask = edge_mask.masked_scatter(edge_mask, recon_edges)
@@ -689,12 +746,12 @@ class AutoEncoder(nn.Module):
         data = {
             "recon_edges": recon_edges,
             "recon_faces": recon_faces
-            }
+        }
 
         if only_return_loss:
             return loss
         delta_time, timer = profile_time(timer, v_print=False)
-        self.time_statics[7] += delta_time
+        self.time_statics[6] += delta_time
         return loss, data
 
     def forward(self, v_data, only_return_recon=False, only_return_loss=True, training=False, **kwargs):
@@ -775,17 +832,17 @@ class AutoEncoder(nn.Module):
         face_embeddings_plus[~face_edge_relations_mask] = 0
         face_embeddings_plus = face_embeddings_plus.sum(dim=1) / face_edge_relations_mask.long().sum(dim=1,
                                                                                                      keepdim=True).clamp(
-                min=1e-5)
+            min=1e-5)
         face_embeddings += face_embeddings_plus
 
         # 3. Reconstruct the edge and face points
         recon_faces = self.decode_face(face_embeddings)
         intersected_edge_features, null_features = self.intersection(
-                face_embeddings,
-                edge_face_connectivity,
-                face_adj,
-                face_mask
-                )
+            face_embeddings,
+            edge_face_connectivity,
+            face_adj,
+            face_mask
+        )
         recon_edges = self.decode_edge(intersected_edge_features)
 
         if only_return_recon:
@@ -807,16 +864,16 @@ class AutoEncoder(nn.Module):
         total_loss = loss_edge + loss_face + loss_null_intersection
 
         loss = {
-            "total_loss"       : total_loss,
-            "edge"             : loss_edge,
-            "face"             : loss_face,
+            "total_loss": total_loss,
+            "edge": loss_edge,
+            "face": loss_face,
             "null_intersection": loss_null_intersection
-            }
+        }
 
         data = {
             "recon_edges": recon_edges,
             "recon_faces": recon_faces
-            }
+        }
 
         if only_return_loss:
             return loss

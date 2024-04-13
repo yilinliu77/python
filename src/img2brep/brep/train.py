@@ -100,6 +100,8 @@ class ModelTraining(pl.LightningModule):
                      sync_dist=True, batch_size=self.batch_size)
         self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
+        if torch.isnan(total_loss).any():
+            print("NAN Loss")
         return total_loss
 
     def validation_step(self, batch, batch_idx):
@@ -174,7 +176,7 @@ class ModelTraining(pl.LightningModule):
 @hydra.main(config_name="train_brepgen.yaml", config_path="../../../configs/img2brep/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
-    torch.set_float32_matmul_precision("medium")
+    torch.set_float32_matmul_precision("high")
     print(OmegaConf.to_yaml(v_cfg))
 
     is_train_transformer = v_cfg["trainer"]["train_transformer"]

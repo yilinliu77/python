@@ -504,13 +504,13 @@ class Attn_fuser(Fuser):
                 v_edge_embedding, v_face_embedding):
         L, _ = v_face_embedding.shape
         S, _ = v_edge_embedding.shape
-        face_edge_attn_mask = torch.zeros(
+        face_edge_attn_mask = torch.ones(
                 L, S + 1, device=v_face_embedding.device, dtype=torch.bool
                 )
         face_edge_relations = v_face_edge_loop[v_face_mask].clone()
         valid_relation_mask = torch.logical_and(face_edge_relations != -1, face_edge_relations != -2)
         face_edge_relations[~valid_relation_mask] = S
-        face_edge_attn_mask = face_edge_attn_mask.scatter(1, face_edge_relations, True)
+        face_edge_attn_mask = face_edge_attn_mask.scatter(1, face_edge_relations, False)
         face_edge_attn_mask = face_edge_attn_mask[:, :S]
 
         x = v_face_embedding
@@ -524,6 +524,36 @@ class Attn_fuser(Fuser):
 
         return x
 
+
+class Face_atten(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.atten = nn.ModuleList([
+            nn.MultiheadAttention(256,1,0.1,batch_first=True),
+            nn.MultiheadAttention(256,1,0.1,batch_first=True),
+            nn.MultiheadAttention(256,1,0.1,batch_first=True),
+        ])
+
+    def forward(self, v_face_embedding, v_face_mask):
+        B, _ = v_face_mask.shape
+        L, _ = v_face_embedding.shape
+        attn_mask = v_face_embedding.new_ones(L, L, device=v_face_embedding.device, dtype=torch.bool)
+        num_valid = v_face_mask.long().sum(dim=1)
+        num_valid = torch.cat((torch.zeros_like(num_valid[:1]),num_valid.cumsum(dim=0)))
+        for i in range(num_valid.shape[0]-1):
+            attn_mask[num_valid[i]:num_valid[i+1],num_valid[i]:num_valid[i+1]] = 0
+
+        # face_embedding_full = v_face_embedding.new_zeros((*v_face_mask.shape, v_face_embedding.shape[-1]))
+        # face_embedding_full = face_embedding_full.masked_scatter(
+        #     rearrange(v_face_mask, '... -> ... 1'), v_face_embedding)
+        # attn_mask = ~v_face_mask
+        # attn_mask = attn_mask[:, :, None] | attn_mask[:, None, :]
+        # # attn_mask = attn_mask.repeat_interleave(2, dim=0)
+
+        x = v_face_embedding
+        for layer in self.atten:
+            x, weights = layer(x,x,x, attn_mask=attn_mask, need_weights=True)
+        return x
 
 class AutoEncoder(nn.Module):
     def __init__(self,
@@ -585,6 +615,9 @@ class AutoEncoder(nn.Module):
                     )
             self.gcn_layers.append(sage_conv)
             gcn_out_dims = dim_layer
+
+        # 2. attention for faces
+        self.face_fuser = Face_atten()
 
         # 3. Fuser
         # Inject edge features to the corresponding face
@@ -774,9 +807,12 @@ class AutoEncoder(nn.Module):
         face_embeddings = self.fuser(
                 v_face_edge_loop=face_edge_loop,
                 v_face_mask=face_mask,
-                v_edge_embedding=edge_embeddings,
+                v_edge_embedding=edge_embeddings_plus,
                 v_face_embedding=face_embeddings
                 )
+
+        # 2. attention on faces
+        face_embeddings = self.face_fuser(face_embeddings, face_mask)
 
         delta_time, timer = profile_time(timer, v_print=False)
         self.time_statics[3] += delta_time

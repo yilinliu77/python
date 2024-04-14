@@ -25,7 +25,6 @@ trainer:
   num_samples: -1
 
   spawn: false
-  checkpoint_autoencoder:
   resume_from_checkpoint: #/root/workspace/python/src/img2brep/brep/tb_logs_brepgen/autoencoder/0409_big_success/checkpoints/epoch=4399-step=88000.ckpt
   evaluate: false
   output: .
@@ -35,6 +34,9 @@ trainer:
 model:
 #  intersector: "Attn_intersector"
   intersector: "Attn_intersector_classifier"
+
+  checkpoint_autoencoder:
+
 
 hydra:
   run:

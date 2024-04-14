@@ -46,7 +46,7 @@ class ModelTraining(pl.LightningModule):
         if not os.path.exists(self.log_root):
             os.makedirs(self.log_root)
 
-        self.autoencoder = AutoEncoder()
+        self.autoencoder = AutoEncoder(self.hydra_conf["model"])
         self.model = self.autoencoder
 
         self.viz = {}

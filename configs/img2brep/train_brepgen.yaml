@@ -33,14 +33,8 @@ trainer:
   accelerator: "32-true"
 
 model:
-  model_name: PC_model
-  with_bn: true
-  channels: 3
-  output_channels: 1
-  need_normalize: true
-  voxelize_res: 256
-  test_threshold: 0.5
-  focal_alpha: 0.75
+#  intersector: "Attn_intersector"
+  intersector: "Attn_intersector_classifier"
 
 hydra:
   run:

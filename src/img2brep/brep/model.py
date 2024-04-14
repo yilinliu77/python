@@ -1,3 +1,4 @@
+import importlib
 from pathlib import Path
 from functools import partial
 from math import ceil, pi, sqrt
@@ -256,65 +257,130 @@ class ResnetBlock(Module):
 
 
 class Intersector(nn.Module):
-    def __init__(self):
+    def __init__(self, num_max_items=None):
         super().__init__()
+        self.num_max_items = num_max_items
 
-    def forward(self, v_embeddings, num_max_items=500):
+    def prepare_data(self, v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask):
+        # True intersection
+        intersection_embedding = v_face_embeddings[v_edge_face_connectivity[:, 1:]]
+
+        # Construct features for false intersection
+        face_adj = v_face_adj.clone()
+        face_adj[v_face_adj == 0] = 1
+        face_adj[v_face_adj == 1] = 0
+        torch.diagonal(face_adj, dim1=1, dim2=2).fill_(0)
+
+        face_embeddings = v_face_embeddings.new_zeros((*v_face_mask.shape, v_face_embeddings.shape[-1]))
+        face_embeddings = face_embeddings.masked_scatter(rearrange(v_face_mask, '... -> ... 1'), v_face_embeddings)
+
+        zero_positions = (face_adj == 1).nonzero()
+        face_embeddings1_idx = zero_positions[:, [0, 1]]
+        face_embeddings2_idx = zero_positions[:, [0, 2]]
+
+        # False itersection
+        face_embeddings1 = face_embeddings[face_embeddings1_idx[:, 0], face_embeddings1_idx[:, 1], :]
+        face_embeddings2 = face_embeddings[face_embeddings2_idx[:, 0], face_embeddings2_idx[:, 1], :]
+        null_intersection_embedding = torch.stack([face_embeddings1, face_embeddings2], dim=1)
+
+        if self.num_max_items is not None and null_intersection_embedding.shape[0] > self.num_max_items:
+            indices = torch.randperm(null_intersection_embedding.shape[0])[:self.num_max_items]
+            null_intersection_embedding = null_intersection_embedding[indices]
+
+        return intersection_embedding, null_intersection_embedding
+
+    def forward(self, v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask):
         return
 
+    def loss(self, edge_features, null_features):
+        return 0
 
-class DotIntersector(Intersector):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, v_embeddings, num_max_items=500):
+    def inference(self, v_features):
         return
 
+    def inference_label(self, v_features):
+        return torch.cosine_similarity(v_features,
+                                       self.null_intersection, dim=-1)
 
-class AttnIntersector(Intersector):
-    def __init__(self, ):
-        super().__init__()
+
+class Attn_intersector(Intersector):
+    def __init__(self, num_max_items=None):
+        super().__init__(num_max_items)
+        self.layers = nn.ModuleList([
+            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
+            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
+        ])
+        self.intersection_token = nn.Parameter(torch.rand(256))
+        self.null_intersection = nn.Parameter(torch.rand(256))
+
+    def forward(self, v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask):
+        intersection_embedding, null_intersection_embedding = self.prepare_data(
+            v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask)
+        edge_features = self.inference(intersection_embedding)
+        null_features = self.inference(null_intersection_embedding)
+
+        return edge_features, null_features
+
+    def inference(self, v_features):
+        x = self.intersection_token[None, None].repeat(v_features.shape[0], 1, 1)
+        for layer in self.layers:
+            out, weights = layer(key=v_features, value=v_features,
+                                 query=x)
+            x = x + out
+        edge_features = x[:, 0]
+        return edge_features
+
+    def inference_label(self, v_features):
+        return torch.cosine_similarity(v_features,
+                                       self.null_intersection, dim=-1) < 0.5
+
+    def loss(self, edge_features, null_features):
+        intersection_feature = torch.cat([edge_features, null_features])
+        gt_label = torch.cat([-torch.ones_like(edge_features[:, 0]),
+                              torch.ones_like(null_features[:, 0])])
+        loss_intersection = F.cosine_embedding_loss(
+            intersection_feature, self.null_intersection[None, :], gt_label, margin=0.5)
+        return loss_intersection
+
+
+class Attn_intersector_classifier(Intersector):
+    def __init__(self, num_max_items=None):
+        super().__init__(num_max_items)
         self.layers = nn.ModuleList([
             nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
             nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
         ])
         self.intersection_token = nn.Parameter(torch.rand(256))
 
-    def forward(self, v_embeddings, num_max_items=None):
-        if num_max_items is not None and v_embeddings.shape[0] > num_max_items:
-            indices = torch.randperm(v_embeddings.shape[0])[:num_max_items]
-            v_embeddings = v_embeddings[indices]
+        self.classifier = nn.Linear(256, 1)
 
-        x = v_embeddings
+    def inference(self, v_features):
+        x = self.intersection_token[None, None].repeat(v_features.shape[0], 1, 1)
         for layer in self.layers:
-            out, weights = layer(key=v_embeddings, value=v_embeddings,
-                                 query=self.intersection_token[None,None].repeat(x.shape[0], 1, 1))
-            x = self.intersection_token + out
+            out, weights = layer(key=v_features, value=v_features,
+                                 query=x)
+            x = x + out
+        edge_features = x[:, 0]
+        return edge_features
 
-        return x[:,0]
+    def forward(self, v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask):
+        intersection_embedding, null_intersection_embedding = self.prepare_data(
+            v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask)
+        edge_features = self.inference(intersection_embedding)
+        null_features = self.inference(null_intersection_embedding)
 
+        return edge_features, null_features
 
-class Attn_intersector_with_classifier(Intersector):
-    def __init__(self, ):
-        super().__init__()
-        self.layers = nn.ModuleList([
-            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
-            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
-        ])
-        self.intersection_token = nn.Parameter(torch.rand(256))
+    def loss(self, edge_features, null_features):
+        intersection_feature = torch.cat([edge_features, null_features])
+        gt_label = torch.cat([torch.ones_like(edge_features[:, 0]),
+                              torch.zeros_like(null_features[:, 0])])
+        loss_intersection = F.binary_cross_entropy_with_logits(
+            self.classifier(intersection_feature), gt_label[:, None])
+        return loss_intersection
 
-    def forward(self, v_embeddings, num_max_items=None):
-        if num_max_items is not None and v_embeddings.shape[0] > num_max_items:
-            indices = torch.randperm(v_embeddings.shape[0])[:num_max_items]
-            v_embeddings = v_embeddings[indices]
-
-        x = v_embeddings
-        for layer in self.layers:
-            out, weights = layer(key=v_embeddings, value=v_embeddings,
-                                 query=self.intersection_token[None,None].repeat(x.shape[0], 1, 1))
-            x = self.intersection_token + out
-
-        return x[:,0]
+    def inference_label(self, v_features):
+        return torch.sigmoid(self.classifier(v_features))[:, 0] > 0.5
 
 
 class Decoder(nn.Module):
@@ -514,6 +580,7 @@ class Face_atten(nn.Module):
 
 class AutoEncoder(nn.Module):
     def __init__(self,
+                 v_conf,
                  max_length=100,
                  dim_codebook_edge=256,
                  dim_codebook_face=256,
@@ -584,8 +651,10 @@ class AutoEncoder(nn.Module):
 
         # 4. Intersection
         # Use face features and connectivity to obtain the edge latent
-        self.intersector = AttnIntersector()
-        self.null_intersection = nn.Parameter(torch.rand(dim_codebook_face))
+        mod = importlib.import_module('src.img2brep.brep.model')
+        self.intersector = getattr(mod, v_conf["intersector"])(500)
+        # self.intersector = Attn_intersector(500)
+        # self.intersector = Attn_intersector_classifier(500)
 
         # 5. Decoder
         # Get BSpline surfaces and edges based on the true latent code
@@ -629,62 +698,19 @@ class AutoEncoder(nn.Module):
             edge_embeddings = conv(edge_embeddings, edge_adj)
         return edge_embeddings
 
-    def intersection(self, v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask):
-        # get the intersection_embedding of the two faces
-        intersection_embedding = v_face_embeddings[v_edge_face_connectivity[:, 1:]]
-
-        # # Build face adj from edge_face_connectivity
-        # num_valid_face = reduce(face_mask.long(), 'b ne -> b', 'sum')
-        # face_adj = torch.zeros(
-        #     (face_embeddings.shape[0], num_valid_face.max(), num_valid_face.max()),
-        #     device=face_embeddings.device,
-        #     dtype=torch.bool
-        # )
-        # true_position = edge_face_connectivity[:, :, 1:].clone()
-        # true_position[~face_adj_mask] = 0
-        # # Mask out invalids
-        # face_adj[torch.arange(face_adj.shape[0])[:, None], true_position[:, :, 0], true_position[:, :, 1]] = True
-        # face_adj = torch.logical_or(face_adj, face_adj.transpose(1, 2))
-        # face_adj[:, torch.arange(face_adj.shape[1]), torch.arange(face_adj.shape[2])] = False
-
-        face_adj = v_face_adj.clone()
-        face_adj[v_face_adj == 0] = 1
-        face_adj[v_face_adj == 1] = 0
-        torch.diagonal(face_adj, dim1=1, dim2=2).fill_(0)
-
-        face_embeddings = v_face_embeddings.new_zeros((*v_face_mask.shape, v_face_embeddings.shape[-1]))
-        face_embeddings = face_embeddings.masked_scatter(rearrange(v_face_mask, '... -> ... 1'), v_face_embeddings)
-
-        zero_positions = (face_adj == 1).nonzero()
-        face_embeddings1_idx = zero_positions[:, [0, 1]]
-        face_embeddings2_idx = zero_positions[:, [0, 2]]
-
-        face_embeddings1 = face_embeddings[face_embeddings1_idx[:, 0], face_embeddings1_idx[:, 1], :]
-        face_embeddings2 = face_embeddings[face_embeddings2_idx[:, 0], face_embeddings2_idx[:, 1], :]
-        null_intersection_embedding = torch.stack([face_embeddings1, face_embeddings2], dim=1)
-
-        edge_features = self.intersector(intersection_embedding)
-        null_features = self.intersector(null_intersection_embedding, num_max_items=500)
-
-        # edge_features = true_attened_features.mean(dim=1)
-        # null_features = null_features.mean(dim=1)
-
-        return edge_features, null_features
-
     def inference(self, v_face_embeddings):
         face_mask = (v_face_embeddings != 0).all(dim=-1)
         B, L = face_mask.shape
         idx = torch.combinations(torch.arange(v_face_embeddings.shape[1]), 2)
         gathered_features = v_face_embeddings[:, idx]
 
-        attened_features = self.intersector(rearrange(gathered_features, 'b n c d -> (b n) c d'))
+        attened_features = self.intersector.inference(rearrange(gathered_features, 'b n c d -> (b n) c d'))
         intersected_edge_features = attened_features.view(B, -1, v_face_embeddings.shape[2])
         intersected_edge_mask = gathered_features.all(dim=-1).all(dim=-1)
 
-        cos_simarility = torch.cosine_similarity(intersected_edge_features[intersected_edge_mask],
-                                                 self.null_intersection, dim=-1)
+        true_intersection = self.intersector.inference_label(intersected_edge_features[intersected_edge_mask])
         intersected_mask = intersected_edge_mask.new_zeros(intersected_edge_mask.shape).masked_scatter(
-            intersected_edge_mask, cos_simarility < 0.5)
+            intersected_edge_mask, true_intersection)
 
         recon_edges, recon_faces = self.decoder(intersected_edge_features, v_face_embeddings)
         recon_edges[~intersected_mask] = -1
@@ -776,7 +802,7 @@ class AutoEncoder(nn.Module):
         self.time_statics[3] += delta_time
 
         # 3. Reconstruct the edge and face points
-        intersected_edge_features, null_features = self.intersection(
+        intersected_edge_features, null_features = self.intersector(
             face_embeddings,
             edge_face_connectivity,
             face_adj,
@@ -797,11 +823,7 @@ class AutoEncoder(nn.Module):
         loss_edge = F.mse_loss(recon_edges, used_edges, reduction='mean')
         loss_face = F.mse_loss(recon_faces, gt_faces, reduction='mean')
 
-        intersection_feature = torch.cat([intersected_edge_features, null_features])
-        gt_label = torch.cat(
-            [-torch.ones_like(intersected_edge_features[:, 0]), torch.ones_like(null_features[:, 0])])
-        loss_intersection = F.cosine_embedding_loss(intersection_feature, self.null_intersection[None, :], gt_label,
-                                                    margin=0.5)
+        loss_intersection = self.intersector.loss(intersected_edge_features, null_features)
 
         total_loss = loss_edge + loss_face + loss_intersection
 

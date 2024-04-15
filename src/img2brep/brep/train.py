@@ -1,6 +1,6 @@
 import sys
 
-sys.path.append('../../../')
+sys.path.append('../../../')  # Add project root to the python path
 import os.path
 from pathlib import Path
 
@@ -55,7 +55,7 @@ class ModelTraining(pl.LightningModule):
         if not self.is_train_transformer:
             self.train_dataset = Auotoencoder_Dataset("training", self.hydra_conf["dataset"], )
 
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=False,
                           collate_fn=Auotoencoder_Dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           # pin_memory=True,
@@ -81,7 +81,7 @@ class ModelTraining(pl.LightningModule):
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.1)
         # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=100, verbose=True)
         return {
-            'optimizer'   : optimizer,
+            'optimizer': optimizer,
             # 'lr_scheduler': {
             #     'scheduler': scheduler,
             #     'monitor'  : 'Validation_Loss',
@@ -96,7 +96,7 @@ class ModelTraining(pl.LightningModule):
         for key in loss:
             if key == "total_loss":
                 continue
-            self.log(f"Training_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
+            self.log(f"Training_{key}", loss[key], prog_bar=True, logger=True, on_step=True, on_epoch=True,
                      sync_dist=True, batch_size=self.batch_size)
         self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
@@ -110,9 +110,9 @@ class ModelTraining(pl.LightningModule):
         for key in loss:
             if key == "total_loss":
                 continue
-            self.log(f"Validation_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
+            self.log(f"Validation_{key}", loss[key], prog_bar=True, logger=True, on_step=True, on_epoch=True,
                      sync_dist=True, batch_size=self.batch_size)
-        self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
+        self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
 
         if batch_idx == 0:
@@ -198,7 +198,8 @@ def main(v_cfg: DictConfig):
             default_root_dir=log_dir,
             logger=logger,
             accelerator='gpu',
-            strategy="ddp_find_unused_parameters_false" if v_cfg["trainer"].gpu > 1 else "auto",
+            # strategy="ddp_find_unused_parameters_false" if v_cfg["trainer"].gpu > 1 else "auto",
+            strategy="auto",
             devices=v_cfg["trainer"].gpu,
             log_every_n_steps=25,
             enable_model_summary=False,

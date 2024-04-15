@@ -273,7 +273,7 @@ class DotIntersector(Intersector):
 
 
 class SinalAttenBlock(nn.Module):
-    def __init__(self, dim=256, num_heads=4, dropout=0.1):
+    def __init__(self, dim=256, num_heads=4, dropout=0):
         super().__init__()
         self.model = nn.MultiheadAttention(embed_dim=dim, num_heads=num_heads, dropout=dropout, batch_first=True)
         self.layers_norm = nn.LayerNorm(dim)
@@ -287,7 +287,7 @@ class SinalAttenBlock(nn.Module):
 
 
 class AttnIntersector(nn.Module):
-    def __init__(self, dim=256, num_heads=4, num_layers=6, dropout=0.1):
+    def __init__(self, dim=256, num_heads=4, num_layers=6, dropout=0):
         super().__init__()
         self.layers = nn.ModuleList()
         for _ in range(num_layers):
@@ -306,7 +306,7 @@ class AttnIntersector(nn.Module):
 
 
 class AttnFaceEmbedding(nn.Module):
-    def __init__(self, dim=256, num_heads=4, num_layers=6, dropout=0.1):
+    def __init__(self, dim=256, num_heads=4, num_layers=6, dropout=0):
         super().__init__()
         self.layers = nn.ModuleList()
         for _ in range(num_layers):
@@ -681,7 +681,6 @@ class AutoEncoder(nn.Module):
 
         return edge_features, null_features
 
-
     def inference(self, v_face_embeddings):
         face_mask = (v_face_embeddings != 0).all(dim=-1)
         B, L = face_mask.shape
@@ -692,8 +691,10 @@ class AutoEncoder(nn.Module):
         intersected_edge_features = attened_features.mean(dim=1).view(B, -1, v_face_embeddings.shape[2])
         intersected_edge_mask = gathered_features.all(dim=-1).all(dim=-1)
 
-        cos_simarility = torch.cosine_similarity(intersected_edge_features[intersected_edge_mask], self.null_intersection, dim=-1)
-        intersected_mask = intersected_edge_mask.new_zeros(intersected_edge_mask.shape).masked_scatter(intersected_edge_mask, cos_simarility < 0.5)
+        cos_simarility = torch.cosine_similarity(intersected_edge_features[intersected_edge_mask],
+                                                 self.null_intersection, dim=-1)
+        intersected_mask = intersected_edge_mask.new_zeros(intersected_edge_mask.shape).masked_scatter(
+                intersected_edge_mask, cos_simarility < 0.5)
 
         recon_edges, recon_faces = self.decoder(intersected_edge_features, v_face_embeddings)
         recon_edges[~intersected_mask] = -1
@@ -766,7 +767,7 @@ class AutoEncoder(nn.Module):
         self.time_statics[1] += delta_time
 
         # 2. GCN on edges
-        edge_embeddings_plus = self.gcn_on_edges(edge_embeddings, vertex_edge_connectivity[..., 1:].permute(1, 0))
+        edge_embeddings = self.gcn_on_edges(edge_embeddings, vertex_edge_connectivity[..., 1:].permute(1, 0))
         delta_time, timer = profile_time(timer, v_print=False)
         self.time_statics[2] += delta_time
 
@@ -806,7 +807,7 @@ class AutoEncoder(nn.Module):
         intersection_feature = torch.cat([intersected_edge_features, null_features])
         gt_label = torch.cat(
                 [-torch.ones_like(intersected_edge_features[:, 0]), torch.ones_like(null_features[:, 0])])
-        loss_intersection = F.cosine_embedding_loss(intersection_feature, self.null_intersection[None,:], gt_label,
+        loss_intersection = F.cosine_embedding_loss(intersection_feature, self.null_intersection[None, :], gt_label,
                                                     margin=0.5)
 
         total_loss = loss_edge + loss_face + loss_intersection
@@ -827,16 +828,17 @@ class AutoEncoder(nn.Module):
                 face_mask[:, :, None, None, None].repeat(1, 1, 20, 20, 3), recon_faces)
         recon_faces_full[~face_mask] = -1
 
-        recovered_face_embeddings = face_embeddings.new_zeros(sample_points_faces.shape[0], sample_points_faces.shape[1],
-                                                                face_embeddings.shape[-1])
+        recovered_face_embeddings = face_embeddings.new_zeros(sample_points_faces.shape[0],
+                                                              sample_points_faces.shape[1],
+                                                              face_embeddings.shape[-1])
         recovered_face_embeddings = recovered_face_embeddings.masked_scatter(
-            face_mask[:, :, None].repeat(1, 1, face_embeddings.shape[-1]), face_embeddings)
+                face_mask[:, :, None].repeat(1, 1, face_embeddings.shape[-1]), face_embeddings)
 
         data = {
-            "recon_edges": recon_edges_full,
-            "recon_faces": recon_faces_full,
+            "recon_edges"    : recon_edges_full,
+            "recon_faces"    : recon_faces_full,
             "face_embeddings": recovered_face_embeddings
-        }
+            }
 
         if only_return_loss:
             return loss

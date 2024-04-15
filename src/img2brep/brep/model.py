@@ -21,7 +21,6 @@ from beartype.typing import Union, Tuple, Callable, Optional, List, Dict, Any
 
 from einops import rearrange, repeat, reduce, pack, unpack
 from einops.layers.torch import Rearrange
-from torchvision.models import resnet34
 
 from shared.common_utils import record_time, profile_time
 from torch.nn import TransformerEncoder, TransformerEncoderLayer

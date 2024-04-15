@@ -86,12 +86,15 @@ class Intersector(nn.Module):
 class Attn_intersector(Intersector):
     def __init__(self, num_max_items=None):
         super().__init__(num_max_items)
+        hidden_dim = 256
         self.layers = nn.ModuleList([
-            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
-            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
         ])
-        self.intersection_token = nn.Parameter(torch.rand(256))
-        self.null_intersection = nn.Parameter(torch.rand(256))
+        self.intersection_token = nn.Parameter(torch.rand(hidden_dim))
+        self.null_intersection = nn.Parameter(torch.rand(hidden_dim))
 
     def forward(self, v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask):
         intersection_embedding, null_intersection_embedding = self.prepare_data(
@@ -104,9 +107,12 @@ class Attn_intersector(Intersector):
     def inference(self, v_features):
         x = self.intersection_token[None, None].repeat(v_features.shape[0], 1, 1)
         for layer in self.layers:
-            out, weights = layer(key=v_features, value=v_features,
-                                 query=x)
-            x = x + out
+            if isinstance(layer, nn.LayerNorm):
+                x = layer(x)
+            else:
+                out, weights = layer(key=v_features, value=v_features,
+                                     query=x)
+                x = x + out
         edge_features = x[:, 0]
         return edge_features
 
@@ -126,20 +132,27 @@ class Attn_intersector(Intersector):
 class Attn_intersector_classifier(Intersector):
     def __init__(self, num_max_items=None):
         super().__init__(num_max_items)
+        hidden_dim=256
         self.layers = nn.ModuleList([
-            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
-            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
-        ])
-        self.intersection_token = nn.Parameter(torch.rand(256))
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
 
-        self.classifier = nn.Linear(256, 1)
+        ])
+        self.intersection_token = nn.Parameter(torch.rand(hidden_dim))
+
+        self.classifier = nn.Linear(hidden_dim, 1)
 
     def inference(self, v_features):
         x = self.intersection_token[None, None].repeat(v_features.shape[0], 1, 1)
         for layer in self.layers:
-            out, weights = layer(key=v_features, value=v_features,
-                                 query=x)
-            x = x + out
+            if isinstance(layer, nn.LayerNorm):
+                x = layer(x)
+            else:
+                out, weights = layer(key=v_features, value=v_features,
+                                     query=x)
+                x = x + out
         edge_features = x[:, 0]
         return edge_features
 
@@ -299,9 +312,12 @@ class Fuser(nn.Module):
 class Attn_fuser(Fuser):
     def __init__(self):
         super().__init__()
+        hidden_dim=256
         self.atten = nn.ModuleList([
-            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
-            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
         ])
         pass
 
@@ -320,13 +336,16 @@ class Attn_fuser(Fuser):
 
         x = v_face_embedding
         for layer in self.atten:
-            out, weights = layer(
-                query=x,
-                key=v_edge_embedding,
-                value=v_edge_embedding,
-                attn_mask=face_edge_attn_mask,
-            )
-            x = x + out
+            if isinstance(layer, nn.LayerNorm):
+                x = layer(x)
+            else:
+                out, weights = layer(
+                    query=x,
+                    key=v_edge_embedding,
+                    value=v_edge_embedding,
+                    attn_mask=face_edge_attn_mask,
+                )
+                x = x + out
 
         return x
 
@@ -335,9 +354,12 @@ class Attn_fuser(Fuser):
 class Face_atten(nn.Module):
     def __init__(self):
         super().__init__()
+        hidden_dim=256
         self.atten = nn.ModuleList([
-            nn.MultiheadAttention(256, 2, 0.1, batch_first=True),
-            nn.MultiheadAttention(256, 2, 0.1, batch_first=True),
+            nn.MultiheadAttention(hidden_dim, 2, 0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
+            nn.MultiheadAttention(hidden_dim, 2, 0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
         ])
 
     def forward(self, v_face_embedding, v_face_mask):
@@ -358,8 +380,11 @@ class Face_atten(nn.Module):
 
         x = v_face_embedding
         for layer in self.atten:
-            out, weights = layer(x, x, x, attn_mask=attn_mask, need_weights=True)
-            x = x + out
+            if isinstance(layer, nn.LayerNorm):
+                x = layer(x)
+            else:
+                out, weights = layer(x, x, x, attn_mask=attn_mask, need_weights=True)
+                x = x + out
         return x
 
 

@@ -32,8 +32,8 @@ trainer:
   accelerator: "32-true"
 
 model:
-#  intersector: "Attn_intersector"
-  intersector: "Attn_intersector_classifier"
+  intersector: "Attn_intersector"
+#  intersector: "Attn_intersector_classifier"
   decoder: "Small_decoder_plus"
 
   checkpoint_autoencoder:

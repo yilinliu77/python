@@ -1,5 +1,5 @@
 dataset:
-#  root: H:\Data\img2brep\deepcad_10000
+  #  root: H:\Data\img2brep\deepcad_10000
   root: G:/Dataset/img2brep/deepcad_10000/main_data
   dataset_name: ABC
   overfit: true
@@ -27,16 +27,17 @@ trainer:
   resume_from_checkpoint:
   evaluate: false
   output: .
+
   check_val_every_n_epoch: 100
-#  accelerator: "16-mixed"
+  #  accelerator: "16-mixed"
   accelerator: "32-true"
 
 model:
-#  intersector: "Attn_intersector"
+  #  intersector: "Attn_intersector"
   intersector: "Attn_intersector_classifier"
 
-#  encoder: "Continuous_encoder"
-#  decoder: "Small_decoder_plus"
+  #  encoder: "Continuous_encoder"
+  #  decoder: "Small_decoder_plus"
 
   encoder: "Discrete_encoder"
   decoder: "Discrete_decoder"

@@ -1,6 +1,6 @@
 dataset:
-  #  root: H:\Data\img2brep\deepcad_10000
-  root: G:/Dataset/img2brep/deepcad_10000/main_data
+  root: H:\Data\img2brep\deepcad_10000
+  #  root: G:/Dataset/img2brep/deepcad_10000/main_data
   dataset_name: ABC
   overfit: true
   tokenized_batch_size: 16
@@ -21,7 +21,7 @@ trainer:
   train_autoregressive: false
 
   num_samples: -1
-  max_epochs: 100000000
+  max_epochs: 10000
 
   spawn: false
   resume_from_checkpoint:
@@ -45,6 +45,8 @@ model:
   checkpoint_autoencoder:
   bbox_discrete_dim: 256
   coor_discrete_dim: 128
+
+  use_GAT: true
 
 
 hydra:

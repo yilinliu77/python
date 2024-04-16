@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.checkpoint import checkpoint
 from torch.cuda.amp import autocast
-from torch_geometric.nn import SAGEConv
+from torch_geometric.nn import SAGEConv, GATv2Conv
 
 from torchtyping import TensorType
 
@@ -71,34 +71,34 @@ class Continuous_encoder(nn.Module):
     def __init__(self, dim_codebook_face=256, dim_codebook_edge=256, **kwargs):
         super().__init__()
         self.face_encoder = nn.Sequential(
-            nn.Conv2d(3, 256, kernel_size=7, stride=1, padding=3),
-            Rearrange('b c h w -> b h w c'),
-            nn.LayerNorm(256),
-            Rearrange('b h w c -> b c h w'),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            res_block_2D(256, 256, ks=3, st=1, pa=1),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            res_block_2D(256, 256, ks=3, st=1, pa=1),
-            nn.AdaptiveAvgPool2d((1, 1)),
-            nn.Flatten(),
-            nn.Linear(256, dim_codebook_face)
-        )
+                nn.Conv2d(3, 256, kernel_size=7, stride=1, padding=3),
+                Rearrange('b c h w -> b h w c'),
+                nn.LayerNorm(256),
+                Rearrange('b h w c -> b c h w'),
+                nn.ReLU(),
+                nn.MaxPool2d(kernel_size=2, stride=2),
+                res_block_2D(256, 256, ks=3, st=1, pa=1),
+                nn.MaxPool2d(kernel_size=2, stride=2),
+                res_block_2D(256, 256, ks=3, st=1, pa=1),
+                nn.AdaptiveAvgPool2d((1, 1)),
+                nn.Flatten(),
+                nn.Linear(256, dim_codebook_face)
+                )
 
         self.edge_encoder = nn.Sequential(
-            nn.Conv1d(in_channels=3, out_channels=256, kernel_size=7, stride=1, padding=3),
-            Rearrange('b c h -> b h c'),
-            nn.LayerNorm(256),
-            Rearrange('b h c -> b c h'),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2, stride=2),
-            res_block_1D(256, 256, ks=3, st=1, pa=1),
-            nn.MaxPool1d(kernel_size=2, stride=2),
-            res_block_1D(256, 256, ks=3, st=1, pa=1),
-            nn.AdaptiveAvgPool1d(1),
-            nn.Flatten(),
-            nn.Linear(256, dim_codebook_edge)
-        )
+                nn.Conv1d(in_channels=3, out_channels=256, kernel_size=7, stride=1, padding=3),
+                Rearrange('b c h -> b h c'),
+                nn.LayerNorm(256),
+                Rearrange('b h c -> b c h'),
+                nn.ReLU(),
+                nn.MaxPool1d(kernel_size=2, stride=2),
+                res_block_1D(256, 256, ks=3, st=1, pa=1),
+                nn.MaxPool1d(kernel_size=2, stride=2),
+                res_block_1D(256, 256, ks=3, st=1, pa=1),
+                nn.AdaptiveAvgPool1d(1),
+                nn.Flatten(),
+                nn.Linear(256, dim_codebook_edge)
+                )
 
     def encode_face(self, v_data):
         face_coords = v_data["face_points"]
@@ -127,62 +127,62 @@ class Discrete_encoder(Continuous_encoder):
         self.coords_embedding = nn.Embedding(coor_discrete_dim - 1, 64)
 
         self.bbox_encoder = nn.Sequential(
-            nn.Linear(6 * 64, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, dim_codebook_face)
-        )
+                nn.Linear(6 * 64, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+                nn.LayerNorm(hidden_dim),
+                nn.Linear(hidden_dim, dim_codebook_face)
+                )
 
         self.face_encoder = nn.Sequential(
-            nn.Conv2d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
-            Rearrange('b c h w -> b h w c'),
-            nn.LayerNorm(hidden_dim),
-            Rearrange('b h w c -> b c h w'),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
-            nn.AdaptiveAvgPool2d((1, 1)),
-            nn.Flatten(),
-            nn.Linear(hidden_dim, dim_codebook_face)
-        )
+                nn.Conv2d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
+                Rearrange('b c h w -> b h w c'),
+                nn.LayerNorm(hidden_dim),
+                Rearrange('b h w c -> b c h w'),
+                nn.ReLU(),
+                nn.MaxPool2d(kernel_size=2, stride=2),
+                res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+                nn.MaxPool2d(kernel_size=2, stride=2),
+                res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+                nn.AdaptiveAvgPool2d((1, 1)),
+                nn.Flatten(),
+                nn.Linear(hidden_dim, dim_codebook_face)
+                )
 
         self.face_fuser = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
-        )
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.ReLU(),
+                )
 
         self.edge_encoder = nn.Sequential(
-            nn.Conv1d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
-            Rearrange('b c h -> b h c'),
-            nn.LayerNorm(hidden_dim),
-            Rearrange('b h c -> b c h'),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2, stride=2),
-            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
-            nn.MaxPool1d(kernel_size=2, stride=2),
-            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
-            nn.AdaptiveAvgPool1d(1),
-            nn.Flatten(),
-            nn.Linear(hidden_dim, dim_codebook_edge)
-        )
+                nn.Conv1d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
+                Rearrange('b c h -> b h c'),
+                nn.LayerNorm(hidden_dim),
+                Rearrange('b h c -> b c h'),
+                nn.ReLU(),
+                nn.MaxPool1d(kernel_size=2, stride=2),
+                res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+                nn.MaxPool1d(kernel_size=2, stride=2),
+                res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+                nn.AdaptiveAvgPool1d(1),
+                nn.Flatten(),
+                nn.Linear(hidden_dim, dim_codebook_edge)
+                )
 
         self.edge_fuser = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
-        )
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.ReLU(),
+                )
 
     def encode_face(self, v_data):
         face_coords = v_data["discrete_face_points"]
@@ -232,39 +232,39 @@ class Small_decoder(nn.Module):
         super(Small_decoder, self).__init__()
         # For edges
         self.edge_decoder = nn.Sequential(
-            nn.Linear(dim_codebook_edge, 384),
-            nn.SiLU(),
-            nn.Dropout(resnet_dropout),
-            nn.LayerNorm(384),
-            nn.Linear(384, 384),
-            nn.SiLU(),
-            nn.Dropout(resnet_dropout),
-            nn.LayerNorm(384),
-            nn.Linear(384, 384),
-            nn.SiLU(),
-            nn.Dropout(resnet_dropout),
-            nn.LayerNorm(384),
-            nn.Linear(384, 20 * 3),
-            Rearrange('... (v c) -> ... v c', v=20)
-        )
+                nn.Linear(dim_codebook_edge, 384),
+                nn.SiLU(),
+                nn.Dropout(resnet_dropout),
+                nn.LayerNorm(384),
+                nn.Linear(384, 384),
+                nn.SiLU(),
+                nn.Dropout(resnet_dropout),
+                nn.LayerNorm(384),
+                nn.Linear(384, 384),
+                nn.SiLU(),
+                nn.Dropout(resnet_dropout),
+                nn.LayerNorm(384),
+                nn.Linear(384, 20 * 3),
+                Rearrange('... (v c) -> ... v c', v=20)
+                )
 
         # For faces
         self.face_decoder = nn.Sequential(
-            nn.Linear(dim_codebook_face, 384),
-            nn.SiLU(),
-            nn.Dropout(resnet_dropout),
-            nn.LayerNorm(384),
-            nn.Linear(384, 768),
-            nn.SiLU(),
-            nn.Dropout(resnet_dropout),
-            nn.LayerNorm(768),
-            nn.Linear(768, 768),
-            nn.SiLU(),
-            nn.Dropout(resnet_dropout),
-            nn.LayerNorm(768),
-            nn.Linear(768, 20 * 20 * 3),
-            Rearrange('... (v w c) -> ... v w c', v=20, w=20)
-        )
+                nn.Linear(dim_codebook_face, 384),
+                nn.SiLU(),
+                nn.Dropout(resnet_dropout),
+                nn.LayerNorm(384),
+                nn.Linear(384, 768),
+                nn.SiLU(),
+                nn.Dropout(resnet_dropout),
+                nn.LayerNorm(768),
+                nn.Linear(768, 768),
+                nn.SiLU(),
+                nn.Dropout(resnet_dropout),
+                nn.LayerNorm(768),
+                nn.Linear(768, 20 * 20 * 3),
+                Rearrange('... (v w c) -> ... v w c', v=20, w=20)
+                )
 
     def forward(self, v_face_embeddings, v_edge_embeddings):
         recon_edges = self.decode_edge(v_edge_embeddings)
@@ -286,20 +286,20 @@ class Small_decoder(nn.Module):
         gt_edge = v_data["edge_points"][v_edge_mask]
 
         loss_face_coords = nn.functional.mse_loss(
-            gt_face,
-            v_pred["face_coords"],
-            reduction='mean')
+                gt_face,
+                v_pred["face_coords"],
+                reduction='mean')
 
         loss_edge_coords = nn.functional.mse_loss(
-            gt_edge,
-            v_pred["edge_coords"],
-            reduction='mean')
+                gt_edge,
+                v_pred["edge_coords"],
+                reduction='mean')
 
         return {
-            "total_loss": loss_face_coords + loss_edge_coords,
+            "total_loss" : loss_face_coords + loss_edge_coords,
             "face_coords": loss_face_coords,
             "edge_coords": loss_edge_coords,
-        }
+            }
 
 
 class Small_decoder_plus(Small_decoder):
@@ -312,33 +312,33 @@ class Small_decoder_plus(Small_decoder):
         super(Small_decoder_plus, self).__init__(dim_codebook_edge, dim_codebook_face, resnet_dropout)
         # For edges
         self.edge_decoder = nn.Sequential(
-            Rearrange('... c -> ... c 1'),
-            nn.Upsample(scale_factor=4, mode="linear"),
-            res_block_1D(dim_codebook_edge, 256),
-            nn.Upsample(scale_factor=2, mode="linear"),
-            res_block_1D(256, 256),
-            nn.Upsample(scale_factor=2, mode="linear"),
-            res_block_1D(256, 256),
-            nn.Upsample(size=20, mode="linear"),
-            res_block_1D(256, 256),
-            nn.Conv1d(256, 3, kernel_size=3, stride=1, padding=1),
-            Rearrange('... c v -> ... v c', c=3),
-        )
+                Rearrange('... c -> ... c 1'),
+                nn.Upsample(scale_factor=4, mode="linear"),
+                res_block_1D(dim_codebook_edge, 256),
+                nn.Upsample(scale_factor=2, mode="linear"),
+                res_block_1D(256, 256),
+                nn.Upsample(scale_factor=2, mode="linear"),
+                res_block_1D(256, 256),
+                nn.Upsample(size=20, mode="linear"),
+                res_block_1D(256, 256),
+                nn.Conv1d(256, 3, kernel_size=3, stride=1, padding=1),
+                Rearrange('... c v -> ... v c', c=3),
+                )
 
         # For faces
         self.face_decoder = nn.Sequential(
-            Rearrange('... c -> ... c 1 1'),
-            nn.Upsample(scale_factor=4, mode="bilinear"),
-            res_block_2D(dim_codebook_face, 256),
-            nn.Upsample(scale_factor=2, mode="bilinear"),
-            res_block_2D(256, 256),
-            nn.Upsample(scale_factor=2, mode="bilinear"),
-            res_block_2D(256, 256),
-            nn.Upsample(size=(20, 20), mode="bilinear"),
-            res_block_2D(256, 256),
-            nn.Conv2d(256, 3, kernel_size=3, stride=1, padding=1),
-            Rearrange('... c w h -> ... w h c', c=3),
-        )
+                Rearrange('... c -> ... c 1 1'),
+                nn.Upsample(scale_factor=4, mode="bilinear"),
+                res_block_2D(dim_codebook_face, 256),
+                nn.Upsample(scale_factor=2, mode="bilinear"),
+                res_block_2D(256, 256),
+                nn.Upsample(scale_factor=2, mode="bilinear"),
+                res_block_2D(256, 256),
+                nn.Upsample(size=(20, 20), mode="bilinear"),
+                res_block_2D(256, 256),
+                nn.Conv2d(256, 3, kernel_size=3, stride=1, padding=1),
+                Rearrange('... c w h -> ... w h c', c=3),
+                )
 
 
 class Discrete_decoder(Small_decoder):
@@ -355,60 +355,59 @@ class Discrete_decoder(Small_decoder):
         self.cd = coor_discrete_dim - 1  # discrete_dim
 
         self.bbox_decoder = nn.Sequential(
-            Rearrange('... c -> ... c 1'),
-            res_block_1D(dim_codebook_face, hidden_dim, ks=1, st=1, pa=0),
-            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
-            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
-            nn.Conv1d(hidden_dim, 6 * self.bd, kernel_size=1, stride=1, padding=0),
-            Rearrange('...(p c) 1-> ... p c', p=6, c=self.bd),
-        )
+                Rearrange('... c -> ... c 1'),
+                res_block_1D(dim_codebook_face, hidden_dim, ks=1, st=1, pa=0),
+                res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+                res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+                nn.Conv1d(hidden_dim, 6 * self.bd, kernel_size=1, stride=1, padding=0),
+                Rearrange('...(p c) 1-> ... p c', p=6, c=self.bd),
+                )
 
         # For faces
         self.face_coords = nn.Sequential(
-            Rearrange('... c -> ... c 1 1'),
-            nn.Upsample(scale_factor=4, mode="bilinear"),
-            res_block_2D(dim_codebook_face, hidden_dim),
-            nn.Upsample(scale_factor=2, mode="bilinear"),
-            res_block_2D(hidden_dim, hidden_dim),
-            nn.Upsample(scale_factor=2, mode="bilinear"),
-            res_block_2D(hidden_dim, hidden_dim),
-            nn.Upsample(size=(20, 20), mode="bilinear"),
-            res_block_2D(hidden_dim, hidden_dim),
-            nn.Conv2d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
-            Rearrange('... (p c) w h -> ... w h p c', p=3, c=self.cd),
-        )
+                Rearrange('... c -> ... c 1 1'),
+                nn.Upsample(scale_factor=4, mode="bilinear"),
+                res_block_2D(dim_codebook_face, hidden_dim),
+                nn.Upsample(scale_factor=2, mode="bilinear"),
+                res_block_2D(hidden_dim, hidden_dim),
+                nn.Upsample(scale_factor=2, mode="bilinear"),
+                res_block_2D(hidden_dim, hidden_dim),
+                nn.Upsample(size=(20, 20), mode="bilinear"),
+                res_block_2D(hidden_dim, hidden_dim),
+                nn.Conv2d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
+                Rearrange('... (p c) w h -> ... w h p c', p=3, c=self.cd),
+                )
 
         # For edges
         self.edge_coords = nn.Sequential(
-            Rearrange('... c -> ... c 1'),
-            nn.Upsample(scale_factor=4, mode="linear"),
-            res_block_1D(dim_codebook_edge, hidden_dim),
-            nn.Upsample(scale_factor=2, mode="linear"),
-            res_block_1D(hidden_dim, hidden_dim),
-            nn.Upsample(scale_factor=2, mode="linear"),
-            res_block_1D(hidden_dim, hidden_dim),
-            nn.Upsample(size=20, mode="linear"),
-            res_block_1D(hidden_dim, hidden_dim),
-            nn.Conv1d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
-            Rearrange('... (p c) w -> ... w p c', p=3, c=self.cd),
-        )
-
+                Rearrange('... c -> ... c 1'),
+                nn.Upsample(scale_factor=4, mode="linear"),
+                res_block_1D(dim_codebook_edge, hidden_dim),
+                nn.Upsample(scale_factor=2, mode="linear"),
+                res_block_1D(hidden_dim, hidden_dim),
+                nn.Upsample(scale_factor=2, mode="linear"),
+                res_block_1D(hidden_dim, hidden_dim),
+                nn.Upsample(size=20, mode="linear"),
+                res_block_1D(hidden_dim, hidden_dim),
+                nn.Conv1d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
+                Rearrange('... (p c) w -> ... w p c', p=3, c=self.cd),
+                )
 
     def decode_face(self, v_face_embeddings):
         face_coords_logits = self.face_coords(v_face_embeddings)
         face_bbox_logits = self.bbox_decoder(v_face_embeddings)
         return {
             "face_coords_logits": face_coords_logits,
-            "face_bbox_logits": face_bbox_logits,
-        }
+            "face_bbox_logits"  : face_bbox_logits,
+            }
 
     def decode_edge(self, v_edge_embeddings):
         edge_coords_logits = self.edge_coords(v_edge_embeddings)
         edge_bbox_logits = self.bbox_decoder(v_edge_embeddings)
         return {
             "edge_coords_logits": edge_coords_logits,
-            "edge_bbox_logits": edge_bbox_logits,
-        }
+            "edge_bbox_logits"  : edge_bbox_logits,
+            }
 
     def loss(self, v_pred, v_data, v_face_mask, v_edge_mask):
         gt_face_bbox = v_data["discrete_face_bboxes"][v_face_mask]
@@ -418,30 +417,30 @@ class Discrete_decoder(Small_decoder):
         gt_edge_coords = v_data["discrete_edge_points"][v_edge_mask]
 
         loss_face_coords = nn.functional.cross_entropy(
-            v_pred["face_coords_logits"].flatten(0, -2),
-            gt_face_coords.flatten(),
-            reduction='mean')
+                v_pred["face_coords_logits"].flatten(0, -2),
+                gt_face_coords.flatten(),
+                reduction='mean')
         loss_face_bbox = nn.functional.cross_entropy(
-            v_pred["face_bbox_logits"].flatten(0, -2),
-            gt_face_bbox.flatten(),
-            reduction='mean')
+                v_pred["face_bbox_logits"].flatten(0, -2),
+                gt_face_bbox.flatten(),
+                reduction='mean')
 
         loss_edge_coords = nn.functional.cross_entropy(
-            v_pred["edge_coords_logits"].flatten(0, -2),
-            gt_edge_coords.flatten(),
-            reduction='mean')
+                v_pred["edge_coords_logits"].flatten(0, -2),
+                gt_edge_coords.flatten(),
+                reduction='mean')
         loss_edge_bbox = nn.functional.cross_entropy(
-            v_pred["edge_bbox_logits"].flatten(0, -2),
-            gt_edge_bbox.flatten(),
-            reduction='mean')
+                v_pred["edge_bbox_logits"].flatten(0, -2),
+                gt_edge_bbox.flatten(),
+                reduction='mean')
 
         return {
-            "total_loss": loss_face_coords + loss_face_bbox + loss_edge_coords + loss_edge_bbox,
+            "total_loss" : loss_face_coords + loss_face_bbox + loss_edge_coords + loss_edge_bbox,
             "face_coords": loss_face_coords,
-            "face_bbox": loss_face_bbox,
+            "face_bbox"  : loss_face_bbox,
             "edge_coords": loss_edge_coords,
-            "edge_bbox": loss_edge_bbox,
-        }
+            "edge_bbox"  : loss_edge_bbox,
+            }
 
     def inference(self, v_data):
         bbox_shifts = (self.bd + 1) // 2 - 1
@@ -696,6 +695,60 @@ class Face_atten(nn.Module):
         return x
 
 
+class SAGE_GraphConv(nn.Module):
+    def __init__(self, in_channels, out_channels_list, normalize=False, project=True):
+        super().__init__()
+
+        self.layers = nn.ModuleList([])
+        in_channels_layer = in_channels
+
+        for idx, out_channels in enumerate(out_channels_list):
+            self.layers.append(SAGEConv(in_channels_layer, out_channels, normalize=normalize, project=project))
+            if idx != len(out_channels_list) - 1:
+                norm = nn.Sequential(
+                        nn.ReLU(),
+                        nn.LayerNorm(out_channels)
+                        )
+                self.layers.append(norm)
+            in_channels_layer = out_channels
+
+    def forward(self, x, edge_index):
+        for layer in self.layers:
+            if isinstance(layer, SAGEConv):
+                x = layer(x, edge_index)
+            else:
+                x = layer(x)
+
+
+class GAT_GraphConv(nn.Module):
+    def __init__(self, in_channels, out_channels_list, heads=8, concat=True,
+                 negative_slope=0.2, fill_value='mean', dropout=0.0, bias=True):
+        super().__init__()
+
+        self.layers = nn.ModuleList([])
+        in_channels_layer = in_channels
+
+        for idx, out_channels in enumerate(out_channels_list):
+            self.layers.append(
+                    GATv2Conv(in_channels_layer, out_channels, heads=heads, concat=concat,
+                              negative_slope=negative_slope, fill_value=fill_value,
+                              dropout=dropout, bias=bias))
+            if idx != len(out_channels_list) - 1:
+                norm = nn.Sequential(
+                        nn.ReLU(),
+                        nn.LayerNorm(out_channels)
+                        )
+                self.layers.append(norm)
+            in_channels_layer = out_channels
+
+    def forward(self, x, edge_index, edge_attr):
+        for layer in self.layers:
+            if isinstance(layer, GATv2Conv):
+                x = layer(x, edge_index, edge_attr)
+            else:
+                x = layer(x)
+
+
 class AutoEncoder(nn.Module):
     def __init__(self,
                  v_conf,
@@ -721,31 +774,20 @@ class AutoEncoder(nn.Module):
         # Out: `dim_codebook_edge` and `dim_codebook_face`
         mod = importlib.import_module('src.img2brep.brep.model')
         self.encoder = getattr(mod, v_conf["encoder"])(
-            dim_codebook_face=dim_codebook_face,
-            bbox_discrete_dim=v_conf["bbox_discrete_dim"],
-            coor_discrete_dim=v_conf["coor_discrete_dim"],
-        )
-
-        # 2. GCN to distribute edge features to the nearby edges
-        # Out: curr_dim
-        init_encoder_dim_edges, *encoder_dims_through_depth_edges = encoder_dims_through_depth_edges
-        gcn_out_dims_edges = init_encoder_dim_edges
-        self.init_sage_conv_edges = SAGEConv(dim_codebook_edge, init_encoder_dim_edges, normalize=True, project=True)
-        self.init_encoder_act_and_norm_egdges = nn.Sequential(
-                nn.SiLU(),
-                nn.LayerNorm(init_encoder_dim_edges)
+                dim_codebook_face=dim_codebook_face,
+                bbox_discrete_dim=v_conf["bbox_discrete_dim"],
+                coor_discrete_dim=v_conf["coor_discrete_dim"],
                 )
 
-        self.gcn_layers_edges = ModuleList([])
-        for dim_layer in encoder_dims_through_depth_edges:
-            sage_conv = SAGEConv(
-                    gcn_out_dims_edges,
-                    dim_layer,
-                    normalize=True,
-                    project=True
-                    )
-            self.gcn_layers_edges.append(sage_conv)
-            gcn_out_dims_edges = dim_layer
+        # 2. GCN to distribute edge features to the nearby edges
+        # if v_conf["use_GAT"]:
+        #     GraphConv = partial(SAGEConv, normalize=True, project=True)
+        # else:
+        #     GraphConv = partial(GATv2Conv, heads=8, concat=True, negative_slope=0.2,
+        #                         fill_value='mean', dropout=0.0, bias=True)
+
+        # Out: curr_dim
+        self.gcn_on_edges = SAGE_GraphConv(dim_codebook_edge, encoder_dims_through_depth_edges)
 
         # 3. Fuser to distribute edge features to the corresponding face
         # Inject edge features to the corresponding face
@@ -755,24 +797,7 @@ class AutoEncoder(nn.Module):
 
         # 4. GCN to distribute edge features to the nearby faces
         # Out: curr_dim
-        init_encoder_dim_faces, *encoder_dims_through_depth_faces = encoder_dims_through_depth_faces
-        gcn_out_dims_faces = init_encoder_dim_faces
-        self.init_sage_conv_faces = SAGEConv(dim_codebook_face, init_encoder_dim_faces, normalize=True, project=True)
-        self.init_encoder_act_and_norm_faces = nn.Sequential(
-                nn.SiLU(),
-                nn.LayerNorm(init_encoder_dim_faces)
-                )
-
-        self.gcn_layers_faces = ModuleList([])
-        for dim_layer in encoder_dims_through_depth_faces:
-            sage_conv = SAGEConv(
-                    gcn_out_dims_faces,
-                    dim_layer,
-                    normalize=True,
-                    project=True
-                    )
-            self.gcn_layers_faces.append(sage_conv)
-            gcn_out_dims_faces = dim_layer
+        self.gcn_on_faces = SAGE_GraphConv(dim_codebook_face, encoder_dims_through_depth_faces)
 
         # 5. attention to aggregate the face features
         self.face_fuser = Face_atten()
@@ -786,12 +811,12 @@ class AutoEncoder(nn.Module):
         # 7. Decoder
         # Get BSpline surfaces and edges based on the true latent code
         self.decoder = getattr(mod, v_conf["decoder"])(
-            dim_codebook_edge=dim_codebook_edge,
-            dim_codebook_face=dim_codebook_face,
-            resnet_dropout=0.0,
-            bbox_discrete_dim=v_conf["bbox_discrete_dim"],
-            coor_discrete_dim=v_conf["coor_discrete_dim"],
-        )
+                dim_codebook_edge=dim_codebook_edge,
+                dim_codebook_face=dim_codebook_face,
+                resnet_dropout=0.0,
+                bbox_discrete_dim=v_conf["bbox_discrete_dim"],
+                coor_discrete_dim=v_conf["coor_discrete_dim"],
+                )
 
     def encode_edge_coords(self, edge):
         # Project in
@@ -799,19 +824,7 @@ class AutoEncoder(nn.Module):
         edge_embed = edge_embed
         return edge_embed
 
-    def gcn_on_edges(self, v_edge_embeddings, edge_adj):
-        edge_embeddings = self.init_sage_conv_edges(v_edge_embeddings, edge_adj)
-
-        edge_embeddings = self.init_encoder_act_and_norm_egdges(edge_embeddings)
-
-        for conv in self.gcn_layers_edges:
-            edge_embeddings = conv(edge_embeddings, edge_adj)
-
-        return edge_embeddings
-
     def gcn_on_faces(self, v_face_embeddings, face_adj):
-        face_embeddings = self.init_sage_conv_faces(v_face_embeddings, face_adj)
-
         face_embeddings = self.init_encoder_act_and_norm_faces(face_embeddings)
 
         for conv in self.gcn_layers_faces:
@@ -842,7 +855,7 @@ class AutoEncoder(nn.Module):
         recon_faces[~face_mask] = -1
         return recon_edges, recon_faces
 
-    def forward(self, v_data, only_return_recon=False, only_return_loss=True, is_inference=False, **kwargs):
+    def forward1(self, v_data, only_return_recon=False, only_return_loss=True, is_inference=False, **kwargs):
         # Encode the edge and face points
         face_embeddings, edge_embeddings, face_mask, edge_mask = self.encoder(v_data)
 
@@ -880,11 +893,10 @@ class AutoEncoder(nn.Module):
         recon_edge_full = recon_edge_full.masked_scatter(rearrange(edge_mask, '... -> ... 1 1'), recon_edges)
         recon_edge_full[~edge_mask] = -1
 
-
         data = {
             "recon_faces": recon_face_full,
             "recon_edges": recon_edge_full,
-        }
+            }
         # Compute the true loss with the continuous points
         true_recon_face_loss = nn.functional.mse_loss(recon_face_full, v_data["face_points"], reduction='mean')
         loss["true_recon_face"] = true_recon_face_loss
@@ -892,7 +904,7 @@ class AutoEncoder(nn.Module):
         loss["true_recon_edge"] = true_recon_edge_loss
         return loss, data
 
-    def forward1(self, v_data, only_return_recon=False, only_return_loss=True, is_inference=False, **kwargs):
+    def forward(self, v_data, only_return_recon=False, only_return_loss=True, is_inference=False, **kwargs):
         sample_points_faces = v_data["sample_points_faces"]
         sample_points_edges = v_data["sample_points_lines"]
         sample_points_vertices = v_data["sample_points_vertices"]
@@ -1022,7 +1034,7 @@ class AutoEncoder(nn.Module):
         recon_edges_full[edge_mask] = bbb
 
         recon_faces_full = recon_faces.new_zeros(sample_points_faces.shape).masked_scatter(
-            face_mask[:, :, None, None, None].repeat(1, 1, 20, 20, 3), recon_faces)
+                face_mask[:, :, None, None, None].repeat(1, 1, 20, 20, 3), recon_faces)
         recon_faces_full[~face_mask] = -1
 
         recovered_face_embeddings = face_embeddings.new_zeros(sample_points_faces.shape[0],

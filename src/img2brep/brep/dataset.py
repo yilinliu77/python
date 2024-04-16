@@ -316,4 +316,3 @@ class Autoregressive_Dataset(torch.utils.data.Dataset):
             "vertex_edge_connectivity": vertex_edge_connectivity,
             "face_idx_sequence"       : face_idx_sequence,
             }
->>>>>>> abacce0db29242ef17f6f1731e7b8f59cef2ceb3

@@ -120,11 +120,13 @@ class TrainAutoEncoder(pl.LightningModule):
                  sync_dist=True, batch_size=self.batch_size)
 
         if batch_idx == 0:
-            recon_edges, recon_faces = self.model.inference(recon_data["face_embeddings"])
-            self.viz["sample_points_faces"] = data["sample_points_faces"].cpu().numpy()
-            self.viz["sample_points_lines"] = data["sample_points_lines"].cpu().numpy()
-            self.viz["reconstructed_edges"] = recon_edges.cpu().numpy()
-            self.viz["reconstructed_faces"] = recon_faces.cpu().numpy()
+            # recon_edges, recon_faces = self.model.inference(recon_data["face_embeddings"])
+            self.viz["face_points"] = data["face_points"].cpu().numpy()
+            self.viz["line_points"] = data["edge_points"].cpu().numpy()
+            # self.viz["reconstructed_edges"] = recon_edges.cpu().numpy()
+            # self.viz["reconstructed_faces"] = recon_faces.cpu().numpy()
+            self.viz["recon_faces"] = recon_data["recon_faces"].cpu().numpy()
+            self.viz["recon_edges"] = recon_data["recon_edges"].cpu().numpy()
 
         return total_loss
 
@@ -132,10 +134,10 @@ class TrainAutoEncoder(pl.LightningModule):
         # if self.trainer.sanity_checking:
         #     return
 
-        v_gt_edges = self.viz["sample_points_lines"]
-        v_gt_faces = self.viz["sample_points_faces"]
-        v_recon_edges = self.viz["reconstructed_edges"]
-        v_recon_faces = self.viz["reconstructed_faces"]
+        v_gt_edges = self.viz["line_points"]
+        v_gt_faces = self.viz["face_points"]
+        v_recon_edges = self.viz["recon_edges"]
+        v_recon_faces = self.viz["recon_faces"]
 
         for idx in range(min(v_gt_edges.shape[0], 4)):
             gt_edges = v_gt_edges[idx]
@@ -326,7 +328,7 @@ class TrainAutoregressiveModel(pl.LightningModule):
 @hydra.main(config_name="train_brepgen.yaml", config_path="../../../configs/img2brep/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
-    torch.set_float32_matmul_precision("high")
+    torch.set_float32_matmul_precision("medium")
     print(OmegaConf.to_yaml(v_cfg))
 
     is_train_transformer = v_cfg["trainer"]["train_transformer"]
@@ -355,7 +357,7 @@ def main(v_cfg: DictConfig):
             log_every_n_steps=25,
             enable_model_summary=False,
             callbacks=[mc, lr_monitor],
-            max_epochs=int(1e8),
+            max_epochs=int(200),
             num_sanity_val_steps=2,
             check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
             precision=v_cfg["trainer"]["accelerator"],

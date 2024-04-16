@@ -7,12 +7,14 @@ dataset:
   dataset_name: ABC
   overfit: true
   tokenized_batch_size: 16
+  bbox_discrete_dim: 256
+  coor_discrete_dim: 128
 
 trainer:
   learning_rate: 1e-4
 
   gpu: 1
-  num_worker: 0
+  num_worker: 4
   batch_size: 4
   #  gpu: [ 0, 1 ]
   #  num_worker: 4
@@ -25,19 +27,26 @@ trainer:
   num_samples: -1
 
   spawn: false
-  resume_from_checkpoint: #/root/workspace/python/src/img2brep/brep/tb_logs_brepgen/autoencoder/0409_big_success/checkpoints/epoch=4399-step=88000.ckpt
+  resume_from_checkpoint:
   evaluate: false
   output: .
   check_val_every_n_epoch: 100
+#  accelerator: "16-mixed"
   accelerator: "32-true"
 
 model:
-  intersector: "Attn_intersector"
-#  intersector: "Attn_intersector_classifier"
-  decoder: "Small_decoder_plus"
+#  intersector: "Attn_intersector"
+  intersector: "Attn_intersector_classifier"
+
+#  encoder: "Continuous_encoder"
+#  decoder: "Small_decoder_plus"
+
+  encoder: "Discrete_encoder"
+  decoder: "Discrete_decoder"
 
   checkpoint_autoencoder:
-
+  bbox_discrete_dim: 256
+  coor_discrete_dim: 128
 
 hydra:
   run:

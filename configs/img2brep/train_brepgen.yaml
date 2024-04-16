@@ -21,6 +21,7 @@ trainer:
   train_autoregressive: false
 
   num_samples: -1
+  max_epochs: 100000000
 
   spawn: false
   resume_from_checkpoint:

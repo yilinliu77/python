@@ -352,7 +352,7 @@ def main(v_cfg: DictConfig):
             log_every_n_steps=25,
             enable_model_summary=False,
             callbacks=[mc, lr_monitor],
-            max_epochs=int(200),
+            max_epochs=int(v_cfg["trainer"]["max_epochs"]),
             num_sanity_val_steps=2,
             check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
             precision=v_cfg["trainer"]["accelerator"],

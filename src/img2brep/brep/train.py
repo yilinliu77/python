@@ -24,7 +24,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import LearningRateMonitor
 from lightning_fabric import seed_everything
 
-from src.img2brep.brep.dataset import Auotoencoder_Dataset
+from src.img2brep.brep.dataset import Autoencoder_Dataset, Autoregressive_Dataset
 from src.img2brep.brep.model import AutoEncoder
 
 
@@ -39,8 +39,6 @@ class TrainAutoEncoder(pl.LightningModule):
         self.dataset_path = self.hydra_conf["dataset"]["root"]
 
         self.vis_recon_faces = self.hydra_conf["trainer"]["vis_recon_faces"]
-        self.is_train_transformer = self.hydra_conf["trainer"]["train_transformer"]
-        self.condition_on_text = self.hydra_conf["trainer"]["condition_on_text"]
 
         self.save_hyperparameters(hparams)
 
@@ -54,11 +52,10 @@ class TrainAutoEncoder(pl.LightningModule):
         self.viz = {}
 
     def train_dataloader(self):
-        if not self.is_train_transformer:
-            self.train_dataset = Auotoencoder_Dataset("training", self.hydra_conf["dataset"], )
+        self.train_dataset = Autoencoder_Dataset("training", self.hydra_conf["dataset"], )
 
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
-                          collate_fn=Auotoencoder_Dataset.collate_fn,
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=False,
+                          collate_fn=Autoencoder_Dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           # pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
@@ -66,11 +63,10 @@ class TrainAutoEncoder(pl.LightningModule):
                           )
 
     def val_dataloader(self):
-        if not self.is_train_transformer:
-            self.valid_dataset = Auotoencoder_Dataset("validation", self.hydra_conf["dataset"], )
+        self.valid_dataset = Autoencoder_Dataset("validation", self.hydra_conf["dataset"], )
 
         return DataLoader(self.valid_dataset, batch_size=self.batch_size,
-                          collate_fn=Auotoencoder_Dataset.collate_fn,
+                          collate_fn=Autoencoder_Dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           # pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
@@ -83,7 +79,7 @@ class TrainAutoEncoder(pl.LightningModule):
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.1)
         # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=100, verbose=True)
         return {
-            'optimizer'   : optimizer,
+            'optimizer': optimizer,
             # 'lr_scheduler': {
             #     'scheduler': scheduler,
             #     'monitor'  : 'Validation_Loss',
@@ -100,7 +96,7 @@ class TrainAutoEncoder(pl.LightningModule):
                 continue
             self.log(f"Training_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                      sync_dist=True, batch_size=self.batch_size)
-        self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
+        self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
         if torch.isnan(total_loss).any():
             print("NAN Loss")
@@ -109,7 +105,7 @@ class TrainAutoEncoder(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         data = batch
 
-        loss, recon_data = self.model(data, only_return_loss=False, is_inference=True)
+        loss, recon_data = self.model(data, only_return_loss=False)
         total_loss = loss["total_loss"]
         for key in loss:
             if key == "total_loss":
@@ -127,6 +123,9 @@ class TrainAutoEncoder(pl.LightningModule):
             # self.viz["reconstructed_faces"] = recon_faces.cpu().numpy()
             self.viz["recon_faces"] = recon_data["recon_faces"].cpu().numpy()
             self.viz["recon_edges"] = recon_data["recon_edges"].cpu().numpy()
+
+            self.viz["sample_points_faces"] = data["sample_points_faces"].cpu().numpy()
+            self.viz["sample_points_lines"] = data["sample_points_lines"].cpu().numpy()
 
         return total_loss
 
@@ -188,8 +187,6 @@ class TrainAutoregressiveModel(pl.LightningModule):
         self.dataset_path = self.hydra_conf["dataset"]["root"]
 
         self.vis_recon_faces = self.hydra_conf["trainer"]["vis_recon_faces"]
-        self.is_train_transformer = self.hydra_conf["trainer"]["train_transformer"]
-        self.condition_on_text = self.hydra_conf["trainer"]["condition_on_text"]
 
         self.save_hyperparameters(hparams)
 
@@ -198,17 +195,16 @@ class TrainAutoregressiveModel(pl.LightningModule):
             os.makedirs(self.log_root)
 
         self.model = AutoregressiveModel(
-            self.hydra_conf["model"]
-        )
+                self.hydra_conf["model"]
+                )
 
         self.viz = {}
 
     def train_dataloader(self):
-        if not self.is_train_transformer:
-            self.train_dataset = Auotoencoder_Dataset("training", self.hydra_conf["dataset"], )
+        self.train_dataset = Autoregressive_Dataset("training", self.hydra_conf["dataset"], )
 
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
-                          collate_fn=Auotoencoder_Dataset.collate_fn,
+                          collate_fn=Autoregressive_Dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           # pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
@@ -216,11 +212,10 @@ class TrainAutoregressiveModel(pl.LightningModule):
                           )
 
     def val_dataloader(self):
-        if not self.is_train_transformer:
-            self.valid_dataset = Auotoencoder_Dataset("validation", self.hydra_conf["dataset"], )
+        self.valid_dataset = Autoregressive_Dataset("validation", self.hydra_conf["dataset"], )
 
         return DataLoader(self.valid_dataset, batch_size=self.batch_size,
-                          collate_fn=Auotoencoder_Dataset.collate_fn,
+                          collate_fn=Autoregressive_Dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           # pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
@@ -233,7 +228,7 @@ class TrainAutoregressiveModel(pl.LightningModule):
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.1)
         # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=100, verbose=True)
         return {
-            'optimizer'   : optimizer,
+            'optimizer': optimizer,
             # 'lr_scheduler': {
             #     'scheduler': scheduler,
             #     'monitor'  : 'Validation_Loss',
@@ -259,28 +254,29 @@ class TrainAutoregressiveModel(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         data = batch
 
-        loss, recon_data = self.model(data, only_return_loss=False, is_inference=True)
+        loss, recon_data = self.model(data, only_return_loss=False)
         total_loss = loss["total_loss"]
         for key in loss:
             if key == "total_loss":
                 continue
-            self.log(f"Validation_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
+            self.log(f"Validation_{key}", loss[key], prog_bar=True, logger=True, on_step=True, on_epoch=True,
                      sync_dist=True, batch_size=self.batch_size)
-        self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
+        self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
 
-        if batch_idx == 0:
-            recon_edges, recon_faces = self.model.inference(recon_data["face_embeddings"])
-            self.viz["sample_points_faces"] = data["sample_points_faces"].cpu().numpy()
-            self.viz["sample_points_lines"] = data["sample_points_lines"].cpu().numpy()
-            self.viz["reconstructed_edges"] = recon_edges.cpu().numpy()
-            self.viz["reconstructed_faces"] = recon_faces.cpu().numpy()
+        # if batch_idx == 0:
+        #     recon_edges, recon_faces = self.model.inference(recon_data["face_embeddings"])
+        #     self.viz["sample_points_faces"] = data["sample_points_faces"].cpu().numpy()
+        #     self.viz["sample_points_lines"] = data["sample_points_lines"].cpu().numpy()
+        #     self.viz["reconstructed_edges"] = recon_edges.cpu().numpy()
+        #     self.viz["reconstructed_faces"] = recon_faces.cpu().numpy()
 
         return total_loss
 
     def on_validation_epoch_end(self):
         # if self.trainer.sanity_checking:
         #     return
+        return
 
         v_gt_edges = self.viz["sample_points_lines"]
         v_gt_faces = self.viz["sample_points_faces"]
@@ -331,28 +327,30 @@ def main(v_cfg: DictConfig):
     torch.set_float32_matmul_precision("medium")
     print(OmegaConf.to_yaml(v_cfg))
 
-    is_train_transformer = v_cfg["trainer"]["train_transformer"]
+    train_autoregressive = v_cfg["trainer"]["train_autoregressive"]
 
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir']
     v_cfg["trainer"]["output"] = os.path.join(log_dir, v_cfg["trainer"]["output"])
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
-    modelTraining = TrainAutoEncoder(v_cfg)
 
     mc = ModelCheckpoint(monitor="Validation_Loss", save_top_k=3, save_last=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
-    if is_train_transformer:
+    if train_autoregressive:
+        modelTraining = TrainAutoregressiveModel(v_cfg)
         logger = TensorBoardLogger(os.path.join(log_dir, "tb_logs_brepgen"), name="transformer")
     else:
+        modelTraining = TrainAutoEncoder(v_cfg)
         logger = TensorBoardLogger(os.path.join(log_dir, "tb_logs_brepgen"), name="autoencoder")
 
     trainer = Trainer(
             default_root_dir=log_dir,
             logger=logger,
             accelerator='gpu',
-            strategy="ddp_find_unused_parameters_false" if v_cfg["trainer"].gpu > 1 else "auto",
+            # strategy="ddp_find_unused_parameters_false" if v_cfg["trainer"].gpu > 1 else "auto",
+            strategy="auto",
             devices=v_cfg["trainer"].gpu,
             log_every_n_steps=25,
             enable_model_summary=False,
@@ -368,7 +366,7 @@ def main(v_cfg: DictConfig):
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
         state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
 
-        if is_train_transformer:
+        if train_autoregressive:
             state_dict_ = {}
             for k, v in state_dict.items():
                 if 'transformer.' in k:

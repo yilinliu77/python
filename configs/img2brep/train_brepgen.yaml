@@ -1,9 +1,5 @@
 dataset:
-  #  root: /mnt/d/meshgpt/0planar_shapes_new
-  #  root: /mnt/d/meshgpt/deepcad_10000/main_data
-  #  root: /mnt/d/meshgpt/deepcad_whole
-  #  root: /mnt/d/yilin/img2brep/deepcad_whole
-  root: G:/Dataset/img2brep/deepcad_10000/main_data
+  root: H:\Data\img2brep\deepcad_10000
   dataset_name: ABC
   overfit: true
   tokenized_batch_size: 16
@@ -14,15 +10,14 @@ trainer:
   learning_rate: 1e-4
 
   gpu: 1
-  num_worker: 4
+  num_worker: 0
   batch_size: 4
   #  gpu: [ 0, 1 ]
   #  num_worker: 4
   #  batch_size: 4
 
   vis_recon_faces: true
-  train_transformer: false
-  condition_on_text: true
+  train_autoregressive: false
 
   num_samples: -1
 
@@ -35,6 +30,7 @@ trainer:
   accelerator: "32-true"
 
 model:
+<<<<<<< HEAD
 #  intersector: "Attn_intersector"
   intersector: "Attn_intersector_classifier"
 
@@ -47,6 +43,13 @@ model:
   checkpoint_autoencoder:
   bbox_discrete_dim: 256
   coor_discrete_dim: 128
+=======
+  intersector: "Attn_intersector"
+  #  intersector: "Attn_intersector_classifier"
+  decoder: "Small_decoder_plus"
+
+  checkpoint_autoencoder: G:\workplace\python_server\python\src\img2brep\brep\outputs_img2brep\2024_04_15_23_36_01\tb_logs_brepgen\autoencoder\version_0\checkpoints\epoch=151999-step=456000.ckpt
+>>>>>>> abacce0db29242ef17f6f1731e7b8f59cef2ceb3
 
 hydra:
   run:

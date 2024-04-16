@@ -124,9 +124,6 @@ class TrainAutoEncoder(pl.LightningModule):
             self.viz["recon_faces"] = recon_data["recon_faces"].cpu().numpy()
             self.viz["recon_edges"] = recon_data["recon_edges"].cpu().numpy()
 
-            self.viz["sample_points_faces"] = data["sample_points_faces"].cpu().numpy()
-            self.viz["sample_points_lines"] = data["sample_points_lines"].cpu().numpy()
-
         return total_loss
 
     def on_validation_epoch_end(self):

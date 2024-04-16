@@ -1,13 +1,16 @@
 dataset:
-  root: H:\Data\img2brep\deepcad_10000
+  #  root: H:\Data\img2brep\deepcad_10000
+  root: G:/Dataset/img2brep/deepcad_10000/main_data
   dataset_name: ABC
   overfit: true
   tokenized_batch_size: 16
+  bbox_discrete_dim: 256
+  coor_discrete_dim: 128
 
 trainer:
   learning_rate: 1e-4
 
-  gpu: [ 0 ]
+  gpu: 1
   num_worker: 0
   batch_size: 4
   #  gpu: [ 0, 1 ]
@@ -18,20 +21,31 @@ trainer:
   train_autoregressive: false
 
   num_samples: -1
+  max_epochs: 100000000
 
   spawn: false
   resume_from_checkpoint:
   evaluate: false
   output: .
-  check_val_every_n_epoch: 1000
+
+  check_val_every_n_epoch: 100
+  #  accelerator: "16-mixed"
   accelerator: "32-true"
 
 model:
-  # intersector: "Attn_intersector"
+  #  intersector: "Attn_intersector"
   intersector: "Attn_intersector_classifier"
-  decoder: "Small_decoder_plus"
 
-  checkpoint_autoencoder: G:\workplace\python_server\python\src\img2brep\brep\outputs_img2brep\2024_04_15_23_36_01\tb_logs_brepgen\autoencoder\version_0\checkpoints\epoch=151999-step=456000.ckpt
+  #  encoder: "Continuous_encoder"
+  #  decoder: "Small_decoder_plus"
+
+  encoder: "Discrete_encoder"
+  decoder: "Discrete_decoder"
+
+  checkpoint_autoencoder:
+  bbox_discrete_dim: 256
+  coor_discrete_dim: 128
+
 
 hydra:
   run:

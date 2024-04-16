@@ -1,39 +1,36 @@
 dataset:
-  root: /mnt/d/yilin/img2brep/deepcad_10000
+  root: H:\Data\img2brep\deepcad_10000
   dataset_name: ABC
   overfit: true
   tokenized_batch_size: 16
 
 trainer:
-  learning_rate: 1e-6
+  learning_rate: 1e-4
 
   gpu: [ 0 ]
   num_worker: 0
-  batch_size: 1
+  batch_size: 4
+  #  gpu: [ 0, 1 ]
+  #  num_worker: 4
+  #  batch_size: 4
 
   vis_recon_faces: true
-  train_transformer: false
-  condition_on_text: true
+  train_autoregressive: false
 
   num_samples: -1
 
   spawn: false
-  checkpoint_autoencoder:
-  resume_from_checkpoint: #/root/workspace/python/src/img2brep/brep/tb_logs_brepgen/autoencoder/0409_big_success/checkpoints/epoch=4399-step=88000.ckpt
+  resume_from_checkpoint:
   evaluate: false
   output: .
-  check_val_every_n_epoch: 1000
+  check_val_every_n_epoch: 100
   accelerator: "32-true"
 
 model:
-  model_name: PC_model
-  with_bn: true
-  channels: 3
-  output_channels: 1
-  need_normalize: true
-  voxelize_res: 256
-  test_threshold: 0.5
-  focal_alpha: 0.75
+  #  intersector: "Attn_intersector"
+  intersector: "Attn_intersector_classifier"
+
+  checkpoint_autoencoder: G:\workplace\python_server\python\src\img2brep\brep\outputs_img2brep\2024_04_15_23_36_01\tb_logs_brepgen\autoencoder\version_0\checkpoints\epoch=151999-step=456000.ckpt
 
 hydra:
   run:

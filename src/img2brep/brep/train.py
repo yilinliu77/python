@@ -1,6 +1,8 @@
 import sys
 
-sys.path.append('../../../')  # Add project root to the python path
+from src.img2brep.brep.autoregressive import AutoregressiveModel
+
+sys.path.append('../../../')
 import os.path
 from pathlib import Path
 
@@ -22,13 +24,13 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import LearningRateMonitor
 from lightning_fabric import seed_everything
 
-from src.img2brep.brep.dataset import Auotoencoder_Dataset
+from src.img2brep.brep.dataset import Autoencoder_Dataset, Autoregressive_Dataset
 from src.img2brep.brep.model import AutoEncoder
 
 
-class ModelTraining(pl.LightningModule):
+class TrainAutoEncoder(pl.LightningModule):
     def __init__(self, hparams):
-        super(ModelTraining, self).__init__()
+        super(TrainAutoEncoder, self).__init__()
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
@@ -37,8 +39,6 @@ class ModelTraining(pl.LightningModule):
         self.dataset_path = self.hydra_conf["dataset"]["root"]
 
         self.vis_recon_faces = self.hydra_conf["trainer"]["vis_recon_faces"]
-        self.is_train_transformer = self.hydra_conf["trainer"]["train_transformer"]
-        self.condition_on_text = self.hydra_conf["trainer"]["condition_on_text"]
 
         self.save_hyperparameters(hparams)
 
@@ -46,17 +46,16 @@ class ModelTraining(pl.LightningModule):
         if not os.path.exists(self.log_root):
             os.makedirs(self.log_root)
 
-        self.autoencoder = AutoEncoder()
+        self.autoencoder = AutoEncoder(self.hydra_conf["model"])
         self.model = self.autoencoder
 
         self.viz = {}
 
     def train_dataloader(self):
-        if not self.is_train_transformer:
-            self.train_dataset = Auotoencoder_Dataset("training", self.hydra_conf["dataset"], )
+        self.train_dataset = Autoencoder_Dataset("training", self.hydra_conf["dataset"], )
 
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=False,
-                          collate_fn=Auotoencoder_Dataset.collate_fn,
+                          collate_fn=Autoencoder_Dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           # pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
@@ -64,11 +63,10 @@ class ModelTraining(pl.LightningModule):
                           )
 
     def val_dataloader(self):
-        if not self.is_train_transformer:
-            self.valid_dataset = Auotoencoder_Dataset("validation", self.hydra_conf["dataset"], )
+        self.valid_dataset = Autoencoder_Dataset("validation", self.hydra_conf["dataset"], )
 
         return DataLoader(self.valid_dataset, batch_size=self.batch_size,
-                          collate_fn=Auotoencoder_Dataset.collate_fn,
+                          collate_fn=Autoencoder_Dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           # pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
@@ -96,27 +94,33 @@ class ModelTraining(pl.LightningModule):
         for key in loss:
             if key == "total_loss":
                 continue
-            self.log(f"Training_{key}", loss[key], prog_bar=True, logger=True, on_step=True, on_epoch=True,
+            self.log(f"Training_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                      sync_dist=True, batch_size=self.batch_size)
-        self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
+        self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
+        if torch.isnan(total_loss).any():
+            print("NAN Loss")
         return total_loss
 
     def validation_step(self, batch, batch_idx):
         data = batch
 
-        loss, recon_data = self.model(data, only_return_loss=False, is_inference=True)
+        loss, recon_data = self.model(data, only_return_loss=False)
         total_loss = loss["total_loss"]
         for key in loss:
             if key == "total_loss":
                 continue
-            self.log(f"Validation_{key}", loss[key], prog_bar=True, logger=True, on_step=True, on_epoch=True,
+            self.log(f"Validation_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                      sync_dist=True, batch_size=self.batch_size)
-        self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
+        self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
 
         if batch_idx == 0:
-            recon_edges, recon_faces = self.model.inference(recon_data["face_embeddings"])
+            if True:
+                recon_edges, recon_faces = self.model.inference(recon_data["face_embeddings"])
+            else:
+                recon_edges = recon_data["recon_edges"]
+                recon_faces = recon_data["recon_faces"]
             self.viz["sample_points_faces"] = data["sample_points_faces"].cpu().numpy()
             self.viz["sample_points_lines"] = data["sample_points_lines"].cpu().numpy()
             self.viz["reconstructed_edges"] = recon_edges.cpu().numpy()
@@ -171,27 +175,173 @@ class ModelTraining(pl.LightningModule):
         return
 
 
+class TrainAutoregressiveModel(pl.LightningModule):
+    def __init__(self, hparams):
+        super(TrainAutoregressiveModel, self).__init__()
+        self.hydra_conf = hparams
+        self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
+        self.batch_size = self.hydra_conf["trainer"]["batch_size"]
+        self.num_worker = self.hydra_conf["trainer"]["num_worker"]
+        self.dataset_name = self.hydra_conf["dataset"]["dataset_name"]
+        self.dataset_path = self.hydra_conf["dataset"]["root"]
+
+        self.vis_recon_faces = self.hydra_conf["trainer"]["vis_recon_faces"]
+
+        self.save_hyperparameters(hparams)
+
+        self.log_root = Path(self.hydra_conf["trainer"]["output"])
+        if not os.path.exists(self.log_root):
+            os.makedirs(self.log_root)
+
+        self.model = AutoregressiveModel(
+                self.hydra_conf["model"]
+                )
+
+        self.viz = {}
+
+    def train_dataloader(self):
+        self.train_dataset = Autoregressive_Dataset("training", self.hydra_conf["dataset"], )
+
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
+                          collate_fn=Autoregressive_Dataset.collate_fn,
+                          num_workers=self.hydra_conf["trainer"]["num_worker"],
+                          # pin_memory=True,
+                          persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
+                          prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
+                          )
+
+    def val_dataloader(self):
+        self.valid_dataset = Autoregressive_Dataset("validation", self.hydra_conf["dataset"], )
+
+        return DataLoader(self.valid_dataset, batch_size=self.batch_size,
+                          collate_fn=Autoregressive_Dataset.collate_fn,
+                          num_workers=self.hydra_conf["trainer"]["num_worker"],
+                          # pin_memory=True,
+                          persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
+                          prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
+                          )
+
+    def configure_optimizers(self):
+        optimizer = Adam(self.model.parameters(), lr=self.learning_rate)
+        # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=40, T_mult=1, eta_min=1e-8, last_epoch=-1)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.1)
+        # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=100, verbose=True)
+        return {
+            'optimizer': optimizer,
+            # 'lr_scheduler': {
+            #     'scheduler': scheduler,
+            #     'monitor'  : 'Validation_Loss',
+            #     }
+            }
+
+    def training_step(self, batch, batch_idx):
+        data = batch
+
+        loss = self.model(data, only_return_loss=True)
+        total_loss = loss["total_loss"]
+        for key in loss:
+            if key == "total_loss":
+                continue
+            self.log(f"Training_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                     sync_dist=True, batch_size=self.batch_size)
+        self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
+                 sync_dist=True, batch_size=self.batch_size)
+        if torch.isnan(total_loss).any():
+            print("NAN Loss")
+        return total_loss
+
+    def validation_step(self, batch, batch_idx):
+        data = batch
+
+        loss, recon_data = self.model(data, only_return_loss=False)
+        total_loss = loss["total_loss"]
+        for key in loss:
+            if key == "total_loss":
+                continue
+            self.log(f"Validation_{key}", loss[key], prog_bar=True, logger=True, on_step=True, on_epoch=True,
+                     sync_dist=True, batch_size=self.batch_size)
+        self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
+                 sync_dist=True, batch_size=self.batch_size)
+
+        # if batch_idx == 0:
+        #     recon_edges, recon_faces = self.model.inference(recon_data["face_embeddings"])
+        #     self.viz["sample_points_faces"] = data["sample_points_faces"].cpu().numpy()
+        #     self.viz["sample_points_lines"] = data["sample_points_lines"].cpu().numpy()
+        #     self.viz["reconstructed_edges"] = recon_edges.cpu().numpy()
+        #     self.viz["reconstructed_faces"] = recon_faces.cpu().numpy()
+
+        return total_loss
+
+    def on_validation_epoch_end(self):
+        # if self.trainer.sanity_checking:
+        #     return
+        return
+
+        v_gt_edges = self.viz["sample_points_lines"]
+        v_gt_faces = self.viz["sample_points_faces"]
+        v_recon_edges = self.viz["reconstructed_edges"]
+        v_recon_faces = self.viz["reconstructed_faces"]
+
+        for idx in range(min(v_gt_edges.shape[0], 4)):
+            gt_edges = v_gt_edges[idx]
+            gt_faces = v_gt_faces[idx]
+            recon_edges = v_recon_edges[idx]
+            recon_faces = v_recon_faces[idx]
+
+            valid_flag = (gt_edges != -1).all(axis=-1).all(axis=-1)
+            gt_edges = gt_edges[valid_flag]
+            valid_flag = (recon_edges != -1).all(axis=-1).all(axis=-1)
+            recon_edges = recon_edges[valid_flag]
+            valid_flag = (gt_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)
+            gt_faces = gt_faces[valid_flag]
+            valid_flag = (recon_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)
+            recon_faces = recon_faces[valid_flag]
+
+            edge_points = np.concatenate((gt_edges, recon_edges), axis=0).reshape(-1, 3)
+            edge_colors = np.concatenate(
+                    (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0] * 20, axis=0),
+                     np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0] * 20, axis=0)), axis=0)
+
+            face_points = np.concatenate((gt_faces, recon_faces), axis=0).reshape(-1, 3)
+            face_colors = np.concatenate(
+                    (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_faces.shape[0] * 400, axis=0),
+                     np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_faces.shape[0] * 400, axis=0)), axis=0)
+
+            pc = o3d.geometry.PointCloud()
+            pc.points = o3d.utility.Vector3dVector(edge_points)
+            pc.colors = o3d.utility.Vector3dVector(edge_colors / 255.0)
+            o3d.io.write_point_cloud(
+                    str(self.log_root / f"{self.trainer.current_epoch:05}_idx_{idx:02}_viz_edges.ply"), pc)
+
+            pc.points = o3d.utility.Vector3dVector(face_points)
+            pc.colors = o3d.utility.Vector3dVector(face_colors / 255.0)
+            o3d.io.write_point_cloud(
+                    str(self.log_root / f"{self.trainer.current_epoch:05}_idx_{idx:02}_viz_faces.ply"), pc)
+        return
+
+
 @hydra.main(config_name="train_brepgen.yaml", config_path="../../../configs/img2brep/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
-    torch.set_float32_matmul_precision("medium")
+    torch.set_float32_matmul_precision("high")
     print(OmegaConf.to_yaml(v_cfg))
 
-    is_train_transformer = v_cfg["trainer"]["train_transformer"]
+    train_autoregressive = v_cfg["trainer"]["train_autoregressive"]
 
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir']
     v_cfg["trainer"]["output"] = os.path.join(log_dir, v_cfg["trainer"]["output"])
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
-    modelTraining = ModelTraining(v_cfg)
 
     mc = ModelCheckpoint(monitor="Validation_Loss", save_top_k=3, save_last=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
-    if is_train_transformer:
+    if train_autoregressive:
+        modelTraining = TrainAutoregressiveModel(v_cfg)
         logger = TensorBoardLogger(os.path.join(log_dir, "tb_logs_brepgen"), name="transformer")
     else:
+        modelTraining = TrainAutoEncoder(v_cfg)
         logger = TensorBoardLogger(os.path.join(log_dir, "tb_logs_brepgen"), name="autoencoder")
 
     trainer = Trainer(
@@ -215,7 +365,7 @@ def main(v_cfg: DictConfig):
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
         state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
 
-        if is_train_transformer:
+        if train_autoregressive:
             state_dict_ = {}
             for k, v in state_dict.items():
                 if 'transformer.' in k:

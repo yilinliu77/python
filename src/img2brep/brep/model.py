@@ -281,14 +281,8 @@ class Small_decoder(nn.Module):
     def inference(self, v_data):
         return v_data["face_coords"], v_data["edge_coords"]
 
-    def loss(self, v_pred, v_data, v_face_mask, v_edge_mask):
-        gt_face = v_data["face_points"][v_face_mask]
-        gt_edge = v_data["edge_points"][v_edge_mask]
-
-        loss_face_coords = nn.functional.mse_loss(
-            gt_face,
-            v_pred["face_coords"],
-            reduction='mean')
+    def loss_edge(self, v_pred, v_data, v_edge_mask,v_used_edge_indexes):
+        gt_edge = v_data["edge_points"][v_edge_mask][v_used_edge_indexes]
 
         loss_edge_coords = nn.functional.mse_loss(
             gt_edge,
@@ -296,10 +290,24 @@ class Small_decoder(nn.Module):
             reduction='mean')
 
         return {
-            "total_loss": loss_face_coords + loss_edge_coords,
-            "face_coords": loss_face_coords,
             "edge_coords": loss_edge_coords,
         }
+
+    def loss(self, v_pred, v_data, v_face_mask, v_edge_mask, v_used_edge_indexes):
+        loss_edge = self.loss_edge(v_pred, v_data, v_edge_mask,v_used_edge_indexes)
+
+        gt_face = v_data["face_points"][v_face_mask]
+        loss_face_coords = nn.functional.mse_loss(
+            gt_face,
+            v_pred["face_coords"],
+            reduction='mean')
+
+        loss_edge.update({
+            "total_loss": loss_face_coords + loss_edge["edge_coords"],
+            "face_coords": loss_face_coords,
+        })
+
+        return loss_edge
 
 
 class Small_decoder_plus(Small_decoder):
@@ -393,7 +401,6 @@ class Discrete_decoder(Small_decoder):
             Rearrange('... (p c) w -> ... w p c', p=3, c=self.cd),
         )
 
-
     def decode_face(self, v_face_embeddings):
         face_coords_logits = self.face_coords(v_face_embeddings)
         face_bbox_logits = self.bbox_decoder(v_face_embeddings)
@@ -410,21 +417,9 @@ class Discrete_decoder(Small_decoder):
             "edge_bbox_logits": edge_bbox_logits,
         }
 
-    def loss(self, v_pred, v_data, v_face_mask, v_edge_mask):
-        gt_face_bbox = v_data["discrete_face_bboxes"][v_face_mask]
-        gt_face_coords = v_data["discrete_face_points"][v_face_mask]
-
-        gt_edge_bbox = v_data["discrete_edge_bboxes"][v_edge_mask]
-        gt_edge_coords = v_data["discrete_edge_points"][v_edge_mask]
-
-        loss_face_coords = nn.functional.cross_entropy(
-            v_pred["face_coords_logits"].flatten(0, -2),
-            gt_face_coords.flatten(),
-            reduction='mean')
-        loss_face_bbox = nn.functional.cross_entropy(
-            v_pred["face_bbox_logits"].flatten(0, -2),
-            gt_face_bbox.flatten(),
-            reduction='mean')
+    def loss_edge(self, v_pred, v_data, v_edge_mask, v_used_edge_indexes):
+        gt_edge_bbox = v_data["discrete_edge_bboxes"][v_edge_mask][v_used_edge_indexes]
+        gt_edge_coords = v_data["discrete_edge_points"][v_edge_mask][v_used_edge_indexes]
 
         loss_edge_coords = nn.functional.cross_entropy(
             v_pred["edge_coords_logits"].flatten(0, -2),
@@ -436,12 +431,31 @@ class Discrete_decoder(Small_decoder):
             reduction='mean')
 
         return {
-            "total_loss": loss_face_coords + loss_face_bbox + loss_edge_coords + loss_edge_bbox,
-            "face_coords": loss_face_coords,
-            "face_bbox": loss_face_bbox,
             "edge_coords": loss_edge_coords,
             "edge_bbox": loss_edge_bbox,
         }
+
+    def loss(self, v_pred, v_data, v_face_mask, v_edge_mask, v_used_edge_indexes):
+        loss_edge = self.loss_edge(v_pred, v_data, v_edge_mask, v_used_edge_indexes)
+
+        gt_face_bbox = v_data["discrete_face_bboxes"][v_face_mask]
+        gt_face_coords = v_data["discrete_face_points"][v_face_mask]
+        loss_face_coords = nn.functional.cross_entropy(
+            v_pred["face_coords_logits"].flatten(0, -2),
+            gt_face_coords.flatten(),
+            reduction='mean')
+        loss_face_bbox = nn.functional.cross_entropy(
+            v_pred["face_bbox_logits"].flatten(0, -2),
+            gt_face_bbox.flatten(),
+            reduction='mean')
+
+        loss_edge.update({
+            "total_loss": loss_face_coords + loss_face_bbox + loss_edge["edge_coords"] + loss_edge["edge_bbox"],
+            "face_coords": loss_face_coords,
+            "face_bbox": loss_face_bbox,
+        })
+
+        return loss_edge
 
     def inference(self, v_data):
         bbox_shifts = (self.bd + 1) // 2 - 1
@@ -519,13 +533,13 @@ class Attn_intersector(Intersector):
             nn.LayerNorm(hidden_dim),
             nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
             nn.LayerNorm(hidden_dim),
-            ])
+        ])
         self.intersection_token = nn.Parameter(torch.rand(hidden_dim))
         self.null_intersection = nn.Parameter(torch.rand(hidden_dim))
 
     def forward(self, v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask):
         intersection_embedding, null_intersection_embedding = self.prepare_data(
-                v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask)
+            v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask)
         edge_features = self.inference(intersection_embedding)
         null_features = self.inference(null_intersection_embedding)
 
@@ -552,7 +566,7 @@ class Attn_intersector(Intersector):
         gt_label = torch.cat([-torch.ones_like(edge_features[:, 0]),
                               torch.ones_like(null_features[:, 0])])
         loss_intersection = F.cosine_embedding_loss(
-                intersection_feature, self.null_intersection[None, :], gt_label, margin=0.5)
+            intersection_feature, self.null_intersection[None, :], gt_label, margin=0.5)
         return loss_intersection
 
 
@@ -566,7 +580,7 @@ class Attn_intersector_classifier(Intersector):
             nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
             nn.LayerNorm(hidden_dim),
 
-            ])
+        ])
         self.intersection_token = nn.Parameter(torch.rand(hidden_dim))
 
         self.classifier = nn.Linear(hidden_dim, 1)
@@ -585,7 +599,7 @@ class Attn_intersector_classifier(Intersector):
 
     def forward(self, v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask):
         intersection_embedding, null_intersection_embedding = self.prepare_data(
-                v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask)
+            v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask)
         edge_features = self.inference(intersection_embedding)
         null_features = self.inference(null_intersection_embedding)
 
@@ -596,7 +610,7 @@ class Attn_intersector_classifier(Intersector):
         gt_label = torch.cat([torch.ones_like(edge_features[:, 0]),
                               torch.zeros_like(null_features[:, 0])])
         loss_intersection = F.binary_cross_entropy_with_logits(
-                self.classifier(intersection_feature), gt_label[:, None])
+            self.classifier(intersection_feature), gt_label[:, None])
         return loss_intersection
 
     def inference_label(self, v_features):
@@ -626,7 +640,7 @@ class Attn_fuser(Fuser):
             nn.LayerNorm(hidden_dim),
             nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
             nn.LayerNorm(hidden_dim),
-            ])
+        ])
         pass
 
     def forward(self, v_face_edge_loop, v_face_mask,
@@ -634,8 +648,8 @@ class Attn_fuser(Fuser):
         L, _ = v_face_embedding.shape
         S, _ = v_edge_embedding.shape
         face_edge_attn_mask = torch.ones(
-                L, S + 1, device=v_face_embedding.device, dtype=torch.bool
-                )
+            L, S + 1, device=v_face_embedding.device, dtype=torch.bool
+        )
         face_edge_relations = v_face_edge_loop[v_face_mask].clone()
         valid_relation_mask = torch.logical_and(face_edge_relations != -1, face_edge_relations != -2)
         face_edge_relations[~valid_relation_mask] = S
@@ -648,11 +662,11 @@ class Attn_fuser(Fuser):
                 x = layer(x)
             else:
                 out, weights = layer(
-                        query=x,
-                        key=v_edge_embedding,
-                        value=v_edge_embedding,
-                        attn_mask=face_edge_attn_mask,
-                        )
+                    query=x,
+                    key=v_edge_embedding,
+                    value=v_edge_embedding,
+                    attn_mask=face_edge_attn_mask,
+                )
                 x = x + out
 
         return x
@@ -668,7 +682,7 @@ class Face_atten(nn.Module):
             nn.LayerNorm(hidden_dim),
             nn.MultiheadAttention(hidden_dim, 2, 0.1, batch_first=True),
             nn.LayerNorm(hidden_dim),
-            ])
+        ])
 
     def forward(self, v_face_embedding, v_face_mask):
         B, _ = v_face_mask.shape
@@ -704,7 +718,7 @@ class AutoEncoder(nn.Module):
                  dim_codebook_face=256,
                  encoder_dims_through_depth: Tuple[int, ...] = (
                          64, 128, 256, 256
-                         ),
+                 ),
                  ):
         super(AutoEncoder, self).__init__()
         self.max_length = max_length
@@ -729,18 +743,18 @@ class AutoEncoder(nn.Module):
         gcn_out_dims = init_encoder_dim
         self.init_sage_conv = SAGEConv(dim_codebook_edge, init_encoder_dim, normalize=True, project=True)
         self.init_encoder_act_and_norm = nn.Sequential(
-                nn.SiLU(),
-                nn.LayerNorm(init_encoder_dim)
-                )
+            nn.SiLU(),
+            nn.LayerNorm(init_encoder_dim)
+        )
 
         self.gcn_layers = ModuleList([])
         for dim_layer in encoder_dims_through_depth:
             sage_conv = SAGEConv(
-                    gcn_out_dims,
-                    dim_layer,
-                    normalize=True,
-                    project=True
-                    )
+                gcn_out_dims,
+                dim_layer,
+                normalize=True,
+                project=True
+            )
             self.gcn_layers.append(sage_conv)
             gcn_out_dims = dim_layer
 
@@ -796,11 +810,11 @@ class AutoEncoder(nn.Module):
 
         true_intersection = self.intersector.inference_label(intersected_edge_features[intersected_edge_mask])
         intersected_mask = intersected_edge_mask.new_zeros(intersected_edge_mask.shape).masked_scatter(
-                intersected_edge_mask, true_intersection)
+            intersected_edge_mask, true_intersection)
 
         recon_edges, recon_faces = self.decoder(
-                intersected_edge_features.view(-1, intersected_edge_features.shape[-1]),
-                v_face_embeddings.view(-1, v_face_embeddings.shape[-1]))
+            intersected_edge_features.view(-1, intersected_edge_features.shape[-1]),
+            v_face_embeddings.view(-1, v_face_embeddings.shape[-1]))
         recon_edges = recon_edges.view(B, -1, 20, 3)
         recon_faces = recon_faces.view(B, -1, 20, 20, 3)
         recon_edges[~intersected_mask] = -1
@@ -811,16 +825,81 @@ class AutoEncoder(nn.Module):
         # Encode the edge and face points
         face_embeddings, edge_embeddings, face_mask, edge_mask = self.encoder(v_data)
 
+        # GCN on edges
+        v_vertex_edge_connectivity = v_data["vertex_edge_connectivity"]
+
+        # Solve the edge_face_connectivity: last two dimension (id_edge)
+        edge_index_offsets = reduce(edge_mask.long(), 'b ne -> b', 'sum')
+        edge_index_offsets = F.pad(edge_index_offsets.cumsum(dim=0), (1, -1), value=0)
+
+        vertex_edge_connectivity_valid = (v_vertex_edge_connectivity != -1).all(dim=-1)
+        vertex_edge_connectivity = v_vertex_edge_connectivity.clone()
+        vertex_edge_connectivity[..., 1:] += edge_index_offsets[:, None, None]
+        vertex_edge_connectivity = vertex_edge_connectivity[vertex_edge_connectivity_valid]
+
+        edge_embeddings_gcn = self.gcn_on_edges(edge_embeddings, vertex_edge_connectivity[..., 1:].permute(1, 0))
+
+        # Edge-face attention
+        face_edge_loop = v_data["face_edge_loop"].clone()
+        original_1 = face_edge_loop == -1
+        original_2 = face_edge_loop == -2
+        face_edge_loop += edge_index_offsets[:, None, None]
+        face_edge_loop[original_1] = -1
+        face_edge_loop[original_2] = -2
+        face_edge_embeddings = self.fuser(
+            v_face_edge_loop=face_edge_loop,
+            v_face_mask=face_mask,
+            v_edge_embedding=edge_embeddings_gcn,
+            v_face_embedding=face_embeddings
+        )
+
+        # Face fusion
+        atten_face_edge_embeddings = self.face_fuser(face_edge_embeddings, face_mask)
+
+        # Intersection
+        edge_face_connectivity = v_data["edge_face_connectivity"].clone()
+        edge_face_connectivity_valid = (edge_face_connectivity != -1).all(dim=-1)
+        edge_index_offsets = reduce(edge_mask.long(), 'b ne -> b', 'sum')
+        edge_index_offsets = F.pad(edge_index_offsets.cumsum(dim=0), (1, -1), value=0)
+        edge_face_connectivity[..., 0] += edge_index_offsets[:, None]
+
+        # Solve the edge_face_connectivity: last two dimension (id_face)
+        face_index_offsets = reduce(face_mask.long(), 'b ne -> b', 'sum')
+        face_index_offsets = F.pad(face_index_offsets.cumsum(dim=0), (1, -1), value=0)
+        edge_face_connectivity[..., 1:] += face_index_offsets[:, None, None]
+        edge_face_connectivity[~edge_face_connectivity_valid] = -1
+        edge_face_connectivity = edge_face_connectivity[edge_face_connectivity_valid]
+
+        face_adj = v_data["face_adj"]
+        intersected_edge_features, null_features = self.intersector(
+            atten_face_edge_embeddings,
+            edge_face_connectivity,
+            face_adj,
+            face_mask
+        )
+
         # Decode the edge and face points
-        recon_data = self.decoder(face_embeddings, edge_embeddings)
+        edge_data = self.decoder.decode_edge(edge_embeddings_gcn)
+        recon_data = self.decoder(atten_face_edge_embeddings, intersected_edge_features)
 
         # Return
         if only_return_recon:
             return recon_data
 
         # Compute loss
-        # loss_face = F.mse_loss(recon_faces, gt_faces, reduction='mean')
-        loss = self.decoder.loss(recon_data, v_data, face_mask, edge_mask)
+        used_edge_indexes = edge_face_connectivity[..., 0]
+        loss = self.decoder.loss(recon_data, v_data, face_mask, edge_mask, used_edge_indexes)
+
+        loss_intersection = self.intersector.loss(intersected_edge_features, null_features)
+        loss.update({"intersection": loss_intersection})
+        loss["total_loss"] += loss_intersection
+
+        loss_edge = self.decoder.loss_edge(
+            edge_data, v_data, edge_mask,
+            torch.arange(edge_embeddings_gcn.shape[0]))
+        for key in loss_edge:
+            loss[key+"1"] = loss_edge[key]
+            loss["total_loss"] += loss_edge[key]
 
         # Return
         if only_return_loss:
@@ -841,10 +920,10 @@ class AutoEncoder(nn.Module):
         recon_face_full = recon_face_full.masked_scatter(rearrange(face_mask, '... -> ... 1 1 1'), recon_face)
         recon_face_full[~face_mask] = -1
 
-        recon_edge_full = recon_edges.new_zeros(v_data["edge_points"].shape)
-        recon_edge_full = recon_edge_full.masked_scatter(rearrange(edge_mask, '... -> ... 1 1'), recon_edges)
-        recon_edge_full[~edge_mask] = -1
-
+        recon_edge_full = -torch.ones_like(v_data["edge_points"])
+        bbb = recon_edge_full[edge_mask].clone()
+        bbb[used_edge_indexes] = recon_edges
+        recon_edge_full[edge_mask] = bbb
 
         data = {
             "recon_faces": recon_face_full,
@@ -853,7 +932,8 @@ class AutoEncoder(nn.Module):
         # Compute the true loss with the continuous points
         true_recon_face_loss = nn.functional.mse_loss(recon_face_full, v_data["face_points"], reduction='mean')
         loss["true_recon_face"] = true_recon_face_loss
-        true_recon_edge_loss = nn.functional.mse_loss(recon_edge_full, v_data["edge_points"], reduction='mean')
+        true_recon_edge_loss = nn.functional.mse_loss(
+            recon_edges, v_data["edge_points"][edge_mask][used_edge_indexes], reduction='mean')
         loss["true_recon_edge"] = true_recon_edge_loss
         return loss, data
 
@@ -929,11 +1009,11 @@ class AutoEncoder(nn.Module):
 
         # aggregate the egde embeddings to face embeddings plus
         face_embeddings = self.fuser(
-                v_face_edge_loop=face_edge_loop,
-                v_face_mask=face_mask,
-                v_edge_embedding=edge_embeddings_plus,
-                v_face_embedding=face_embeddings
-                )
+            v_face_edge_loop=face_edge_loop,
+            v_face_mask=face_mask,
+            v_edge_embedding=edge_embeddings_plus,
+            v_face_embedding=face_embeddings
+        )
 
         # 2. attention on faces
         face_embeddings = self.face_fuser(face_embeddings, face_mask)
@@ -943,11 +1023,11 @@ class AutoEncoder(nn.Module):
 
         # 3. Reconstruct the edge and face points
         intersected_edge_features, null_features = self.intersector(
-                face_embeddings,
-                edge_face_connectivity,
-                face_adj,
-                face_mask
-                )
+            face_embeddings,
+            edge_face_connectivity,
+            face_adj,
+            face_mask
+        )
         delta_time, timer = profile_time(timer, v_print=False)
         self.time_statics[4] += delta_time
 
@@ -970,12 +1050,12 @@ class AutoEncoder(nn.Module):
         total_loss = loss_edge + loss_face + loss_intersection + loss_edge2
 
         loss = {
-            "total_loss"       : total_loss,
-            "edge"             : loss_edge,
-            "edge2"            : loss_edge2,
-            "face"             : loss_face,
+            "total_loss": total_loss,
+            "edge": loss_edge,
+            "edge2": loss_edge2,
+            "face": loss_face,
             "null_intersection": loss_intersection,
-            }
+        }
 
         dtype = recon_edges.dtype
         recon_edges_full = -torch.ones_like(sample_points_edges).to(dtype)
@@ -991,13 +1071,13 @@ class AutoEncoder(nn.Module):
                                                               sample_points_faces.shape[1],
                                                               face_embeddings.shape[-1])
         recovered_face_embeddings = recovered_face_embeddings.masked_scatter(
-                face_mask[:, :, None].repeat(1, 1, face_embeddings.shape[-1]), face_embeddings)
+            face_mask[:, :, None].repeat(1, 1, face_embeddings.shape[-1]), face_embeddings)
 
         data = {
-            "recon_edges"    : recon_edges_full,
-            "recon_faces"    : recon_faces_full,
+            "recon_edges": recon_edges_full,
+            "recon_faces": recon_faces_full,
             "face_embeddings": recovered_face_embeddings
-            }
+        }
 
         if only_return_loss:
             return loss

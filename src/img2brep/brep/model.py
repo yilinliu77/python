@@ -394,7 +394,10 @@ class AutoEncoder(nn.Module):
                  max_length=100,
                  dim_codebook_edge=256,
                  dim_codebook_face=256,
-                 encoder_dims_through_depth: Tuple[int, ...] = (
+                 encoder_dims_through_depth_edges: Tuple[int, ...] = (
+                         64, 128, 256, 256
+                         ),
+                 encoder_dims_through_depth_faces: Tuple[int, ...] = (
                          64, 128, 256, 256
                          ),
                  ):
@@ -431,42 +434,63 @@ class AutoEncoder(nn.Module):
 
         # 2. GCN to distribute edge features to the nearby edges
         # Out: curr_dim
-        init_encoder_dim, *encoder_dims_through_depth = encoder_dims_through_depth
-        gcn_out_dims = init_encoder_dim
-        self.init_sage_conv = SAGEConv(dim_codebook_edge, init_encoder_dim, normalize=True, project=True)
-        self.init_encoder_act_and_norm = nn.Sequential(
+        init_encoder_dim_edges, *encoder_dims_through_depth_edges = encoder_dims_through_depth_edges
+        gcn_out_dims_edges = init_encoder_dim_edges
+        self.init_sage_conv_edges = SAGEConv(dim_codebook_edge, init_encoder_dim_edges, normalize=True, project=True)
+        self.init_encoder_act_and_norm_egdges = nn.Sequential(
                 nn.SiLU(),
-                nn.LayerNorm(init_encoder_dim)
+                nn.LayerNorm(init_encoder_dim_edges)
                 )
 
-        self.gcn_layers = ModuleList([])
-        for dim_layer in encoder_dims_through_depth:
+        self.gcn_layers_edges = ModuleList([])
+        for dim_layer in encoder_dims_through_depth_edges:
             sage_conv = SAGEConv(
-                    gcn_out_dims,
+                    gcn_out_dims_edges,
                     dim_layer,
                     normalize=True,
                     project=True
                     )
-            self.gcn_layers.append(sage_conv)
-            gcn_out_dims = dim_layer
+            self.gcn_layers_edges.append(sage_conv)
+            gcn_out_dims_edges = dim_layer
 
-        # 2. attention for faces
-        self.face_fuser = Face_atten()
-
-        # 3. Fuser
+        # 3. Fuser to distribute edge features to the corresponding face
         # Inject edge features to the corresponding face
         # This is the true latent code we want to obtain during the generation
         # self.fuser = Simple_fuser()
         self.fuser = Attn_fuser()
 
-        # 4. Intersection
+        # 4. GCN to distribute edge features to the nearby faces
+        # Out: curr_dim
+        init_encoder_dim_faces, *encoder_dims_through_depth_faces = encoder_dims_through_depth_faces
+        gcn_out_dims_faces = init_encoder_dim_faces
+        self.init_sage_conv_faces = SAGEConv(dim_codebook_face, init_encoder_dim_faces, normalize=True, project=True)
+        self.init_encoder_act_and_norm_faces = nn.Sequential(
+                nn.SiLU(),
+                nn.LayerNorm(init_encoder_dim_faces)
+                )
+
+        self.gcn_layers_faces = ModuleList([])
+        for dim_layer in encoder_dims_through_depth_faces:
+            sage_conv = SAGEConv(
+                    gcn_out_dims_faces,
+                    dim_layer,
+                    normalize=True,
+                    project=True
+                    )
+            self.gcn_layers_faces.append(sage_conv)
+            gcn_out_dims_faces = dim_layer
+
+        # 5. attention to aggregate the face features
+        self.face_fuser = Face_atten()
+
+        # 6. Intersection
         # Use face features and connectivity to obtain the edge latent
         mod = importlib.import_module('src.img2brep.brep.model')
         self.intersector = getattr(mod, v_conf["intersector"])(500)
         # self.intersector = Attn_intersector(500)
         # self.intersector = Attn_intersector_classifier(500)
 
-        # 5. Decoder
+        # 7. Decoder
         # Get BSpline surfaces and edges based on the true latent code
         self.decoder = getattr(mod, v_conf["decoder"])(
                 dim_codebook_edge=dim_codebook_edge,
@@ -486,13 +510,24 @@ class AutoEncoder(nn.Module):
         return face_embed
 
     def gcn_on_edges(self, v_edge_embeddings, edge_adj):
-        edge_embeddings = self.init_sage_conv(v_edge_embeddings, edge_adj)
+        edge_embeddings = self.init_sage_conv_edges(v_edge_embeddings, edge_adj)
 
-        edge_embeddings = self.init_encoder_act_and_norm(edge_embeddings)
+        edge_embeddings = self.init_encoder_act_and_norm_egdges(edge_embeddings)
 
-        for conv in self.gcn_layers:
+        for conv in self.gcn_layers_edges:
             edge_embeddings = conv(edge_embeddings, edge_adj)
+
         return edge_embeddings
+
+    def gcn_on_faces(self, v_face_embeddings, face_adj):
+        face_embeddings = self.init_sage_conv_faces(v_face_embeddings, face_adj)
+
+        face_embeddings = self.init_encoder_act_and_norm_faces(face_embeddings)
+
+        for conv in self.gcn_layers_faces:
+            face_embeddings = conv(face_embeddings, face_adj)
+
+        return face_embeddings
 
     def inference(self, v_face_embeddings):
         face_mask = (v_face_embeddings != 0).all(dim=-1)
@@ -587,7 +622,7 @@ class AutoEncoder(nn.Module):
         delta_time, timer = profile_time(timer, v_print=False)
         self.time_statics[2] += delta_time
 
-        # aggregate the egde embeddings to face embeddings plus
+        # 3. Cross attention to aggregate the egde embeddings to according faces embeddings
         face_embeddings = self.fuser(
                 v_face_edge_loop=face_edge_loop,
                 v_face_mask=face_mask,
@@ -595,13 +630,16 @@ class AutoEncoder(nn.Module):
                 v_face_embedding=face_embeddings
                 )
 
-        # 2. attention on faces
+        # 4. GCN on faces
+        face_embeddings = self.gcn_on_faces(face_embeddings, edge_face_connectivity[..., 1:].permute(1, 0))
+
+        # 5. Attention on faces to aggregate the face embeddings
         face_embeddings = self.face_fuser(face_embeddings, face_mask)
 
         delta_time, timer = profile_time(timer, v_print=False)
         self.time_statics[3] += delta_time
 
-        # 3. Reconstruct the edge and face points
+        # 6. Reconstruct the edge and face points
         intersected_edge_features, null_features = self.intersector(
                 face_embeddings,
                 edge_face_connectivity,

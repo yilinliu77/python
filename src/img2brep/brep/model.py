@@ -86,12 +86,15 @@ class Intersector(nn.Module):
 class Attn_intersector(Intersector):
     def __init__(self, num_max_items=None):
         super().__init__(num_max_items)
+        hidden_dim = 256
         self.layers = nn.ModuleList([
-            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
-            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
             ])
-        self.intersection_token = nn.Parameter(torch.rand(256))
-        self.null_intersection = nn.Parameter(torch.rand(256))
+        self.intersection_token = nn.Parameter(torch.rand(hidden_dim))
+        self.null_intersection = nn.Parameter(torch.rand(hidden_dim))
 
     def forward(self, v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask):
         intersection_embedding, null_intersection_embedding = self.prepare_data(
@@ -104,9 +107,12 @@ class Attn_intersector(Intersector):
     def inference(self, v_features):
         x = self.intersection_token[None, None].repeat(v_features.shape[0], 1, 1)
         for layer in self.layers:
-            out, weights = layer(key=v_features, value=v_features,
-                                 query=x)
-            x = x + out
+            if isinstance(layer, nn.LayerNorm):
+                x = layer(x)
+            else:
+                out, weights = layer(key=v_features, value=v_features,
+                                     query=x)
+                x = x + out
         edge_features = x[:, 0]
         return edge_features
 
@@ -126,19 +132,27 @@ class Attn_intersector(Intersector):
 class Attn_intersector_classifier(Intersector):
     def __init__(self, num_max_items=None):
         super().__init__(num_max_items)
+        hidden_dim = 256
         self.layers = nn.ModuleList([
-            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
-            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
+
             ])
-        self.intersection_token = nn.Parameter(torch.rand(256))
-        self.classifier = nn.Linear(256, 1)
+        self.intersection_token = nn.Parameter(torch.rand(hidden_dim))
+
+        self.classifier = nn.Linear(hidden_dim, 1)
 
     def inference(self, v_features):
         x = self.intersection_token[None, None].repeat(v_features.shape[0], 1, 1)
         for layer in self.layers:
-            out, weights = layer(key=v_features, value=v_features,
-                                 query=x)
-            x = x + out
+            if isinstance(layer, nn.LayerNorm):
+                x = layer(x)
+            else:
+                out, weights = layer(key=v_features, value=v_features,
+                                     query=x)
+                x = x + out
         edge_features = x[:, 0]
         return edge_features
 
@@ -210,6 +224,77 @@ class Small_decoder(nn.Module):
         recon_faces = self.face_decoder(v_face_embeddings)
         return recon_edges, recon_faces
 
+    def decode_edge(self, v_edge_embeddings):
+        return self.edge_decoder(v_edge_embeddings)
+
+
+class res_block_1D(nn.Module):
+    def __init__(self, dim_in, dim_out):
+        super(res_block_1D, self).__init__()
+        self.conv = nn.Conv1d(dim_in, dim_out, kernel_size=3, stride=1, padding=1)
+        self.act = nn.ReLU()
+        self.norm = nn.LayerNorm(dim_out)
+
+    def forward(self, x):
+        x = x + self.conv(x)
+        x = rearrange(x, '... c h -> ... h c')
+        x = self.norm(x)
+        x = rearrange(x, '... h c -> ... c h')
+        return self.act(x)
+
+
+class res_block_2D(nn.Module):
+    def __init__(self, dim_in, dim_out):
+        super(res_block_2D, self).__init__()
+        self.conv = nn.Conv2d(dim_in, dim_out, kernel_size=3, stride=1, padding=1)
+        self.act = nn.ReLU()
+        self.norm = nn.LayerNorm(dim_out)
+
+    def forward(self, x):
+        x = x + self.conv(x)
+        x = rearrange(x, '... c h w -> ... h w c')
+        x = self.norm(x)
+        x = rearrange(x, '... h w c -> ... c h w')
+        return self.act(x)
+
+
+class Small_decoder_plus(Small_decoder):
+    def __init__(self,
+                 dim_codebook_edge,
+                 dim_codebook_face,
+                 resnet_dropout
+                 ):
+        super(Small_decoder_plus, self).__init__(dim_codebook_edge, dim_codebook_face, resnet_dropout)
+        # For edges
+        self.edge_decoder = nn.Sequential(
+                Rearrange('... c -> ... c 1'),
+                nn.Upsample(scale_factor=4, mode="linear"),
+                res_block_1D(dim_codebook_edge, 256),
+                nn.Upsample(scale_factor=2, mode="linear"),
+                res_block_1D(256, 256),
+                nn.Upsample(scale_factor=2, mode="linear"),
+                res_block_1D(256, 256),
+                nn.Upsample(size=20, mode="linear"),
+                res_block_1D(256, 256),
+                nn.Conv1d(256, 3, kernel_size=3, stride=1, padding=1),
+                Rearrange('... c v -> ... v c', c=3),
+                )
+
+        # For faces
+        self.face_decoder = nn.Sequential(
+                Rearrange('... c -> ... c 1 1'),
+                nn.Upsample(scale_factor=4, mode="bilinear"),
+                res_block_2D(dim_codebook_face, 256),
+                nn.Upsample(scale_factor=2, mode="bilinear"),
+                res_block_2D(256, 256),
+                nn.Upsample(scale_factor=2, mode="bilinear"),
+                res_block_2D(256, 256),
+                nn.Upsample(size=(20, 20), mode="bilinear"),
+                res_block_2D(256, 256),
+                nn.Conv2d(256, 3, kernel_size=3, stride=1, padding=1),
+                Rearrange('... c w h -> ... w h c', c=3),
+                )
+
 
 ### Add edge features to the corresponding faces
 class Fuser(nn.Module):
@@ -227,9 +312,12 @@ class Fuser(nn.Module):
 class Attn_fuser(Fuser):
     def __init__(self):
         super().__init__()
+        hidden_dim = 256
         self.atten = nn.ModuleList([
-            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
-            nn.MultiheadAttention(embed_dim=256, num_heads=2, dropout=0.1, batch_first=True),
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
             ])
         pass
 
@@ -248,13 +336,16 @@ class Attn_fuser(Fuser):
 
         x = v_face_embedding
         for layer in self.atten:
-            out, weights = layer(
-                    query=x,
-                    key=v_edge_embedding,
-                    value=v_edge_embedding,
-                    attn_mask=face_edge_attn_mask,
-                    )
-            x = x + out
+            if isinstance(layer, nn.LayerNorm):
+                x = layer(x)
+            else:
+                out, weights = layer(
+                        query=x,
+                        key=v_edge_embedding,
+                        value=v_edge_embedding,
+                        attn_mask=face_edge_attn_mask,
+                        )
+                x = x + out
 
         return x
 
@@ -263,9 +354,12 @@ class Attn_fuser(Fuser):
 class Face_atten(nn.Module):
     def __init__(self):
         super().__init__()
+        hidden_dim = 256
         self.atten = nn.ModuleList([
-            nn.MultiheadAttention(256, 2, 0.1, batch_first=True),
-            nn.MultiheadAttention(256, 2, 0.1, batch_first=True),
+            nn.MultiheadAttention(hidden_dim, 2, 0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
+            nn.MultiheadAttention(hidden_dim, 2, 0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
             ])
 
     def forward(self, v_face_embedding, v_face_mask):
@@ -286,8 +380,11 @@ class Face_atten(nn.Module):
 
         x = v_face_embedding
         for layer in self.atten:
-            out, weights = layer(x, x, x, attn_mask=attn_mask, need_weights=True)
-            x = x + out
+            if isinstance(layer, nn.LayerNorm):
+                x = layer(x)
+            else:
+                out, weights = layer(x, x, x, attn_mask=attn_mask, need_weights=True)
+                x = x + out
         return x
 
 
@@ -371,10 +468,10 @@ class AutoEncoder(nn.Module):
 
         # 5. Decoder
         # Get BSpline surfaces and edges based on the true latent code
-        self.decoder = Small_decoder(
+        self.decoder = getattr(mod, v_conf["decoder"])(
                 dim_codebook_edge=dim_codebook_edge,
                 dim_codebook_face=dim_codebook_face,
-                resnet_dropout=0.1,
+                resnet_dropout=0.0,
                 )
 
     def encode_edge_coords(self, edge):
@@ -411,7 +508,11 @@ class AutoEncoder(nn.Module):
         intersected_mask = intersected_edge_mask.new_zeros(intersected_edge_mask.shape).masked_scatter(
                 intersected_edge_mask, true_intersection)
 
-        recon_edges, recon_faces = self.decoder(intersected_edge_features, v_face_embeddings)
+        recon_edges, recon_faces = self.decoder(
+                intersected_edge_features.view(-1, intersected_edge_features.shape[-1]),
+                v_face_embeddings.view(-1, v_face_embeddings.shape[-1]))
+        recon_edges = recon_edges.view(B, -1, 20, 3)
+        recon_faces = recon_faces.view(B, -1, 20, 20, 3)
         recon_edges[~intersected_mask] = -1
         recon_faces[~face_mask] = -1
         return recon_edges, recon_faces
@@ -511,6 +612,7 @@ class AutoEncoder(nn.Module):
         self.time_statics[4] += delta_time
 
         recon_edges, recon_faces = self.decoder(intersected_edge_features, face_embeddings)
+        recon_edges_gt = self.decoder.decode_edge(edge_embeddings_plus)
         delta_time, timer = profile_time(timer, v_print=False)
         self.time_statics[5] += delta_time
 
@@ -520,15 +622,17 @@ class AutoEncoder(nn.Module):
         # recon loss
         used_edges = gt_edges[edge_mask][edge_face_connectivity[..., 0]]
         loss_edge = F.mse_loss(recon_edges, used_edges, reduction='mean')
+        loss_edge2 = F.mse_loss(recon_edges_gt, gt_edges[edge_mask], reduction='mean')
         loss_face = F.mse_loss(recon_faces, gt_faces, reduction='mean')
 
         loss_intersection = self.intersector.loss(intersected_edge_features, null_features)
 
-        total_loss = loss_edge + loss_face + loss_intersection
+        total_loss = loss_edge + loss_face + loss_intersection + loss_edge2
 
         loss = {
             "total_loss"       : total_loss,
             "edge"             : loss_edge,
+            "edge2"            : loss_edge2,
             "face"             : loss_face,
             "null_intersection": loss_intersection,
             }

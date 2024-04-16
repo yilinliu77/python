@@ -27,8 +27,9 @@ trainer:
   accelerator: "32-true"
 
 model:
-  #  intersector: "Attn_intersector"
-  intersector: "Attn_intersector_classifier"
+  intersector: "Attn_intersector"
+  #  intersector: "Attn_intersector_classifier"
+  decoder: "Small_decoder_plus"
 
   checkpoint_autoencoder: G:\workplace\python_server\python\src\img2brep\brep\outputs_img2brep\2024_04_15_23_36_01\tb_logs_brepgen\autoencoder\version_0\checkpoints\epoch=151999-step=456000.ckpt
 

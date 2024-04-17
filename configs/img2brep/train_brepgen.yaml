@@ -34,7 +34,8 @@ trainer:
 
 model:
   #  intersector: "Attn_intersector"
-  intersector: "Attn_intersector_classifier"
+#  intersector: "Attn_intersector_classifier"
+  intersector: "Proj_intersector"
 
   encoder: "Continuous_encoder"
   decoder: "Small_decoder_plus"

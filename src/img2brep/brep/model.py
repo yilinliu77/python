@@ -538,6 +538,45 @@ class Intersector(nn.Module):
                                        self.null_intersection, dim=-1)
 
 
+class Proj_intersector(Intersector):
+    def __init__(self, num_max_items=None):
+        super().__init__(num_max_items)
+        hidden_dim = 256
+        self.layers = nn.Sequential(
+            Rearrange('... c -> ... c 1'),
+            res_block_1D(hidden_dim, hidden_dim),
+            res_block_1D(hidden_dim, hidden_dim),
+            res_block_1D(hidden_dim, hidden_dim),
+        )
+        self.classifier = nn.Linear(hidden_dim, 1)
+
+    def forward(self, v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask):
+        intersection_embedding, null_intersection_embedding = self.prepare_data(
+            v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask)
+
+        edge_features = self.inference(intersection_embedding)
+        null_features = self.inference(null_intersection_embedding)
+
+        return edge_features, null_features
+
+    def inference(self, v_features):
+        edge_feature = v_features[:,0]*v_features[:,1]
+        x = self.layers(edge_feature)
+        edge_features = x[..., 0]
+        return edge_features
+
+    def loss(self, edge_features, null_features):
+        intersection_feature = torch.cat([edge_features, null_features])
+        gt_label = torch.cat([torch.ones_like(edge_features[:, 0]),
+                              torch.zeros_like(null_features[:, 0])])
+        loss_intersection = F.binary_cross_entropy_with_logits(
+            self.classifier(intersection_feature), gt_label[:, None])
+        return loss_intersection
+
+    def inference_label(self, v_features):
+        return torch.sigmoid(self.classifier(v_features))[:, 0] > 0.5
+
+
 class Attn_intersector(Intersector):
     def __init__(self, num_max_items=None):
         super().__init__(num_max_items)

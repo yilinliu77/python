@@ -742,18 +742,15 @@ class GAT_GraphConv(nn.Module):
                     GATv2Conv(in_channels_layer, out_channels, edge_dim=edge_dim, heads=num_heads,
                               concat=concat, negative_slope=negative_slope, fill_value=fill_value,
                               dropout=dropout, bias=bias))
-            if idx != len(out_channels_list) - 1:
-                norm = nn.Sequential(
-                        nn.ReLU(),
-                        nn.LayerNorm(normalized_shape=out_channels * num_heads if concat else out_channels)
-                        )
-                self.layers.append(norm)
+
+            self.layers.append(nn.LayerNorm(out_channels * num_heads if concat else out_channels))
+            self.layers.append(nn.ReLU())
             in_channels_layer = out_channels
 
     def forward(self, x, edge_index, edge_attr=None, **kwargs):
         for layer in self.layers:
             if isinstance(layer, GATv2Conv):
-                x = layer(x, edge_index, edge_attr)
+                x = layer(x, edge_index, edge_attr) + x
             else:
                 x = layer(x)
         return x
@@ -766,10 +763,10 @@ class AutoEncoder(nn.Module):
                  dim_codebook_edge=256,
                  dim_codebook_face=256,
                  encoder_dims_through_depth_edges: Tuple[int, ...] = (
-                         64, 128, 256, 256
+                         256, 256, 256, 256
                          ),
                  encoder_dims_through_depth_faces: Tuple[int, ...] = (
-                         256, 256
+                         256, 256, 256, 256
                          ),
                  ):
         super(AutoEncoder, self).__init__()
@@ -905,7 +902,7 @@ class AutoEncoder(nn.Module):
                                                      edge_face_connectivity[..., 1:].permute(1, 0),
                                                      edge_attr=atten_edge_embeddings[edge_face_connectivity[..., 0]])
 
-        atten_face_edge_embeddings = self.face_fuser(face_edge_embeddings, face_mask)
+        atten_face_edge_embeddings = self.face_fuser(face_edge_embeddings_gcn, face_mask)
 
         # Intersection
         face_adj = v_data["face_adj"]

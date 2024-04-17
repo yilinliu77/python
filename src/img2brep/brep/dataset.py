@@ -44,14 +44,14 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
         self.conf = v_conf
         self.dataset_path = v_conf['root']
         self.is_overfit = v_conf['overfit']
-        self.bd = v_conf['bbox_discrete_dim'] // 2 - 1 # discrete_dim
-        self.cd = v_conf['coor_discrete_dim'] // 2 - 1 # discrete_dim
+        self.bd = v_conf['bbox_discrete_dim'] // 2 - 1  # discrete_dim
+        self.cd = v_conf['coor_discrete_dim'] // 2 - 1  # discrete_dim
 
         self.data_folders = [os.path.join(self.dataset_path, folder) for folder in os.listdir(self.dataset_path) if
                              os.path.isdir(os.path.join(self.dataset_path, folder))]
         self.data_folders.sort()
 
-        self.data_folders = self.data_folders
+        # self.data_folders = self.data_folders[0:100]
 
         self.src_data_sum = len(self.data_folders)
 
@@ -109,7 +109,7 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
         sample_points_faces_normalized = ((face_points - center_face[:, None, None]) /
                                           (length_face[:, None, None] + 1e-8)) * 2
         discrete_face_points = torch.round(
-            sample_points_faces_normalized * self.cd).long().clamp(-self.cd, self.cd)
+                sample_points_faces_normalized * self.cd).long().clamp(-self.cd, self.cd)
         discrete_face_bboxes = torch.round((torch.cat([
             min_face, max_face], dim=-1) * self.bd)).long().clamp(-self.bd, self.bd)
         discrete_face_points += self.cd
@@ -123,7 +123,7 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
         sample_points_edges_normalized = ((line_points - center_edge[:, None]) /
                                           (length_edge[:, None] + 1e-8)) * 2
         discrete_edge_points = torch.round(
-            sample_points_edges_normalized * self.cd).long().clamp(-self.cd, self.cd)
+                sample_points_edges_normalized * self.cd).long().clamp(-self.cd, self.cd)
         discrete_edge_bboxes = torch.round((torch.cat([
             min_edge, max_edge], dim=-1) * self.bd)).long().clamp(-self.bd, self.bd)
         discrete_edge_points += self.cd
@@ -198,19 +198,19 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
         face_adj = torch.stack(face_adj)
 
         return {
-            "vertex_points": vertex_points,
-            "edge_points": line_points,
-            "face_points": face_points,
-            "discrete_face_points": discrete_face_points,
-            "discrete_face_bboxes": discrete_face_bboxes,
-            "discrete_edge_points": discrete_edge_points,
-            "discrete_edge_bboxes": discrete_edge_bboxes,
+            "vertex_points"           : vertex_points,
+            "edge_points"             : line_points,
+            "face_points"             : face_points,
+            "discrete_face_points"    : discrete_face_points,
+            "discrete_face_bboxes"    : discrete_face_bboxes,
+            "discrete_edge_points"    : discrete_edge_points,
+            "discrete_edge_bboxes"    : discrete_edge_bboxes,
 
-            "face_edge_loop": face_edge_loop,
-            "face_adj": face_adj,
-            "edge_face_connectivity": edge_face_connectivity,
+            "face_edge_loop"          : face_edge_loop,
+            "face_adj"                : face_adj,
+            "edge_face_connectivity"  : edge_face_connectivity,
             "vertex_edge_connectivity": vertex_edge_connectivity,
-        }
+            }
 
 
 class Autoregressive_Dataset(torch.utils.data.Dataset):
@@ -225,7 +225,7 @@ class Autoregressive_Dataset(torch.utils.data.Dataset):
                              os.path.isdir(os.path.join(self.dataset_path, folder))]
         self.data_folders.sort()
 
-        self.data_folders = self.data_folders[0:10]
+        # self.data_folders = self.data_folders[0:100]
 
         self.src_data_sum = len(self.data_folders)
 

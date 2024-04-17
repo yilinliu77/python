@@ -22,6 +22,7 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.profilers import AdvancedProfiler
 from lightning_fabric import seed_everything
 
 from src.img2brep.brep.dataset import Autoencoder_Dataset, Autoregressive_Dataset
@@ -357,6 +358,7 @@ def main(v_cfg: DictConfig):
             check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
             precision=v_cfg["trainer"]["accelerator"],
             # accumulate_grad_batches=1,
+            profiler=AdvancedProfiler(dirpath=log_dir, filename="profiler.txt"),
             )
 
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":

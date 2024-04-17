@@ -905,7 +905,7 @@ class AutoEncoder(nn.Module):
                                                      edge_face_connectivity[..., 1:].permute(1, 0),
                                                      edge_attr=atten_edge_embeddings[edge_face_connectivity[..., 0]])
 
-        atten_face_edge_embeddings = self.face_fuser(face_edge_embeddings_gcn, face_mask)
+        atten_face_edge_embeddings = self.face_fuser(face_edge_embeddings, face_mask)
 
         # Intersection
         face_adj = v_data["face_adj"]

@@ -6,6 +6,7 @@ import time
 
 import h5py
 import numpy as np
+import plyfile
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -21,7 +22,6 @@ import networkx as nx
 from torch.nn.utils.rnn import pad_sequence
 
 import torch.nn.functional as F
-
 
 def get_face_idx_sequence(edge_face_connectivity, sample_points_faces):
     G = nx.Graph()
@@ -134,6 +134,24 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
 
         # Adjacency matrix for face (num_faces, num_faces)
         face_adj = torch.from_numpy(data_npz['face_adj'])
+
+        # indices = torch.arange(face_points.shape[0]).repeat_interleave(400)
+        # data = np.array(
+        #     [(face_points.reshape(-1,3)[i,0], face_points.reshape(-1,3)[i,1], face_points.reshape(-1,3)[i,2],indices[i]) for i in range(face_points.shape[0]*400)],
+        #     dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('primitive_index', 'i4')]
+        # )
+        # plyfile.PlyData([
+        #     plyfile.PlyElement.describe(data, 'vertex')
+        # ], text=True).write("face_points.ply")
+        #
+        # indices = torch.arange(line_points.shape[0]).repeat_interleave(20)
+        # data = np.array(
+        #     [(line_points.reshape(-1,3)[i,0], line_points.reshape(-1,3)[i,1], line_points.reshape(-1,3)[i,2],indices[i]) for i in range(line_points.shape[0]*20)],
+        #     dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('primitive_index', 'i4')]
+        # )
+        # plyfile.PlyData([
+        #     plyfile.PlyElement.describe(data, 'vertex')
+        # ], text=True).write("edge_points.ply")
 
         #  Which of two faces intersect and produce an edge (num_intersection, (id_edge, id_face1, id_face2))
         edge_face_connectivity = torch.from_numpy(data_npz['edge_face_connectivity'])

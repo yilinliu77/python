@@ -10,14 +10,8 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.checkpoint import checkpoint
 from torch.cuda.amp import autocast
+# from torch.utils.flop_counter import FlopCounterMode
 from torch_geometric.nn import SAGEConv
-
-from torchtyping import TensorType
-
-from pytorch_custom_utils import save_load
-
-from beartype import beartype
-from beartype.typing import Union, Tuple, Callable, Optional, List, Dict, Any
 
 from einops import rearrange, repeat, reduce, pack, unpack
 from einops.layers.torch import Rearrange
@@ -67,11 +61,18 @@ class res_block_2D(nn.Module):
 
 
 ################### Encoder
+# 11137M FLOPS and 3719680 parameters
 class Continuous_encoder(nn.Module):
     def __init__(self, dim_codebook_face=256, dim_codebook_edge=256, **kwargs):
         super().__init__()
         self.face_encoder = nn.Sequential(
             nn.Conv2d(3, 256, kernel_size=7, stride=1, padding=3),
+            Rearrange('b c h w -> b h w c'),
+            nn.LayerNorm(256),
+            Rearrange('b h w c -> b c h w'),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(256, 256, kernel_size=5, stride=1, padding=2),
             Rearrange('b c h w -> b h w c'),
             nn.LayerNorm(256),
             Rearrange('b h w c -> b c h w'),
@@ -87,6 +88,12 @@ class Continuous_encoder(nn.Module):
 
         self.edge_encoder = nn.Sequential(
             nn.Conv1d(in_channels=3, out_channels=256, kernel_size=7, stride=1, padding=3),
+            Rearrange('b c h -> b h c'),
+            nn.LayerNorm(256),
+            Rearrange('b h c -> b c h'),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            nn.Conv1d(in_channels=256, out_channels=256, kernel_size=5, stride=1, padding=2),
             Rearrange('b c h -> b h c'),
             nn.LayerNorm(256),
             Rearrange('b h c -> b c h'),
@@ -116,6 +123,7 @@ class Continuous_encoder(nn.Module):
         return face_coords, edge_coords, face_mask, edge_mask
 
 
+# 57196M FLOPS and 4982400 parameters
 class Discrete_encoder(Continuous_encoder):
     def __init__(self, dim_codebook_face=256, dim_codebook_edge=256,
                  bbox_discrete_dim=64,
@@ -310,6 +318,7 @@ class Small_decoder(nn.Module):
         return loss_edge
 
 
+# 43134M FLOPS and 6300678 parameters
 class Small_decoder_plus(Small_decoder):
     def __init__(self,
                  dim_codebook_edge,
@@ -321,34 +330,39 @@ class Small_decoder_plus(Small_decoder):
         # For edges
         self.edge_decoder = nn.Sequential(
             Rearrange('... c -> ... c 1'),
-            nn.Upsample(scale_factor=4, mode="linear"),
+            nn.Upsample(scale_factor=2, mode="linear"),
             res_block_1D(dim_codebook_edge, 256),
             nn.Upsample(scale_factor=2, mode="linear"),
             res_block_1D(256, 256),
             nn.Upsample(scale_factor=2, mode="linear"),
-            res_block_1D(256, 256),
+            res_block_1D(256, 256, 5,1,2),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(256, 256, 5,1,2),
             nn.Upsample(size=20, mode="linear"),
             res_block_1D(256, 256),
-            nn.Conv1d(256, 3, kernel_size=3, stride=1, padding=1),
+            nn.Conv1d(256, 3, kernel_size=1, stride=1, padding=0),
             Rearrange('... c v -> ... v c', c=3),
         )
 
         # For faces
         self.face_decoder = nn.Sequential(
             Rearrange('... c -> ... c 1 1'),
-            nn.Upsample(scale_factor=4, mode="bilinear"),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
             res_block_2D(dim_codebook_face, 256),
             nn.Upsample(scale_factor=2, mode="bilinear"),
             res_block_2D(256, 256),
             nn.Upsample(scale_factor=2, mode="bilinear"),
-            res_block_2D(256, 256),
+            res_block_2D(256, 256, 5,1,2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(256, 256, 5,1,2),
             nn.Upsample(size=(20, 20), mode="bilinear"),
             res_block_2D(256, 256),
-            nn.Conv2d(256, 3, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(256, 3, kernel_size=1, stride=1, padding=0),
             Rearrange('... c w h -> ... w h c', c=3),
         )
 
 
+# 26897M FLOPS and 6271200 parameters
 class Discrete_decoder(Small_decoder):
     def __init__(self,
                  dim_codebook_edge,
@@ -716,10 +730,10 @@ class AutoEncoder(nn.Module):
                  max_length=100,
                  dim_codebook_edge=256,
                  dim_codebook_face=256,
-                 encoder_dims_through_depth_edges: Tuple[int, ...] = (
+                 encoder_dims_through_depth_edges = (
                          64, 128, 256, 256
                  ),
-                 encoder_dims_through_depth_faces: Tuple[int, ...] = (
+                 encoder_dims_through_depth_faces = (
                          64, 128, 256, 256
                  ),
                  ):
@@ -806,6 +820,7 @@ class AutoEncoder(nn.Module):
             bbox_discrete_dim=v_conf["bbox_discrete_dim"],
             coor_discrete_dim=v_conf["coor_discrete_dim"],
         )
+
 
     def gcn_on_edges(self, v_edge_embeddings, edge_adj):
         edge_embeddings = self.init_sage_conv_edges(v_edge_embeddings, edge_adj)
@@ -931,6 +946,13 @@ class AutoEncoder(nn.Module):
         for key in loss_edge:
             loss[key + "1"] = loss_edge[key]
             loss["total_loss"] += loss_edge[key]
+
+        # counter = FlopCounterMode(depth=999)
+        # with counter:
+        #     self.encoder(v_data)
+        # counter = FlopCounterMode(depth=999)
+        # with counter:
+        #     self.decoder(atten_face_edge_embeddings, intersected_edge_features)
 
         # Return
         if only_return_loss:

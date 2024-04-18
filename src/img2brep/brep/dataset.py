@@ -43,7 +43,16 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
         super(Autoencoder_Dataset, self).__init__()
         self.mode = v_training_mode
         self.conf = v_conf
-        self.dataset_path = v_conf['root']
+
+        if v_training_mode == "testing":
+            self.dataset_path = v_conf['test_dataset']
+        elif v_conf['val_dataset'] is not None:
+            if v_training_mode == "training":
+                self.dataset_path = v_conf['train_dataset']
+            elif v_training_mode == "validation":
+                self.dataset_path = v_conf['val_dataset']
+        else:
+            self.dataset_path = v_conf['train_dataset']
         self.is_overfit = v_conf['overfit']
         self.bd = v_conf['bbox_discrete_dim'] // 2 - 1  # discrete_dim
         self.cd = v_conf['coor_discrete_dim'] // 2 - 1  # discrete_dim
@@ -68,7 +77,7 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
         self.validation_range = [int(0.9 * self.data_sum), int(1.0 * self.data_sum)]
         self.test_range = [int(0 * self.data_sum), int(1.0 * self.data_sum)]
 
-        if self.is_overfit or self.mode == "testing":
+        if v_conf['val_dataset'] is None or self.mode == "testing":
             self.data_folders = self.data_folders[self.test_range[0]:self.test_range[1]]
         elif self.mode == "training":
             self.data_folders = self.data_folders[self.training_range[0]:self.training_range[1]]
@@ -133,7 +142,7 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
         vertex_points = torch.from_numpy(data_npz['sample_points_vertices'])
 
         discrete_face_points, discrete_face_bboxes, discrete_edge_points, discrete_edge_bboxes = (
-            self.discrete_coordinates(face_points,line_points))
+            self.discrete_coordinates(face_points, line_points))
         # Vertex
         discrete_vertex_points = torch.round(
             vertex_points * self.cd).long().clamp(-self.cd, self.cd)
@@ -147,10 +156,13 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
         #  Which of two edges intersect and produce a vertex (num_intersection, (id_vertex, id_edge1, id_edge2))
         vertex_edge_connectivity = torch.from_numpy(data_npz['vertex_edge_connectivity'])
 
-        face_adj = torch.zeros(face_points.shape[0], face_points.shape[0], dtype=torch.bool)
-        face_adj[edge_face_connectivity[:, 1], edge_face_connectivity[:, 2]] = True
-        face_adj = torch.logical_or(face_adj, face_adj.T)
-        face_adj.diagonal().fill_(True)
+        if True:
+            face_adj = torch.zeros(face_points.shape[0], face_points.shape[0], dtype=torch.bool)
+            face_adj[edge_face_connectivity[:, 1], edge_face_connectivity[:, 2]] = True
+            face_adj = torch.logical_or(face_adj, face_adj.T)
+            face_adj.diagonal().fill_(True)
+        else:
+            face_adj = torch.from_numpy(data_npz['face_adj'])
 
         edge_adj = torch.zeros(line_points.shape[0], line_points.shape[0], dtype=torch.bool)
         edge_adj[vertex_edge_connectivity[:, 1], vertex_edge_connectivity[:, 2]] = True
@@ -175,16 +187,18 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
         # plyfile.PlyData([
         #     plyfile.PlyElement.describe(data, 'vertex')
         # ], text=True).write("edge_points.ply")
-        return (face_points, line_points, vertex_points,
-                discrete_face_points, discrete_face_bboxes,
-                discrete_edge_points, discrete_edge_bboxes,
-                discrete_vertex_points,
-                face_edge_loop, face_adj, edge_adj,
-                edge_face_connectivity, vertex_edge_connectivity)
+        return (
+            Path(folder_path).stem,
+            face_points, line_points, vertex_points,
+            discrete_face_points, discrete_face_bboxes,
+            discrete_edge_points, discrete_edge_bboxes,
+            discrete_vertex_points,
+            face_edge_loop, face_adj, edge_adj,
+            edge_face_connectivity, vertex_edge_connectivity)
 
     @staticmethod
     def collate_fn(batch):
-        (face_points, edge_points, vertex_points,
+        (v_prefix, face_points, edge_points, vertex_points,
          discrete_face_points, discrete_face_bboxes,
          discrete_edge_points, discrete_edge_bboxes,
          discrete_vertex_points,
@@ -231,21 +245,22 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
         edge_adj = torch.stack(edge_adj)
 
         return {
-            "vertex_points"           : vertex_points,
-            "edge_points"             : edge_points,
-            "face_points"             : face_points,
-            "discrete_face_points"    : discrete_face_points,
-            "discrete_face_bboxes"    : discrete_face_bboxes,
-            "discrete_edge_points"    : discrete_edge_points,
-            "discrete_edge_bboxes"    : discrete_edge_bboxes,
-            "discrete_vertex_points"    : discrete_vertex_points,
+            "v_prefix": v_prefix,
+            "vertex_points": vertex_points,
+            "edge_points": edge_points,
+            "face_points": face_points,
+            "discrete_face_points": discrete_face_points,
+            "discrete_face_bboxes": discrete_face_bboxes,
+            "discrete_edge_points": discrete_edge_points,
+            "discrete_edge_bboxes": discrete_edge_bboxes,
+            "discrete_vertex_points": discrete_vertex_points,
 
-            "face_edge_loop"          : face_edge_loop,
-            "face_adj"                : face_adj,
-            "edge_adj"                : edge_adj,
-            "edge_face_connectivity"  : edge_face_connectivity,
+            "face_edge_loop": face_edge_loop,
+            "face_adj": face_adj,
+            "edge_adj": edge_adj,
+            "edge_face_connectivity": edge_face_connectivity,
             "vertex_edge_connectivity": vertex_edge_connectivity,
-            }
+        }
 
 
 class Autoregressive_Dataset(torch.utils.data.Dataset):
@@ -320,7 +335,7 @@ class Autoregressive_Dataset(torch.utils.data.Dataset):
         sample_points_faces_normalized = ((face_points - center_face[:, None, None]) /
                                           (length_face[:, None, None] + 1e-8)) * 2
         discrete_face_points = torch.round(
-                sample_points_faces_normalized * self.cd).long().clamp(-self.cd, self.cd)
+            sample_points_faces_normalized * self.cd).long().clamp(-self.cd, self.cd)
         discrete_face_bboxes = torch.round((torch.cat([
             min_face, max_face], dim=-1) * self.bd)).long().clamp(-self.bd, self.bd)
         discrete_face_points += self.cd
@@ -334,7 +349,7 @@ class Autoregressive_Dataset(torch.utils.data.Dataset):
         sample_points_edges_normalized = ((line_points - center_edge[:, None]) /
                                           (length_edge[:, None] + 1e-8)) * 2
         discrete_edge_points = torch.round(
-                sample_points_edges_normalized * self.cd).long().clamp(-self.cd, self.cd)
+            sample_points_edges_normalized * self.cd).long().clamp(-self.cd, self.cd)
         discrete_edge_bboxes = torch.round((torch.cat([
             min_edge, max_edge], dim=-1) * self.bd)).long().clamp(-self.bd, self.bd)
         discrete_edge_points += self.cd
@@ -398,17 +413,17 @@ class Autoregressive_Dataset(torch.utils.data.Dataset):
         face_adj = torch.stack(face_adj)
 
         return {
-            "vertex_points"           : vertex_points,
-            "edge_points"             : line_points,
-            "face_points"             : face_points,
-            "discrete_face_points"    : discrete_face_points,
-            "discrete_face_bboxes"    : discrete_face_bboxes,
-            "discrete_edge_points"    : discrete_edge_points,
-            "discrete_edge_bboxes"    : discrete_edge_bboxes,
+            "vertex_points": vertex_points,
+            "edge_points": line_points,
+            "face_points": face_points,
+            "discrete_face_points": discrete_face_points,
+            "discrete_face_bboxes": discrete_face_bboxes,
+            "discrete_edge_points": discrete_edge_points,
+            "discrete_edge_bboxes": discrete_edge_bboxes,
 
-            "face_edge_loop"          : face_edge_loop,
-            "face_adj"                : face_adj,
-            "edge_face_connectivity"  : edge_face_connectivity,
+            "face_edge_loop": face_edge_loop,
+            "face_adj": face_adj,
+            "edge_face_connectivity": edge_face_connectivity,
             "vertex_edge_connectivity": vertex_edge_connectivity,
-            "face_idx_sequence"       : face_idx_sequence,
-            }
+            "face_idx_sequence": face_idx_sequence,
+        }

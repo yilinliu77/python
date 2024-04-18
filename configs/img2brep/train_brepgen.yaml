@@ -1,6 +1,8 @@
 dataset:
 #  root: H:\Data\img2brep\deepcad_10000
-  root: G:/Dataset/img2brep/deepcad_test
+  train_dataset: G:/Dataset/img2brep/deepcad_10000/main_data
+  val_dataset: G:/Dataset/img2brep/deepcad_10000/main_data
+  test_dataset: G:/Dataset/img2brep/deepcad_10000/main_data
   dataset_name: ABC
   overfit: true
   tokenized_batch_size: 16

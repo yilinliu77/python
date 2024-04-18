@@ -46,13 +46,12 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
 
         if v_training_mode == "testing":
             self.dataset_path = v_conf['test_dataset']
-        elif v_conf['val_dataset'] is not None:
-            if v_training_mode == "training":
-                self.dataset_path = v_conf['train_dataset']
-            elif v_training_mode == "validation":
-                self.dataset_path = v_conf['val_dataset']
-        else:
+        elif v_training_mode == "training":
             self.dataset_path = v_conf['train_dataset']
+        elif v_training_mode == "validation":
+            self.dataset_path = v_conf['val_dataset']
+        else:
+            raise
         self.is_overfit = v_conf['overfit']
         self.bd = v_conf['bbox_discrete_dim'] // 2 - 1  # discrete_dim
         self.cd = v_conf['coor_discrete_dim'] // 2 - 1  # discrete_dim
@@ -73,18 +72,7 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
         print("Src data_folders:", self.src_data_sum)
         print("After removing:", self.data_sum)
 
-        self.training_range = [int(0 * self.data_sum), int(0.9 * self.data_sum)]
-        self.validation_range = [int(0.9 * self.data_sum), int(1.0 * self.data_sum)]
-        self.test_range = [int(0 * self.data_sum), int(1.0 * self.data_sum)]
-
-        if v_conf['val_dataset'] is None or self.mode == "testing":
-            self.data_folders = self.data_folders[self.test_range[0]:self.test_range[1]]
-        elif self.mode == "training":
-            self.data_folders = self.data_folders[self.training_range[0]:self.training_range[1]]
-        elif self.mode == "validation":
-            self.data_folders = self.data_folders[self.validation_range[0]:self.validation_range[1]]
-        else:
-            raise
+        self.data_folders = self.data_folders
 
     def __len__(self):
         return len(self.data_folders)

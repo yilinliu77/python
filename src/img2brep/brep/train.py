@@ -262,12 +262,12 @@ class TrainAutoregressiveModel(pl.LightningModule):
         self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
 
-        # if batch_idx == 0:
-        #     recon_edges, recon_faces = self.model.inference(recon_data["face_embeddings"])
-        #     self.viz["sample_points_faces"] = data["sample_points_faces"].cpu().numpy()
-        #     self.viz["sample_points_lines"] = data["sample_points_lines"].cpu().numpy()
-        #     self.viz["reconstructed_edges"] = recon_edges.cpu().numpy()
-        #     self.viz["reconstructed_faces"] = recon_faces.cpu().numpy()
+        if batch_idx == 0:
+            self.model.generate()
+            # self.viz["sample_points_faces"] = data["sample_points_faces"].cpu().numpy()
+            # self.viz["sample_points_lines"] = data["sample_points_lines"].cpu().numpy()
+            # self.viz["reconstructed_edges"] = recon_edges.cpu().numpy()
+            # self.viz["reconstructed_faces"] = recon_faces.cpu().numpy()
 
         return total_loss
 

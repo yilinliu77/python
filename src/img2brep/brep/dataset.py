@@ -23,13 +23,13 @@ from torch.nn.utils.rnn import pad_sequence
 import torch.nn.functional as F
 
 
-def get_face_idx_sequence(edge_face_connectivity, sample_points_faces):
+def get_face_idx_sequence(edge_face_connectivity, face_points):
     G = nx.Graph()
 
     for idx, (edge_id, face1, face2) in enumerate(edge_face_connectivity):
         G.add_edge(int(face1), int(face2))
 
-    if G.number_of_nodes() != sample_points_faces.shape[0]:
+    if G.number_of_nodes() != face_points.shape[0]:
         raise ValueError("Number of nodes is not equal to number of faces")
 
     face_idx_sequence = list(nx.bfs_tree(G, 0))
@@ -51,7 +51,7 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
                              os.path.isdir(os.path.join(self.dataset_path, folder))]
         self.data_folders.sort()
 
-        # self.data_folders = self.data_folders[0:100]
+        self.data_folders = self.data_folders[0:10]
 
         self.src_data_sum = len(self.data_folders)
 
@@ -202,12 +202,14 @@ class Autoregressive_Dataset(torch.utils.data.Dataset):
         self.conf = v_conf
         self.dataset_path = v_conf['root']
         self.is_overfit = v_conf['overfit']
+        self.bd = v_conf['bbox_discrete_dim'] // 2 - 1  # discrete_dim
+        self.cd = v_conf['coor_discrete_dim'] // 2 - 1  # discrete_dim
 
         self.data_folders = [os.path.join(self.dataset_path, folder) for folder in os.listdir(self.dataset_path) if
                              os.path.isdir(os.path.join(self.dataset_path, folder))]
         self.data_folders.sort()
 
-        # self.data_folders = self.data_folders[0:100]
+        self.data_folders = self.data_folders[0:10]
 
         self.src_data_sum = len(self.data_folders)
 
@@ -253,9 +255,37 @@ class Autoregressive_Dataset(torch.utils.data.Dataset):
         data_npz = np.load(os.path.join(folder_path, "data.npz"))
 
         # Face sample points (num_faces*20*20*3)
-        sample_points_faces = torch.from_numpy(data_npz['sample_points_faces'])
-        sample_points_lines = torch.from_numpy(data_npz['sample_points_lines'])
-        sample_points_vertices = torch.from_numpy(data_npz['sample_points_vertices'])
+        face_points = torch.from_numpy(data_npz['sample_points_faces'])
+        line_points = torch.from_numpy(data_npz['sample_points_lines'])
+        vertex_points = torch.from_numpy(data_npz['sample_points_vertices'])
+
+        # Compute bounding box and discrete coordinates for faces
+        min_face = face_points.min(dim=1).values.min(dim=1).values
+        max_face = face_points.max(dim=1).values.max(dim=1).values
+        length_face = max_face - min_face
+        center_face = (max_face + min_face) / 2
+        sample_points_faces_normalized = ((face_points - center_face[:, None, None]) /
+                                          (length_face[:, None, None] + 1e-8)) * 2
+        discrete_face_points = torch.round(
+                sample_points_faces_normalized * self.cd).long().clamp(-self.cd, self.cd)
+        discrete_face_bboxes = torch.round((torch.cat([
+            min_face, max_face], dim=-1) * self.bd)).long().clamp(-self.bd, self.bd)
+        discrete_face_points += self.cd
+        discrete_face_bboxes += self.bd
+
+        # Compute bounding box and discrete coordinates for edges
+        min_edge = line_points.min(dim=1).values
+        max_edge = line_points.max(dim=1).values
+        length_edge = max_edge - min_edge
+        center_edge = (max_edge + min_edge) / 2
+        sample_points_edges_normalized = ((line_points - center_edge[:, None]) /
+                                          (length_edge[:, None] + 1e-8)) * 2
+        discrete_edge_points = torch.round(
+                sample_points_edges_normalized * self.cd).long().clamp(-self.cd, self.cd)
+        discrete_edge_bboxes = torch.round((torch.cat([
+            min_edge, max_edge], dim=-1) * self.bd)).long().clamp(-self.bd, self.bd)
+        discrete_edge_points += self.cd
+        discrete_edge_bboxes += self.bd
 
         # Loops along each face, -2 means start token and -1 means padding (num_faces, max_num_edges_this_face)
         face_edge_loop = torch.from_numpy(data_npz['face_edge_loop'])
@@ -268,19 +298,27 @@ class Autoregressive_Dataset(torch.utils.data.Dataset):
         #  Which of two edges intersect and produce a vertex (num_intersection, (id_vertex, id_edge1, id_edge2))
         vertex_edge_connectivity = torch.from_numpy(data_npz['vertex_edge_connectivity'])
 
-        face_idx_sequence_c = get_face_idx_sequence(edge_face_connectivity, sample_points_faces)
+        face_idx_sequence_c = get_face_idx_sequence(edge_face_connectivity, face_points)
 
-        return (sample_points_faces, sample_points_lines, sample_points_vertices,
-                face_edge_loop, face_adj, edge_face_connectivity, vertex_edge_connectivity, face_idx_sequence_c)
+        return (face_points, line_points, vertex_points,
+                discrete_face_points, discrete_face_bboxes, discrete_edge_points, discrete_edge_bboxes,
+                face_edge_loop, face_adj, edge_face_connectivity, vertex_edge_connectivity,
+                face_idx_sequence_c
+                )
 
     @staticmethod
     def collate_fn(batch):
-        (sample_points_faces, sample_points_lines, sample_points_vertices, face_edge_loop, face_adj,
-         edge_face_connectivity, vertex_edge_connectivity, face_idx_sequence) = zip(*batch)
+        (face_points, line_points, vertex_points,
+         discrete_face_points, discrete_face_bboxes, discrete_edge_points, discrete_edge_bboxes,
+         face_edge_loop, face_adj, edge_face_connectivity, vertex_edge_connectivity, face_idx_sequence) = zip(*batch)
 
-        sample_points_faces = pad_sequence(sample_points_faces, batch_first=True, padding_value=-1)
-        sample_points_lines = pad_sequence(sample_points_lines, batch_first=True, padding_value=-1)
-        sample_points_vertices = pad_sequence(sample_points_vertices, batch_first=True, padding_value=-1)
+        face_points = pad_sequence(face_points, batch_first=True, padding_value=-1)
+        discrete_face_points = pad_sequence(discrete_face_points, batch_first=True, padding_value=-1)
+        discrete_face_bboxes = pad_sequence(discrete_face_bboxes, batch_first=True, padding_value=-1)
+        discrete_edge_points = pad_sequence(discrete_edge_points, batch_first=True, padding_value=-1)
+        discrete_edge_bboxes = pad_sequence(discrete_edge_bboxes, batch_first=True, padding_value=-1)
+        line_points = pad_sequence(line_points, batch_first=True, padding_value=-1)
+        vertex_points = pad_sequence(vertex_points, batch_first=True, padding_value=-1)
 
         edge_face_connectivity = pad_sequence(edge_face_connectivity, batch_first=True, padding_value=-1)
         vertex_edge_connectivity = pad_sequence(vertex_edge_connectivity, batch_first=True, padding_value=-1)
@@ -307,9 +345,14 @@ class Autoregressive_Dataset(torch.utils.data.Dataset):
         face_adj = torch.stack(face_adj)
 
         return {
-            "sample_points_vertices"  : sample_points_vertices,
-            "sample_points_lines"     : sample_points_lines,
-            "sample_points_faces"     : sample_points_faces,
+            "vertex_points"           : vertex_points,
+            "edge_points"             : line_points,
+            "face_points"             : face_points,
+            "discrete_face_points"    : discrete_face_points,
+            "discrete_face_bboxes"    : discrete_face_bboxes,
+            "discrete_edge_points"    : discrete_edge_points,
+            "discrete_edge_bboxes"    : discrete_edge_bboxes,
+
             "face_edge_loop"          : face_edge_loop,
             "face_adj"                : face_adj,
             "edge_face_connectivity"  : edge_face_connectivity,

@@ -417,18 +417,29 @@ class Discrete_decoder(Small_decoder):
             "edge_bbox_logits"  : edge_bbox_logits,
             }
 
+    def cross_entropy_loss(self, pred, gt, is_blur=True):
+        if not is_blur:
+            return nn.functional.cross_entropy(pred, gt, reduction='mean')
+        else:
+            pred_log_prob = pred.log_softmax(dim=-1)
+            gt = nn.functional.one_hot(gt, num_classes=pred.shape[-1])
+            gt = gaussian_blur_1d(gt.float(), sigma=0.3, guassian_kernel_width=5)
+            return -torch.sum(gt * pred_log_prob) / pred.shape[0]
+
+    def cross_entropy_loss_with_blur(self, pred, gt, bin_smooth_blur_sigma=0.3, guassian_kernel_width=5):
+        pred_log_prob = pred.log_softmax(dim=-1)
+        gt = nn.functional.one_hot(gt, num_classes=pred.shape[-1])
+        gt = gaussian_blur_1d(gt.float(), bin_smooth_blur_sigma, guassian_kernel_width)
+        return -torch.sum(gt * pred_log_prob) / pred.shape[0]
+
     def loss_edge(self, v_pred, v_data, v_edge_mask, v_used_edge_indexes):
         gt_edge_bbox = v_data["discrete_edge_bboxes"][v_edge_mask][v_used_edge_indexes]
         gt_edge_coords = v_data["discrete_edge_points"][v_edge_mask][v_used_edge_indexes]
 
-        loss_edge_coords = nn.functional.cross_entropy(
-                v_pred["edge_coords_logits"].flatten(0, -2),
-                gt_edge_coords.flatten(),
-                reduction='mean')
-        loss_edge_bbox = nn.functional.cross_entropy(
-                v_pred["edge_bbox_logits"].flatten(0, -2),
-                gt_edge_bbox.flatten(),
-                reduction='mean')
+        loss_edge_coords = self.cross_entropy_loss(v_pred["edge_coords_logits"].flatten(0, -2),
+                                                   gt_edge_coords.flatten())
+        loss_edge_bbox = self.cross_entropy_loss(v_pred["edge_bbox_logits"].flatten(0, -2),
+                                                 gt_edge_bbox.flatten())
 
         return {
             "edge_coords": loss_edge_coords,
@@ -440,14 +451,11 @@ class Discrete_decoder(Small_decoder):
 
         gt_face_bbox = v_data["discrete_face_bboxes"][v_face_mask]
         gt_face_coords = v_data["discrete_face_points"][v_face_mask]
-        loss_face_coords = nn.functional.cross_entropy(
-                v_pred["face_coords_logits"].flatten(0, -2),
-                gt_face_coords.flatten(),
-                reduction='mean')
-        loss_face_bbox = nn.functional.cross_entropy(
-                v_pred["face_bbox_logits"].flatten(0, -2),
-                gt_face_bbox.flatten(),
-                reduction='mean')
+
+        loss_face_coords = self.cross_entropy_loss(v_pred["face_coords_logits"].flatten(0, -2),
+                                                   gt_face_coords.flatten())
+        loss_face_bbox = self.cross_entropy_loss(v_pred["face_bbox_logits"].flatten(0, -2),
+                                                 gt_face_bbox.flatten())
 
         loss_edge.update({
             "total_loss" : loss_face_coords + loss_face_bbox + loss_edge["edge_coords"] + loss_edge["edge_bbox"],
@@ -841,9 +849,10 @@ class AutoEncoder(nn.Module):
         intersected_mask = intersected_edge_mask.new_zeros(intersected_edge_mask.shape).masked_scatter(
                 intersected_edge_mask, true_intersection)
 
-        recon_edges, recon_faces = self.decoder(
-                intersected_edge_features.view(-1, intersected_edge_features.shape[-1]),
-                v_face_embeddings.view(-1, v_face_embeddings.shape[-1]))
+        recon_data = self.decoder(v_face_embeddings.view(-1, v_face_embeddings.shape[-1]),
+                                  intersected_edge_features.view(-1, intersected_edge_features.shape[-1]))
+        recon_faces, recon_edges = self.decoder.inference(recon_data)
+
         recon_edges = recon_edges.view(B, -1, 20, 3)
         recon_faces = recon_faces.view(B, -1, 20, 20, 3)
         recon_edges[~intersected_mask] = -1
@@ -960,9 +969,15 @@ class AutoEncoder(nn.Module):
         bbb[used_edge_indexes] = recon_edges
         recon_edge_full[edge_mask] = bbb
 
+        face_embeddings_return = atten_face_edge_embeddings.new_zeros(
+                (*face_mask.shape, atten_face_edge_embeddings.shape[-1]))
+        face_embeddings_return = face_embeddings_return.masked_scatter(rearrange(face_mask, '... -> ... 1'),
+                                                                       atten_face_edge_embeddings)
+
         data = {
-            "recon_faces": recon_face_full,
-            "recon_edges": recon_edge_full,
+            "recon_faces"    : recon_face_full,
+            "recon_edges"    : recon_edge_full,
+            "face_embeddings": face_embeddings_return,
             }
         # Compute the true loss with the continuous points
         true_recon_face_loss = nn.functional.mse_loss(recon_face_full, v_data["face_points"], reduction='mean')

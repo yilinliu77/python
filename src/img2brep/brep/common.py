@@ -82,6 +82,37 @@ def pad_to_length(t, length, dim=-1, value=0, right=True):
     return pad_at_dim(t, padding, dim=dim, value=value)
 
 
+def gaussian_blur_1d(
+        t: Tensor,
+        sigma: float = 1.,
+        guassian_kernel_width=None,
+        ) -> Tensor:
+    is_add_channels = len(t.shape) == 2
+
+    if is_add_channels:
+        t = t[:, :, None]
+
+    _, _, channels, device, dtype = *t.shape, t.device, t.dtype
+
+    if guassian_kernel_width is None:
+        guassian_kernel_width = int(ceil(sigma * 10))
+
+    guassian_kernel_width += (guassian_kernel_width + 1) % 2
+    half_width = guassian_kernel_width // 2
+
+    distance = torch.arange(-half_width, half_width + 1, dtype=dtype, device=device)
+
+    gaussian = torch.exp(-(distance ** 2) / (2 * sigma ** 2))
+    gaussian = l1norm(gaussian)
+
+    kernel = repeat(gaussian, 'n -> c 1 n', c=channels)
+
+    t = rearrange(t, 'b n c -> b c n')
+    out = F.conv1d(t, kernel, padding=half_width, groups=channels)
+    out = rearrange(out, 'b c n -> b n c')
+    return out.squeeze(2) if is_add_channels else out
+
+
 # resnet block
 
 class PixelNorm(Module):

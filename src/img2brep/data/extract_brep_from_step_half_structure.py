@@ -1,14 +1,12 @@
 import os
 import queue
+import shutil
 from pathlib import Path
 
 import ray, trimesh
-import open3d as o3d
 import numpy as np
-import yaml
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
-from OCC.Core.NCollection import NCollection_Map
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX, TopAbs_WIRE
 from OCC.Core.GeomAbs import (GeomAbs_Circle, GeomAbs_Line, GeomAbs_BSplineCurve, GeomAbs_Ellipse,
                               GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone,
@@ -17,29 +15,30 @@ from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Extend.DataExchange import read_step_file
 from tqdm import tqdm
 import networkx as nx
-from shared.common_utils import *
-
-import igraph as ig
 
 import traceback, sys
 
-from src.img2brep.sample_points import sample_points_on_line, sample_points_on_plane, get_plane_points, \
-    sample_points_on_circle, sample_points_on_bspline
-
-from scipy.interpolate import BSpline
-
 write_debug_data = False
 data_root = Path(r"G:/Dataset/ABC/raw_data/abc_0000_obj_v00")
-# data_split = r"valid_planar_shapes_except_cube.txt"
-data_split = r"C:/repo/python/src/img2brep/data/deepcad_train_10000.txt"
-exception_files = [
-    r"C:/repo/python/src/img2brep/data/abc_multiple_component_or_few_faces_ids_.txt",
-    r"C:/repo/python/src/img2brep/data/abc_cube_ids.txt",
-    r"C:/repo/python/src/img2brep/data/abc_with_others_ids.txt",
-]
 output_root = Path(r"G:/Dataset/img2brep/deepcad_test")
+data_split = r"src/img2brep/data/deepcad_train_10000.txt"
+
+exception_files = [
+    r"src/img2brep/data/abc_multiple_component_or_few_faces_ids_.txt",
+    r"src/img2brep/data/abc_cube_ids.txt",
+    r"src/img2brep/data/abc_with_others_ids.txt",
+]
 
 num_max_primitives = 100000
+
+def check_dir(v_path):
+    if os.path.exists(v_path):
+        shutil.rmtree(v_path)
+    os.makedirs(v_path)
+
+def safe_check_dir(v_path):
+    if not os.path.exists(v_path):
+        os.makedirs(v_path)
 
 
 # @ray.remote(num_cpus=1)
@@ -74,9 +73,7 @@ def get_brep(v_root, output_root, v_folders):
             # Start to extract BREP
             shape = read_step_file(str(v_root / v_folder / step_file), verbosity=False)
             if shape.NbChildren() != 1:
-                print("Multiple components: {}; Jump over".format(v_folder))
-                shutil.rmtree(output_root / v_folder)
-                continue
+                raise ValueError("Multiple components: {}; Jump over".format(v_folder))
 
             # Function to explore and print the elements of a shape
             def explore_shape(shape, shape_type):
@@ -237,6 +234,7 @@ def get_brep(v_root, output_root, v_folders):
             if not write_debug_data:
                 continue
 
+            import open3d as o3d
             # Check
             # Write face
             pc_model = o3d.geometry.PointCloud()
@@ -261,8 +259,10 @@ def get_brep(v_root, output_root, v_folders):
                 last_traceback = tb_list[-1]
                 f.write(v_folder + ": " + str(e) + "\n")
                 f.write(f"An error occurred on line {last_traceback.lineno} in {last_traceback.name}\n\n")
+                print(v_folder + ": " + str(e))
                 print(f"An error occurred on line {last_traceback.lineno} in {last_traceback.name}\n\n")
                 print(e)
+                shutil.rmtree(output_root / v_folder)
 
     for folder in single_loop_folder:
         with open(output_root / "single_loop.txt", "a") as f:
@@ -294,8 +294,8 @@ if __name__ == '__main__':
         ray.init(
             dashboard_host="0.0.0.0",
             dashboard_port=15000,
-            num_cpus=1,
-            local_mode=True
+            # num_cpus=1,
+            # local_mode=True
         )
         num_batches = 40
         batch_size = len(total_ids) // num_batches + 1

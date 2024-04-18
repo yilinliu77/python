@@ -24,7 +24,7 @@ trainer:
   max_epochs: 3000
 
   spawn: false
-  resume_from_checkpoint: G:\workplace\python_server\python\src\img2brep\brep\outputs_img2brep\2024_04_18_11_07_56\tb_logs_brepgen\transformer\version_0\checkpoints\epoch=2999-step=9000.ckpt
+  resume_from_checkpoint:
   evaluate: false
   output: .
 
@@ -34,8 +34,8 @@ trainer:
 
 model:
   #  intersector: "Attn_intersector"
-#  intersector: "Attn_intersector_classifier"
-  intersector: "Proj_intersector"
+  intersector: "Attn_intersector_classifier"
+#  intersector: "Proj_intersector"
 
 #  encoder: "Continuous_encoder"
 #  decoder: "Small_decoder_plus"
@@ -43,7 +43,7 @@ model:
   encoder: "Discrete_encoder"
   decoder: "Discrete_decoder"
 
-  checkpoint_autoencoder: G:\workplace\python_server\python\src\img2brep\brep\outputs_img2brep\2024_04_17_15_08_57\tb_logs_brepgen\autoencoder\version_0\checkpoints\epoch=2899-step=8700.ckpt
+  checkpoint_autoencoder:
   bbox_discrete_dim: 256
   coor_discrete_dim: 128
 

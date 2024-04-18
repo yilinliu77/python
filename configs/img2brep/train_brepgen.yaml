@@ -18,13 +18,13 @@ trainer:
   #  batch_size: 4
 
   vis_recon_faces: true
-  train_autoregressive: false
+  train_autoregressive: true
 
   num_samples: -1
   max_epochs: 3000
 
   spawn: false
-  resume_from_checkpoint:
+  resume_from_checkpoint: G:\workplace\python_server\python\src\img2brep\brep\outputs_img2brep\2024_04_18_11_07_56\tb_logs_brepgen\transformer\version_0\checkpoints\epoch=2999-step=9000.ckpt
   evaluate: false
   output: .
 
@@ -43,7 +43,7 @@ model:
   encoder: "Discrete_encoder"
   decoder: "Discrete_decoder"
 
-  checkpoint_autoencoder:
+  checkpoint_autoencoder: G:\workplace\python_server\python\src\img2brep\brep\outputs_img2brep\2024_04_17_15_08_57\tb_logs_brepgen\autoencoder\version_0\checkpoints\epoch=2899-step=8700.ckpt
   bbox_discrete_dim: 256
   coor_discrete_dim: 128
 

@@ -1,6 +1,6 @@
 dataset:
 #  root: H:\Data\img2brep\deepcad_10000
-  root: G:/Dataset/img2brep/deepcad_10000/main_data
+  root: G:/Dataset/img2brep/deepcad_test
   dataset_name: ABC
   overfit: true
   tokenized_batch_size: 16
@@ -11,7 +11,7 @@ trainer:
   learning_rate: 1e-4
 
   gpu: 1
-  num_worker: 0
+  num_worker: 2
   batch_size: 4
   #  gpu: [ 0, 1 ]
   #  num_worker: 4
@@ -28,7 +28,7 @@ trainer:
   evaluate: false
   output: .
 
-  check_val_every_n_epoch: 100
+  check_val_every_n_epoch: 10
   #  accelerator: "16-mixed"
   accelerator: "32-true"
 
@@ -37,11 +37,11 @@ model:
 #  intersector: "Attn_intersector_classifier"
   intersector: "Proj_intersector"
 
-  encoder: "Continuous_encoder"
-  decoder: "Small_decoder_plus"
+#  encoder: "Continuous_encoder"
+#  decoder: "Small_decoder_plus"
 
-#  encoder: "Discrete_encoder"
-#  decoder: "Discrete_decoder"
+  encoder: "Discrete_encoder"
+  decoder: "Discrete_decoder"
 
   checkpoint_autoencoder:
   bbox_discrete_dim: 256

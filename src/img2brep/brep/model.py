@@ -10,14 +10,8 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.checkpoint import checkpoint
 from torch.cuda.amp import autocast
+# from torch.utils.flop_counter import FlopCounterMode
 from torch_geometric.nn import SAGEConv, GATv2Conv
-
-from torchtyping import TensorType
-
-from pytorch_custom_utils import save_load
-
-from beartype import beartype
-from beartype.typing import Union, Tuple, Callable, Optional, List, Dict, Any
 
 from einops import rearrange, repeat, reduce, pack, unpack
 from einops.layers.torch import Rearrange
@@ -67,11 +61,18 @@ class res_block_2D(nn.Module):
 
 
 ################### Encoder
+# 11137M FLOPS and 3719680 parameters
 class Continuous_encoder(nn.Module):
     def __init__(self, dim_codebook_face=256, dim_codebook_edge=256, **kwargs):
         super().__init__()
         self.face_encoder = nn.Sequential(
                 nn.Conv2d(3, 256, kernel_size=7, stride=1, padding=3),
+                Rearrange('b c h w -> b h w c'),
+                nn.LayerNorm(256),
+                Rearrange('b h w c -> b c h w'),
+                nn.ReLU(),
+                nn.MaxPool2d(kernel_size=2, stride=2),
+                nn.Conv2d(256, 256, kernel_size=5, stride=1, padding=2),
                 Rearrange('b c h w -> b h w c'),
                 nn.LayerNorm(256),
                 Rearrange('b h w c -> b c h w'),
@@ -87,6 +88,12 @@ class Continuous_encoder(nn.Module):
 
         self.edge_encoder = nn.Sequential(
                 nn.Conv1d(in_channels=3, out_channels=256, kernel_size=7, stride=1, padding=3),
+                Rearrange('b c h -> b h c'),
+                nn.LayerNorm(256),
+                Rearrange('b h c -> b c h'),
+                nn.ReLU(),
+                nn.MaxPool1d(kernel_size=2, stride=2),
+                nn.Conv1d(in_channels=256, out_channels=256, kernel_size=5, stride=1, padding=2),
                 Rearrange('b c h -> b h c'),
                 nn.LayerNorm(256),
                 Rearrange('b h c -> b c h'),
@@ -116,6 +123,7 @@ class Continuous_encoder(nn.Module):
         return face_coords, edge_coords, face_mask, edge_mask
 
 
+# 57196M FLOPS and 4982400 parameters
 class Discrete_encoder(Continuous_encoder):
     def __init__(self, dim_codebook_face=256, dim_codebook_edge=256,
                  bbox_discrete_dim=64,
@@ -310,6 +318,7 @@ class Small_decoder(nn.Module):
         return loss_edge
 
 
+# 43134M FLOPS and 6300678 parameters
 class Small_decoder_plus(Small_decoder):
     def __init__(self,
                  dim_codebook_edge,
@@ -321,34 +330,39 @@ class Small_decoder_plus(Small_decoder):
         # For edges
         self.edge_decoder = nn.Sequential(
                 Rearrange('... c -> ... c 1'),
-                nn.Upsample(scale_factor=4, mode="linear"),
+                nn.Upsample(scale_factor=2, mode="linear"),
                 res_block_1D(dim_codebook_edge, 256),
                 nn.Upsample(scale_factor=2, mode="linear"),
                 res_block_1D(256, 256),
                 nn.Upsample(scale_factor=2, mode="linear"),
-                res_block_1D(256, 256),
+                res_block_1D(256, 256, 5, 1, 2),
+                nn.Upsample(scale_factor=2, mode="linear"),
+                res_block_1D(256, 256, 5, 1, 2),
                 nn.Upsample(size=20, mode="linear"),
                 res_block_1D(256, 256),
-                nn.Conv1d(256, 3, kernel_size=3, stride=1, padding=1),
+                nn.Conv1d(256, 3, kernel_size=1, stride=1, padding=0),
                 Rearrange('... c v -> ... v c', c=3),
                 )
 
         # For faces
         self.face_decoder = nn.Sequential(
                 Rearrange('... c -> ... c 1 1'),
-                nn.Upsample(scale_factor=4, mode="bilinear"),
+                nn.Upsample(scale_factor=2, mode="bilinear"),
                 res_block_2D(dim_codebook_face, 256),
                 nn.Upsample(scale_factor=2, mode="bilinear"),
                 res_block_2D(256, 256),
                 nn.Upsample(scale_factor=2, mode="bilinear"),
-                res_block_2D(256, 256),
+                res_block_2D(256, 256, 5, 1, 2),
+                nn.Upsample(scale_factor=2, mode="bilinear"),
+                res_block_2D(256, 256, 5, 1, 2),
                 nn.Upsample(size=(20, 20), mode="bilinear"),
                 res_block_2D(256, 256),
-                nn.Conv2d(256, 3, kernel_size=3, stride=1, padding=1),
+                nn.Conv2d(256, 3, kernel_size=1, stride=1, padding=0),
                 Rearrange('... c w h -> ... w h c', c=3),
                 )
 
 
+# 26897M FLOPS and 6271200 parameters
 class Discrete_decoder(Small_decoder):
     def __init__(self,
                  dim_codebook_edge,
@@ -530,6 +544,45 @@ class Intersector(nn.Module):
     def inference_label(self, v_features):
         return torch.cosine_similarity(v_features,
                                        self.null_intersection, dim=-1)
+
+
+class Proj_intersector(Intersector):
+    def __init__(self, num_max_items=None):
+        super().__init__(num_max_items)
+        hidden_dim = 256
+        self.layers = nn.Sequential(
+                Rearrange('... c -> ... c 1'),
+                res_block_1D(hidden_dim, hidden_dim),
+                res_block_1D(hidden_dim, hidden_dim),
+                res_block_1D(hidden_dim, hidden_dim),
+                )
+        self.classifier = nn.Linear(hidden_dim, 1)
+
+    def forward(self, v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask):
+        intersection_embedding, null_intersection_embedding = self.prepare_data(
+                v_face_embeddings, v_edge_face_connectivity, v_face_adj, v_face_mask)
+
+        edge_features = self.inference(intersection_embedding)
+        null_features = self.inference(null_intersection_embedding)
+
+        return edge_features, null_features
+
+    def inference(self, v_features):
+        edge_feature = v_features[:, 0] * v_features[:, 1]
+        x = self.layers(edge_feature)
+        edge_features = x[..., 0]
+        return edge_features
+
+    def loss(self, edge_features, null_features):
+        intersection_feature = torch.cat([edge_features, null_features])
+        gt_label = torch.cat([torch.ones_like(edge_features[:, 0]),
+                              torch.zeros_like(null_features[:, 0])])
+        loss_intersection = F.binary_cross_entropy_with_logits(
+                self.classifier(intersection_feature), gt_label[:, None])
+        return loss_intersection
+
+    def inference_label(self, v_features):
+        return torch.sigmoid(self.classifier(v_features))[:, 0] > 0.5
 
 
 class Attn_intersector(Intersector):
@@ -770,12 +823,8 @@ class AutoEncoder(nn.Module):
                  max_length=100,
                  dim_codebook_edge=256,
                  dim_codebook_face=256,
-                 encoder_dims_through_depth_edges: Tuple[int, ...] = (
-                         256, 256, 256, 256
-                         ),
-                 encoder_dims_through_depth_faces: Tuple[int, ...] = (
-                         256, 256, 256, 256
-                         ),
+                 encoder_dims_through_depth_edges=(256, 256, 256, 256),
+                 encoder_dims_through_depth_faces=(256, 256, 256, 256),
                  ):
         super(AutoEncoder, self).__init__()
         self.max_length = max_length
@@ -822,8 +871,6 @@ class AutoEncoder(nn.Module):
         # 6. Intersection
         # Use face features and connectivity to obtain the edge latent
         self.intersector = getattr(mod, v_conf["intersector"])(500)
-        # self.intersector = Attn_intersector(500)
-        # self.intersector = Attn_intersector_classifier(500)
 
         # 7. Decoder
         # Get BSpline surfaces and edges based on the true latent code
@@ -945,6 +992,14 @@ class AutoEncoder(nn.Module):
             loss[key + "1"] = loss_edge[key]
             loss["total_loss"] += loss_edge[key]
 
+        # Compute model size and flops
+        # counter = FlopCounterMode(depth=999)
+        # with counter:
+        #     self.encoder(v_data)
+        # counter = FlopCounterMode(depth=999)
+        # with counter:
+        #     self.decoder(atten_face_edge_embeddings, intersected_edge_features)
+
         # Return
         if only_return_loss:
             return loss
@@ -979,6 +1034,7 @@ class AutoEncoder(nn.Module):
             "recon_edges"    : recon_edge_full,
             "face_embeddings": face_embeddings_return,
             }
+
         # Compute the true loss with the continuous points
         true_recon_face_loss = nn.functional.mse_loss(recon_face_full, v_data["face_points"], reduction='mean')
         loss["true_recon_face"] = true_recon_face_loss

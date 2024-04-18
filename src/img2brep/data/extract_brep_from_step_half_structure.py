@@ -1,14 +1,12 @@
 import os
 import queue
+import shutil
 from pathlib import Path
 
 import ray, trimesh
-import open3d as o3d
 import numpy as np
-import yaml
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
-from OCC.Core.NCollection import NCollection_Map
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX, TopAbs_WIRE
 from OCC.Core.GeomAbs import (GeomAbs_Circle, GeomAbs_Line, GeomAbs_BSplineCurve, GeomAbs_Ellipse,
                               GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone,
@@ -17,29 +15,30 @@ from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Extend.DataExchange import read_step_file
 from tqdm import tqdm
 import networkx as nx
-from shared.common_utils import *
-
-import igraph as ig
 
 import traceback, sys
 
-from src.img2brep.sample_points import sample_points_on_line, sample_points_on_plane, get_plane_points, \
-    sample_points_on_circle, sample_points_on_bspline
-
-from scipy.interpolate import BSpline
-
 write_debug_data = False
 data_root = Path(r"G:/Dataset/ABC/raw_data/abc_0000_obj_v00")
-# data_split = r"valid_planar_shapes_except_cube.txt"
-data_split = r"C:/repo/python/src/img2brep/data/deepcad_train_10000.txt"
-exception_files = [
-    r"C:/repo/python/src/img2brep/data/abc_multiple_component_or_few_faces_ids_.txt",
-    r"C:/repo/python/src/img2brep/data/abc_cube_ids.txt",
-    r"C:/repo/python/src/img2brep/data/abc_with_others_ids.txt",
-]
 output_root = Path(r"G:/Dataset/img2brep/deepcad_test")
+data_split = r"src/img2brep/data/deepcad_train_10000.txt"
+
+exception_files = [
+    r"src/img2brep/data/abc_multiple_component_or_few_faces_ids_.txt",
+    r"src/img2brep/data/abc_cube_ids.txt",
+    r"src/img2brep/data/abc_with_others_ids.txt",
+]
 
 num_max_primitives = 100000
+
+def check_dir(v_path):
+    if os.path.exists(v_path):
+        shutil.rmtree(v_path)
+    os.makedirs(v_path)
+
+def safe_check_dir(v_path):
+    if not os.path.exists(v_path):
+        os.makedirs(v_path)
 
 
 # @ray.remote(num_cpus=1)
@@ -74,9 +73,7 @@ def get_brep(v_root, output_root, v_folders):
             # Start to extract BREP
             shape = read_step_file(str(v_root / v_folder / step_file), verbosity=False)
             if shape.NbChildren() != 1:
-                print("Multiple components: {}; Jump over".format(v_folder))
-                shutil.rmtree(output_root / v_folder)
-                continue
+                raise ValueError("Multiple components: {}; Jump over".format(v_folder))
 
             # Function to explore and print the elements of a shape
             def explore_shape(shape, shape_type):
@@ -88,17 +85,17 @@ def get_brep(v_root, output_root, v_folders):
             # Explore and list faces, edges, and vertices
             face_dict = {}
             for face in explore_shape(shape, TopAbs_FACE):
-                if face not in face_dict and face.Reversed() not in face_dict:
+                if face not in face_dict:
                     face_dict[face] = len(face_dict)
             num_faces = len(face_dict)
             edge_dict = {}
             for edge in explore_shape(shape, TopAbs_EDGE):
-                if edge not in edge_dict and edge.Reversed() not in edge_dict:
+                if edge not in edge_dict:
                     edge_dict[edge] = len(edge_dict)
             num_edges = len(edge_dict)
             vertex_dict = {}
             for vertex in explore_shape(shape, TopAbs_VERTEX):
-                if vertex not in vertex_dict and vertex.Reversed() not in vertex_dict:
+                if vertex not in vertex_dict:
                     vertex_dict[vertex] = len(vertex_dict)
 
             # Sample points in face
@@ -156,80 +153,67 @@ def get_brep(v_root, output_root, v_folders):
 
             # (N, X) shows every loop with each face, -2 denotes a start token and pad with -1
             face_edge_loop = []
+            vertex_edge_connectivity = []
+            #
+            edge_face_look_up_table = {}
+            vertex_edge_look_up_table = {}
             for face in face_dict:
                 loops = []
-
                 for wire in explore_shape(face, TopAbs_WIRE):
                     loops.append(-2)
+                    local_vertex_edge_connectivity = []
                     for edge in explore_shape(wire, TopAbs_EDGE):
-                        if edge in edge_dict:
-                            loops.append(edge_dict[edge])
-                        elif edge.Reversed() in edge_dict:
-                            loops.append(edge_dict[edge.Reversed()])
-                        else:
+                        if edge not in edge_dict:
                             raise ValueError("Edge not in edge_dict")
+                        loops.append(edge_dict[edge])
+
+                        if edge not in edge_face_look_up_table:
+                            edge_face_look_up_table[edge] = [face]
+                        else:
+                            edge_face_look_up_table[edge].append(face)
+
+                        for idv, vertex in enumerate(explore_shape(edge, TopAbs_VERTEX)):
+                            if vertex not in vertex_dict:
+                                raise ValueError("Edge not in edge_dict")
+
+                            if vertex not in vertex_edge_look_up_table:
+                                vertex_edge_look_up_table[vertex] = [edge]
+                            else:
+                                vertex_edge_look_up_table[vertex].append(edge)
+
+                            if idv==1:
+                                local_vertex_edge_connectivity.append((vertex_dict[vertex], edge_dict[edge]))
+
+                    for idv in range(len(local_vertex_edge_connectivity)):
+                        vertex_edge_connectivity.append((
+                            local_vertex_edge_connectivity[idv][0],
+                            local_vertex_edge_connectivity[idv][1],
+                            local_vertex_edge_connectivity[(idv + 1) % len(local_vertex_edge_connectivity)][1]
+                        ))
+
                 face_edge_loop.append(loops)
 
-            edge_vertex_map = {}
-            # (L, 2) shows the index of curves to intersect with a vertex
-            vertex_edge_connectivity = []
-            for edge in edge_dict:
-                # Get vertices of the current edge
-                for vertex in explore_shape(edge, TopAbs_VERTEX):
-                    if vertex in edge_vertex_map:
-                        edge_vertex_map[vertex].append(edge)
-                    elif vertex.Reversed() in edge_vertex_map:
-                        edge_vertex_map[vertex.Reversed()].append(edge)
-                    else:
-                        edge_vertex_map[vertex] = [edge]
-            for vertex, edges in edge_vertex_map.items():
-                for i in range(len(edges)):
-                    for j in range(i + 1, len(edges)):
-                        id1 = edge_dict[edges[i]] if edges[i] in edge_dict else edge_dict[edges[i].Reversed()]
-                        id2 = edge_dict[edges[j]] if edges[j] in edge_dict else edge_dict[edges[j].Reversed()]
-                        id_vertex = vertex_dict[vertex] if vertex in vertex_dict else vertex_dict[vertex.Reversed()]
-                        if id1 == id2:
-                            continue
-                        if id1 < id2:
-                            vertex_edge_connectivity.append([id_vertex, id1, id2])
-                        elif id1 > id2:
-                            vertex_edge_connectivity.append([id_vertex, id2, id1])
-
-            vertex_edge_connectivity = list(set([tuple(item) for item in vertex_edge_connectivity]))
-            vertex_edge_connectivity = np.asarray(vertex_edge_connectivity, dtype=np.int32)
-
-            # (N, N) shows the adjacency of faces
-            face_connectivity = np.zeros((num_faces, num_faces), dtype=np.int8)
-            face_edge_map = {}
-            # (M, 2) shows the index of faces to intersect with an edge
             edge_face_connectivity = []
-            for face in face_dict:
-                # Get edges of the current face
-                for edge in explore_shape(face, TopAbs_EDGE):
-                    if edge in face_edge_map:
-                        face_edge_map[edge].append(face)
-                    elif edge.Reversed() in face_edge_map:
-                        face_edge_map[edge.Reversed()].append(face)
-                    else:
-                        face_edge_map[edge] = [face]
-            for item in face_edge_map:
-                if len(face_edge_map[item]) != 2:
-                    raise ValueError("Edge results by more than 2 faces.")
-            for edge, faces in face_edge_map.items():
-                id1 = face_dict[faces[0]] if faces[0] in face_dict else face_dict[faces[0].Reversed()]
-                id2 = face_dict[faces[1]] if faces[1] in face_dict else face_dict[faces[1].Reversed()]
-                id_edge = edge_dict[edge] if edge in edge_dict else edge_dict[edge.Reversed()]
-                if id1 > id2:
-                    id1, id2 = id2, id1
-                elif id1 == id2:
-                    continue
-                face_connectivity[id1, id2] = 1
-                face_connectivity[id2, id1] = 1
+            for edge in edge_face_look_up_table:
+                if edge.Reversed() not in edge_face_look_up_table:
+                    raise ValueError("Edge not in edge_face_look_up_table")
+                if len(edge_face_look_up_table[edge]) != 1:
+                    raise ValueError("Edge indexed by more than 1 faces.")
 
-                edge_face_connectivity.append([id_edge, id1, id2])
+                edge_face_connectivity.append((
+                    edge_dict[edge],
+                    face_dict[edge_face_look_up_table[edge][0]],
+                    face_dict[edge_face_look_up_table[edge.Reversed()][0]]
+                ))
 
-            edge_face_connectivity = list(set([tuple(item) for item in edge_face_connectivity]))
+            # Check
+            if len(edge_face_connectivity) != len(edge_dict):
+                raise ValueError("Wrong edge_face_connectivity")
+            # if len(vertex_edge_connectivity) != num_edges / 2 * (num_edges / 2 - 1):
+            #     raise ValueError("Wrong vertex_edge_connectivity")
+
             edge_face_connectivity = np.asarray(edge_face_connectivity, dtype=np.int32)
+            vertex_edge_connectivity = np.asarray(vertex_edge_connectivity, dtype=np.int32)
 
             max_length = max(len(lst) for lst in face_edge_loop)
             face_edge_loop = np.array(
@@ -241,7 +225,6 @@ def get_brep(v_root, output_root, v_folders):
                 'sample_points_faces': face_sample_points.astype(np.float32),
 
                 'face_edge_loop': face_edge_loop.astype(np.int64),
-                'face_adj': face_connectivity.astype(np.int8),
                 'edge_face_connectivity': edge_face_connectivity.astype(np.int64),
                 'vertex_edge_connectivity': vertex_edge_connectivity.astype(np.int64),
             }
@@ -251,6 +234,7 @@ def get_brep(v_root, output_root, v_folders):
             if not write_debug_data:
                 continue
 
+            import open3d as o3d
             # Check
             # Write face
             pc_model = o3d.geometry.PointCloud()
@@ -275,8 +259,10 @@ def get_brep(v_root, output_root, v_folders):
                 last_traceback = tb_list[-1]
                 f.write(v_folder + ": " + str(e) + "\n")
                 f.write(f"An error occurred on line {last_traceback.lineno} in {last_traceback.name}\n\n")
+                print(v_folder + ": " + str(e))
                 print(f"An error occurred on line {last_traceback.lineno} in {last_traceback.name}\n\n")
                 print(e)
+                shutil.rmtree(output_root / v_folder)
 
     for folder in single_loop_folder:
         with open(output_root / "single_loop.txt", "a") as f:
@@ -308,8 +294,8 @@ if __name__ == '__main__':
         ray.init(
             dashboard_host="0.0.0.0",
             dashboard_port=15000,
-            num_cpus=1,
-            local_mode=True
+            # num_cpus=1,
+            # local_mode=True
         )
         num_batches = 40
         batch_size = len(total_ids) // num_batches + 1

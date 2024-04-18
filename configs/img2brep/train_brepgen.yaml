@@ -18,7 +18,7 @@ trainer:
   #  batch_size: 4
 
   vis_recon_faces: true
-  train_autoregressive: true
+  train_autoregressive: false
 
   num_samples: -1
   max_epochs: 3000

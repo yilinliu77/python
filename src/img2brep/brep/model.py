@@ -63,48 +63,49 @@ class res_block_2D(nn.Module):
 ################### Encoder
 # 11137M FLOPS and 3719680 parameters
 class Continuous_encoder(nn.Module):
-    def __init__(self, dim_codebook_face=256, dim_codebook_edge=256, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__()
+        hidden_dim = 256
         self.face_encoder = nn.Sequential(
-            nn.Conv2d(3, 256, kernel_size=7, stride=1, padding=3),
+            nn.Conv2d(3, hidden_dim, kernel_size=7, stride=1, padding=3),
             Rearrange('b c h w -> b h w c'),
-            nn.LayerNorm(256),
+            nn.LayerNorm(hidden_dim),
             Rearrange('b h w c -> b c h w'),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2),
-            nn.Conv2d(256, 256, kernel_size=5, stride=1, padding=2),
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=5, stride=1, padding=2),
             Rearrange('b c h w -> b h w c'),
-            nn.LayerNorm(256),
+            nn.LayerNorm(hidden_dim),
             Rearrange('b h w c -> b c h w'),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2),
-            res_block_2D(256, 256, ks=3, st=1, pa=1),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.MaxPool2d(kernel_size=2, stride=2),
-            res_block_2D(256, 256, ks=3, st=1, pa=1),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
-            nn.Linear(256, dim_codebook_face)
+            nn.Linear(hidden_dim, hidden_dim)
         )
 
         self.edge_encoder = nn.Sequential(
-            nn.Conv1d(in_channels=3, out_channels=256, kernel_size=7, stride=1, padding=3),
+            nn.Conv1d(in_channels=3, out_channels=hidden_dim, kernel_size=7, stride=1, padding=3),
             Rearrange('b c h -> b h c'),
-            nn.LayerNorm(256),
+            nn.LayerNorm(hidden_dim),
             Rearrange('b h c -> b c h'),
             nn.ReLU(),
             nn.MaxPool1d(kernel_size=2, stride=2),
-            nn.Conv1d(in_channels=256, out_channels=256, kernel_size=5, stride=1, padding=2),
+            nn.Conv1d(in_channels=hidden_dim, out_channels=hidden_dim, kernel_size=5, stride=1, padding=2),
             Rearrange('b c h -> b h c'),
-            nn.LayerNorm(256),
+            nn.LayerNorm(hidden_dim),
             Rearrange('b h c -> b c h'),
             nn.ReLU(),
             nn.MaxPool1d(kernel_size=2, stride=2),
-            res_block_1D(256, 256, ks=3, st=1, pa=1),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.MaxPool1d(kernel_size=2, stride=2),
-            res_block_1D(256, 256, ks=3, st=1, pa=1),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.AdaptiveAvgPool1d(1),
             nn.Flatten(),
-            nn.Linear(256, dim_codebook_edge)
+            nn.Linear(256, hidden_dim)
         )
 
     def encode_face(self, v_data):
@@ -117,15 +118,21 @@ class Continuous_encoder(nn.Module):
         edge_mask = (edge_coords != -1).all(dim=-1).all(dim=-1)
         return self.edge_encoder(edge_coords[edge_mask].permute(0, 2, 1)), edge_mask
 
+    def encode_vertex(self, v_data):
+        vertex_coords = v_data["vertex_points"]
+        vertex_mask = (vertex_coords != -1).all(dim=-1).all(dim=-1)
+        return self.vertex_encoder(vertex_coords[vertex_mask].permute(0, 2, 1)), vertex_mask
+
     def forward(self, v_data):
         face_coords, face_mask = self.encode_face(v_data)
         edge_coords, edge_mask = self.encode_edge(v_data)
-        return face_coords, edge_coords, face_mask, edge_mask
+        vertex_coords, vertex_mask = self.encode_vertex(v_data)
+        return face_coords, edge_coords, vertex_coords, face_mask, edge_mask, vertex_mask
 
 
 # 57196M FLOPS and 4982400 parameters
 class Discrete_encoder(Continuous_encoder):
-    def __init__(self, dim_codebook_face=256, dim_codebook_edge=256,
+    def __init__(self,
                  bbox_discrete_dim=64,
                  coor_discrete_dim=64,
                  ):
@@ -141,7 +148,7 @@ class Discrete_encoder(Continuous_encoder):
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, dim_codebook_face)
+            nn.Linear(hidden_dim, hidden_dim)
         )
 
         self.face_encoder = nn.Sequential(
@@ -156,7 +163,7 @@ class Discrete_encoder(Continuous_encoder):
             res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
-            nn.Linear(hidden_dim, dim_codebook_face)
+            nn.Linear(hidden_dim, hidden_dim)
         )
 
         self.face_fuser = nn.Sequential(
@@ -180,7 +187,7 @@ class Discrete_encoder(Continuous_encoder):
             res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.AdaptiveAvgPool1d(1),
             nn.Flatten(),
-            nn.Linear(hidden_dim, dim_codebook_edge)
+            nn.Linear(hidden_dim, hidden_dim)
         )
 
         self.edge_fuser = nn.Sequential(
@@ -190,6 +197,17 @@ class Discrete_encoder(Continuous_encoder):
             nn.Linear(hidden_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU(),
+        )
+
+        self.vertex_encoder = nn.Sequential(
+            Rearrange('b c -> b c 1'),
+            nn.Conv1d(3 * 64, hidden_dim, kernel_size=1, stride=1, padding=0),
+            Rearrange('b c h -> b h c'),
+            nn.LayerNorm(hidden_dim),
+            Rearrange('b h c -> b c h'),
+            nn.ReLU(),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
         )
 
     def encode_face(self, v_data):
@@ -227,6 +245,16 @@ class Discrete_encoder(Continuous_encoder):
         edge_features = self.edge_fuser(edge_coords_features + edge_bbox_features)
 
         return edge_features, edge_mask
+
+    def encode_vertex(self, v_data):
+        vertex_coords = v_data["discrete_vertex_points"]
+        vertex_mask = (vertex_coords != -1).all(dim=-1)
+
+        flatten_vertex_coords = vertex_coords[vertex_mask]
+
+        vertex_coords = rearrange(self.coords_embedding(flatten_vertex_coords), "... h d c -> ... h (d c)")
+        vertex_coords_features = self.vertex_encoder(vertex_coords)[...,0]
+        return vertex_coords_features, vertex_mask
 
 
 ################### Decoder
@@ -755,21 +783,85 @@ class Attn_intersector_classifier(Intersector):
         return torch.sigmoid(self.classifier(v_features))[:, 0] > 0.5
 
 
-################### Fuser
-### Add edge features to the corresponding faces
-class Fuser(nn.Module):
+
+### Add vertex features to the corresponding edges through cross attention
+class Attn_fuser_vertex_edge(nn.Module):
     def __init__(self):
         super().__init__()
-
+        hidden_dim = 256
+        self.atten = nn.ModuleList([
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
+        ])
         pass
 
-    def forward(self, v_face_edge_loop, v_face_mask,
-                v_edge_embedding, v_face_embedding):
-        return
+    def forward(self, v_vertex_embeddings, v_edge_embeddings, v_vertex_edge_connectivity):
+        num_vertices, _ = v_vertex_embeddings.shape
+        num_edges, _ = v_edge_embeddings.shape
+        edge_vertex_attn_mask = torch.ones(
+            num_edges, num_vertices, device=v_vertex_embeddings.device, dtype=torch.bool
+        )
+        edge_vertex_attn_mask[v_vertex_edge_connectivity[:, 1], v_vertex_edge_connectivity[:, 0]]=False
+        edge_vertex_attn_mask[v_vertex_edge_connectivity[:, 2], v_vertex_edge_connectivity[:, 0]]=False
 
+        x = v_edge_embeddings
+        for layer in self.atten:
+            if isinstance(layer, nn.LayerNorm):
+                x = layer(x)
+            else:
+                out, weights = layer(
+                    query=x,
+                    key=v_vertex_embeddings,
+                    value=v_vertex_embeddings,
+                    attn_mask=edge_vertex_attn_mask,
+                )
+                x = x + out
+
+        return x
+
+
+
+### Add vertex features to the corresponding edges through cross attention
+class Attn_fuser_edge_face(nn.Module):
+    def __init__(self):
+        super().__init__()
+        hidden_dim = 256
+        self.atten = nn.ModuleList([
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
+            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
+            nn.LayerNorm(hidden_dim),
+        ])
+        pass
+
+    def forward(self, v_edge_embeddings, v_face_embeddings, v_edge_face_connectivity):
+        num_edges, _ = v_edge_embeddings.shape
+        num_faces, _ = v_face_embeddings.shape
+        face_edge_attn_mask = torch.ones(
+            num_faces, num_edges, device=v_face_embeddings.device, dtype=torch.bool
+        )
+        face_edge_attn_mask[v_edge_face_connectivity[:, 1], v_edge_face_connectivity[:, 0]]=False
+        face_edge_attn_mask[v_edge_face_connectivity[:, 2], v_edge_face_connectivity[:, 0]]=False
+
+        x = v_face_embeddings
+        for layer in self.atten:
+            if isinstance(layer, nn.LayerNorm):
+                x = layer(x)
+            else:
+                out, weights = layer(
+                    query=x,
+                    key=v_edge_embeddings,
+                    value=v_edge_embeddings,
+                    attn_mask=face_edge_attn_mask,
+                )
+                x = x + out
+
+        return x
 
 ### Add edge features to the corresponding faces through cross attention
-class Attn_fuser(Fuser):
+class Attn_fuser(nn.Module):
     def __init__(self):
         super().__init__()
         hidden_dim = 256
@@ -915,7 +1007,6 @@ class AutoEncoder(nn.Module):
         # Out: `dim_codebook_edge` and `dim_codebook_face`
         mod = importlib.import_module('src.img2brep.brep.model')
         self.encoder = getattr(mod, v_conf["encoder"])(
-            dim_codebook_face=dim_codebook_face,
             bbox_discrete_dim=v_conf["bbox_discrete_dim"],
             coor_discrete_dim=v_conf["coor_discrete_dim"],
         )
@@ -933,10 +1024,9 @@ class AutoEncoder(nn.Module):
         self.edge_fuser = Self_atten()
 
         # 4. Fuser to distribute edge features to the corresponding face
-        # Inject edge features to the corresponding face
-        # This is the true latent code we want to obtain during the generation
-        # self.fuser_edges_to_faces = Simple_fuser()
-        self.fuser_edges_to_faces = Attn_fuser()
+        # self.fuser_edges_to_faces = Attn_fuser()
+        self.fuser_edges_to_faces = Attn_fuser_edge_face()
+        self.fuser_vertices_to_edges = Attn_fuser_vertex_edge()
 
         # 5. GCN to distribute edge features to the nearby faces
         # Out: curr_dim
@@ -991,67 +1081,69 @@ class AutoEncoder(nn.Module):
                 return_face_features=False,
                 return_true_loss=False,
                 **kwargs):
-        # 1. Encode the edge and face points
-        face_embeddings, edge_embeddings, face_mask, edge_mask = self.encoder(v_data)
+        # ================== Encode the edge and face points ==================
+        face_embeddings, edge_embeddings, vertex_embeddings, face_mask, edge_mask, vertex_mask = self.encoder(v_data)
 
-        # 2. GCN on edges and self-attention
-        v_vertex_edge_connectivity = v_data["vertex_edge_connectivity"]
-
-        # Solve the edge_face_connectivity: last two dimension (id_edge)
+        # ================== Prepare data for flattened features ==================
         edge_index_offsets = reduce(edge_mask.long(), 'b ne -> b', 'sum')
         edge_index_offsets = F.pad(edge_index_offsets.cumsum(dim=0), (1, -1), value=0)
-
-        vertex_edge_connectivity_valid = (v_vertex_edge_connectivity != -1).all(dim=-1)
-        vertex_edge_connectivity = v_vertex_edge_connectivity.clone()
-        vertex_edge_connectivity[..., 1:] += edge_index_offsets[:, None, None]
-
-        # Solve the edge_face_connectivity: first (id_vertex)
-        vertex_mask = (v_data["discrete_vertex_points"] != -1).all(dim=-1)
+        face_index_offsets = reduce(face_mask.long(), 'b ne -> b', 'sum')
+        face_index_offsets = F.pad(face_index_offsets.cumsum(dim=0), (1, -1), value=0)
         vertex_index_offsets = reduce(vertex_mask.long(), 'b ne -> b', 'sum')
         vertex_index_offsets = F.pad(vertex_index_offsets.cumsum(dim=0), (1, -1), value=0)
-        vertex_edge_connectivity[..., 0:1] += vertex_index_offsets[:, None, None]
 
+        vertex_edge_connectivity = v_data["vertex_edge_connectivity"].clone()
+        vertex_edge_connectivity_valid = (vertex_edge_connectivity != -1).all(dim=-1)
+        # Solve the vertex_edge_connectivity: last two dimension (id_edge)
+        vertex_edge_connectivity[..., 1:] += edge_index_offsets[:, None, None]
+        # Solve the edge_face_connectivity: first (id_vertex)
+        vertex_edge_connectivity[..., 0:1] += vertex_index_offsets[:, None, None]
         vertex_edge_connectivity = vertex_edge_connectivity[vertex_edge_connectivity_valid]
 
-        edge_embeddings_gcn = self.gcn_on_edges(edge_embeddings,
+        edge_face_connectivity = v_data["edge_face_connectivity"].clone()
+        edge_face_connectivity_valid = (edge_face_connectivity != -1).all(dim=-1)
+        # Solve the edge_face_connectivity: last two dimension (id_face)
+        edge_face_connectivity[..., 1:] += face_index_offsets[:, None, None]
+        # Solve the edge_face_connectivity: first dimension (id_edge)
+        edge_face_connectivity[..., 0] += edge_index_offsets[:, None]
+        edge_face_connectivity = edge_face_connectivity[edge_face_connectivity_valid]
+
+        # ================== Fuse vertex features to the corresponding edges ==================
+        edge_vertex_embeddings = self.fuser_vertices_to_edges(
+            v_vertex_embeddings=vertex_embeddings,
+            v_edge_embeddings=edge_embeddings,
+            v_vertex_edge_connectivity=vertex_edge_connectivity
+        )
+
+        # ================== GCN and self-attention on edges ==================
+        edge_embeddings_gcn = self.gcn_on_edges(edge_vertex_embeddings,
                                                 vertex_edge_connectivity[..., 1:].permute(1, 0))
         atten_edge_embeddings = self.edge_fuser(edge_embeddings_gcn, edge_mask)
 
-        # 3. fuse edges features to the corresponding faces
-        face_edge_loop = v_data["face_edge_loop"].clone()
-        original_1 = face_edge_loop == -1
-        original_2 = face_edge_loop == -2
-        face_edge_loop += edge_index_offsets[:, None, None]
-        face_edge_loop[original_1] = -1
-        face_edge_loop[original_2] = -2
+        # ================== fuse edges features to the corresponding faces ==================
+        pass
+        # face_edge_loop = v_data["face_edge_loop"].clone()
+        # original_1 = face_edge_loop == -1
+        # original_2 = face_edge_loop == -2
+        # face_edge_loop += edge_index_offsets[:, None, None]
+        # face_edge_loop[original_1] = -1
+        # face_edge_loop[original_2] = -2
         face_edge_embeddings = self.fuser_edges_to_faces(
-            v_face_edge_loop=face_edge_loop,
-            v_face_mask=face_mask,
-            v_edge_embedding=atten_edge_embeddings,
-            v_face_embedding=face_embeddings
+            # v_face_edge_loop=face_edge_loop,
+            # v_face_mask=face_mask,
+            v_edge_face_connectivity=edge_face_connectivity,
+            v_edge_embeddings=atten_edge_embeddings,
+            v_face_embeddings=face_embeddings
         )
 
-        # 4. GCN on faces and self-attention
-        edge_face_connectivity = v_data["edge_face_connectivity"].clone()
-        edge_face_connectivity_valid = (edge_face_connectivity != -1).all(dim=-1)
-        edge_index_offsets = reduce(edge_mask.long(), 'b ne -> b', 'sum')
-        edge_index_offsets = F.pad(edge_index_offsets.cumsum(dim=0), (1, -1), value=0)
-        edge_face_connectivity[..., 0] += edge_index_offsets[:, None]
-
-        # Solve the edge_face_connectivity: last two dimension (id_face)
-        face_index_offsets = reduce(face_mask.long(), 'b ne -> b', 'sum')
-        face_index_offsets = F.pad(face_index_offsets.cumsum(dim=0), (1, -1), value=0)
-        edge_face_connectivity[..., 1:] += face_index_offsets[:, None, None]
-        edge_face_connectivity[~edge_face_connectivity_valid] = -1
-        edge_face_connectivity = edge_face_connectivity[edge_face_connectivity_valid]
-
+        # ================== GCN and self-attention on faces  ==================
         face_edge_embeddings_gcn = self.gcn_on_faces(face_edge_embeddings,
                                                      edge_face_connectivity[..., 1:].permute(1, 0),
                                                      edge_attr=atten_edge_embeddings[edge_face_connectivity[..., 0]])
 
-        atten_face_edge_embeddings = self.face_fuser(face_edge_embeddings_gcn, face_mask)
+        atten_face_edge_embeddings = self.face_fuser(face_edge_embeddings_gcn, face_mask) # This is the true latent
 
-        # Intersection
+        # ================== Intersection  ==================
         face_adj = v_data["face_adj"]
         edge_adj = v_data["edge_adj"]
         inter_edge_features, inter_edge_null_features, inter_vertex_features, inter_vertex_null_features = self.intersector(
@@ -1062,14 +1154,14 @@ class AutoEncoder(nn.Module):
             edge_adj, edge_mask,
         )
 
-        # Normal decoding
-        edge_data = self.decoder.decode_edge(atten_edge_embeddings)
+        # ================== Decoding  ==================
+        vertex_data = self.decoder.decode_vertex(vertex_embeddings) # Normal decoding vertex
+        edge_data = self.decoder.decode_edge(atten_edge_embeddings) # Normal decoding edges
         # Decode with intersection feature
         recon_data = self.decoder(
             atten_face_edge_embeddings,
             inter_edge_features,
             inter_vertex_features,
-
         )
 
         loss = {}
@@ -1100,6 +1192,13 @@ class AutoEncoder(nn.Module):
             for key in loss_edge:
                 loss[key + "1"] = loss_edge[key]
                 loss["total_loss"] += loss_edge[key]
+
+            loss_vertex = self.decoder.loss_vertex(
+                vertex_data, v_data, vertex_mask,
+                torch.arange(vertex_embeddings.shape[0]))
+            for key in loss_vertex:
+                loss[key + "1"] = loss_vertex[key]
+                loss["total_loss"] += loss_vertex[key]
 
         # Compute model size and flops
         # counter = FlopCounterMode(depth=999)

@@ -569,13 +569,14 @@ class Intersector(nn.Module):
         edge_embeddings1_idx = zero_positions[:, [0, 1]]
         edge_embeddings2_idx = zero_positions[:, [0, 2]]
 
-        edge_embeddings1 = edge_embeddings[edge_embeddings1_idx[:, 0], edge_embeddings1_idx[:, 1], :]
-        edge_embeddings2 = edge_embeddings[edge_embeddings2_idx[:, 0], edge_embeddings2_idx[:, 1], :]
-        null_intersection = torch.stack([edge_embeddings1, edge_embeddings2], dim=1)
+        if self.num_max_items is not None and edge_embeddings1_idx.shape[0] > self.num_max_items:
+            indices = torch.randperm(edge_embeddings1_idx.shape[0])[:self.num_max_items]
+        else:
+            indices = torch.arange(edge_embeddings1_idx.shape[0])
 
-        if self.num_max_items is not None and null_intersection.shape[0] > self.num_max_items:
-            indices = torch.randperm(null_intersection.shape[0])[:self.num_max_items]
-            null_intersection = null_intersection[indices]
+        edge_embeddings1 = edge_embeddings[edge_embeddings1_idx[indices, 0], edge_embeddings1_idx[indices, 1], :]
+        edge_embeddings2 = edge_embeddings[edge_embeddings2_idx[indices, 0], edge_embeddings2_idx[indices, 1], :]
+        null_intersection = torch.stack([edge_embeddings1, edge_embeddings2], dim=1)
 
         return intersection_embedding, null_intersection
 
@@ -596,15 +597,15 @@ class Intersector(nn.Module):
         face_embeddings1_idx = zero_positions[:, [0, 1]]
         face_embeddings2_idx = zero_positions[:, [0, 2]]
 
-        # False itersection
-        face_embeddings1 = face_embeddings[face_embeddings1_idx[:, 0], face_embeddings1_idx[:, 1], :]
-        face_embeddings2 = face_embeddings[face_embeddings2_idx[:, 0], face_embeddings2_idx[:, 1], :]
+        if self.num_max_items is not None and face_embeddings1_idx.shape[0] > self.num_max_items:
+            indices = torch.randperm(face_embeddings1_idx.shape[0])[:self.num_max_items]
+        else:
+            indices = torch.arange(face_embeddings1_idx.shape[0])
+
+        # False intersection
+        face_embeddings1 = face_embeddings[face_embeddings1_idx[indices, 0], face_embeddings1_idx[indices, 1], :]
+        face_embeddings2 = face_embeddings[face_embeddings2_idx[indices, 0], face_embeddings2_idx[indices, 1], :]
         null_intersection_embedding = torch.stack([face_embeddings1, face_embeddings2], dim=1)
-
-        if self.num_max_items is not None and null_intersection_embedding.shape[0] > self.num_max_items:
-            indices = torch.randperm(null_intersection_embedding.shape[0])[:self.num_max_items]
-            null_intersection_embedding = null_intersection_embedding[indices]
-
         return intersection_embedding, null_intersection_embedding
 
     def forward(self, v_face_embeddings,

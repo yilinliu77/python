@@ -1,6 +1,8 @@
 dataset:
-  #  root: H:\Data\img2brep\deepcad_10000
-  root: G:/Dataset/img2brep/deepcad_10000/main_data
+  #  train_dataset: G:/Dataset/img2brep/deepcad_10000_v2
+  train_dataset: G:/Dataset/img2brep/deepcad_10000/main_data
+  val_dataset: G:/Dataset/img2brep/deepcad_10000/main_data
+  test_dataset: G:/Dataset/img2brep/deepcad_10000_v2
   dataset_name: ABC
   overfit: true
   tokenized_batch_size: 16
@@ -18,17 +20,17 @@ trainer:
   #  batch_size: 4
 
   vis_recon_faces: true
-  train_autoregressive: true
+  train_autoregressive: false
 
   num_samples: -1
   max_epochs: 10000000
 
   spawn: false
-  resume_from_checkpoint: #G:\workplace\python_server\python\src\img2brep\brep\outputs_img2brep\2024_04_21_21_19_10\tb_logs_brepgen\transformer\version_0\checkpoints\last.ckpt
+  resume_from_checkpoint:
   evaluate: false
   output: .
 
-  check_val_every_n_epoch: 100
+  check_val_every_n_epoch: 10
   #  accelerator: "16-mixed"
   accelerator: "32-true"
 

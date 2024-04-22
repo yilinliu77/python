@@ -1,5 +1,4 @@
 import os
-import queue
 import shutil
 from pathlib import Path
 
@@ -13,9 +12,6 @@ from OCC.Core.GeomAbs import (GeomAbs_Circle, GeomAbs_Line, GeomAbs_BSplineCurve
                               GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BSplineSurface)
 from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Extend.DataExchange import read_step_file
-from tqdm import tqdm
-import networkx as nx
-
 import traceback, sys
 
 write_debug_data = False

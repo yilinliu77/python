@@ -1,5 +1,7 @@
 import sys
+from tqdm import tqdm
 
+from shared.common_utils import check_dir
 from src.img2brep.brep.autoregressive import AutoregressiveModel
 
 sys.path.append('../../../')
@@ -37,7 +39,6 @@ class TrainAutoEncoder(pl.LightningModule):
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
         self.num_worker = self.hydra_conf["trainer"]["num_worker"]
         self.dataset_name = self.hydra_conf["dataset"]["dataset_name"]
-        self.dataset_path = self.hydra_conf["dataset"]["root"]
 
         self.vis_recon_faces = self.hydra_conf["trainer"]["vis_recon_faces"]
 
@@ -90,7 +91,8 @@ class TrainAutoEncoder(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         data = batch
 
-        loss = self.model(data, only_return_loss=True)
+        loss, data = self.model(data, return_loss=True,
+                                return_recon=False, return_face_features=False, return_true_loss=False)
         total_loss = loss["total_loss"]
         for key in loss:
             if key == "total_loss":
@@ -106,7 +108,8 @@ class TrainAutoEncoder(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         data = batch
 
-        loss, recon_data = self.model(data, only_return_loss=False)
+        loss, recon_data = self.model(data, return_loss=True,
+                                      return_recon=True, return_face_features=False, return_true_loss=True)
         total_loss = loss["total_loss"]
         for key in loss:
             if key == "total_loss":
@@ -119,37 +122,43 @@ class TrainAutoEncoder(pl.LightningModule):
         if batch_idx == 0:
             # recon_edges, recon_faces = self.model.inference(recon_data["face_embeddings"])
             self.viz["face_points"] = data["face_points"].cpu().numpy()
-            self.viz["line_points"] = data["edge_points"].cpu().numpy()
-            # self.viz["reconstructed_edges"] = recon_edges.cpu().numpy()
-            # self.viz["reconstructed_faces"] = recon_faces.cpu().numpy()
+            self.viz["edge_points"] = data["edge_points"].cpu().numpy()
+            self.viz["vertex_points"] = data["vertex_points"].cpu().numpy()
             self.viz["recon_faces"] = recon_data["recon_faces"].cpu().numpy()
             self.viz["recon_edges"] = recon_data["recon_edges"].cpu().numpy()
+            self.viz["recon_vertices"] = recon_data["recon_vertices"].cpu().numpy()
 
         return total_loss
 
     def on_validation_epoch_end(self):
         # if self.trainer.sanity_checking:
         #     return
-
-        v_gt_edges = self.viz["line_points"]
+        v_gt_vertices = self.viz["vertex_points"]
+        v_gt_edges = self.viz["edge_points"]
         v_gt_faces = self.viz["face_points"]
+        v_recon_vertices = self.viz["recon_vertices"]
         v_recon_edges = self.viz["recon_edges"]
         v_recon_faces = self.viz["recon_faces"]
 
         for idx in range(min(v_gt_edges.shape[0], 4)):
+            gt_vertices = v_gt_vertices[idx]
             gt_edges = v_gt_edges[idx]
             gt_faces = v_gt_faces[idx]
+            recon_vertices = v_recon_vertices[idx]
             recon_edges = v_recon_edges[idx]
             recon_faces = v_recon_faces[idx]
 
-            valid_flag = (gt_edges != -1).all(axis=-1).all(axis=-1)
-            gt_edges = gt_edges[valid_flag]
-            valid_flag = (recon_edges != -1).all(axis=-1).all(axis=-1)
-            recon_edges = recon_edges[valid_flag]
-            valid_flag = (gt_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)
-            gt_faces = gt_faces[valid_flag]
-            valid_flag = (recon_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)
-            recon_faces = recon_faces[valid_flag]
+            gt_edges = gt_edges[(gt_edges != -1).all(axis=-1).all(axis=-1)]
+            recon_edges = recon_edges[(recon_edges != -1).all(axis=-1).all(axis=-1)]
+            gt_faces = gt_faces[(gt_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)]
+            recon_faces = recon_faces[(recon_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)]
+            gt_vertices = gt_vertices[(gt_vertices != -1).all(axis=-1)]
+            recon_vertices = recon_vertices[(recon_vertices != -1).all(axis=-1)]
+
+            vertex_points = np.concatenate((gt_vertices, recon_vertices), axis=0).reshape(-1, 3)
+            vertex_colors = np.concatenate(
+                    (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_vertices.shape[0], axis=0),
+                        np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_vertices.shape[0], axis=0)), axis=0)
 
             edge_points = np.concatenate((gt_edges, recon_edges), axis=0).reshape(-1, 3)
             edge_colors = np.concatenate(
@@ -162,6 +171,11 @@ class TrainAutoEncoder(pl.LightningModule):
                      np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_faces.shape[0] * 400, axis=0)), axis=0)
 
             pc = o3d.geometry.PointCloud()
+            pc.points = o3d.utility.Vector3dVector(vertex_points)
+            pc.colors = o3d.utility.Vector3dVector(vertex_colors / 255.0)
+            o3d.io.write_point_cloud(
+                    str(self.log_root / f"{self.trainer.current_epoch:05}_idx_{idx:02}_viz_vertices.ply"), pc)
+
             pc.points = o3d.utility.Vector3dVector(edge_points)
             pc.colors = o3d.utility.Vector3dVector(edge_colors / 255.0)
             o3d.io.write_point_cloud(
@@ -172,6 +186,90 @@ class TrainAutoEncoder(pl.LightningModule):
             o3d.io.write_point_cloud(
                     str(self.log_root / f"{self.trainer.current_epoch:05}_idx_{idx:02}_viz_faces.ply"), pc)
         return
+
+    def test_dataloader(self):
+        self.test_dataset = Autoencoder_Dataset("testing", self.hydra_conf["dataset"], )
+
+        return DataLoader(self.test_dataset, batch_size=1,
+                          collate_fn=Autoencoder_Dataset.collate_fn,
+                          shuffle=False,
+                          num_workers=self.hydra_conf["trainer"]["num_worker"],
+                          )
+
+    def test_step(self, batch, batch_idx):
+        data = batch
+
+        loss, recon_data = self.model(data, return_loss=True,
+                                      return_recon=True, return_face_features=True, return_true_loss=True)
+        face_embeddings = recon_data["face_embeddings"]
+        inferenced_vertices, inferenced_edges, inferenced_faces = self.model.inference(face_embeddings)
+        total_loss = loss["total_loss"]
+        for key in loss:
+            if key == "total_loss":
+                continue
+            self.log(f"Test_{key}", loss[key], prog_bar=True, logger=False, on_step=False, on_epoch=True,
+                     batch_size=self.batch_size)
+        self.log("Test_Loss", total_loss, prog_bar=True, logger=False, on_step=False, on_epoch=True,
+                 batch_size=self.batch_size)
+
+        if batch_idx == 0:
+            self.viz = {
+                "prefixes": [],
+                "gt_face_points": [],
+                "gt_edge_points": [],
+                "gt_vertex_points": [],
+
+                "pred_face_points": [],
+                "pred_edge_points": [],
+                "pred_vertex_points": [],
+            }
+
+        prefix = data["v_prefix"][0]
+        gt_face = data["face_points"].cpu().numpy()
+        gt_edge_point = data["edge_points"].cpu().numpy()
+        gt_vertex = data["vertex_points"].cpu().numpy()
+        pred_face = inferenced_faces.cpu().numpy()
+        pred_edge_point = inferenced_edges.cpu().numpy()
+        pred_vertex = inferenced_vertices.cpu().numpy()
+
+        root = Path(r"G:/Dataset/img2brep/test_temp")
+        check_dir(root / prefix)
+        pc = o3d.geometry.PointCloud()
+        pc.points = o3d.utility.Vector3dVector(np.concatenate(
+            (gt_face.reshape(-1, 3), pred_face.reshape(-1, 3)), axis=0))
+        pc.colors = o3d.utility.Vector3dVector(np.concatenate((
+            np.repeat(np.array([[255, 0, 0]], dtype=np.uint8),
+                      gt_face.reshape(-1, 3).shape[0], axis=0),
+            np.repeat(np.array([[0, 255, 0]], dtype=np.uint8),
+                      pred_face.reshape(-1, 3).shape[0], axis=0)),
+            axis=0) / 255.0)
+        o3d.io.write_point_cloud(str(root / prefix / f"face.ply"), pc)
+
+        pc.points = o3d.utility.Vector3dVector(np.concatenate(
+            (gt_edge_point.reshape(-1, 3), pred_edge_point.reshape(-1, 3)), axis=0))
+        pc.colors = o3d.utility.Vector3dVector(np.concatenate((
+            np.repeat(np.array([[255, 0, 0]], dtype=np.uint8),
+                      gt_edge_point.reshape(-1, 3).shape[0], axis=0),
+            np.repeat(np.array([[0, 255, 0]], dtype=np.uint8),
+                      pred_edge_point.reshape(-1, 3).shape[0], axis=0)),
+            axis=0) / 255.0)
+        o3d.io.write_point_cloud(str(root / prefix / f"edge.ply"), pc)
+
+        pc.points = o3d.utility.Vector3dVector(np.concatenate(
+            (gt_vertex.reshape(-1, 3), pred_vertex.reshape(-1, 3)), axis=0))
+        pc.colors = o3d.utility.Vector3dVector(np.concatenate((
+            np.repeat(np.array([[255, 0, 0]], dtype=np.uint8),
+                      gt_vertex.reshape(-1, 3).shape[0], axis=0),
+            np.repeat(np.array([[0, 255, 0]], dtype=np.uint8),
+                      pred_vertex.reshape(-1, 3).shape[0], axis=0)),
+            axis=0) / 255.0)
+        o3d.io.write_point_cloud(str(root / prefix / f"vertex.ply"), pc)
+        return
+
+    def on_test_end(self) -> None:
+        for key in self.trainer.callback_metrics:
+            print("{}: {:.5f}".format(key, self.trainer.callback_metrics[key].cpu().numpy().item()))
+
 
 
 class TrainAutoregressiveModel(pl.LightningModule):

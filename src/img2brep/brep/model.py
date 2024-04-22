@@ -431,14 +431,8 @@ class Discrete_decoder(Small_decoder):
             "edge_bbox_logits"  : edge_bbox_logits,
             }
 
-    def cross_entropy_loss(self, pred, gt, is_blur=True):
-        if not is_blur:
-            return nn.functional.cross_entropy(pred, gt, reduction='mean')
-        else:
-            pred_log_prob = pred.log_softmax(dim=-1)
-            gt = nn.functional.one_hot(gt, num_classes=pred.shape[-1])
-            gt = gaussian_blur_1d(gt.float(), sigma=0.3, guassian_kernel_width=5)
-            return -torch.sum(gt * pred_log_prob) / pred.shape[0]
+    def cross_entropy_loss(self, pred, gt):
+        return nn.functional.cross_entropy(pred, gt, reduction='mean')
 
     def cross_entropy_loss_with_blur(self, pred, gt, bin_smooth_blur_sigma=0.3, guassian_kernel_width=5):
         pred_log_prob = pred.log_softmax(dim=-1)
@@ -640,7 +634,6 @@ class Attn_intersector_classifier(Intersector):
             nn.LayerNorm(hidden_dim),
             nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
             nn.LayerNorm(hidden_dim),
-
             ])
         self.intersection_token = nn.Parameter(torch.rand(hidden_dim))
 

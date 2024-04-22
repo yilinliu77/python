@@ -23,6 +23,8 @@ from torch.nn.utils.rnn import pad_sequence
 
 import torch.nn.functional as F
 
+from src.img2brep.brep.model import AutoEncoder
+
 
 def get_face_idx_sequence(edge_face_connectivity, face_points):
     G = nx.Graph()
@@ -228,7 +230,7 @@ class Autoregressive_Dataset(torch.utils.data.Dataset):
                              os.path.isdir(os.path.join(self.dataset_path, folder))]
         self.data_folders.sort()
 
-        self.data_folders = self.data_folders[0:10]
+        self.data_folders = self.data_folders
 
         self.src_data_sum = len(self.data_folders)
 

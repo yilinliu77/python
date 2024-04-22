@@ -1,5 +1,5 @@
 dataset:
-#  root: H:\Data\img2brep\deepcad_10000
+  #  root: H:\Data\img2brep\deepcad_10000
   root: G:/Dataset/img2brep/deepcad_10000/main_data
   dataset_name: ABC
   overfit: true
@@ -11,8 +11,8 @@ trainer:
   learning_rate: 1e-4
 
   gpu: 1
-  num_worker: 0
-  batch_size: 4
+  num_worker: 4
+  batch_size: 8
   #  gpu: [ 0, 1 ]
   #  num_worker: 4
   #  batch_size: 4
@@ -21,10 +21,10 @@ trainer:
   train_autoregressive: true
 
   num_samples: -1
-  max_epochs: 3000
+  max_epochs: 10000000
 
   spawn: false
-  resume_from_checkpoint: G:\workplace\python_server\python\src\img2brep\brep\outputs_img2brep\2024_04_18_11_07_56\tb_logs_brepgen\transformer\version_0\checkpoints\epoch=2999-step=9000.ckpt
+  resume_from_checkpoint: #G:\workplace\python_server\python\src\img2brep\brep\outputs_img2brep\2024_04_21_21_19_10\tb_logs_brepgen\transformer\version_0\checkpoints\last.ckpt
   evaluate: false
   output: .
 
@@ -34,16 +34,16 @@ trainer:
 
 model:
   #  intersector: "Attn_intersector"
-#  intersector: "Attn_intersector_classifier"
-  intersector: "Proj_intersector"
+  intersector: "Attn_intersector_classifier"
+  #  intersector: "Proj_intersector"
 
-  encoder: "Continuous_encoder"
-  decoder: "Small_decoder_plus"
+  #  encoder: "Continuous_encoder"
+  #  decoder: "Small_decoder_plus"
 
-#  encoder: "Discrete_encoder"
-#  decoder: "Discrete_decoder"
+  encoder: "Discrete_encoder"
+  decoder: "Discrete_decoder"
 
-  checkpoint_autoencoder: G:\workplace\python_server\python\src\img2brep\brep\outputs_img2brep\2024_04_17_15_08_57\tb_logs_brepgen\autoencoder\version_0\checkpoints\epoch=2899-step=8700.ckpt
+  checkpoint_autoencoder: G:\workplace\python_server\python\src\img2brep\brep\outputs_img2brep\2024_04_17_15_08_57\tb_logs_brepgen\autoencoder\version_0\checkpoints\last.ckpt
   bbox_discrete_dim: 256
   coor_discrete_dim: 128
 

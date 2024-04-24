@@ -1,35 +1,32 @@
 dataset:
   #  train_dataset: G:/Dataset/img2brep/deepcad_10000_v2
-  train_dataset: G:/Dataset/img2brep/deepcad_10000/main_data
-  val_dataset: G:/Dataset/img2brep/deepcad_10000/main_data
+  train_dataset: G:/Dataset/img2brep/deepcad_10000_v2
+  val_dataset: G:/Dataset/img2brep/deepcad_10000_v2
   test_dataset: G:/Dataset/img2brep/deepcad_10000_v2
   dataset_name: ABC
-  overfit: true
-  tokenized_batch_size: 16
   bbox_discrete_dim: 256
   coor_discrete_dim: 128
+  num_max_faces: 36
+  length_scaling_factors: 100
 
 trainer:
   learning_rate: 1e-4
 
   gpu: 1
-  num_worker: 4
-  batch_size: 8
+  num_worker: 0
+  batch_size: 256
   #  gpu: [ 0, 1 ]
   #  num_worker: 4
   #  batch_size: 4
 
-  vis_recon_faces: true
   train_autoregressive: false
 
-  num_samples: -1
   max_epochs: 10000000
-
   spawn: false
   resume_from_checkpoint:
   evaluate: false
+  save_face_embedding: false
   output: .
-
   check_val_every_n_epoch: 10
   #  accelerator: "16-mixed"
   accelerator: "32-true"
@@ -45,13 +42,14 @@ model:
   encoder: "Discrete_encoder"
   decoder: "Discrete_decoder"
 
-  checkpoint_autoencoder: G:\workplace\python_server\python\src\img2brep\brep\outputs_img2brep\2024_04_17_15_08_57\tb_logs_brepgen\autoencoder\version_0\checkpoints\last.ckpt
+  checkpoint_autoencoder:
   bbox_discrete_dim: 256
   coor_discrete_dim: 128
 
   #  graphconv: "SAGE"
   graphconv: "GAT"
 
+  num_max_faces: 36
 
 hydra:
   run:

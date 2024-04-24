@@ -80,29 +80,30 @@ class AutoEncoder(nn.Module):
         num_faces = v_face_embeddings.shape[1]
         idx = torch.stack(torch.meshgrid(
                 torch.arange(num_faces), torch.arange(num_faces), indexing="xy"), dim=2).reshape(-1, 2)
-        gathered_face_features = v_face_embeddings[:, idx]
-        gathered_face_mask = gathered_face_features.all(dim=-1).all(dim=-1)
+        gathered_face_features = v_face_embeddings[0, idx]
 
-        edge_features = self.intersector.inference(gathered_face_features[gathered_face_mask], "edge")
+        edge_features = self.intersector.inference(gathered_face_features, "edge")
         edge_intersection_mask = self.intersector.inference_label(edge_features)
+        edge_features = edge_features[edge_intersection_mask]
+        num_edges = edge_features.shape[0]
 
         # Use edge to intersect vertices
-        num_edges = idx.shape[0]
-        idx = torch.stack(torch.meshgrid(
-                torch.arange(num_edges), torch.arange(num_edges), indexing="xy"), dim=2).reshape(-1, 2)
-        edge_features_full = edge_features.new_zeros(B, num_edges, edge_features.shape[-1])
-        edge_features_full[gathered_face_mask] = edge_features
-        gathered_edge_features = edge_features_full[:, idx]
-        gathered_edge_mask = gathered_edge_features.all(dim=-1).all(dim=-1)
+        if True and num_edges < 500:
+            idx = torch.stack(torch.meshgrid(
+                    torch.arange(num_edges), torch.arange(num_edges), indexing="xy"), dim=2).reshape(-1, 2)
+            gathered_edge_features = edge_features[idx]
 
-        vertex_features = self.intersector.inference(gathered_edge_features[gathered_edge_mask], "vertex")
-        vertex_intersection_mask = self.intersector.inference_label(vertex_features)
+            vertex_features = self.intersector.inference(gathered_edge_features, "vertex")
+            vertex_intersection_mask = self.intersector.inference_label(vertex_features)
+            vertex_features = vertex_features[vertex_intersection_mask]
+        else:
+            vertex_features = edge_features.new_zeros(0, edge_features.shape[-1])
 
         # Decode
         recon_data = self.decoder(
                 v_face_embeddings.view(-1, v_face_embeddings.shape[-1]),
-                edge_features[edge_intersection_mask],
-                vertex_features[vertex_intersection_mask],
+                edge_features,
+                vertex_features,
                 )
         recon_faces, recon_edges, recon_vertices = self.decoder.inference(recon_data)
         return recon_vertices, recon_edges, recon_faces

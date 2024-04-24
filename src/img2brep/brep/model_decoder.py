@@ -11,53 +11,55 @@ from src.img2brep.brep.model_encoder import res_block_1D, res_block_2D
 # 43134M FLOPS and 6300678 parameters
 class Small_decoder(nn.Module):
     def __init__(self,
-                 dim_codebook_edge,
-                 dim_codebook_face,
-                 resnet_dropout,
+                 dim_in,
+                 hidden_dim=256,
                  **kwargs
                  ):
         super(Small_decoder, self).__init__()
         # For vertex
         self.vertex_decoder = nn.Sequential(
+            nn.Linear(dim_in, hidden_dim),
             Rearrange('... c -> ... c 1'),
-            res_block_1D(256, 256, 1, 1, 0),
-            res_block_1D(256, 256, 1, 1, 0),
-            res_block_1D(256, 256, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
             nn.Conv1d(256, 3, kernel_size=1, stride=1, padding=0),
             Rearrange('... c 1 -> ... c', c=3),
         )
 
         # For edges
         self.edge_decoder = nn.Sequential(
+            nn.Linear(dim_in, hidden_dim),
             Rearrange('... c -> ... c 1'),
             nn.Upsample(scale_factor=2, mode="linear"),
-            res_block_1D(dim_codebook_edge, 256),
+            res_block_1D(hidden_dim, hidden_dim),
             nn.Upsample(scale_factor=2, mode="linear"),
-            res_block_1D(256, 256),
+            res_block_1D(hidden_dim, hidden_dim),
             nn.Upsample(scale_factor=2, mode="linear"),
-            res_block_1D(256, 256, 5, 1, 2),
+            res_block_1D(hidden_dim, hidden_dim, 5, 1, 2),
             nn.Upsample(scale_factor=2, mode="linear"),
-            res_block_1D(256, 256, 5, 1, 2),
+            res_block_1D(hidden_dim, hidden_dim, 5, 1, 2),
             nn.Upsample(size=20, mode="linear"),
-            res_block_1D(256, 256),
-            nn.Conv1d(256, 3, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim),
+            nn.Conv1d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
             Rearrange('... c v -> ... v c', c=3),
         )
 
         # For faces
         self.face_decoder = nn.Sequential(
+            nn.Linear(dim_in, hidden_dim),
             Rearrange('... c -> ... c 1 1'),
             nn.Upsample(scale_factor=2, mode="bilinear"),
-            res_block_2D(dim_codebook_face, 256),
+            res_block_2D(hidden_dim, hidden_dim),
             nn.Upsample(scale_factor=2, mode="bilinear"),
-            res_block_2D(256, 256),
+            res_block_2D(hidden_dim, hidden_dim),
             nn.Upsample(scale_factor=2, mode="bilinear"),
-            res_block_2D(256, 256, 5, 1, 2),
+            res_block_2D(hidden_dim, hidden_dim, 5, 1, 2),
             nn.Upsample(scale_factor=2, mode="bilinear"),
-            res_block_2D(256, 256, 5, 1, 2),
+            res_block_2D(hidden_dim, hidden_dim, 5, 1, 2),
             nn.Upsample(size=(20, 20), mode="bilinear"),
-            res_block_2D(256, 256),
-            nn.Conv2d(256, 3, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim),
+            nn.Conv2d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
             Rearrange('... c w h -> ... w h c', c=3),
         )
 
@@ -132,20 +134,19 @@ class Small_decoder(nn.Module):
 # 26897M FLOPS and 6271200 parameters
 class Discrete_decoder(Small_decoder):
     def __init__(self,
-                 dim_codebook_edge,
-                 dim_codebook_face,
-                 resnet_dropout,
+                 dim_in,
+                 hidden_dim=256,
                  bbox_discrete_dim=64,
                  coor_discrete_dim=64,
                  ):
-        super(Discrete_decoder, self).__init__(dim_codebook_edge, dim_codebook_face, resnet_dropout)
-        hidden_dim = 256
+        super(Discrete_decoder, self).__init__(dim_in, hidden_dim)
         self.bd = bbox_discrete_dim - 1  # discrete_dim
         self.cd = coor_discrete_dim - 1  # discrete_dim
 
         self.bbox_decoder = nn.Sequential(
+            nn.Linear(dim_in, hidden_dim),
             Rearrange('... c -> ... c 1'),
-            res_block_1D(dim_codebook_face, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
             res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
             res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
             nn.Conv1d(hidden_dim, 6 * self.bd, kernel_size=1, stride=1, padding=0),
@@ -154,9 +155,10 @@ class Discrete_decoder(Small_decoder):
 
         # For faces
         self.face_coords = nn.Sequential(
+            nn.Linear(dim_in, hidden_dim),
             Rearrange('... c -> ... c 1 1'),
             nn.Upsample(scale_factor=4, mode="bilinear"),
-            res_block_2D(dim_codebook_face, hidden_dim),
+            res_block_2D(hidden_dim, hidden_dim),
             nn.Upsample(scale_factor=2, mode="bilinear"),
             res_block_2D(hidden_dim, hidden_dim),
             nn.Upsample(scale_factor=2, mode="bilinear"),
@@ -169,9 +171,10 @@ class Discrete_decoder(Small_decoder):
 
         # For edges
         self.edge_coords = nn.Sequential(
+            nn.Linear(dim_in, hidden_dim),
             Rearrange('... c -> ... c 1'),
             nn.Upsample(scale_factor=4, mode="linear"),
-            res_block_1D(dim_codebook_edge, hidden_dim),
+            res_block_1D(hidden_dim, hidden_dim),
             nn.Upsample(scale_factor=2, mode="linear"),
             res_block_1D(hidden_dim, hidden_dim),
             nn.Upsample(scale_factor=2, mode="linear"),
@@ -184,10 +187,11 @@ class Discrete_decoder(Small_decoder):
 
         # For vertex
         self.vertex_coords = nn.Sequential(
+            nn.Linear(dim_in, hidden_dim),
             Rearrange('... c -> ... c 1'),
-            res_block_1D(dim_codebook_edge, hidden_dim, 1, 1, 0),
-            res_block_1D(dim_codebook_edge, hidden_dim, 1, 1, 0),
-            res_block_1D(dim_codebook_edge, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
             nn.Conv1d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
             Rearrange('... (p c) 1 -> ... p c', p=3, c=self.cd),
         )

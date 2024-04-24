@@ -129,10 +129,11 @@ class DiffusionModel(nn.Module):
             # objective = 'pred_v',
         )
 
+        self.padding_token = nn.Parameter(torch.randn(256), requires_grad=True)
+
         pass
 
-    # face_embeddings: (batch, max_seq_len, dim),
-    def forward_on_embedding(self, v_face_embeddings, only_return_loss=False, only_return_recon=False):
+    def forward_on_embedding1(self, v_face_embeddings, only_return_loss=False, only_return_recon=False):
         B, num_face, dim = v_face_embeddings.shape
         zero_flag = (v_face_embeddings==0).all(dim=-1)
         num_valid = (~zero_flag).sum(dim=1)
@@ -162,6 +163,27 @@ class DiffusionModel(nn.Module):
 
         return loss, {}
 
+    def forward_on_embedding(self, v_face_embeddings, only_return_loss=False, only_return_recon=False):
+        B, num_face, dim = v_face_embeddings.shape
+        zero_flag = (v_face_embeddings==0).all(dim=-1)
+        num_valid = (~zero_flag).sum(dim=1)
+        face_embeddings = torch.sigmoid(v_face_embeddings)
+        # face_embeddings[zero_flag] = 0
+        face_embeddings[zero_flag] = self.padding_token
+
+        padded_face_embeddings = torch.cat((
+            face_embeddings,
+            self.padding_token.repeat((B, self.num_max_faces-face_embeddings.shape[1], 1)),
+        ), dim=1)
+
+        loss = self.diffusion(padded_face_embeddings.permute(0,2,1))
+
+        loss = {
+            "total_loss"         : loss,
+            }
+
+        return loss, {}
+
     @torch.no_grad()
     def prepare_face_embedding(self, v_data):
         loss, recon_data = self.autoencoder(v_data, return_face_features=True)
@@ -176,6 +198,9 @@ class DiffusionModel(nn.Module):
     @torch.no_grad()
     def generate(self, batch_size=1):
         samples = self.diffusion.sample(batch_size).permute(0,2,1)
+        distance = nn.functional.mse_loss(samples, self.padding_token[None,None,:], reduction='none').mean(dim=-1)
+        valid_flag = distance > 1e-2
         face_embeddings = -torch.log(torch.clamp_min(1 / samples - 1, 1e-4))
+        face_embeddings[~valid_flag] = 0
         recon_vertices, recon_edges, recon_faces = self.autoencoder.inference(face_embeddings)
         return recon_vertices, recon_edges, recon_faces

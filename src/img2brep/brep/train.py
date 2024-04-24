@@ -326,14 +326,14 @@ class TrainAutoregressiveModel(pl.LightningModule):
         # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=40, T_mult=1, eta_min=1e-8, last_epoch=-1)
         # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.1)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',
-                                                               factor=0.5, patience=10, threshold=1e-5, min_lr=1e-5,
+                                                               factor=0.5, patience=20, threshold=1e-5, min_lr=1e-5,
                                                                verbose=True)
         return {
             'optimizer': optimizer,
-            'lr_scheduler': {
-                'scheduler': scheduler,
-                'monitor'  : 'Training_Loss',
-                }
+            # 'lr_scheduler': {
+            #     'scheduler': scheduler,
+            #     'monitor'  : 'Training_Loss',
+            #     }
             }
 
     def training_step(self, batch, batch_idx):

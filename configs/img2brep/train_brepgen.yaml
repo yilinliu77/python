@@ -14,7 +14,7 @@ trainer:
 
   gpu: 1
   num_worker: 0
-  batch_size: 256
+  batch_size: 1
   #  gpu: [ 0, 1 ]
   #  num_worker: 4
   #  batch_size: 4
@@ -33,6 +33,8 @@ trainer:
   accelerator: "32-true"
 
 model:
+  dim_latent: 768
+
   #  intersector: "Attn_intersector"
   intersector: "Attn_intersector_classifier"
   #  intersector: "Proj_intersector"

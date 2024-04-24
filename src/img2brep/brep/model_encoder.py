@@ -162,11 +162,12 @@ class Continuous_encoder(nn.Module):
 # 57196M FLOPS and 4982400 parameters
 class Discrete_encoder(Continuous_encoder):
     def __init__(self,
+                 dim=256,
                  bbox_discrete_dim=64,
                  coor_discrete_dim=64,
                  ):
         super().__init__()
-        hidden_dim = 256
+        hidden_dim = dim
         self.bbox_embedding = nn.Embedding(bbox_discrete_dim - 1, 64)
         self.coords_embedding = nn.Embedding(coor_discrete_dim - 1, 64)
 

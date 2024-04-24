@@ -170,26 +170,23 @@ class Attn_intersector(Intersector):
 
 
 class Attn_intersector_classifier(Intersector):
-    def __init__(self, num_max_items=None):
+    def __init__(self, num_max_items=None, dim=256):
         super().__init__(num_max_items)
-        hidden_dim = 256
         self.edge_layers = nn.ModuleList([
-            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
-            nn.LayerNorm(hidden_dim),
-            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
-            nn.LayerNorm(hidden_dim),
+            nn.TransformerDecoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
+            nn.TransformerDecoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
+            nn.TransformerDecoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
         ])
         self.vertex_layers = nn.ModuleList([
-            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
-            nn.LayerNorm(hidden_dim),
-            nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=2, dropout=0.1, batch_first=True),
-            nn.LayerNorm(hidden_dim),
+            nn.TransformerDecoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
+            nn.TransformerDecoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
+            nn.TransformerDecoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
         ])
 
-        self.vertex_token = nn.Parameter(torch.rand(hidden_dim))
-        self.edge_token = nn.Parameter(torch.rand(hidden_dim))
+        self.vertex_token = nn.Parameter(torch.rand(dim))
+        self.edge_token = nn.Parameter(torch.rand(dim))
 
-        self.classifier = nn.Linear(hidden_dim, 1)
+        self.classifier = nn.Linear(dim, 1)
 
     def inference(self, v_features, v_type):
         if v_type == "edge":
@@ -197,12 +194,7 @@ class Attn_intersector_classifier(Intersector):
         else:
             x = self.vertex_token[None, None].repeat(v_features.shape[0], 1, 1)
         for layer in self.edge_layers if v_type == "edge" else self.vertex_layers:
-            if isinstance(layer, nn.LayerNorm):
-                x = layer(x)
-            else:
-                out, weights = layer(key=v_features, value=v_features,
-                                     query=x)
-                x = x + out
+            x = layer(x, v_features)
         features = x[:, 0]
         return features
 

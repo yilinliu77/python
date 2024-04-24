@@ -61,7 +61,7 @@ class SAGE_GraphConv(nn.Module):
 
 
 class GAT_GraphConv(nn.Module):
-    def __init__(self, in_channels, out_channels_list, edge_dim=None, num_heads=8, concat=False,
+    def __init__(self, in_channels, out_channels_list, out_channels, edge_dim=None, num_heads=8, concat=False,
                  negative_slope=0.2, fill_value='mean', dropout=0.0, bias=True, **kwargs):
         super().__init__()
 
@@ -77,6 +77,7 @@ class GAT_GraphConv(nn.Module):
             self.layers.append(nn.LayerNorm(out_channels * num_heads if concat else out_channels))
             self.layers.append(nn.ReLU())
             in_channels_layer = out_channels
+
 
     def forward(self, x, edge_index, edge_attr=None, **kwargs):
         for layer in self.layers:

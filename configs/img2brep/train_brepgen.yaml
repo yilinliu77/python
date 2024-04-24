@@ -34,6 +34,8 @@ trainer:
 
 model:
   dim_latent: 768
+  dim_shape: 256
+  with_quantization: false
 
   #  intersector: "Attn_intersector"
   intersector: "Attn_intersector_classifier"

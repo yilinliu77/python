@@ -173,14 +173,12 @@ class Attn_intersector_classifier(Intersector):
     def __init__(self, num_max_items=None, dim=256):
         super().__init__(num_max_items)
         self.edge_layers = nn.ModuleList([
-            nn.TransformerDecoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            nn.TransformerDecoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            nn.TransformerDecoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
+            nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
+            nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
         ])
         self.vertex_layers = nn.ModuleList([
-            nn.TransformerDecoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            nn.TransformerDecoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            nn.TransformerDecoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
+            nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
+            nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
         ])
 
         self.vertex_token = nn.Parameter(torch.rand(dim))

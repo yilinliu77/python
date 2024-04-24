@@ -21,10 +21,12 @@ class AutoEncoder(nn.Module):
     def __init__(self,
                  v_conf,
                  codebook_size=16384,
-                 num_quantizers=8,
+                 num_quantizers=4,
                  ):
         super(AutoEncoder, self).__init__()
+        self.dim_shape = v_conf["dim_shape"]
         self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
         self.pad_id = -1
 
         self.time_statics = [0 for _ in range(10)]
@@ -32,10 +34,13 @@ class AutoEncoder(nn.Module):
         # ================== Convolutional encoder ==================
         mod = importlib.import_module('src.img2brep.brep.model_encoder')
         self.encoder = getattr(mod, v_conf["encoder"])(
-            self.dim_latent,
+            self.dim_shape,
             bbox_discrete_dim=v_conf["bbox_discrete_dim"],
             coor_discrete_dim=v_conf["coor_discrete_dim"],
         )
+        self.vertices_proj = nn.Linear(self.dim_shape, self.dim_latent)
+        self.edges_proj = nn.Linear(self.dim_shape, self.dim_latent)
+        self.faces_proj = nn.Linear(self.dim_shape, self.dim_latent)
 
         # ================== GCN to distribute features across primitives ==================
         if v_conf["graphconv"] == "GAT":
@@ -44,16 +49,18 @@ class AutoEncoder(nn.Module):
             GraphConv = SAGE_GraphConv
         encoder_dims_through_depth_edges = [self.dim_latent for _ in range(4)]
         encoder_dims_through_depth_faces = [self.dim_latent for _ in range(4)]
-        self.gcn_on_edges = GraphConv(self.dim_latent, encoder_dims_through_depth_edges)
-        self.gcn_on_faces = GraphConv(self.dim_latent, encoder_dims_through_depth_faces, edge_dim=self.dim_latent)
+        self.gcn_on_edges = GraphConv(self.dim_latent, encoder_dims_through_depth_edges,
+                                      self.dim_latent)
+        self.gcn_on_faces = GraphConv(self.dim_latent, encoder_dims_through_depth_faces,
+                                      self.dim_latent, edge_dim=self.dim_latent)
 
         # ================== self attention to aggregate features ==================
         self.edge_fuser = Attn_fuser_single(self.dim_latent)
         self.face_fuser = Attn_fuser_single(self.dim_latent)
 
         # ================== cross attention to aggregate features ==================
-        self.fuser_edges_to_faces = Attn_fuser_cross(self.dim_latent)
         self.fuser_vertices_to_edges = Attn_fuser_cross(self.dim_latent)
+        self.fuser_edges_to_faces = Attn_fuser_cross(self.dim_latent)
 
         # ================== Intersection ==================
         mod = importlib.import_module('src.img2brep.brep.model_intersector')
@@ -119,6 +126,9 @@ class AutoEncoder(nn.Module):
                 **kwargs):
         # ================== Encode the edge and face points ==================
         face_embeddings, edge_embeddings, vertex_embeddings, face_mask, edge_mask, vertex_mask = self.encoder(v_data)
+        face_embeddings = self.faces_proj(face_embeddings)
+        edge_embeddings = self.edges_proj(edge_embeddings)
+        vertex_embeddings = self.vertices_proj(vertex_embeddings)
 
         # ================== Prepare data for flattened features ==================
         edge_index_offsets = reduce(edge_mask.long(), 'b ne -> b', 'sum')
@@ -186,9 +196,13 @@ class AutoEncoder(nn.Module):
         atten_face_edge_embeddings = self.face_fuser(face_edge_embeddings_gcn, face_attn_mask)  # This is the true latent
 
         # ================== Quantization  ==================
-        quantized_face_embeddings, indices, quantized_loss = self.quantizer(atten_face_edge_embeddings[:, None])
-        quantized_face_embeddings = quantized_face_embeddings[:, 0]
-        indices = indices[:, 0]
+        if self.with_quantization:
+            quantized_face_embeddings, indices, quantized_loss = self.quantizer(atten_face_edge_embeddings[:, None])
+            quantized_face_embeddings = quantized_face_embeddings[:, 0]
+            indices = indices[:, 0]
+        else:
+            quantized_face_embeddings = atten_face_edge_embeddings
+            indices = None
 
         # ================== Intersection  ==================
         face_adj = v_data["face_adj"]
@@ -253,7 +267,8 @@ class AutoEncoder(nn.Module):
             # Loss for l2 distance from the intersection vertex features and normal vertex features
             loss["vertex_l2"] = nn.functional.mse_loss(
                 inter_vertex_features, vertex_embeddings[used_vertex_indexes], reduction='mean')
-            loss["quantization"] = quantized_loss.mean()
+            if self.with_quantization:
+                loss["quantization"] = quantized_loss.mean()
             loss["total_loss"] = sum(loss.values())
 
         # Compute model size and flops

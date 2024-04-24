@@ -232,7 +232,8 @@ class TrainAutoEncoder(pl.LightningModule):
         pred_edge_point = inferenced_edges.cpu().numpy()
         pred_vertex = inferenced_vertices.cpu().numpy()
 
-        root = Path(r"G:/Dataset/img2brep/test_temp")
+
+        root = Path(self.hydra_conf["trainer"]["test_output_dir"])
         check_dir(root / prefix)
         pc = o3d.geometry.PointCloud()
         pc.points = o3d.utility.Vector3dVector(np.concatenate(

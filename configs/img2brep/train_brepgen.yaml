@@ -26,6 +26,7 @@ trainer:
   resume_from_checkpoint:
   evaluate: false
   save_face_embedding: false
+  test_output_dir: "G:/Dataset/img2brep/test_temp"
   output: .
   check_val_every_n_epoch: 10
   #  accelerator: "16-mixed"

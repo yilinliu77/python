@@ -35,7 +35,7 @@ trainer:
 model:
   dim_latent: 768
   dim_shape: 256
-  dim_decoder: 512
+  dim_decoder: 256
   with_quantization: false
 
   #  intersector: "Attn_intersector"

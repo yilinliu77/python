@@ -2,7 +2,7 @@ import importlib
 
 # from torch.utils.flop_counter import FlopCounterMode
 from torch_geometric.nn import SAGEConv, GATv2Conv
-from vector_quantize_pytorch import ResidualLFQ
+from vector_quantize_pytorch import ResidualLFQ, VectorQuantize
 
 from src.img2brep.brep.common import *
 from src.img2brep.brep.model_encoder import GAT_GraphConv, SAGE_GraphConv
@@ -20,8 +20,6 @@ def l2norm(t):
 class AutoEncoder(nn.Module):
     def __init__(self,
                  v_conf,
-                 codebook_size=16384,
-                 num_quantizers=4,
                  ):
         super(AutoEncoder, self).__init__()
         self.dim_shape = v_conf["dim_shape"]
@@ -70,15 +68,24 @@ class AutoEncoder(nn.Module):
         mod = importlib.import_module('src.img2brep.brep.model_decoder')
         self.decoder = getattr(mod, v_conf["decoder"])(
             dim_in=self.dim_latent,
-            hidden_dim=256,
+            hidden_dim=v_conf["dim_decoder"],
             bbox_discrete_dim=v_conf["bbox_discrete_dim"],
             coor_discrete_dim=v_conf["coor_discrete_dim"],
         )
         # ================== Quantization ==================
-        self.quantizer = ResidualLFQ(dim=self.dim_latent,
-                                     codebook_size=codebook_size,
-                                     num_quantizers=num_quantizers,
-                                     commitment_loss_weight=1., )
+        # self.quantizer = ResidualLFQ(dim=self.dim_latent,
+        #                              codebook_size=18384,
+        #                              num_quantizers=4,
+        #                              commitment_loss_weight=1., )
+
+        self.quantizer = VectorQuantize(
+            dim=self.dim_latent,
+            codebook_dim=32,  # a number of papers have shown smaller codebook dimension to be acceptable
+            heads=8,  # number of heads to vector quantize, codebook shared across all heads
+            separate_codebook_per_head=True, # whether to have a separate codebook per head. False would mean 1 shared codebook
+            codebook_size=8196,
+            accept_image_fmap=False
+        )
 
     # Inference (B * num_faces * num_features)
     # Pad features are all zeros

@@ -175,8 +175,12 @@ class Attn_intersector_classifier(Intersector):
         self.edge_layers = nn.ModuleList([
             nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
             nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
+            nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
+            nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
         ])
         self.vertex_layers = nn.ModuleList([
+            nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
+            nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
             nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
             nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
         ])

@@ -464,10 +464,10 @@ def main(v_cfg: DictConfig):
                 elif 'model.' in k:
                     state_dict_[k[6:]] = v
         else:
-            state_dict_ = {k[12:]: v for k, v in state_dict.items() if 'autoencoder' in k}
+            state_dict_ = {k[12:]: v for k, v in state_dict.items() if 'autoencoder' in k and 'quantizer' not in k}
         del state_dict
 
-        modelTraining.model.load_state_dict(state_dict_, strict=True)
+        modelTraining.model.load_state_dict(state_dict_, strict=False)
 
     if v_cfg["trainer"].evaluate:
         trainer.test(modelTraining)

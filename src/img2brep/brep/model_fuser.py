@@ -9,6 +9,8 @@ class Attn_fuser_cross(nn.Module):
         self.atten = nn.ModuleList([
             nn.TransformerDecoderLayer(dim, 4, dim_feedforward=dim, dropout=0.1, batch_first=True),
             nn.TransformerDecoderLayer(dim, 4, dim_feedforward=dim, dropout=0.1, batch_first=True),
+            nn.TransformerDecoderLayer(dim, 4, dim_feedforward=dim, dropout=0.1, batch_first=True),
+            nn.TransformerDecoderLayer(dim, 4, dim_feedforward=dim, dropout=0.1, batch_first=True),
         ])
         pass
 
@@ -38,6 +40,8 @@ class Attn_fuser_single(nn.Module):
         super().__init__()
         hidden_dim = dim
         self.atten = nn.ModuleList([
+            nn.TransformerEncoderLayer(hidden_dim, 4, dim_feedforward=hidden_dim, dropout=0.1, batch_first=True),
+            nn.TransformerEncoderLayer(hidden_dim, 4, dim_feedforward=hidden_dim, dropout=0.1, batch_first=True),
             nn.TransformerEncoderLayer(hidden_dim, 4, dim_feedforward=hidden_dim, dropout=0.1, batch_first=True),
             nn.TransformerEncoderLayer(hidden_dim, 4, dim_feedforward=hidden_dim, dropout=0.1, batch_first=True),
         ])

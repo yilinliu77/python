@@ -256,13 +256,7 @@ class Discrete_decoder(Small_decoder):
             "edge_bbox": loss_edge_bbox,
         }
 
-    def loss(self, v_pred, v_data, v_face_mask,
-             v_edge_mask, v_used_edge_indexes,
-             v_vertex_mask, v_used_vertex_indexes,
-             ):
-        loss_vertex = self.loss_vertex(v_pred, v_data, v_vertex_mask, v_used_vertex_indexes)
-        loss_edge = self.loss_edge(v_pred, v_data, v_edge_mask, v_used_edge_indexes)
-
+    def loss_face(self, v_pred, v_data, v_face_mask):
         gt_face_bbox = v_data["discrete_face_bboxes"][v_face_mask]
         gt_face_coords = v_data["discrete_face_points"][v_face_mask]
 
@@ -271,13 +265,23 @@ class Discrete_decoder(Small_decoder):
         loss_face_bbox = self.cross_entropy_loss(v_pred["face_bbox_logits"].flatten(0, -2),
                                                  gt_face_bbox.flatten())
 
-        loss_edge.update({
-            "vertex_coords": loss_vertex["vertex_coords"],
+        return {
             "face_coords": loss_face_coords,
             "face_bbox": loss_face_bbox,
-        })
+        }
 
-        return loss_edge
+    def loss(self, v_pred, v_data, v_face_mask,
+             v_edge_mask, v_used_edge_indexes,
+             v_vertex_mask, v_used_vertex_indexes,
+             ):
+        loss_vertex = self.loss_vertex(v_pred, v_data, v_vertex_mask, v_used_vertex_indexes)
+        loss_edge = self.loss_edge(v_pred, v_data, v_edge_mask, v_used_edge_indexes)
+        loss_face = self.loss_face(v_pred, v_data, v_face_mask)
+
+        loss_face.update(loss_vertex)
+        loss_face.update(loss_edge)
+
+        return loss_face
 
     def inference(self, v_data):
         bbox_shifts = (self.bd + 1) // 2 - 1

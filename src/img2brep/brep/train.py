@@ -3,7 +3,7 @@ from tqdm import tqdm
 
 from shared.common_utils import check_dir, safe_check_dir
 from src.img2brep.brep.autoregressive import AutoregressiveModel
-from src.img2brep.brep.diffusion import DiffusionModel
+from src.img2brep.brep.diffusion import DiffusionModel, TrainDiffusionModel
 
 sys.path.append('../../../')
 import os.path
@@ -415,7 +415,7 @@ def main(v_cfg: DictConfig):
     torch.set_float32_matmul_precision("medium")
     print(OmegaConf.to_yaml(v_cfg))
 
-    train_autoregressive = v_cfg["trainer"]["train_autoregressive"]
+    train_mode = v_cfg["trainer"]["train_mode"]
 
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir']
@@ -426,12 +426,15 @@ def main(v_cfg: DictConfig):
     mc = ModelCheckpoint(monitor="Validation_Loss", save_top_k=3, save_last=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
-    if train_autoregressive:
-        modelTraining = TrainAutoregressiveModel(v_cfg)
-        logger = TensorBoardLogger(os.path.join(log_dir, "tb_logs_brepgen"), name="transformer")
-    else:
+    if train_mode==0:
         modelTraining = TrainAutoEncoder(v_cfg)
         logger = TensorBoardLogger(os.path.join(log_dir, "tb_logs_brepgen"), name="autoencoder")
+    elif train_mode==1:
+        modelTraining = TrainAutoregressiveModel(v_cfg)
+        logger = TensorBoardLogger(os.path.join(log_dir, "tb_logs_brepgen"), name="transformer")
+    elif train_mode==2:
+        modelTraining = TrainDiffusionModel(v_cfg)
+        logger = TensorBoardLogger(os.path.join(log_dir, "tb_logs_brepgen"), name="diffusion")
 
     trainer = Trainer(
             default_root_dir=log_dir,
@@ -464,11 +467,11 @@ def main(v_cfg: DictConfig):
                 elif 'model.' in k:
                     state_dict_[k[6:]] = v
         else:
-            # state_dict_ = {k[12:]: v for k, v in state_dict.items() if 'autoencoder' in k and 'quantizer' not in k}
-            state_dict_ = {k[12:]: v for k, v in state_dict.items() if 'autoencoder' in k}
+            state_dict_ = {k[12:]: v for k, v in state_dict.items() if 'autoencoder' in k and 'quantizer' not in k}
+            # state_dict_ = {k[12:]: v for k, v in state_dict.items() if 'autoencoder' in k}
         del state_dict
 
-        modelTraining.model.load_state_dict(state_dict_, strict=True)
+        modelTraining.model.load_state_dict(state_dict_, strict=False)
 
     if v_cfg["trainer"].evaluate:
         trainer.test(modelTraining)

@@ -283,6 +283,7 @@ class Face_feature_dataset(torch.utils.data.Dataset):
         return len(self.folders) * self.length_scaling_factors
 
     def __getitem__(self, idx):
+        idx = 0
         data = torch.from_numpy(np.load(self.root/self.folders[idx % len(self.folders)]))
         num_faces = data.shape[0]
         idx = torch.randperm(num_faces, device=data.device)

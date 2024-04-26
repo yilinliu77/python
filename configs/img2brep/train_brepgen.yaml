@@ -14,26 +14,26 @@ trainer:
 
   gpu: 1
   num_worker: 0
-  batch_size: 1
+  batch_size: 512
   #  gpu: [ 0, 1 ]
   #  num_worker: 4
   #  batch_size: 4
 
-  train_autoregressive: false
+  train_mode: 0
 
   max_epochs: 10000000
   spawn: false
   resume_from_checkpoint:
   evaluate: false
   save_face_embedding: false
-  test_output_dir: "G:/Dataset/img2brep/test_temp"
+  test_output_dir:
   output: .
   check_val_every_n_epoch: 10
   #  accelerator: "16-mixed"
   accelerator: "32-true"
 
 model:
-  dim_latent: 768
+  dim_latent: 256
   dim_shape: 256
   dim_decoder: 256
   with_quantization: false
@@ -55,7 +55,7 @@ model:
   #  graphconv: "SAGE"
   graphconv: "GAT"
 
-  num_max_faces: 36
+  num_max_faces: 3
 
 hydra:
   run:

@@ -65,7 +65,7 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
 
         self.src_data_sum = len(self.data_folders)
 
-        self.check_data()
+        self.check_data(v_training_mode)
 
         self.data_sum = len(self.data_folders)
 
@@ -78,17 +78,23 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.data_folders)
 
-    def check_data(self):
+    def check_data(self, v_training_mode):
+        if v_training_mode == "training":
+            filepath = r"src/img2brep/data/id_larger_than_128_faces_train.txt"
+        elif v_training_mode == "validation":
+            filepath = r"src/img2brep/data/id_larger_than_128_faces_validation.txt"
+        else:
+            filepath = r"src/img2brep/data/id_larger_than_128_faces_test.txt"
+        ignore_ids = [item.strip() for item in open(filepath).readlines()]
+
         miss = []
         for folder_path in self.data_folders:
-            if not os.path.exists(os.path.join(folder_path, "data.npz")):
+            if not os.path.exists(os.path.join(folder_path, "data.npz")) or folder_path in ignore_ids:
                 miss.append(folder_path)
-                # print("Missing data.npz in", folder_path)
 
-        if len(miss) > 0:
-            for folder_path in miss:
-                self.data_folders.remove(folder_path)
-            print("Remove missing data.npz folders:", len(miss))
+        for folder_path in miss:
+            self.data_folders.remove(folder_path)
+        print("Remove invalid data.npz folders:", len(miss))
 
     def discrete_coordinates(self, face_points, line_points):
         # Compute bounding box and discrete coordinates for faces

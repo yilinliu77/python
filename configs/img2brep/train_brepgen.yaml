@@ -36,7 +36,7 @@ model:
   dim_latent: 256
   dim_shape: 256
   dim_decoder: 256
-  with_quantization: false
+  with_quantization: true
 
   #  intersector: "Attn_intersector"
   intersector: "Attn_intersector_classifier"

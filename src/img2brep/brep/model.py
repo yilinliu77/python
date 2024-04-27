@@ -104,22 +104,27 @@ class AutoEncoder(nn.Module):
             torch.arange(num_faces), torch.arange(num_faces), indexing="xy"), dim=2).reshape(-1, 2)
         gathered_face_features = v_face_embeddings[0, idx]
 
-        edge_features = self.intersector.inference(gathered_face_features, "edge")
-        edge_intersection_mask = self.intersector.inference_label(edge_features)
-        edge_features = edge_features[edge_intersection_mask]
-        num_edges = edge_features.shape[0]
-
-        # Use edge to intersect vertices
-        if False and num_edges < 500:
-            idx = torch.stack(torch.meshgrid(
-                torch.arange(num_edges), torch.arange(num_edges), indexing="xy"), dim=2).reshape(-1, 2)
-            gathered_edge_features = edge_features[idx]
-
-            vertex_features = self.intersector.inference(gathered_edge_features, "vertex")
-            vertex_intersection_mask = self.intersector.inference_label(vertex_features)
-            vertex_features = vertex_features[vertex_intersection_mask]
-        else:
+        if num_faces > 128:
+            edge_features = v_face_embeddings.new_zeros(0, v_face_embeddings.shape[-1])
             vertex_features = edge_features.new_zeros(0, edge_features.shape[-1])
+
+        else:
+            edge_features = self.intersector.inference(gathered_face_features, "edge")
+            edge_intersection_mask = self.intersector.inference_label(edge_features)
+            edge_features = edge_features[edge_intersection_mask]
+            num_edges = edge_features.shape[0]
+
+            # Use edge to intersect vertices
+            if False and num_edges < 500:
+                idx = torch.stack(torch.meshgrid(
+                    torch.arange(num_edges), torch.arange(num_edges), indexing="xy"), dim=2).reshape(-1, 2)
+                gathered_edge_features = edge_features[idx]
+
+                vertex_features = self.intersector.inference(gathered_edge_features, "vertex")
+                vertex_intersection_mask = self.intersector.inference_label(vertex_features)
+                vertex_features = vertex_features[vertex_intersection_mask]
+            else:
+                vertex_features = edge_features.new_zeros(0, edge_features.shape[-1])
 
         # Decode
         recon_data = self.decoder(
@@ -348,10 +353,10 @@ class AutoEncoder(nn.Module):
             loss["true_recon_vertex"] = true_recon_vertex_loss
 
         if return_face_features:
-            face_embeddings_return = atten_face_edge_embeddings.new_zeros(
-                (*face_mask.shape, atten_face_edge_embeddings.shape[-1]))
+            face_embeddings_return = quantized_face_embeddings.new_zeros(
+                (*face_mask.shape, quantized_face_embeddings.shape[-1]))
             face_embeddings_return = face_embeddings_return.masked_scatter(
-                rearrange(face_mask, '... -> ... 1'), atten_face_edge_embeddings)
+                rearrange(face_mask, '... -> ... 1'), quantized_face_embeddings)
             data["face_embeddings"] = face_embeddings_return
 
             if self.with_quantization:

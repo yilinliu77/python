@@ -459,7 +459,7 @@ def main(v_cfg: DictConfig):
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
         state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
 
-        if train_autoregressive:
+        if train_mode==0:
             state_dict_ = {}
             for k, v in state_dict.items():
                 if 'transformer.' in k:
@@ -471,7 +471,7 @@ def main(v_cfg: DictConfig):
             # state_dict_ = {k[12:]: v for k, v in state_dict.items() if 'autoencoder' in k}
         del state_dict
 
-        modelTraining.model.load_state_dict(state_dict_, strict=False)
+        modelTraining.model.load_state_dict(state_dict_, strict=True)
 
     if v_cfg["trainer"].evaluate:
         trainer.test(modelTraining)

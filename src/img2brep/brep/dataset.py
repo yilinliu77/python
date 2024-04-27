@@ -65,7 +65,7 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
 
         self.src_data_sum = len(self.data_folders)
 
-        self.check_data(v_training_mode)
+        self.check_data(self.dataset_path,v_training_mode)
 
         self.data_sum = len(self.data_folders)
 
@@ -78,13 +78,13 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.data_folders)
 
-    def check_data(self, v_training_mode):
+    def check_data(self, v_path, v_training_mode):
         if v_training_mode == "training":
-            filepath = r"src/img2brep/data/id_larger_than_128_faces_train.txt"
+            filepath = os.path.join(v_path, r"id_larger_than_128_faces_train.txt")
         elif v_training_mode == "validation":
-            filepath = r"src/img2brep/data/id_larger_than_128_faces_validation.txt"
+            filepath = os.path.join(v_path, r"id_larger_than_128_faces_validation.txt")
         else:
-            filepath = r"src/img2brep/data/id_larger_than_128_faces_test.txt"
+            filepath = os.path.join(v_path, r"id_larger_than_128_faces_test.txt")
         ignore_ids = [item.strip() for item in open(filepath).readlines()]
 
         miss = []

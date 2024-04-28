@@ -214,7 +214,7 @@ class Diff_transformer(nn.Module):
 
         mask = None
         if self.is_causal:
-            mask = nn.Transformer.generate_square_subsequent_mask(x.shape[1])
+            mask = nn.Transformer.generate_square_subsequent_mask(x.shape[2], device=x.device)
 
         x = self.project_in(x.permute(0,2,1))
         # x = x.permute(0,2,1)
@@ -234,10 +234,11 @@ class DiffusionModel(nn.Module):
                  ):
         super().__init__()
         self.autoencoder = AutoEncoder(v_conf)
-        state_dict = torch.load(v_conf["checkpoint_autoencoder"])["state_dict"]
-        state_dict_ = {k[12:]: v for k, v in state_dict.items() if 'autoencoder' in k}
-        self.autoencoder.load_state_dict(
-            state_dict_, strict=True)
+        if v_conf["checkpoint_autoencoder"] is not None:
+            state_dict = torch.load(v_conf["checkpoint_autoencoder"])["state_dict"]
+            state_dict_ = {k[12:]: v for k, v in state_dict.items() if 'autoencoder' in k}
+            self.autoencoder.load_state_dict(
+                state_dict_, strict=True)
         self.autoencoder.eval()
 
         self.num_max_faces = v_conf["num_max_faces"]

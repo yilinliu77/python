@@ -32,8 +32,8 @@ trainer:
   test_output_dir:
   output: .
   check_val_every_n_epoch: 10
-  accelerator: "16-mixed"
-#  accelerator: "32-true"
+#  accelerator: "16-mixed"
+  accelerator: "32-true"
 
 model:
   dim_latent: 256

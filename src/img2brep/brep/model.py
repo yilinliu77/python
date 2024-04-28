@@ -142,6 +142,9 @@ class AutoEncoder(nn.Module):
             vertex_features,
         )
         recon_faces, recon_edges, recon_vertices = self.decoder.inference(recon_data)
+
+        valid_face_flag = (v_face_embeddings[0]!=0).any(dim=-1)
+        recon_faces[~valid_face_flag] = -1
         return recon_vertices, recon_edges, recon_faces
 
     def forward(self, v_data,

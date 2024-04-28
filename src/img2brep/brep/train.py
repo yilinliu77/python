@@ -458,21 +458,7 @@ def main(v_cfg: DictConfig):
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
         state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
-
-        if train_mode==0:
-            state_dict_ = {}
-            for k, v in state_dict.items():
-                if 'transformer.' in k:
-                    state_dict_[k[12:]] = v
-                elif 'model.' in k:
-                    state_dict_[k[6:]] = v
-        elif train_mode==2:
-            state_dict_ = state_dict
-        else:
-            state_dict_ = {k[12:]: v for k, v in state_dict.items() if 'autoencoder' in k and 'quantizer' not in k}
-            # state_dict_ = {k[12:]: v for k, v in state_dict.items() if 'autoencoder' in k}
-
-        modelTraining.load_state_dict(state_dict_, strict=True)
+        modelTraining.load_state_dict(state_dict, strict=True)
 
     if v_cfg["trainer"].evaluate:
         trainer.test(modelTraining)

@@ -238,7 +238,7 @@ class DiffusionModel(nn.Module):
 
         self.num_max_faces = v_conf["num_max_faces"]
 
-        self.is_causal = v_conf["is_causal"]
+        self.is_causal = v_conf["diffusion_causal"]
         self.model = Diff_transformer(
             dim=dim,
             channels=dim,

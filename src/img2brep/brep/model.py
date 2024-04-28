@@ -100,6 +100,7 @@ class AutoEncoder(nn.Module):
                 nn.Linear(self.dim_latent * 2, self.dim_latent * 2),
                 nn.GELU(),
             )
+            self.vae_weight = v_conf["vae_weight"]
 
     # Inference (B * num_faces * num_features)
     # Pad features are all zeros
@@ -240,7 +241,7 @@ class AutoEncoder(nn.Module):
             logvar = vae_face_embeddings[..., self.dim_latent:]
             std = torch.exp(0.5 * logvar)
             eps = torch.randn_like(std)
-            true_face_embeddings = mean + eps * std
+            true_face_embeddings = mean + eps * std * self.vae_weight
             indices = None
             vae_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
         else:

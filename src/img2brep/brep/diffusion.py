@@ -212,12 +212,16 @@ class Diff_transformer(nn.Module):
             x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
             x = torch.cat((x_self_cond, x), dim=1)
 
+        mask = None
+        if self.is_causal:
+            mask = nn.Transformer.generate_square_subsequent_mask(x.shape[1])
+
         x = self.project_in(x.permute(0,2,1))
         # x = x.permute(0,2,1)
         r = x.clone()
         t = self.time_mlp(time)
         for layer in self.atten:
-            x = layer(x + t[:,None,:], is_causal=self.is_causal)
+            x = layer(x + t[:,None,:], is_causal=self.is_causal, src_mask=mask)
         x = self.final_mlp(x + r)
         x = x.permute(0,2,1)
         return x

@@ -283,16 +283,27 @@ class Face_feature_dataset(torch.utils.data.Dataset):
         folders = [item.strip() for item in os.listdir(self.root)]
         folders.sort()
         num_max_faces = v_conf['num_max_faces']
+        self.is_map = v_conf['is_map']
         self.length_scaling_factors = int(v_conf['length_scaling_factors'])
         self.folders = [f for f in folders if np.load(self.root/f).shape[0] < num_max_faces]
         print("Filter out {} folders with faces > {}".format(len(folders) - len(self.folders), num_max_faces))
+
+        if self.is_map:
+            print("Pre-load data into memory".format(len(folders) - len(self.folders), num_max_faces))
+            self.data = []
+            for folder in self.folders:
+                data = torch.from_numpy(np.load(self.root/folder))
+                self.data.append(data)
 
     def __len__(self):
         return len(self.folders) * self.length_scaling_factors
 
     def __getitem__(self, idx):
         # idx = 0
-        data = torch.from_numpy(np.load(self.root/self.folders[idx % len(self.folders)]))
+        if not self.is_map:
+            data = torch.from_numpy(np.load(self.root/self.folders[idx % len(self.folders)]))
+        else:
+            data = self.data[idx % len(self.folders)]
         num_faces = data.shape[0]
         idx = torch.randperm(num_faces, device=data.device)
         return data[idx]

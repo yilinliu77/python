@@ -9,6 +9,8 @@ dataset:
   num_max_faces: 36
   length_scaling_factors: 100
 
+  is_map: true
+
 trainer:
   learning_rate: 1e-4
 

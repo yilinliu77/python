@@ -85,11 +85,13 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
             filepath = os.path.join(v_path, r"id_larger_than_128_faces_validation.txt")
         else:
             filepath = os.path.join(v_path, r"id_larger_than_128_faces_test.txt")
-        ignore_ids = [item.strip() for item in open(filepath).readlines()]
-
+        if os.path.exists(filepath):
+            ignore_ids = [item.strip() for item in open(filepath).readlines()]
+        else:
+            ignore_ids = []
         miss = []
         for folder_path in self.data_folders:
-            if not os.path.exists(os.path.join(folder_path, "data.npz")) or folder_path in ignore_ids:
+            if not os.path.exists(os.path.join(folder_path, "data.npz")) or folder_path[-8:] in ignore_ids:
                 miss.append(folder_path)
 
         for folder_path in miss:
@@ -289,7 +291,7 @@ class Face_feature_dataset(torch.utils.data.Dataset):
         return len(self.folders) * self.length_scaling_factors
 
     def __getitem__(self, idx):
-        idx = 0
+        # idx = 0
         data = torch.from_numpy(np.load(self.root/self.folders[idx % len(self.folders)]))
         num_faces = data.shape[0]
         idx = torch.randperm(num_faces, device=data.device)

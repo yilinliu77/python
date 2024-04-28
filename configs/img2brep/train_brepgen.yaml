@@ -14,7 +14,7 @@ trainer:
 
   gpu: 1
   num_worker: 0
-  batch_size: 512
+  batch_size: 4
   #  gpu: [ 0, 1 ]
   #  num_worker: 4
   #  batch_size: 4
@@ -29,8 +29,8 @@ trainer:
   test_output_dir:
   output: .
   check_val_every_n_epoch: 10
-  #  accelerator: "16-mixed"
-  accelerator: "32-true"
+  accelerator: "16-mixed"
+#  accelerator: "32-true"
 
 model:
   dim_latent: 256
@@ -55,7 +55,9 @@ model:
   #  graphconv: "SAGE"
   graphconv: "GAT"
 
-  num_max_faces: 3
+  num_max_faces: 64
+  diffusion_objective: pred_noise # pred_noise, pred_x0, pred_v
+  diffusion_causal: false #
 
 hydra:
   run:

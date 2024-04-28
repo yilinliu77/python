@@ -43,10 +43,10 @@ class TrainDiffusionModel(pl.LightningModule):
     def train_dataloader(self):
         self.train_dataset = Face_feature_dataset("training", self.hydra_conf["dataset"], )
 
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
+        return DataLoader(self.train_dataset, batch_size=1, shuffle=True,
                           collate_fn=Face_feature_dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
-                          pin_memory=True,
+                          pin_memory=False,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
                           )
@@ -54,10 +54,10 @@ class TrainDiffusionModel(pl.LightningModule):
     def val_dataloader(self):
         self.valid_dataset = Face_feature_dataset("validation", self.hydra_conf["dataset"], )
 
-        return DataLoader(self.valid_dataset, batch_size=self.batch_size,
+        return DataLoader(self.valid_dataset, batch_size=1,
                           collate_fn=Face_feature_dataset.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
-                          pin_memory=True,
+                          pin_memory=False,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
                           )

@@ -8,6 +8,7 @@ dataset:
   coor_discrete_dim: 128
   num_max_faces: 36
   length_scaling_factors: 100
+  face_embedding_batch_size: 512
 
   is_map: true
 

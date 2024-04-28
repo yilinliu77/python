@@ -92,6 +92,15 @@ class AutoEncoder(nn.Module):
             nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
         )
 
+        self.with_vae = v_conf["with_vae"]
+        if self.with_vae:
+            self.vae = nn.Sequential(
+                nn.Linear(self.dim_latent, self.dim_latent * 2),
+                nn.GELU(),
+                nn.Linear(self.dim_latent * 2, self.dim_latent * 2),
+                nn.GELU(),
+            )
+
     # Inference (B * num_faces * num_features)
     # Pad features are all zeros
     # B==1 currently
@@ -213,23 +222,34 @@ class AutoEncoder(nn.Module):
 
         atten_face_edge_embeddings = self.face_fuser(face_edge_embeddings_gcn, face_attn_mask)  # This is the true latent
 
-        # ================== Quantization  ==================
-        if self.with_quantization:
+        if self.with_quantization and self.with_vae:
+            raise NotImplementedError
+        elif self.with_quantization:
+            # ================== Quantization  ==================
             quantized_face_embeddings, indices, quantized_loss = self.quantizer(atten_face_edge_embeddings[:, None])
             quantized_face_embeddings = quantized_face_embeddings[:, 0]
             indices = indices[:, 0]
-            quantized_face_embeddings = self.quantizer_proj(quantized_face_embeddings)
-        else:
-            quantized_face_embeddings = atten_face_edge_embeddings
+            true_face_embeddings = self.quantizer_proj(quantized_face_embeddings)
+            true_face_embeddings = torch.sigmoid(true_face_embeddings)
+        elif self.with_vae:
+            vae_face_embeddings = self.vae(atten_face_edge_embeddings)
+            mean = vae_face_embeddings[..., :self.dim_latent]
+            logvar = vae_face_embeddings[..., self.dim_latent:]
+            std = torch.exp(0.5 * logvar)
+            eps = torch.randn_like(std)
+            true_face_embeddings = mean + eps * std
             indices = None
-
-        quantized_face_embeddings = torch.sigmoid(quantized_face_embeddings)
+            vae_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
+        else:
+            true_face_embeddings = atten_face_edge_embeddings
+            true_face_embeddings = torch.sigmoid(true_face_embeddings)
+            indices = None
 
         # ================== Intersection  ==================
         face_adj = v_data["face_adj"]
         edge_adj = v_data["edge_adj"]
         inter_edge_features, inter_edge_null_features, inter_vertex_features, inter_vertex_null_features = self.intersector(
-            quantized_face_embeddings,
+            true_face_embeddings,
             edge_face_connectivity,
             vertex_edge_connectivity,
             face_adj, face_mask,
@@ -242,7 +262,7 @@ class AutoEncoder(nn.Module):
         face_data = self.decoder.decode_face(face_embeddings)  # Normal decoding faces
         # Decode with intersection feature
         recon_data = self.decoder(
-            quantized_face_embeddings,
+            true_face_embeddings,
             inter_edge_features,
             inter_vertex_features,
         )
@@ -290,7 +310,7 @@ class AutoEncoder(nn.Module):
 
             # Loss for l2 distance from the quantized face features and normal face features
             loss["face_l2"] = nn.functional.mse_loss(
-                quantized_face_embeddings, face_embeddings, reduction='mean')
+                true_face_embeddings, face_embeddings, reduction='mean')
             # Loss for l2 distance from the intersection edge features and normal edge features
             loss["edge_l2"] = nn.functional.mse_loss(
                 inter_edge_features, edge_embeddings[used_edge_indexes], reduction='mean')
@@ -299,6 +319,8 @@ class AutoEncoder(nn.Module):
                 inter_vertex_features, vertex_embeddings[used_vertex_indexes], reduction='mean')
             if self.with_quantization:
                 loss["quantization"] = quantized_loss.mean()
+            if self.with_vae:
+                loss["vae"] = vae_loss
             loss["total_loss"] = sum(loss.values())
 
         # Compute model size and flops
@@ -343,7 +365,8 @@ class AutoEncoder(nn.Module):
             if not return_recon:
                 raise
             # Compute the true loss with the continuous points
-            true_recon_face_loss = nn.functional.mse_loss(data["recon_faces"], v_data["face_points"], reduction='mean')
+            true_recon_face_loss = nn.functional.mse_loss(
+                data["recon_faces"], v_data["face_points"], reduction='mean')
             loss["true_recon_face"] = true_recon_face_loss
             true_recon_edge_loss = nn.functional.mse_loss(
                 recon_edges, v_data["edge_points"][edge_mask][used_edge_indexes], reduction='mean')
@@ -353,23 +376,17 @@ class AutoEncoder(nn.Module):
             loss["true_recon_vertex"] = true_recon_vertex_loss
 
         if return_face_features:
-            face_embeddings_return = quantized_face_embeddings.new_zeros(
-                (*face_mask.shape, quantized_face_embeddings.shape[-1]))
+            face_embeddings_return = true_face_embeddings.new_zeros(
+                (*face_mask.shape, true_face_embeddings.shape[-1]))
             face_embeddings_return = face_embeddings_return.masked_scatter(
-                rearrange(face_mask, '... -> ... 1'), quantized_face_embeddings)
+                rearrange(face_mask, '... -> ... 1'), true_face_embeddings)
             data["face_embeddings"] = face_embeddings_return
 
             if self.with_quantization:
-                quantized_face_embeddings_return = quantized_face_embeddings.new_zeros(
-                    (*face_mask.shape, quantized_face_embeddings.shape[-1]))
-                quantized_face_embeddings_return = quantized_face_embeddings_return.masked_scatter(
-                    rearrange(face_mask, '... -> ... 1'), quantized_face_embeddings)
-
                 quantized_face_indices_return = indices.new_zeros(
                     (*face_mask.shape, indices.shape[-1]))
                 quantized_face_indices_return = quantized_face_indices_return.masked_scatter(
                     rearrange(face_mask, '... -> ... 1'), indices)
-                data["quantized_face_embeddings"] = quantized_face_embeddings_return
                 data["quantized_face_indices"] = quantized_face_indices_return
 
         return loss, data

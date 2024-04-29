@@ -1,65 +1,56 @@
 dataset:
-  #  train_dataset: G:/Dataset/img2brep/deepcad_10000_v2
   train_dataset: G:/Dataset/img2brep/deepcad_10000_v2
   val_dataset: G:/Dataset/img2brep/deepcad_10000_v2
   test_dataset: G:/Dataset/img2brep/deepcad_10000_v2
-  dataset_name: ABC
   bbox_discrete_dim: 256
   coor_discrete_dim: 128
+
+  # Diffusion
   num_max_faces: 36
   length_scaling_factors: 100
   face_embedding_batch_size: 512
-
   is_map: true
 
 trainer:
-  learning_rate: 1e-4
+  train_mode: 0
 
   gpu: 1
   num_worker: 0
   batch_size: 4
-  #  gpu: [ 0, 1 ]
-  #  num_worker: 4
-  #  batch_size: 4
-
-  train_mode: 0
-
-  max_epochs: 10000000
-  spawn: false
-  resume_from_checkpoint:
-  evaluate: false
-  save_face_embedding: false
-  test_output_dir:
-  output: .
+  learning_rate: 1e-4
   check_val_every_n_epoch: 10
 #  accelerator: "16-mixed"
   accelerator: "32-true"
 
+  # Evaluation
+  evaluate: false
+  save_face_embedding: false
+  test_output_dir:
+  resume_from_checkpoint:
+
+  max_epochs: 10000000
+  spawn: false
+  output: .
+
 model:
+  # Dimension
   dim_latent: 256
   dim_shape: 256
   dim_decoder: 256
+  bbox_discrete_dim: 256
+  coor_discrete_dim: 128
+  # Flags
   with_quantization: false
   with_vae: false
   vae_weight: 0.1
 
-  #  intersector: "Attn_intersector"
-  intersector: "Attn_intersector_classifier"
-  #  intersector: "Proj_intersector"
+  encoder: "Discrete_encoder" # "Continuous_encoder", "Discrete_encoder"
+  decoder: "Discrete_decoder" # "Small_decoder_plus", "Discrete_decoder"
+  intersector: "Attn_intersector_classifier"  # "Attn_intersector", "Proj_intersector"
+  graphconv: "GAT" # "SAGE", "GAT"
 
-  #  encoder: "Continuous_encoder"
-  #  decoder: "Small_decoder_plus"
-
-  encoder: "Discrete_encoder"
-  decoder: "Discrete_decoder"
-
+  # For generative model
   checkpoint_autoencoder:
-  bbox_discrete_dim: 256
-  coor_discrete_dim: 128
-
-  #  graphconv: "SAGE"
-  graphconv: "GAT"
-
   num_max_faces: 64
   diffusion_objective: pred_noise # pred_noise, pred_x0, pred_v
   diffusion_causal: false #

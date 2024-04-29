@@ -39,7 +39,6 @@ class TrainAutoEncoder(pl.LightningModule):
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
         self.num_worker = self.hydra_conf["trainer"]["num_worker"]
-        self.dataset_name = self.hydra_conf["dataset"]["dataset_name"]
 
         self.save_hyperparameters(hparams)
 
@@ -426,13 +425,13 @@ def main(v_cfg: DictConfig):
     mc = ModelCheckpoint(monitor="Validation_Loss", save_top_k=3, save_last=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
-    if train_mode==0:
+    if train_mode==0 or train_mode==1:
         modelTraining = TrainAutoEncoder(v_cfg)
         logger = TensorBoardLogger(os.path.join(log_dir, "tb_logs_brepgen"), name="autoencoder")
-    elif train_mode==1:
+    elif train_mode==2:
         modelTraining = TrainAutoregressiveModel(v_cfg)
         logger = TensorBoardLogger(os.path.join(log_dir, "tb_logs_brepgen"), name="transformer")
-    elif train_mode==2:
+    elif train_mode==3:
         modelTraining = TrainDiffusionModel(v_cfg)
         logger = TensorBoardLogger(os.path.join(log_dir, "tb_logs_brepgen"), name="diffusion")
 
@@ -452,13 +451,16 @@ def main(v_cfg: DictConfig):
             check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
             precision=v_cfg["trainer"]["accelerator"],
             # accumulate_grad_batches=1,
-            profiler=SimpleProfiler(dirpath=log_dir, filename="profiler.txt"),
+            # profiler=SimpleProfiler(dirpath=log_dir, filename="profiler.txt"),
             )
 
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
         state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
-        modelTraining.load_state_dict(state_dict, strict=True)
+        if train_mode==1:
+            modelTraining.load_state_dict(state_dict, strict=False)
+        else:
+            modelTraining.load_state_dict(state_dict, strict=True)
 
     if v_cfg["trainer"].evaluate:
         trainer.test(modelTraining)

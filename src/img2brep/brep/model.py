@@ -73,34 +73,57 @@ class AutoEncoder(nn.Module):
             bbox_discrete_dim=v_conf["bbox_discrete_dim"],
             coor_discrete_dim=v_conf["coor_discrete_dim"],
         )
+
+        self.frozen_models = []
         # ================== Quantization ==================
-        # self.quantizer = ResidualLFQ(dim=self.dim_latent,
-        #                              codebook_size=18384,
-        #                              num_quantizers=4,
-        #                              commitment_loss_weight=1., )
+        self.with_quantization = v_conf["with_quantization"]
+        if self.with_quantization:
+            self.quantizer = VectorQuantize(
+                dim=self.dim_latent,
+                codebook_dim=32,  # a number of papers have shown smaller codebook dimension to be acceptable
+                heads=8,  # number of heads to vector quantize, codebook shared across all heads
+                separate_codebook_per_head=True, # whether to have a separate codebook per head. False would mean 1 shared codebook
+                codebook_size=8196,
+                accept_image_fmap=False
+            )
+            self.quantizer_proj = nn.Sequential(
+                nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
+                nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
+            )
+            self.frozen_models = [
+                self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
+                self.gcn_on_edges, self.gcn_on_faces, self.edge_fuser, self.face_fuser,
+                self.fuser_vertices_to_edges, self.fuser_edges_to_faces,
+            ]
 
-        self.quantizer = VectorQuantize(
-            dim=self.dim_latent,
-            codebook_dim=32,  # a number of papers have shown smaller codebook dimension to be acceptable
-            heads=8,  # number of heads to vector quantize, codebook shared across all heads
-            separate_codebook_per_head=True, # whether to have a separate codebook per head. False would mean 1 shared codebook
-            codebook_size=8196,
-            accept_image_fmap=False
-        )
-        self.quantizer_proj = nn.Sequential(
-            nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
-            nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
-        )
-
+        # ================== VAE ==================
         self.with_vae = v_conf["with_vae"]
         if self.with_vae:
             self.vae = nn.Sequential(
                 nn.Linear(self.dim_latent, self.dim_latent * 2),
                 nn.GELU(),
-                nn.Linear(self.dim_latent * 2, self.dim_latent * 2),
-                nn.GELU(),
+                nn.TransformerEncoderLayer(d_model=self.dim_latent*2, nhead=8, batch_first=True, dropout=0.1),
+                nn.TransformerEncoderLayer(d_model=self.dim_latent*2, nhead=8, batch_first=True, dropout=0.0),
             )
             self.vae_weight = v_conf["vae_weight"]
+            self.vae_proj = nn.Sequential(
+                nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
+                nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
+                nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
+                nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
+                nn.Linear(self.dim_latent, self.dim_latent),
+            )
+            self.frozen_models = [
+                self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
+                self.gcn_on_edges, self.gcn_on_faces, self.edge_fuser, self.face_fuser,
+                self.fuser_vertices_to_edges, self.fuser_edges_to_faces,
+            ]
+
+        # ================== Freeze models ==================
+        for model in self.frozen_models:
+            model.eval()
+            for param in model.parameters():
+                param.requires_grad = False
 
     # Inference (B * num_faces * num_features)
     # Pad features are all zeros
@@ -237,11 +260,15 @@ class AutoEncoder(nn.Module):
             true_face_embeddings = torch.sigmoid(true_face_embeddings)
         elif self.with_vae:
             vae_face_embeddings = self.vae(atten_face_edge_embeddings)
+            # Sampling
             mean = vae_face_embeddings[..., :self.dim_latent]
             logvar = vae_face_embeddings[..., self.dim_latent:]
             std = torch.exp(0.5 * logvar)
             eps = torch.randn_like(std)
-            true_face_embeddings = mean + eps * std * self.vae_weight
+            sampled_embeddings = mean + eps * std * self.vae_weight
+            # Proj
+            true_face_embeddings = self.vae_proj(sampled_embeddings)
+            true_face_embeddings = torch.sigmoid(true_face_embeddings)
             indices = None
             vae_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
         else:

@@ -46,9 +46,7 @@ class TrainAutoEncoder(pl.LightningModule):
         if not os.path.exists(self.log_root):
             os.makedirs(self.log_root)
 
-        self.autoencoder = AutoEncoder(self.hydra_conf["model"])
-        self.model = self.autoencoder
-
+        self.model = AutoEncoder(self.hydra_conf["model"])
         self.viz = {}
 
     def train_dataloader(self):
@@ -457,7 +455,7 @@ def main(v_cfg: DictConfig):
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
         state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
-        state_dict = {k.replace("autoencoder.", ""): v for k, v in state_dict.items()}
+        state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
         if train_mode==1:
             print(modelTraining.model.load_state_dict(state_dict, strict=False))
         else:

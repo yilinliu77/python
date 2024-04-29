@@ -32,8 +32,8 @@ class TrainDiffusionModel(pl.LightningModule):
         if not os.path.exists(self.log_root):
             os.makedirs(self.log_root)
 
-        # self.model = DiffusionModel(
-        self.model = DiffuserModel(
+        self.model = DiffusionModel(
+        # self.model = DiffuserModel(
             self.hydra_conf["model"]
         )
 
@@ -379,7 +379,7 @@ class DiffuserModel(nn.Module):
 
         self.schedular = DDPMScheduler(
             num_train_timesteps=1000,
-            prediction_type=v_conf["diffusion_objective"],
+            # prediction_type=v_conf["diffusion_objective"],
         )
         self.pipeline = DDPMPipeline(unet=self.model, scheduler=self.schedular)
         pass

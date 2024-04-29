@@ -83,7 +83,8 @@ class AutoEncoder(nn.Module):
                     dim=self.dim_latent,
                     codebook_dim=32,  # a number of papers have shown smaller codebook dimension to be acceptable
                     heads=8,  # number of heads to vector quantize, codebook shared across all heads
-                    separate_codebook_per_head=True, # whether to have a separate codebook per head. False would mean 1 shared codebook
+                    separate_codebook_per_head=True,
+                    # whether to have a separate codebook per head. False would mean 1 shared codebook
                     codebook_size=8196,
                     accept_image_fmap=False
                 )
@@ -118,17 +119,19 @@ class AutoEncoder(nn.Module):
         # ================== VAE ==================
         self.with_vae = v_conf["with_vae"]
         if self.with_vae:
-            layer = nn.TransformerEncoderLayer(d_model=self.dim_latent*2, nhead=8, batch_first=True, dropout=0.1)
+            layer = nn.TransformerEncoderLayer(d_model=self.dim_latent * 2, nhead=8, dim_feedforward=512,
+                                               batch_first=True, dropout=0.1)
             self.vae = nn.Sequential(
                 nn.Linear(self.dim_latent, self.dim_latent * 2),
                 nn.GELU(),
-                nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(self.dim_latent*2)),
+                nn.TransformerEncoder(layer, 4, norm=nn.LayerNorm(self.dim_latent * 2)),
                 nn.Linear(self.dim_latent * 2, self.dim_latent * 2),
             )
             self.vae_weight = v_conf["vae_weight"]
-            layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1)
+            layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, dim_feedforward=512,
+                                               batch_first=True, dropout=0.1)
             self.vae_proj = nn.Sequential(
-                nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(self.dim_latent)),
+                nn.TransformerEncoder(layer, 4, norm=nn.LayerNorm(self.dim_latent)),
                 nn.Linear(self.dim_latent, self.dim_latent),
             )
             self.frozen_models = [
@@ -186,7 +189,7 @@ class AutoEncoder(nn.Module):
         )
         recon_faces, recon_edges, recon_vertices = self.decoder.inference(recon_data)
 
-        valid_face_flag = (v_face_embeddings[0]!=0).any(dim=-1)
+        valid_face_flag = (v_face_embeddings[0] != 0).any(dim=-1)
         recon_faces[~valid_face_flag] = -1
         return recon_vertices, recon_edges, recon_faces
 
@@ -266,7 +269,8 @@ class AutoEncoder(nn.Module):
                                                      edge_face_connectivity[..., 1:].permute(1, 0),
                                                      edge_attr=atten_edge_embeddings[edge_face_connectivity[..., 0]])
 
-        atten_face_edge_embeddings = self.face_fuser(face_edge_embeddings_gcn, face_attn_mask)  # This is the true latent
+        atten_face_edge_embeddings = self.face_fuser(face_edge_embeddings_gcn,
+                                                     face_attn_mask)  # This is the true latent
 
         if self.with_quantization and self.with_vae:
             raise NotImplementedError

@@ -103,7 +103,8 @@ class AutoEncoder(nn.Module):
                     codebook_size=8196,
                     accept_image_fmap=False
                 )
-                layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1)
+                layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, dim_feedforward=512,
+                                                batch_first=True, dropout=0.1)
                 self.quantizer_proj = nn.Sequential(
                     nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(self.dim_latent)),
                     nn.Linear(self.dim_latent, self.dim_latent),

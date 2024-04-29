@@ -111,9 +111,9 @@ class AutoEncoder(nn.Module):
                 )
 
                 self.frozen_models = [
-                    self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
-                    self.gcn_on_edges, self.gcn_on_faces, self.edge_fuser, self.face_fuser,
-                    self.fuser_vertices_to_edges, self.fuser_edges_to_faces,
+                    # self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
+                    # self.gcn_on_edges, self.gcn_on_faces, self.edge_fuser, self.face_fuser,
+                    # self.fuser_vertices_to_edges, self.fuser_edges_to_faces,
                     # self.decoder, self.intersector
                 ]
 
@@ -136,17 +136,17 @@ class AutoEncoder(nn.Module):
                 nn.Linear(self.dim_latent, self.dim_latent),
             )
             self.frozen_models = [
-                self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
-                self.gcn_on_edges, self.gcn_on_faces, self.edge_fuser, self.face_fuser,
-                self.fuser_vertices_to_edges, self.fuser_edges_to_faces,
+                # self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
+                # self.gcn_on_edges, self.gcn_on_faces, self.edge_fuser, self.face_fuser,
+                # self.fuser_vertices_to_edges, self.fuser_edges_to_faces,
                 # self.decoder, self.intersector
             ]
 
         # ================== Freeze models ==================
-        for model in self.frozen_models:
-            model.eval()
-            for param in model.parameters():
-                param.requires_grad = False
+        # for model in self.frozen_models:
+        #     model.eval()
+        #     for param in model.parameters():
+        #         param.requires_grad = False
 
     # Inference (B * num_faces * num_features)
     # Pad features are all zeros

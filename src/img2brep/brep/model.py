@@ -78,23 +78,42 @@ class AutoEncoder(nn.Module):
         # ================== Quantization ==================
         self.with_quantization = v_conf["with_quantization"]
         if self.with_quantization:
-            self.quantizer = VectorQuantize(
-                dim=self.dim_latent,
-                codebook_dim=32,  # a number of papers have shown smaller codebook dimension to be acceptable
-                heads=8,  # number of heads to vector quantize, codebook shared across all heads
-                separate_codebook_per_head=True, # whether to have a separate codebook per head. False would mean 1 shared codebook
-                codebook_size=8196,
-                accept_image_fmap=False
-            )
-            self.quantizer_proj = nn.Sequential(
-                nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
-                nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
-            )
-            self.frozen_models = [
-                self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
-                self.gcn_on_edges, self.gcn_on_faces, self.edge_fuser, self.face_fuser,
-                self.fuser_vertices_to_edges, self.fuser_edges_to_faces,
-            ]
+            if False:
+                self.quantizer = VectorQuantize(
+                    dim=self.dim_latent,
+                    codebook_dim=32,  # a number of papers have shown smaller codebook dimension to be acceptable
+                    heads=8,  # number of heads to vector quantize, codebook shared across all heads
+                    separate_codebook_per_head=True, # whether to have a separate codebook per head. False would mean 1 shared codebook
+                    codebook_size=8196,
+                    accept_image_fmap=False
+                )
+                self.quantizer_proj = nn.Sequential(
+                    nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
+                    nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
+                )
+                self.frozen_models = []
+            else:
+                self.quantizer = VectorQuantize(
+                    dim=self.dim_latent,
+                    codebook_dim=32,  # a number of papers have shown smaller codebook dimension to be acceptable
+                    heads=8,  # number of heads to vector quantize, codebook shared across all heads
+                    separate_codebook_per_head=True,
+                    # whether to have a separate codebook per head. False would mean 1 shared codebook
+                    codebook_size=8196,
+                    accept_image_fmap=False
+                )
+                layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1)
+                self.quantizer_proj = nn.Sequential(
+                    nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(self.dim_latent)),
+                    nn.Linear(self.dim_latent, self.dim_latent),
+                )
+
+                self.frozen_models = [
+                    self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
+                    self.gcn_on_edges, self.gcn_on_faces, self.edge_fuser, self.face_fuser,
+                    self.fuser_vertices_to_edges, self.fuser_edges_to_faces,
+                    # self.decoder, self.intersector
+                ]
 
         # ================== VAE ==================
         self.with_vae = v_conf["with_vae"]
@@ -116,7 +135,7 @@ class AutoEncoder(nn.Module):
                 self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
                 self.gcn_on_edges, self.gcn_on_faces, self.edge_fuser, self.face_fuser,
                 self.fuser_vertices_to_edges, self.fuser_edges_to_faces,
-                self.decoder, self.intersector
+                # self.decoder, self.intersector
             ]
 
         # ================== Freeze models ==================

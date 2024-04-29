@@ -377,7 +377,10 @@ class DiffuserModel(nn.Module):
         )
         self.padding_token = nn.Parameter(torch.rand(dim), requires_grad=True)
 
-        self.schedular = DDPMScheduler(num_train_timesteps=1000)
+        self.schedular = DDPMScheduler(
+            num_train_timesteps=1000,
+            prediction_type=v_conf["diffusion_objective"],
+        )
         self.pipeline = DDPMPipeline(unet=self.model, scheduler=self.schedular)
         pass
 

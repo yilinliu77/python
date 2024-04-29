@@ -4,7 +4,7 @@ from pathlib import Path
 import torch
 from denoising_diffusion_pytorch import GaussianDiffusion, GaussianDiffusion1D, Unet1D
 from denoising_diffusion_pytorch.denoising_diffusion_pytorch_1d import SinusoidalPosEmb, default
-from diffusers import AutoencoderKL
+from diffusers import AutoencoderKL, DDPMScheduler, DDPMPipeline
 from einops import rearrange
 
 from torch import nn
@@ -25,7 +25,6 @@ class TrainDiffusionModel(pl.LightningModule):
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
         self.num_worker = self.hydra_conf["trainer"]["num_worker"]
-        self.dataset_name = self.hydra_conf["dataset"]["dataset_name"]
 
         self.save_hyperparameters(hparams)
 
@@ -33,9 +32,10 @@ class TrainDiffusionModel(pl.LightningModule):
         if not os.path.exists(self.log_root):
             os.makedirs(self.log_root)
 
-        self.model = DiffusionModel(
-                self.hydra_conf["model"]
-                )
+        # self.model = DiffusionModel(
+        self.model = DiffuserModel(
+            self.hydra_conf["model"]
+        )
 
         self.viz_recon = {}
         self.viz_gen = {}
@@ -75,7 +75,7 @@ class TrainDiffusionModel(pl.LightningModule):
             #     'scheduler': scheduler,
             #     'monitor'  : 'Training_Loss',
             #     }
-            }
+        }
 
     def training_step(self, batch, batch_idx):
         data = batch
@@ -120,7 +120,6 @@ class TrainDiffusionModel(pl.LightningModule):
     def on_validation_epoch_end(self):
         # if self.trainer.sanity_checking:
         # return
-
         def vis(viz_data, subname):
             assert subname in ["recon", "gen"]
 
@@ -139,27 +138,25 @@ class TrainDiffusionModel(pl.LightningModule):
             pc = o3d.geometry.PointCloud()
             pc.points = o3d.utility.Vector3dVector(edge_points)
             o3d.io.write_point_cloud(
-                    str(self.log_root / f"{self.trainer.current_epoch:05}_viz_edges_{subname}.ply"),
-                    pc)
+                str(self.log_root / f"{self.trainer.current_epoch:05}_viz_edges_{subname}.ply"),
+                pc)
 
             pc.points = o3d.utility.Vector3dVector(face_points)
             o3d.io.write_point_cloud(
-                    str(self.log_root / f"{self.trainer.current_epoch:05}_viz_faces_{subname}.ply"),
-                    pc)
-
+                str(self.log_root / f"{self.trainer.current_epoch:05}_viz_faces_{subname}.ply"),
+                pc)
         vis(self.viz_recon, "recon")
-
         return
 
 
 class Diff_transformer(nn.Module):
     def __init__(
-        self,
-        dim,
-        channels = 3,
-        self_condition = False,
-        sinusoidal_pos_emb_theta = 10000,
-        is_causal=False
+            self,
+            dim,
+            channels=3,
+            self_condition=False,
+            sinusoidal_pos_emb_theta=10000,
+            is_causal=False
     ):
         super().__init__()
         self.channels = channels
@@ -167,31 +164,36 @@ class Diff_transformer(nn.Module):
         self.is_causal = is_causal
         # determine dimensions
 
+        dim = 768
         if self.self_condition:
             self.project_in = nn.Linear(channels * 2, dim)
         else:
             self.project_in = nn.Linear(channels, dim)
 
-        self.atten = nn.ModuleList([
-            nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            # nn.TransformerEncoderLayer(d_model=dim, nhead=12, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            # nn.TransformerEncoderLayer(d_model=dim, nhead=12, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            # nn.TransformerEncoderLayer(d_model=dim, nhead=12, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            # nn.TransformerEncoderLayer(d_model=dim, nhead=12, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            # nn.TransformerEncoderLayer(d_model=dim, nhead=12, dim_feedforward=dim, dropout=0.1, batch_first=True),
-            # nn.TransformerEncoderLayer(d_model=dim, nhead=12, dim_feedforward=dim, dropout=0.1, batch_first=True),
-        ])
+        # self.atten = nn.ModuleList([
+        #     nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        #     nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        #     nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        #     nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        #     nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        #     nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        #     nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        #     nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        #     # nn.TransformerEncoderLayer(d_model=dim, nhead=12, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        #     # nn.TransformerEncoderLayer(d_model=dim, nhead=12, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        #     # nn.TransformerEncoderLayer(d_model=dim, nhead=12, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        #     # nn.TransformerEncoderLayer(d_model=dim, nhead=12, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        #     # nn.TransformerEncoderLayer(d_model=dim, nhead=12, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        #     # nn.TransformerEncoderLayer(d_model=dim, nhead=12, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        # ])
+
+        layer = nn.TransformerEncoderLayer(d_model=dim, nhead=12, norm_first=True,
+                                                   dim_feedforward=1024, dropout=0.1)
+        self.net = nn.TransformerEncoder(layer, 12, nn.LayerNorm(dim))
 
         # time embeddings
         time_dim = dim
-        sinu_pos_emb = SinusoidalPosEmb(dim, theta = sinusoidal_pos_emb_theta)
+        sinu_pos_emb = SinusoidalPosEmb(dim, theta=sinusoidal_pos_emb_theta)
         fourier_dim = dim
 
         self.time_mlp = nn.Sequential(
@@ -216,14 +218,16 @@ class Diff_transformer(nn.Module):
         if self.is_causal:
             mask = nn.Transformer.generate_square_subsequent_mask(x.shape[2], device=x.device)
 
-        x = self.project_in(x.permute(0,2,1))
+        x = self.project_in(x.permute(0, 2, 1))
         # x = x.permute(0,2,1)
         r = x.clone()
         t = self.time_mlp(time)
-        for layer in self.atten:
-            x = layer(x + t[:,None,:], is_causal=self.is_causal, src_mask=mask)
-        x = self.final_mlp(x + r)
-        x = x.permute(0,2,1)
+        x = x + t[:,None]
+        # for layer in self.atten:
+        #     x = layer(x, is_causal=self.is_causal, src_mask=mask)
+        x = self.net(x)
+        x = self.final_mlp(x)
+        x = x.permute(0, 2, 1)
         return x
 
 
@@ -236,7 +240,7 @@ class DiffusionModel(nn.Module):
         self.autoencoder = AutoEncoder(v_conf)
         if v_conf["checkpoint_autoencoder"] is not None:
             state_dict = torch.load(v_conf["checkpoint_autoencoder"])["state_dict"]
-            state_dict_ = {k[12:]: v for k, v in state_dict.items() if 'autoencoder' in k}
+            state_dict_ = {k[6:]: v for k, v in state_dict.items()}
             self.autoencoder.load_state_dict(
                 state_dict_, strict=True)
         self.autoencoder.eval()
@@ -258,7 +262,7 @@ class DiffusionModel(nn.Module):
             auto_normalize=True,
             beta_schedule='linear',
             # objective = 'pred_v',
-            objective = v_conf["diffusion_objective"],
+            objective=v_conf["diffusion_objective"],
         )
         # self.diffusion = AutoencoderKL(in_channels=256,
         #     out_channels=256,
@@ -277,7 +281,7 @@ class DiffusionModel(nn.Module):
 
     def forward_on_embedding(self, v_face_embeddings, only_return_loss=False, only_return_recon=False):
         B, num_face, dim = v_face_embeddings.shape
-        zero_flag = (v_face_embeddings==0).all(dim=-1)
+        zero_flag = (v_face_embeddings == 0).all(dim=-1)
         num_valid = (~zero_flag).sum(dim=1)
         face_embeddings = v_face_embeddings
         # face_embeddings[zero_flag] = 0
@@ -285,20 +289,20 @@ class DiffusionModel(nn.Module):
 
         padded_face_embeddings = torch.cat((
             face_embeddings,
-            self.padding_token.repeat((B, self.num_max_faces-face_embeddings.shape[1], 1)),
+            self.padding_token.repeat((B, self.num_max_faces - face_embeddings.shape[1], 1)),
         ), dim=1)
 
-        loss = self.diffusion(padded_face_embeddings.permute(0,2,1))
+        loss = self.diffusion(padded_face_embeddings.permute(0, 2, 1))
 
         loss = {
-            "total_loss"         : loss,
-            }
+            "total_loss": loss,
+        }
 
         return loss, {}
 
     def forward_on_embedding1(self, v_face_embeddings, only_return_loss=False, only_return_recon=False):
         B, num_face, dim = v_face_embeddings.shape
-        zero_flag = (v_face_embeddings==0).all(dim=-1)
+        zero_flag = (v_face_embeddings == 0).all(dim=-1)
         num_valid = (~zero_flag).sum(dim=1)
         face_embeddings = v_face_embeddings
         # face_embeddings[zero_flag] = 0
@@ -306,10 +310,10 @@ class DiffusionModel(nn.Module):
 
         padded_face_embeddings = torch.cat((
             face_embeddings,
-            self.padding_token.repeat((B, self.num_max_faces-face_embeddings.shape[1], 1)),
+            self.padding_token.repeat((B, self.num_max_faces - face_embeddings.shape[1], 1)),
         ), dim=1)
 
-        posterior = self.diffusion.encode(padded_face_embeddings.permute(0,2,1)).latent_dist
+        posterior = self.diffusion.encode(padded_face_embeddings.permute(0, 2, 1)).latent_dist
         z = posterior.sample()
         dec = self.model.decode(z).sample
 
@@ -318,11 +322,10 @@ class DiffusionModel(nn.Module):
         total_loss = mse_loss + 1e-6 * kl_loss
 
         loss = {
-            "total_loss"         : total_loss,
-            }
+            "total_loss": total_loss,
+        }
 
         return loss, {}
-
 
     @torch.no_grad()
     def prepare_face_embedding(self, v_data):
@@ -337,8 +340,93 @@ class DiffusionModel(nn.Module):
 
     @torch.no_grad()
     def generate(self, batch_size=1, v_gt_feature=None):
-        samples = self.diffusion.sample(batch_size).permute(0,2,1)
-        distance = nn.functional.mse_loss(samples, self.padding_token[None,None,:], reduction='none').mean(dim=-1)
+        samples = self.diffusion.sample(batch_size).permute(0, 2, 1)
+        distance = nn.functional.mse_loss(samples, self.padding_token[None, None, :], reduction='none').mean(dim=-1)
+        valid_flag = distance > 1e-2
+        face_embeddings = samples
+        face_embeddings[~valid_flag] = 0
+        recon_vertices, recon_edges, recon_faces = self.autoencoder.inference(face_embeddings)
+        mse_loss = v_gt_feature.new_zeros(1)
+        # mse_loss = nn.functional.mse_loss(face_embeddings[0,:3], v_gt_feature)
+        return recon_vertices, recon_edges, recon_faces, mse_loss
+
+
+
+class DiffuserModel(nn.Module):
+    def __init__(self,
+                 v_conf,
+                 dim=256,
+                 ):
+        super().__init__()
+        self.autoencoder = AutoEncoder(v_conf)
+        if v_conf["checkpoint_autoencoder"] is not None:
+            state_dict = torch.load(v_conf["checkpoint_autoencoder"])["state_dict"]
+            state_dict_ = {k[6:]: v for k, v in state_dict.items()}
+            self.autoencoder.load_state_dict(
+                state_dict_, strict=True)
+        self.autoencoder.eval()
+
+        self.num_max_faces = v_conf["num_max_faces"]
+
+        self.is_causal = v_conf["diffusion_causal"]
+        self.model = Diff_transformer(
+            dim=dim,
+            channels=dim,
+            self_condition=False,
+            is_causal=self.is_causal,
+        )
+        self.padding_token = nn.Parameter(torch.rand(dim), requires_grad=True)
+
+        self.schedular = DDPMScheduler(num_train_timesteps=1000)
+        self.pipeline = DDPMPipeline(unet=self.model, scheduler=self.schedular)
+        pass
+
+
+    @torch.no_grad()
+    def prepare_face_embedding(self, v_data):
+        loss, recon_data = self.autoencoder(v_data, return_face_features=True)
+        face_embeddings = recon_data["face_embeddings"]
+        return face_embeddings
+
+    def forward(self, v_face_embeddings, **kwargs):
+        B, num_face, dim = v_face_embeddings.shape
+        zero_flag = (v_face_embeddings == 0).all(dim=-1)
+        num_valid = (~zero_flag).sum(dim=1)
+        face_embeddings = v_face_embeddings
+        # face_embeddings[zero_flag] = 0
+        face_embeddings[zero_flag] = self.padding_token
+
+        padded_face_embeddings = torch.cat((
+            face_embeddings,
+            self.padding_token.repeat((B, self.num_max_faces - face_embeddings.shape[1], 1)),
+        ), dim=1).permute(0, 2, 1)
+        padded_face_embeddings = padded_face_embeddings * 2 - 1
+
+        # Diffusion
+        noise = torch.randn(padded_face_embeddings.shape, device=padded_face_embeddings.device)
+        timesteps = torch.randint(
+            0, self.schedular.config.num_train_timesteps, (B,), device=padded_face_embeddings.device,
+            dtype=torch.int64
+        )
+        noisy_images = self.schedular.add_noise(padded_face_embeddings, noise, timesteps)
+        noise_pred = self.model(noisy_images, timesteps)
+        loss = nn.functional.mse_loss(noise_pred, noise)
+
+        loss = {
+            "total_loss": loss,
+        }
+
+        return loss, {}
+
+    @torch.no_grad()
+    def generate(self, batch_size=1, v_gt_feature=None):
+        generated_features = torch.randn((batch_size, 256, self.num_max_faces)).cuda()
+        for t in tqdm(self.schedular.timesteps):
+            timesteps = t.reshape(-1).cuda()
+            pred = self.model(generated_features, timesteps)
+            generated_features = self.schedular.step(pred, t, generated_features).prev_sample
+        samples = generated_features.permute(0,2,1) / 2 + 0.5
+        distance = nn.functional.mse_loss(samples, self.padding_token[None, None, :], reduction='none').mean(dim=-1)
         valid_flag = distance > 1e-2
         face_embeddings = samples
         face_embeddings[~valid_flag] = 0

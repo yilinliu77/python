@@ -99,24 +99,24 @@ class AutoEncoder(nn.Module):
         # ================== VAE ==================
         self.with_vae = v_conf["with_vae"]
         if self.with_vae:
+            layer = nn.TransformerEncoderLayer(d_model=self.dim_latent*2, nhead=8, batch_first=True, dropout=0.1)
             self.vae = nn.Sequential(
                 nn.Linear(self.dim_latent, self.dim_latent * 2),
                 nn.GELU(),
-                nn.TransformerEncoderLayer(d_model=self.dim_latent*2, nhead=8, batch_first=True, dropout=0.1),
-                nn.TransformerEncoderLayer(d_model=self.dim_latent*2, nhead=8, batch_first=True, dropout=0.0),
+                nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(self.dim_latent*2)),
+                nn.Linear(self.dim_latent * 2, self.dim_latent * 2),
             )
             self.vae_weight = v_conf["vae_weight"]
+            layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1)
             self.vae_proj = nn.Sequential(
-                nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
-                nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
-                nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
-                nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
+                nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(self.dim_latent)),
                 nn.Linear(self.dim_latent, self.dim_latent),
             )
             self.frozen_models = [
                 self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
                 self.gcn_on_edges, self.gcn_on_faces, self.edge_fuser, self.face_fuser,
                 self.fuser_vertices_to_edges, self.fuser_edges_to_faces,
+                self.decoder, self.intersector
             ]
 
         # ================== Freeze models ==================

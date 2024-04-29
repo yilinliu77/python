@@ -455,11 +455,11 @@ def main(v_cfg: DictConfig):
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
         state_dict = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
-        state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
+        state_dict = {k[6:]: v for k, v in state_dict.items()}
         if train_mode==1:
             print(modelTraining.model.load_state_dict(state_dict, strict=False))
         else:
-            modelTraining.model.load_state_dict(state_dict, strict=True)
+            modelTraining.model.load_state_dict(state_dict, strict=False)
 
     if v_cfg["trainer"].evaluate:
         trainer.test(modelTraining)

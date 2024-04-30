@@ -282,20 +282,20 @@ class Face_feature_dataset(torch.utils.data.Dataset):
             self.root = Path(v_conf['val_dataset'])
         folders = [item.strip() for item in os.listdir(self.root)]
         folders.sort()
-        num_max_faces = v_conf['num_max_faces']
+        self.num_max_faces = v_conf['num_max_faces']
         self.is_map = v_conf['is_map']
         self.face_embedding_batch_size = v_conf['face_embedding_batch_size']
         self.length_scaling_factors = int(v_conf['length_scaling_factors']) if v_training_mode == "training" else 1
-        self.folders = [f for f in folders if np.load(self.root/f).shape[0] < num_max_faces]
-        print("Filter out {} folders with faces > {}".format(len(folders) - len(self.folders), num_max_faces))
+        self.folders = [f for f in folders if np.load(self.root/f).shape[0] < self.num_max_faces]
+        print("Filter out {} folders with faces > {}".format(len(folders) - len(self.folders), self.num_max_faces))
 
         if self.is_map:
-            print("Pre-load data into memory".format(len(folders) - len(self.folders), num_max_faces))
+            print("Pre-load data into memory".format(len(folders) - len(self.folders), self.num_max_faces))
             self.data = []
             for folder in self.folders:
                 data = torch.from_numpy(np.load(self.root/folder))
                 self.data.append(data)
-            self.data = pad_sequence(self.data, batch_first=True, padding_value=0).cuda()
+            self.data = pad_sequence(self.data, batch_first=True, padding_value=0)
             self.length = self.data.shape[0]
         else:
             self.length = len(self.folders)
@@ -310,9 +310,7 @@ class Face_feature_dataset(torch.utils.data.Dataset):
         else:
             idx = torch.randperm(self.face_embedding_batch_size, device=self.data.device) % self.length
             data = self.data[idx]
-        num_faces = data.shape[1]
-        idx = torch.randperm(num_faces, device=data.device)
-        return data[:, idx]
+        return data
 
     @staticmethod
     def collate_fn(batch):

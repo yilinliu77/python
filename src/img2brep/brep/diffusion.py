@@ -279,27 +279,6 @@ class DiffusionModel(nn.Module):
         self.padding_token = nn.Parameter(torch.rand(dim), requires_grad=True)
         pass
 
-    def forward_on_embedding(self, v_face_embeddings, only_return_loss=False, only_return_recon=False):
-        B, num_face, dim = v_face_embeddings.shape
-        zero_flag = (v_face_embeddings == 0).all(dim=-1)
-        num_valid = (~zero_flag).sum(dim=1)
-        face_embeddings = v_face_embeddings
-        # face_embeddings[zero_flag] = 0
-        face_embeddings[zero_flag] = self.padding_token
-
-        padded_face_embeddings = torch.cat((
-            face_embeddings,
-            self.padding_token.repeat((B, self.num_max_faces - face_embeddings.shape[1], 1)),
-        ), dim=1)
-
-        loss = self.diffusion(padded_face_embeddings.permute(0, 2, 1))
-
-        loss = {
-            "total_loss": loss,
-        }
-
-        return loss, {}
-
     def forward_on_embedding1(self, v_face_embeddings, only_return_loss=False, only_return_recon=False):
         B, num_face, dim = v_face_embeddings.shape
         zero_flag = (v_face_embeddings == 0).all(dim=-1)
@@ -333,18 +312,32 @@ class DiffusionModel(nn.Module):
         face_embeddings = recon_data["face_embeddings"]
         return face_embeddings
 
-    def forward(self, v_data, **kwargs):
-        face_embeddings = v_data
-        # face_embeddings = self.prepare_face_embedding(v_data)
-        return self.forward_on_embedding(face_embeddings, **kwargs)
+    def forward(self, v_face_embeddings, **kwargs):
+        B, num_face, dim = v_face_embeddings.shape
+        zero_flag = (v_face_embeddings == 0).all(dim=-1)
+        num_valid = (~zero_flag).sum(dim=1)
+        idx = torch.arange(self.num_max_faces, device=v_face_embeddings.device)[None,:].repeat(B,1) % num_valid[:,None]
+
+        idx = idx[:, torch.randperm(self.num_max_faces)]
+
+        padded_face_embeddings = torch.gather(
+            v_face_embeddings, dim=1, index=idx[:, :, None].expand(B, self.num_max_faces, dim))
+
+        loss = self.diffusion(padded_face_embeddings.permute(0, 2, 1))
+
+        loss = {
+            "total_loss": loss,
+        }
+
+        return loss, {}
 
     @torch.no_grad()
     def generate(self, batch_size=1, v_gt_feature=None):
         samples = self.diffusion.sample(batch_size).permute(0, 2, 1)
-        distance = nn.functional.mse_loss(samples, self.padding_token[None, None, :], reduction='none').mean(dim=-1)
-        valid_flag = distance > 1e-2
+        # distance = nn.functional.mse_loss(samples, self.padding_token[None, None, :], reduction='none').mean(dim=-1)
+        # valid_flag = distance > 1e-2
         face_embeddings = samples
-        face_embeddings[~valid_flag] = 0
+        # face_embeddings[~valid_flag] = 0
         recon_vertices, recon_edges, recon_faces = self.autoencoder.inference(face_embeddings)
         mse_loss = v_gt_feature.new_zeros(1)
         # mse_loss = nn.functional.mse_loss(face_embeddings[0,:3], v_gt_feature)

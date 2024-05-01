@@ -80,11 +80,11 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
 
     def check_data(self, v_path, v_training_mode):
         if v_training_mode == "training":
-            filepath = os.path.join(v_path, r"id_larger_than_128_faces_train.txt")
+            filepath = os.path.join(v_path, r"id_larger_than_128_faces.txt")
         elif v_training_mode == "validation":
-            filepath = os.path.join(v_path, r"id_larger_than_128_faces_validation.txt")
+            filepath = os.path.join(v_path, r"id_larger_than_128_faces.txt")
         else:
-            filepath = os.path.join(v_path, r"id_larger_than_128_faces_test.txt")
+            filepath = os.path.join(v_path, r"id_larger_than_128_faces.txt")
         if os.path.exists(filepath):
             ignore_ids = [item.strip() for item in open(filepath).readlines()]
         else:

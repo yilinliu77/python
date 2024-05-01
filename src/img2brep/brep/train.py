@@ -199,8 +199,7 @@ class TrainAutoEncoder(pl.LightningModule):
         loss, recon_data = self.model(data, return_loss=True,
                                       return_recon=True, return_face_features=True, return_true_loss=True)
         face_embeddings = recon_data["face_embeddings"]
-        inferenced_vertices, inferenced_edges, inferenced_faces, \
-            face_edge_connectivity, edge_vertex_connectivity = self.model.inference(face_embeddings, False)
+        inferenced_vertices, inferenced_edges, inferenced_faces, = self.model.inference(face_embeddings, False)
         # ============================= Loss stuffs =============================
         total_loss = loss["total_loss"]
         for key in loss:
@@ -222,8 +221,8 @@ class TrainAutoEncoder(pl.LightningModule):
         pred_face = inferenced_faces.cpu().numpy()
         pred_edge_point = inferenced_edges.cpu().numpy()
         pred_vertex = inferenced_vertices.cpu().numpy()
-        pred_edge_face_connectivity = face_edge_connectivity.cpu().numpy()[0]
-        pred_vertex_edge_connectivity = edge_vertex_connectivity.cpu().numpy()[0]
+        # pred_edge_face_connectivity = face_edge_connectivity.cpu().numpy()[0]
+        # pred_vertex_edge_connectivity = edge_vertex_connectivity.cpu().numpy()[0]
 
         root = Path(self.hydra_conf["trainer"]["test_output_dir"])
         check_dir(root / prefix)
@@ -237,8 +236,8 @@ class TrainAutoEncoder(pl.LightningModule):
                  pred_face=pred_face,
                  pred_edge_point=pred_edge_point,
                  pred_vertex=pred_vertex,
-                 pred_edge_face_connectivity=pred_edge_face_connectivity,
-                 pred_vertex_edge_connectivity=pred_vertex_edge_connectivity,
+                 # pred_edge_face_connectivity=pred_edge_face_connectivity,
+                 # pred_vertex_edge_connectivity=pred_vertex_edge_connectivity,
                  )
 
 

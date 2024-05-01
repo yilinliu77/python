@@ -162,7 +162,7 @@ class VaeModel(nn.Module):
             quantize_dropout=False,
 
             # separate_codebook_per_head=True,
-            codebook_size=8196,
+            codebook_size=16384,
         )
         # self.quantizer = VectorQuantize(
         #     dim=dim,

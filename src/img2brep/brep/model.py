@@ -1,5 +1,6 @@
 import importlib
 
+import numpy as np
 import torch
 # from torch.utils.flop_counter import FlopCounterMode
 from torch_geometric.nn import SAGEConv, GATv2Conv
@@ -151,36 +152,31 @@ class AutoEncoder(nn.Module):
     # Inference (B * num_faces * num_features)
     # Pad features are all zeros
     # B==1 currently
-    def inference(self, v_face_embeddings):
+    def inference(self, v_face_embeddings, return_topology=False):
         # Use face to intersect edges
         B = v_face_embeddings.shape[0]
+        device = v_face_embeddings.device
         assert B == 1
         num_faces = v_face_embeddings.shape[1]
-        idx = torch.stack(torch.meshgrid(
-            torch.arange(num_faces), torch.arange(num_faces), indexing="xy"), dim=2).reshape(-1, 2)
-        gathered_face_features = v_face_embeddings[0, idx]
+        face_idx = torch.stack(torch.meshgrid(
+            torch.arange(num_faces), torch.arange(num_faces), indexing="xy"), dim=2
+        ).reshape(-1, 2).to(device)
+        gathered_face_features = v_face_embeddings[0, face_idx]
 
-        if num_faces > 128:
-            edge_features = v_face_embeddings.new_zeros(0, v_face_embeddings.shape[-1])
-            vertex_features = edge_features.new_zeros(0, edge_features.shape[-1])
+        edge_features = self.intersector.inference(gathered_face_features, "edge")
+        edge_intersection_mask = self.intersector.inference_label(edge_features)
+        edge_features = edge_features[edge_intersection_mask]
+        num_edges = edge_features.shape[0]
 
-        else:
-            edge_features = self.intersector.inference(gathered_face_features, "edge")
-            edge_intersection_mask = self.intersector.inference_label(edge_features)
-            edge_features = edge_features[edge_intersection_mask]
-            num_edges = edge_features.shape[0]
+        # Use edge to intersect vertices
+        edge_idx = torch.stack(torch.meshgrid(
+            torch.arange(num_edges), torch.arange(num_edges), indexing="xy"), dim=2
+        ).reshape(-1, 2).to(device)
+        gathered_edge_features = edge_features[edge_idx]
 
-            # Use edge to intersect vertices
-            if False and num_edges < 500:
-                idx = torch.stack(torch.meshgrid(
-                    torch.arange(num_edges), torch.arange(num_edges), indexing="xy"), dim=2).reshape(-1, 2)
-                gathered_edge_features = edge_features[idx]
-
-                vertex_features = self.intersector.inference(gathered_edge_features, "vertex")
-                vertex_intersection_mask = self.intersector.inference_label(vertex_features)
-                vertex_features = vertex_features[vertex_intersection_mask]
-            else:
-                vertex_features = edge_features.new_zeros(0, edge_features.shape[-1])
+        vertex_features = self.intersector.inference(gathered_edge_features, "vertex")
+        vertex_intersection_mask = self.intersector.inference_label(vertex_features)
+        vertex_features = vertex_features[vertex_intersection_mask]
 
         # Decode
         recon_data = self.decoder(
@@ -189,9 +185,13 @@ class AutoEncoder(nn.Module):
             vertex_features,
         )
         recon_faces, recon_edges, recon_vertices = self.decoder.inference(recon_data)
-
-        valid_face_flag = (v_face_embeddings[0] != 0).any(dim=-1)
-        recon_faces[~valid_face_flag] = -1
+        if return_topology:
+            face_edge_connectivity = torch.cat((
+                torch.arange(num_edges,device=device)[:,None], face_idx[edge_intersection_mask], ),dim=1)
+            edge_vertex_connectivity = torch.cat((
+                torch.arange(vertex_features.shape[0],device=device)[:,None], edge_idx[vertex_intersection_mask], ),
+                dim=1)
+            return recon_vertices, recon_edges, recon_faces, face_edge_connectivity, edge_vertex_connectivity
         return recon_vertices, recon_edges, recon_faces
 
     def forward(self, v_data,

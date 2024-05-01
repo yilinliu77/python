@@ -200,7 +200,7 @@ class TrainAutoEncoder(pl.LightningModule):
                                       return_recon=True, return_face_features=True, return_true_loss=True)
         face_embeddings = recon_data["face_embeddings"]
         inferenced_vertices, inferenced_edges, inferenced_faces, \
-            face_edge_connectivity, edge_vertex_connectivity = self.model.inference(face_embeddings, True)
+            face_edge_connectivity, edge_vertex_connectivity = self.model.inference(face_embeddings, False)
         # ============================= Loss stuffs =============================
         total_loss = loss["total_loss"]
         for key in loss:

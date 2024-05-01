@@ -174,9 +174,12 @@ class AutoEncoder(nn.Module):
         ).reshape(-1, 2).to(device)
         gathered_edge_features = edge_features[edge_idx]
 
-        vertex_features = self.intersector.inference(gathered_edge_features, "vertex")
-        vertex_intersection_mask = self.intersector.inference_label(vertex_features)
-        vertex_features = vertex_features[vertex_intersection_mask]
+        if gathered_edge_features.shape[0] < 64*64:
+            vertex_features = self.intersector.inference(gathered_edge_features, "vertex")
+            vertex_intersection_mask = self.intersector.inference_label(vertex_features)
+            vertex_features = vertex_features[vertex_intersection_mask]
+        else:
+            vertex_features = gathered_edge_features.new_zeros(0, gathered_edge_features.shape[-1])
 
         # Decode
         recon_data = self.decoder(

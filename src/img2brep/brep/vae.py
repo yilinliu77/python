@@ -173,18 +173,22 @@ class VaeModel(nn.Module):
         #     codebook_size=8196,
         #     accept_image_fmap=False
         # )
-        layer = nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=512,
+        layer = nn.TransformerEncoderLayer(d_model=dim, nhead=1, dim_feedforward=512,
                                            batch_first=True, dropout=0.2)
-        self.quantizer_proj = nn.Sequential(
-            nn.TransformerEncoder(layer, 4, norm=nn.LayerNorm(dim)),
-            nn.Linear(dim, dim),
-        )
+        self.quantizer_proj = nn.TransformerEncoder(layer, 4, norm=nn.LayerNorm(dim))
+        self.quantizer_proj2 = nn.Linear(dim, dim)
 
 
     def forward(self, x,):
         quantized_features, indices, quantization_loss = self.quantizer(x)
-        quantized_features = self.quantizer_proj(quantized_features)
+        mask = ~(x==0).all(dim=-1)
+        attn_mask = ~mask.unsqueeze(1).repeat(1,x.shape[1],1)
+        # attn_mask[mask]=False
+        # attn_mask = torch.logical_or(attn_mask, attn_mask.transpose(1,2))
+        quantized_features = self.quantizer_proj(quantized_features, attn_mask.repeat(1,1,1))
+        quantized_features = self.quantizer_proj2(quantized_features)
         quantized_features = torch.sigmoid(quantized_features)
+        quantized_features = quantized_features * mask.unsqueeze(-1)
         loss = nn.functional.mse_loss(quantized_features, x)
 
         return {

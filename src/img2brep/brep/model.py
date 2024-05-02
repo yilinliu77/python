@@ -378,7 +378,7 @@ class AutoEncoder(nn.Module):
 
             # Loss for l2 distance from the quantized face features and normal face features
             loss["face_l2"] = nn.functional.mse_loss(
-                true_face_embeddings, face_embeddings, reduction='mean')
+                true_face_embeddings, atten_face_edge_embeddings, reduction='mean')
             # Loss for l2 distance from the intersection edge features and normal edge features
             loss["edge_l2"] = nn.functional.mse_loss(
                 inter_edge_features, edge_embeddings[used_edge_indexes], reduction='mean')

@@ -117,10 +117,8 @@ class AutoEncoder(nn.Module):
 
                 layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, dim_feedforward=256,
                                                 batch_first=True, dropout=0.1)
-                self.quantizer_proj = nn.Sequential(
-                    nn.TransformerEncoder(layer, 4, norm=nn.LayerNorm(self.dim_latent)),
-                    nn.Linear(self.dim_latent, self.dim_latent),
-                )
+                self.quantizer_proj = nn.TransformerEncoder(layer, 4, norm=nn.LayerNorm(self.dim_latent))
+                self.quantizer_proj2 = nn.Linear(self.dim_latent, self.dim_latent)
 
                 self.frozen_models = [
                     # self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
@@ -295,7 +293,8 @@ class AutoEncoder(nn.Module):
             quantized_face_embeddings, indices, quantized_loss = self.quantizer(atten_face_edge_embeddings[:, None])
             quantized_face_embeddings = quantized_face_embeddings[:, 0]
             indices = indices[:, 0]
-            true_face_embeddings = self.quantizer_proj(quantized_face_embeddings)
+            true_face_embeddings = self.quantizer_proj(quantized_face_embeddings, face_attn_mask)
+            true_face_embeddings = self.quantizer_proj2(true_face_embeddings)
             true_face_embeddings = torch.sigmoid(true_face_embeddings)
         elif self.with_vae:
             vae_face_embeddings = self.vae(atten_face_edge_embeddings)

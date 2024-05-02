@@ -2,6 +2,10 @@ dataset:
   train_dataset: G:/Dataset/img2brep/deepcad_10000_v2
   val_dataset: G:/Dataset/img2brep/deepcad_10000_v2
   test_dataset: G:/Dataset/img2brep/deepcad_10000_v2
+  train_feature_dataset:
+  val_feature_dataset:
+
+
   bbox_discrete_dim: 256
   coor_discrete_dim: 128
 

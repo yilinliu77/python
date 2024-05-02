@@ -4,7 +4,7 @@ import numpy as np
 import torch
 # from torch.utils.flop_counter import FlopCounterMode
 from torch_geometric.nn import SAGEConv, GATv2Conv
-from vector_quantize_pytorch import ResidualLFQ, VectorQuantize
+from vector_quantize_pytorch import ResidualLFQ, VectorQuantize, ResidualVQ
 
 from src.img2brep.brep.common import *
 from src.img2brep.brep.model_encoder import GAT_GraphConv, SAGE_GraphConv
@@ -95,19 +95,30 @@ class AutoEncoder(nn.Module):
                 )
                 self.frozen_models = []
             else:
-                self.quantizer = VectorQuantize(
+                # self.quantizer = VectorQuantize(
+                #     dim=self.dim_latent,
+                #     codebook_dim=32,  # a number of papers have shown smaller codebook dimension to be acceptable
+                #     heads=8,  # number of heads to vector quantize, codebook shared across all heads
+                #     separate_codebook_per_head=True,
+                #     # whether to have a separate codebook per head. False would mean 1 shared codebook
+                #     codebook_size=8196,
+                #     accept_image_fmap=False
+                # )
+
+                self.quantizer = ResidualVQ(
                     dim=self.dim_latent,
-                    codebook_dim=32,  # a number of papers have shown smaller codebook dimension to be acceptable
-                    heads=8,  # number of heads to vector quantize, codebook shared across all heads
-                    separate_codebook_per_head=True,
-                    # whether to have a separate codebook per head. False would mean 1 shared codebook
-                    codebook_size=8196,
-                    accept_image_fmap=False
+                    codebook_dim=32,
+                    num_quantizers=8,
+                    quantize_dropout=True,
+
+                    # separate_codebook_per_head=True,
+                    codebook_size=16384,
                 )
-                layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, dim_feedforward=512,
+
+                layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, dim_feedforward=256,
                                                 batch_first=True, dropout=0.1)
                 self.quantizer_proj = nn.Sequential(
-                    nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(self.dim_latent)),
+                    nn.TransformerEncoder(layer, 4, norm=nn.LayerNorm(self.dim_latent)),
                     nn.Linear(self.dim_latent, self.dim_latent),
                 )
 
@@ -275,6 +286,7 @@ class AutoEncoder(nn.Module):
 
         atten_face_edge_embeddings = self.face_fuser(face_edge_embeddings_gcn,
                                                      face_attn_mask)  # This is the true latent
+        atten_face_edge_embeddings = torch.sigmoid(atten_face_edge_embeddings)
 
         if self.with_quantization and self.with_vae:
             raise NotImplementedError
@@ -300,7 +312,6 @@ class AutoEncoder(nn.Module):
             vae_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
         else:
             true_face_embeddings = atten_face_edge_embeddings
-            true_face_embeddings = torch.sigmoid(true_face_embeddings)
             indices = None
 
         # ================== Intersection  ==================

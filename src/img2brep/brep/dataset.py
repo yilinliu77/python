@@ -48,10 +48,13 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
 
         if v_training_mode == "testing":
             self.dataset_path = v_conf['test_dataset']
+            self.feature_dataset_path = v_conf['test_feature_dataset']
         elif v_training_mode == "training":
             self.dataset_path = v_conf['train_dataset']
+            self.feature_dataset_path = v_conf['train_feature_dataset']
         elif v_training_mode == "validation":
             self.dataset_path = v_conf['val_dataset']
+            self.feature_dataset_path = v_conf['val_feature_dataset']
         else:
             raise
         self.bd = v_conf['bbox_discrete_dim'] // 2 - 1  # discrete_dim
@@ -74,6 +77,18 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
         print("After removing:", self.data_sum)
 
         self.data_folders = self.data_folders
+
+        if self.feature_dataset_path is not None:
+            self.num_max_faces = v_conf['num_max_faces']
+            folders = [item.strip() for item in os.listdir(self.feature_dataset_path)]
+            self.folders = [f for f in folders if np.load(os.path.join(self.feature_dataset_path, f)).shape[0] < self.num_max_faces]
+            print("Pre-load data into memory".format(len(folders) - len(self.folders), self.num_max_faces))
+            self.data = []
+            for folder in self.folders:
+                data = torch.from_numpy(np.load(self.root / folder))
+                self.data.append(data)
+            self.data = pad_sequence(self.data, batch_first=True, padding_value=0)
+            self.length = self.data.shape[0]
 
     def __len__(self):
         return len(self.data_folders)

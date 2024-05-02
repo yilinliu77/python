@@ -159,7 +159,7 @@ class VaeModel(nn.Module):
             dim=dim,
             codebook_dim=32,
             num_quantizers=8,
-            quantize_dropout=False,
+            quantize_dropout=True,
 
             # separate_codebook_per_head=True,
             codebook_size=16384,
@@ -174,9 +174,9 @@ class VaeModel(nn.Module):
         #     accept_image_fmap=False
         # )
         layer = nn.TransformerEncoderLayer(d_model=dim, nhead=8, dim_feedforward=512,
-                                           batch_first=True, dropout=0.1)
+                                           batch_first=True, dropout=0.2)
         self.quantizer_proj = nn.Sequential(
-            nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(dim)),
+            nn.TransformerEncoder(layer, 4, norm=nn.LayerNorm(dim)),
             nn.Linear(dim, dim),
         )
 

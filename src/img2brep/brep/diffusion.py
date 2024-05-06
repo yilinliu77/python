@@ -13,7 +13,6 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.img2brep.brep.dataset import Face_feature_dataset
-from src.img2brep.brep.model import AutoEncoder
 import pytorch_lightning as pl
 import open3d as o3d
 

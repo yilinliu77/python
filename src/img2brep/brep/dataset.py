@@ -23,8 +23,6 @@ from torch.nn.utils.rnn import pad_sequence
 
 import torch.nn.functional as F
 
-from src.img2brep.brep.model import AutoEncoder
-
 
 def get_face_idx_sequence(edge_face_connectivity, face_points):
     G = nx.Graph()
@@ -40,21 +38,21 @@ def get_face_idx_sequence(edge_face_connectivity, face_points):
     return torch.tensor(face_idx_sequence, dtype=torch.long, device=edge_face_connectivity.device)
 
 
-class Autoencoder_Dataset(torch.utils.data.Dataset):
+class AutoEncoder_dataset(torch.utils.data.Dataset):
     def __init__(self, v_training_mode, v_conf):
-        super(Autoencoder_Dataset, self).__init__()
+        super(AutoEncoder_dataset, self).__init__()
         self.mode = v_training_mode
         self.conf = v_conf
 
         if v_training_mode == "testing":
             self.dataset_path = v_conf['test_dataset']
-            self.feature_dataset_path = v_conf['test_feature_dataset']
+            # self.feature_dataset_path = v_conf['test_feature_dataset']
         elif v_training_mode == "training":
             self.dataset_path = v_conf['train_dataset']
-            self.feature_dataset_path = v_conf['train_feature_dataset']
+            # self.feature_dataset_path = v_conf['train_feature_dataset']
         elif v_training_mode == "validation":
             self.dataset_path = v_conf['val_dataset']
-            self.feature_dataset_path = v_conf['val_feature_dataset']
+            # self.feature_dataset_path = v_conf['val_feature_dataset']
         else:
             raise
         self.bd = v_conf['bbox_discrete_dim'] // 2 - 1  # discrete_dim
@@ -78,7 +76,7 @@ class Autoencoder_Dataset(torch.utils.data.Dataset):
 
         self.data_folders = self.data_folders
 
-        if self.feature_dataset_path is not None:
+        if False and self.feature_dataset_path is not None:
             self.num_max_faces = v_conf['num_max_faces']
             folders = [item.strip() for item in os.listdir(self.feature_dataset_path)]
             self.folders = [f for f in folders if np.load(os.path.join(self.feature_dataset_path, f)).shape[0] < self.num_max_faces]

@@ -1,5 +1,5 @@
 from src.img2brep.brep.autoregressive import AutoregressiveModel
-from src.img2brep.brep.model import AutoEncoder
+from src.img2brep.brep.autoencoder import AutoEncoder
 from src.img2brep.brep.dataset import *
 import hydra
 from omegaconf import DictConfig, OmegaConf

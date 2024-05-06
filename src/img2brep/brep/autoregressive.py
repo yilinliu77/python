@@ -4,7 +4,6 @@ from einops import rearrange
 from torch import nn
 from tqdm import tqdm
 
-from src.img2brep.brep.model import AutoEncoder
 from x_transformers import ContinuousTransformerWrapper, Decoder, ContinuousAutoregressiveWrapper
 
 

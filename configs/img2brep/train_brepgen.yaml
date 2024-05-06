@@ -1,4 +1,6 @@
 dataset:
+  dataset_name: Autoencoder_Dataset
+
   train_dataset: G:/Dataset/img2brep/deepcad_10000_v2
   val_dataset: G:/Dataset/img2brep/deepcad_10000_v2
   test_dataset: G:/Dataset/img2brep/deepcad_10000_v2
@@ -17,6 +19,7 @@ dataset:
 
 trainer:
   train_mode: 0
+  output_validation_model: true
 
   gpu: 1
   num_worker: 0
@@ -37,6 +40,8 @@ trainer:
   output: .
 
 model:
+  model_name: AutoEncoder
+
   # Dimension
   dim_latent: 256
   dim_shape: 256
@@ -45,6 +50,7 @@ model:
   coor_discrete_dim: 128
   # Flags
   with_quantization: false
+  finetune_decoder: false
   with_vae: false
   vae_weight: 0.1
 

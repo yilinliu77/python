@@ -323,7 +323,7 @@ class Face_feature_dataset(torch.utils.data.Dataset):
             data = torch.from_numpy(np.load(self.root/self.folders[idx % self.length]))
         else:
             idx = torch.arange(self.face_embedding_batch_size * idx, self.face_embedding_batch_size * (idx+1))
-            idx = idx % self.length
+            idx = idx % self.data.shape[0]
             data = self.data[idx]
         return data
 

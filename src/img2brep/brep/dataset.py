@@ -309,19 +309,21 @@ class Face_feature_dataset(torch.utils.data.Dataset):
                 data = torch.from_numpy(np.load(self.root/folder))
                 self.data.append(data)
             self.data = pad_sequence(self.data, batch_first=True, padding_value=0)
-            self.length = self.data.shape[0]
+            self.length = max(1, self.data.shape[0] // self.face_embedding_batch_size + 1)
         else:
             self.length = len(self.folders)
 
     def __len__(self):
-        return self.length_scaling_factors
+        return int(self.length_scaling_factors * self.length)
 
     def __getitem__(self, idx):
         # idx = 0
         if not self.is_map:
+            raise NotImplementedError
             data = torch.from_numpy(np.load(self.root/self.folders[idx % self.length]))
         else:
-            idx = torch.randperm(self.face_embedding_batch_size, device=self.data.device) % self.length
+            idx = torch.arange(self.face_embedding_batch_size * idx, self.face_embedding_batch_size * (idx+1))
+            idx = idx % self.length
             data = self.data[idx]
         return data
 

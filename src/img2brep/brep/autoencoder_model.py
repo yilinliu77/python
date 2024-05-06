@@ -106,25 +106,25 @@ class AutoEncoder(nn.Module):
                 )
                 self.frozen_models = []
             else:
-                # self.quantizer = ResidualVQ(
-                #     dim=self.dim_latent,
-                #     codebook_dim=32,
-                #     num_quantizers=8,
-                #     # quantize_dropout=True,
-                #     # stochastic_sample_codes=True,
-                #     # sample_codebook_temp=0.1,
-                #     # shared_codebook=True,
-                #
-                #     codebook_size=16384,
-                #     # use_cosine_sim=True,
-                #     # threshold_ema_dead_code=2,
-                # )
-
-                self.quantizer = ResidualLFQ(
+                self.quantizer = ResidualVQ(
                     dim=self.dim_latent,
-                    codebook_size=8192,
-                    num_quantizers=4
+                    codebook_dim=32,
+                    num_quantizers=8,
+                    # quantize_dropout=True,
+                    # stochastic_sample_codes=True,
+                    # sample_codebook_temp=0.1,
+                    # shared_codebook=True,
+
+                    codebook_size=16384,
+                    # use_cosine_sim=True,
+                    # threshold_ema_dead_code=2,
                 )
+
+                # self.quantizer = ResidualLFQ(
+                #     dim=self.dim_latent,
+                #     codebook_size=8192,
+                #     num_quantizers=4
+                # )
 
                 layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, dim_feedforward=256,
                                                    batch_first=True, dropout=0.1)

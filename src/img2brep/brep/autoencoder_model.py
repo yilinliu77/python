@@ -128,7 +128,7 @@ class AutoEncoder(nn.Module):
 
                 layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, dim_feedforward=256,
                                                    batch_first=True, dropout=0.1)
-                self.quantizer_proj = nn.TransformerEncoder(layer, 4, norm=nn.LayerNorm(self.dim_latent))
+                self.quantizer_proj = nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(self.dim_latent))
                 self.quantizer_proj2 = nn.Linear(self.dim_latent, self.dim_latent)
 
                 self.frozen_models = [

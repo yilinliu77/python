@@ -14,7 +14,7 @@ import pytorch_lightning as pl
 
 from shared.common_utils import *
 from src.img2brep.brep.common import *
-from src.img2brep.brep.model_encoder import GAT_GraphConv, SAGE_GraphConv
+from src.img2brep.brep.model_encoder import GAT_GraphConv, SAGE_GraphConv, res_block_1D
 from src.img2brep.brep.model_fuser import Attn_fuser_cross, Attn_fuser_single
 
 import open3d as o3d
@@ -108,9 +108,20 @@ class AutoEncoder(nn.Module):
             else:
                 layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, dim_feedforward=512,
                                                    batch_first=True, dropout=0.1)
-                self.quantizer_in = nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(self.dim_latent))
-                self.quantizer_out = nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(self.dim_latent))
-                self.quantizer_out2 = nn.Linear(self.dim_latent, self.dim_latent)
+                self.quantizer_out = nn.Sequential(
+                    nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(self.dim_latent)),
+                    nn.Linear(self.dim_latent, self.dim_latent),
+                    nn.Sigmoid(),
+                )
+
+                self.quantizer_out = nn.Sequential(
+                    res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+                    res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+                    res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+                    res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+                    nn.Conv1d(self.dim_latent, self.dim_latent, 1, 1, 0),
+                    nn.Sigmoid(),
+                )
 
                 self.quantizer = ResidualVQ(
                     dim=self.dim_latent,
@@ -426,20 +437,16 @@ class AutoEncoder(nn.Module):
             else:
                 mask = ~(v_data == 0).all(dim=-1)
                 # Construct the attention mask
-                b = v_data.shape[0]
-                n = v_data.shape[1]
-                batch_indices = torch.arange(b, device=v_data.device).unsqueeze(1).repeat(1, n)
-                batch_indices = batch_indices[mask]
-                atten_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
+                # b = v_data.shape[0]
+                # n = v_data.shape[1]
+                # batch_indices = torch.arange(b, device=v_data.device).unsqueeze(1).repeat(1, n)
+                # batch_indices = batch_indices[mask]
+                # atten_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
 
                 flattened_features = v_data[mask]
-                encoded_features = self.quantizer_in(flattened_features, atten_mask)
-                quantized_face_embeddings, indices, quantized_loss = self.quantizer(encoded_features[:,None])
-                quantized_face_embeddings = quantized_face_embeddings[:, 0]
-                indices = indices[:, 0]
-                quantized_features = self.quantizer_out(quantized_face_embeddings, atten_mask)
-                quantized_features = self.quantizer_out2(quantized_features)
-                true_face_embeddings = torch.sigmoid(quantized_features)
+                # quantized_face_embeddings, indices, quantized_loss = self.quantizer(flattened_features[:,None])
+                quantized_face_embeddings, indices, quantized_loss = self.quantizer(flattened_features)
+                true_face_embeddings = self.quantizer_out(quantized_face_embeddings.unsqueeze(2))[...,0]
 
                 loss["quantization_l2"] = nn.functional.mse_loss(true_face_embeddings, flattened_features)
             loss["quantization_internal"] = quantized_loss.mean()

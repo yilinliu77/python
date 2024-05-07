@@ -208,7 +208,7 @@ def main(v_cfg: DictConfig):
         enable_model_summary=False,
         callbacks=[mc, lr_monitor],
         max_epochs=int(v_cfg["trainer"]["max_epochs"]),
-        # max_epochs=4,
+        # max_epochs=2,
         num_sanity_val_steps=2,
         check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
         precision=v_cfg["trainer"]["accelerator"],

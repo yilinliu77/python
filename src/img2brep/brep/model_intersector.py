@@ -196,7 +196,7 @@ class Attn_intersector_classifier(Intersector):
         for layer in self.edge_layers if v_type == "edge" else self.vertex_layers:
             x = layer(x, v_features)
         features = x[:, 0]
-        return features
+        return F.sigmoid(features)
 
     def forward(self,
                 v_face_embeddings,

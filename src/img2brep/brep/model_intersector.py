@@ -66,7 +66,9 @@ class Intersector(nn.Module):
         null_intersection_embedding = torch.stack([face_embeddings1, face_embeddings2], dim=1)
         return intersection_embedding, null_intersection_embedding
 
-    def forward(self, v_face_embeddings,
+    def forward(self,
+                v_face_embeddings,
+                v_edge_embeddings,
                 v_edge_face_connectivity, v_vertex_edge_connectivity,
                 v_face_adj, v_face_mask,
                 v_edge_adj, v_edge_mask,
@@ -196,7 +198,9 @@ class Attn_intersector_classifier(Intersector):
         features = x[:, 0]
         return features
 
-    def forward(self, v_face_embeddings,
+    def forward(self,
+                v_face_embeddings,
+                v_edge_embeddings,
                 v_edge_face_connectivity, v_vertex_edge_connectivity,
                 v_face_adj, v_face_mask,
                 v_edge_adj, v_edge_mask,
@@ -207,7 +211,7 @@ class Attn_intersector_classifier(Intersector):
         edge_null_features = self.inference(null_gathered_edges, "edge")
 
         gathered_vertices, null_gathered_vertices = self.prepare_vertex_data(
-            edge_features, v_vertex_edge_connectivity, v_edge_adj, v_edge_mask)
+            v_edge_embeddings, v_vertex_edge_connectivity, v_edge_adj, v_edge_mask)
         vertex_features = self.inference(gathered_vertices, "vertex")
         vertex_null_features = self.inference(null_gathered_vertices, "vertex")
 

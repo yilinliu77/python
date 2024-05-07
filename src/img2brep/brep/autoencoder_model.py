@@ -28,7 +28,7 @@ def l2norm(t):
     return F.normalize(t, dim=-1, p=2)
 
 
-class AutoEncoder1(nn.Module):
+class AutoEncoder(nn.Module):
     def __init__(self,
                  v_conf,
                  ):
@@ -48,9 +48,18 @@ class AutoEncoder1(nn.Module):
             bbox_discrete_dim=v_conf["bbox_discrete_dim"],
             coor_discrete_dim=v_conf["coor_discrete_dim"],
         )
-        self.vertices_proj = nn.Linear(self.dim_shape, self.dim_latent)
-        self.edges_proj = nn.Linear(self.dim_shape, self.dim_latent)
-        self.faces_proj = nn.Linear(self.dim_shape, self.dim_latent)
+        self.vertices_proj = nn.Sequential(
+            nn.Linear(self.dim_shape, self.dim_latent),
+            nn.Sigmoid()
+        )
+        self.edges_proj = nn.Sequential(
+            nn.Linear(self.dim_shape, self.dim_latent),
+            nn.Sigmoid()
+        )
+        self.faces_proj = nn.Sequential(
+            nn.Linear(self.dim_shape, self.dim_latent),
+            nn.Sigmoid()
+        )
 
         # ================== GCN to distribute features across primitives ==================
         if v_conf["graphconv"] == "GAT":
@@ -86,6 +95,31 @@ class AutoEncoder1(nn.Module):
             coor_discrete_dim=v_conf["coor_discrete_dim"],
         )
 
+        self.intersection_face_decoder = nn.Sequential(
+            res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+            res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+            res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+            res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+            nn.Conv1d(self.dim_latent, self.dim_latent, 1, 1, 0),
+            nn.Sigmoid(),
+        )
+        self.intersection_edge_decoder=nn.Sequential(
+            res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+            res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+            res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+            res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+            nn.Conv1d(self.dim_latent, self.dim_latent, 1, 1, 0),
+            nn.Sigmoid(),
+        )
+        self.intersection_vertex_decoder=nn.Sequential(
+            res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+            res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+            res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+            res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+            nn.Conv1d(self.dim_latent, self.dim_latent, 1, 1, 0),
+            nn.Sigmoid(),
+        )
+
         self.frozen_models = []
         # ================== Quantization ==================
         self.with_quantization = v_conf["with_quantization"]
@@ -106,16 +140,7 @@ class AutoEncoder1(nn.Module):
                 )
                 self.frozen_models = []
             else:
-                layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, dim_feedforward=512,
-                                                   batch_first=True, dropout=0.1)
                 self.quantizer_out = nn.Sequential(
-                    nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(self.dim_latent)),
-                    nn.Linear(self.dim_latent, self.dim_latent),
-                    nn.Sigmoid(),
-                )
-
-                self.quantizer_out = nn.Sequential(
-                    res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
                     res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
                     res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
                     res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
@@ -127,14 +152,7 @@ class AutoEncoder1(nn.Module):
                     dim=self.dim_latent,
                     codebook_dim=32,
                     num_quantizers=8,
-                    # quantize_dropout=True,
-                    # stochastic_sample_codes=True,
-                    # sample_codebook_temp=0.1,
-                    # shared_codebook=True,
-
                     codebook_size=2048,
-                    # use_cosine_sim=True,
-                    # threshold_ema_dead_code=2,
                 )
 
                 self.frozen_models = [
@@ -143,31 +161,6 @@ class AutoEncoder1(nn.Module):
                     # self.fuser_vertices_to_edges, self.fuser_edges_to_faces,
                     # self.decoder, self.intersector
                 ]
-
-        # ================== VAE ==================
-        self.with_vae = v_conf["with_vae"]
-        if self.with_vae:
-            layer = nn.TransformerEncoderLayer(d_model=self.dim_latent * 2, nhead=8, dim_feedforward=512,
-                                               batch_first=True, dropout=0.1)
-            self.vae = nn.Sequential(
-                nn.Linear(self.dim_latent, self.dim_latent * 2),
-                nn.GELU(),
-                nn.TransformerEncoder(layer, 4, norm=nn.LayerNorm(self.dim_latent * 2)),
-                nn.Linear(self.dim_latent * 2, self.dim_latent * 2),
-            )
-            self.vae_weight = v_conf["vae_weight"]
-            layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, dim_feedforward=512,
-                                               batch_first=True, dropout=0.1)
-            self.vae_proj = nn.Sequential(
-                nn.TransformerEncoder(layer, 4, norm=nn.LayerNorm(self.dim_latent)),
-                nn.Linear(self.dim_latent, self.dim_latent),
-            )
-            self.frozen_models = [
-                # self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
-                # self.gcn_on_edges, self.gcn_on_faces, self.edge_fuser, self.face_fuser,
-                # self.fuser_vertices_to_edges, self.fuser_edges_to_faces,
-                # self.decoder, self.intersector
-            ]
 
         # ================== Freeze models ==================
         # for model in self.frozen_models:
@@ -254,29 +247,24 @@ class AutoEncoder1(nn.Module):
         edge_face_connectivity[..., 0] += edge_index_offsets[:, None]
         edge_face_connectivity = edge_face_connectivity[edge_face_connectivity_valid]
 
-        # ================== Fuse vertex features to the corresponding edges ==================
-        L = edge_embeddings.shape[0]
-        edge_attn_mask = edge_embeddings.new_ones(L, L, dtype=torch.bool)
-        num_valid = edge_mask.long().sum(dim=1)
-        num_valid = torch.cat((torch.zeros_like(num_valid[:1]), num_valid.cumsum(dim=0)))
-        for i in range(num_valid.shape[0] - 1):
-            edge_attn_mask[num_valid[i]:num_valid[i + 1], num_valid[i]:num_valid[i + 1]] = 0
+        # ================== Self-attention on vertices ==================
+        b, n = vertex_mask.shape
+        batch_indices = torch.arange(b, device=vertex_mask.device).unsqueeze(1).repeat(1, n)
+        batch_indices = batch_indices[vertex_mask]
+        vertex_attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
+        atten_vertex_embeddings = self.vertex_fuser(vertex_embeddings, vertex_attn_mask)
 
+        # ================== Fuse vertex features to the corresponding edges ==================
+        b, n = edge_mask.shape
+        batch_indices = torch.arange(b, device=edge_mask.device).unsqueeze(1).repeat(1, n)
+        batch_indices = batch_indices[edge_mask]
+        edge_attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
         edge_vertex_embeddings = self.fuser_vertices_to_edges(
-            v_embeddings1=vertex_embeddings,
+            v_embeddings1=atten_vertex_embeddings,
             v_embeddings2=edge_embeddings,
             v_connectivity1_to_2=vertex_edge_connectivity,
             v_attn_mask=edge_attn_mask
         )
-
-        # ================== Self-attention on vertices ==================
-        L = vertex_embeddings.shape[0]
-        vertex_attn_mask = vertex_embeddings.new_ones(L, L, dtype=torch.bool)
-        num_valid = vertex_mask.long().sum(dim=1)
-        num_valid = torch.cat((torch.zeros_like(num_valid[:1]), num_valid.cumsum(dim=0)))
-        for i in range(num_valid.shape[0] - 1):
-            vertex_attn_mask[num_valid[i]:num_valid[i + 1], num_valid[i]:num_valid[i + 1]] = 0
-        atten_vertex_embeddings = self.vertex_fuser(vertex_embeddings, vertex_attn_mask)
 
         # ================== GCN and self-attention on edges ==================
         edge_embeddings_gcn = self.gcn_on_edges(edge_vertex_embeddings,
@@ -284,12 +272,10 @@ class AutoEncoder1(nn.Module):
         atten_edge_embeddings = self.edge_fuser(edge_embeddings_gcn, edge_attn_mask)
 
         # ================== fuse edges features to the corresponding faces ==================
-        L = face_embeddings.shape[0]
-        face_attn_mask = face_embeddings.new_ones(L, L, dtype=torch.bool)
-        num_valid = face_mask.long().sum(dim=1)
-        num_valid = torch.cat((torch.zeros_like(num_valid[:1]), num_valid.cumsum(dim=0)))
-        for i in range(num_valid.shape[0] - 1):
-            face_attn_mask[num_valid[i]:num_valid[i + 1], num_valid[i]:num_valid[i + 1]] = 0
+        b, n = face_mask.shape
+        batch_indices = torch.arange(b, device=face_mask.device).unsqueeze(1).repeat(1, n)
+        batch_indices = batch_indices[face_mask]
+        face_attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
         face_edge_embeddings = self.fuser_edges_to_faces(
             v_connectivity1_to_2=edge_face_connectivity,
             v_embeddings1=atten_edge_embeddings,
@@ -302,9 +288,12 @@ class AutoEncoder1(nn.Module):
                                                      edge_face_connectivity[..., 1:].permute(1, 0),
                                                      edge_attr=atten_edge_embeddings[edge_face_connectivity[..., 0]])
 
-        atten_face_edge_embeddings = self.face_fuser(face_edge_embeddings_gcn,
-                                                     face_attn_mask)  # This is the true latent
-        atten_face_edge_embeddings = torch.sigmoid(atten_face_edge_embeddings)
+        atten_face_embeddings = self.face_fuser(face_edge_embeddings_gcn,
+                                                face_attn_mask)  # This is the true latent
+
+        atten_vertex_embeddings = torch.sigmoid(atten_vertex_embeddings)
+        atten_edge_embeddings = torch.sigmoid(atten_edge_embeddings)
+        atten_face_embeddings = torch.sigmoid(atten_face_embeddings)
 
         v_data["edge_face_connectivity"] = edge_face_connectivity
         v_data["vertex_edge_connectivity"] = vertex_edge_connectivity
@@ -312,52 +301,65 @@ class AutoEncoder1(nn.Module):
         v_data["edge_mask"] = edge_mask
         v_data["vertex_mask"] = vertex_mask
         v_data["face_attn_mask"] = face_attn_mask
-        return atten_face_edge_embeddings, atten_edge_embeddings, atten_vertex_embeddings
+        v_data["edge_attn_mask"] = edge_attn_mask
+        v_data["face_embeddings"] = face_embeddings
+        v_data["edge_embeddings"] = edge_embeddings
+        v_data["vertex_embeddings"] = vertex_embeddings
+        v_data["atten_face_embeddings"] = atten_face_embeddings
+        v_data["atten_edge_embeddings"] = atten_edge_embeddings
+        v_data["atten_vertex_embeddings"] = atten_vertex_embeddings
+        return
 
-    def decode(self, true_face_embeddings, v_data=None):
+    def decode(self, v_data=None):
         # ================== Intersection  ==================
         recon_data = {}
         if v_data is not None:
             face_adj = v_data["face_adj"]
             edge_adj = v_data["edge_adj"]
             inter_edge_features, inter_edge_null_features, inter_vertex_features, inter_vertex_null_features = self.intersector(
-                true_face_embeddings,
+                v_data["atten_face_embeddings"],
+                v_data["atten_edge_embeddings"],
                 v_data["edge_face_connectivity"],
                 v_data["vertex_edge_connectivity"],
                 face_adj, v_data["face_mask"],
                 edge_adj, v_data["edge_mask"],
             )
-            recon_data["inter_edge_null_features"] = inter_edge_null_features
-            recon_data["inter_vertex_null_features"] = inter_vertex_null_features
-            recon_data["inter_edge_features"] = inter_edge_features
-            recon_data["inter_vertex_features"] = inter_vertex_features
+
         else:
             raise
 
+        # Recover the shape features
+        recon_data["proj_face_features"] = self.intersection_face_decoder(v_data["atten_face_embeddings"][...,None])[...,0]
+        recon_data["proj_edge_features"] = self.intersection_edge_decoder(inter_edge_features[...,None])[...,0]
+        recon_data["proj_vertex_features"] = self.intersection_vertex_decoder(inter_vertex_features[...,None])[...,0]
+
+        recon_data["inter_edge_null_features"] = inter_edge_null_features
+        recon_data["inter_vertex_null_features"] = inter_vertex_null_features
+        recon_data["inter_edge_features"] = inter_edge_features
+        recon_data["inter_vertex_features"] = inter_vertex_features
+
         # Decode with intersection feature
         recon_data.update(self.decoder(
-            true_face_embeddings,
-            inter_edge_features,
-            inter_vertex_features,
+            recon_data["proj_face_features"],
+            recon_data["proj_edge_features"],
+            recon_data["proj_vertex_features"],
         ))
         return recon_data
 
-    def loss(self, atten_face_edge_embeddings, atten_edge_embeddings, atten_vertex_embeddings,
-             true_face_embeddings, v_data, v_recon_data):
+    def loss(self, v_data, v_recon_data):
+        atten_edge_embeddings = v_data["atten_edge_embeddings"]
+        atten_vertex_embeddings = v_data["atten_vertex_embeddings"]
         edge_mask = v_data["edge_mask"]
         vertex_mask = v_data["vertex_mask"]
         face_mask = v_data["face_mask"]
-
-        inter_edge_features = v_recon_data["inter_edge_features"]
-        inter_vertex_features = v_recon_data["inter_vertex_features"]
 
         used_edge_indexes = v_data["edge_face_connectivity"][..., 0]
         used_vertex_indexes = v_data["vertex_edge_connectivity"][..., 0]
 
         # ================== Normal Decoding  ==================
-        vertex_data = self.decoder.decode_vertex(atten_vertex_embeddings)
-        edge_data = self.decoder.decode_edge(atten_edge_embeddings)
-        face_data = self.decoder.decode_face(atten_face_edge_embeddings)
+        vertex_data = self.decoder.decode_vertex(v_data["vertex_embeddings"])
+        edge_data = self.decoder.decode_edge(v_data["edge_embeddings"])
+        face_data = self.decoder.decode_face(v_data["face_embeddings"])
 
         loss = {}
         # Loss for predicting discrete points from the intersection features
@@ -395,15 +397,14 @@ class AutoEncoder1(nn.Module):
         for key in loss_face:
             loss[key + "1"] = loss_face[key]
 
-        # Loss for l2 distance from the quantized face features and normal face features
         loss["face_l2"] = nn.functional.mse_loss(
-            true_face_embeddings, atten_face_edge_embeddings, reduction='mean')
-        # Loss for l2 distance from the intersection edge features and normal edge features
+            v_recon_data["proj_face_features"], v_data["face_embeddings"], reduction='mean')
         loss["edge_l2"] = nn.functional.mse_loss(
-            inter_edge_features, atten_edge_embeddings[used_edge_indexes], reduction='mean')
-        # Loss for l2 distance from the intersection vertex features and normal vertex features
+            v_recon_data["proj_edge_features"], v_data["edge_embeddings"][used_edge_indexes], reduction='mean')
         loss["vertex_l2"] = nn.functional.mse_loss(
-            inter_vertex_features, atten_vertex_embeddings[used_vertex_indexes], reduction='mean')
+            v_recon_data["proj_vertex_features"], v_data["vertex_embeddings"][used_vertex_indexes], reduction='mean')
+        loss["inter_edge_l2"] = nn.functional.mse_loss(
+            v_recon_data["inter_edge_features"], v_data["atten_edge_embeddings"], reduction='mean')
         loss["total_loss"] = sum(loss.values())
         return loss
 
@@ -413,71 +414,23 @@ class AutoEncoder1(nn.Module):
                 return_face_features=False,
                 return_true_loss=False,
                 **kwargs):
-        if not self.with_quantization:
-            atten_face_edge_embeddings, atten_edge_embeddings, atten_vertex_embeddings = self.encode(v_data)
-        elif self.with_quantization and self.finetune_decoder:
-            atten_face_edge_embeddings, atten_edge_embeddings, atten_vertex_embeddings = self.encode(v_data)
-        else:
-            pass
+        self.encode(v_data)
 
         loss = {}
-        # ================== Bottleneck  ==================
-        if self.with_quantization and self.with_vae:
-            raise NotImplementedError
-        elif self.with_quantization:
-            # ================== Quantization  ==================
-            if self.finetune_decoder:
-                quantized_face_embeddings, indices, quantized_loss = self.quantizer(atten_face_edge_embeddings[:,None])
-                quantized_face_embeddings = quantized_face_embeddings[:, 0]
-                indices = indices[:, 0]
-                quantized_features = self.quantizer_proj(quantized_face_embeddings, v_data["face_attn_mask"])
-                quantized_features = self.quantizer_proj2(quantized_features)
-                true_face_embeddings = torch.sigmoid(quantized_features)
-                loss["quantization_l2"] = nn.functional.mse_loss(true_face_embeddings, atten_face_edge_embeddings)
-            else:
-                mask = ~(v_data == 0).all(dim=-1)
-                # Construct the attention mask
-                # b = v_data.shape[0]
-                # n = v_data.shape[1]
-                # batch_indices = torch.arange(b, device=v_data.device).unsqueeze(1).repeat(1, n)
-                # batch_indices = batch_indices[mask]
-                # atten_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
-
-                flattened_features = v_data[mask]
-                # quantized_face_embeddings, indices, quantized_loss = self.quantizer(flattened_features[:,None])
-                quantized_face_embeddings, indices, quantized_loss = self.quantizer(flattened_features)
-                true_face_embeddings = self.quantizer_out(quantized_face_embeddings.unsqueeze(2))[...,0]
-
-                loss["quantization_l2"] = nn.functional.mse_loss(true_face_embeddings, flattened_features)
+        # ================== Quantization  ==================
+        if self.with_quantization:
+            quantized_face_embeddings, indices, quantized_loss = self.quantizer(v_data["atten_face_embeddings"])
+            true_face_embeddings = self.quantizer_out(quantized_face_embeddings.unsqueeze(2))[...,0]
+            v_data["atten_face_embeddings"] = quantized_face_embeddings
             loss["quantization_internal"] = quantized_loss.mean()
-            loss["total_loss"] = sum(loss.values())
-            if not self.finetune_decoder:
-                return loss, {}
-        elif self.with_vae:
-            vae_face_embeddings = self.vae(atten_face_edge_embeddings)
-            # Sampling
-            mean = vae_face_embeddings[..., :self.dim_latent]
-            logvar = vae_face_embeddings[..., self.dim_latent:]
-            std = torch.exp(0.5 * logvar)
-            eps = torch.randn_like(std)
-            sampled_embeddings = mean + eps * std * self.vae_weight
-            # Proj
-            true_face_embeddings = self.vae_proj(sampled_embeddings)
-            true_face_embeddings = torch.sigmoid(true_face_embeddings)
-            indices = None
-            vae_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
         else:
-            true_face_embeddings = atten_face_edge_embeddings
             indices = None
 
-        recon_data = self.decode(true_face_embeddings, v_data)
+        recon_data = self.decode(v_data)
 
-        if return_loss:
-            loss.update(self.loss(
-                atten_face_edge_embeddings, atten_edge_embeddings, atten_vertex_embeddings,
-                true_face_embeddings,
-                v_data, recon_data
-            ))
+        loss.update(self.loss(
+            v_data, recon_data
+        ))
         # Compute model size and flops
         # counter = FlopCounterMode(depth=999)
         # with counter:
@@ -540,7 +493,7 @@ class AutoEncoder1(nn.Module):
         return loss, data
 
 
-class AutoEncoder(nn.Module):
+class AutoEncoder1(nn.Module):
     def __init__(self,
                  v_conf,
                  ):
@@ -745,68 +698,29 @@ class AutoEncoder(nn.Module):
         encoding_result["vertex_embeddings"] = vertex_embeddings
         return encoding_result
 
-    def normal_decode(self, v_encoding_result):
-        # Decode with intersection feature
-        recon_data = self.decoder(
-            v_encoding_result["face_embeddings"],
-            v_encoding_result["edge_embeddings"],
-            v_encoding_result["vertex_embeddings"],
-        )
-        return recon_data
+    def loss(self, v_data, encoding_result, exchange_result, intersections, intersection_recon_data,):
+        edge_mask = encoding_result["edge_mask"]
+        vertex_mask = encoding_result["vertex_mask"]
+        face_mask = encoding_result["face_mask"]
 
-
-    def loss(self, atten_face_edge_embeddings, atten_edge_embeddings, atten_vertex_embeddings,
-             true_face_embeddings, v_data, v_recon_data):
-        edge_mask = v_data["edge_mask"]
-        vertex_mask = v_data["vertex_mask"]
-        face_mask = v_data["face_mask"]
-
-        inter_edge_features = v_recon_data["inter_edge_features"]
-        inter_vertex_features = v_recon_data["inter_vertex_features"]
-
-        used_edge_indexes = v_data["edge_face_connectivity"][..., 0]
-        used_vertex_indexes = v_data["vertex_edge_connectivity"][..., 0]
-
-        # ================== Normal Decoding  ==================
-        vertex_data = self.decoder.decode_vertex(atten_vertex_embeddings)
-        edge_data = self.decoder.decode_edge(atten_edge_embeddings)
-        face_data = self.decoder.decode_face(atten_face_edge_embeddings)
+        used_edge_indexes = exchange_result["edge_face_connectivity"][..., 0]
+        used_vertex_indexes = exchange_result["vertex_edge_connectivity"][..., 0]
 
         loss = {}
         # Loss for predicting discrete points from the intersection features
         loss.update(self.decoder.loss(
-            v_recon_data, v_data, face_mask,
+            intersection_recon_data, v_data, face_mask,
             edge_mask, used_edge_indexes,
             vertex_mask, used_vertex_indexes
         ))
 
         # Loss for classifying the intersection features
         loss_edge, loss_vertex = self.intersector.loss(
-            v_recon_data["inter_edge_features"], v_recon_data["inter_edge_null_features"],
-            v_recon_data["inter_vertex_features"], v_recon_data["inter_vertex_null_features"]
+            intersections["inter_edge_features"], intersections["inter_edge_null_features"],
+            intersections["inter_vertex_features"], intersections["inter_vertex_null_features"]
         )
         loss.update({"intersection_edge": loss_edge})
         loss.update({"intersection_vertex": loss_vertex})
-
-        # Loss for normal decoding edges
-        loss_edge = self.decoder.loss_edge(
-            edge_data, v_data, edge_mask,
-            torch.arange(atten_edge_embeddings.shape[0]))
-        for key in loss_edge:
-            loss[key + "1"] = loss_edge[key]
-
-        # Loss for normal decoding vertices
-        loss_vertex = self.decoder.loss_vertex(
-            vertex_data, v_data, vertex_mask,
-            torch.arange(atten_vertex_embeddings.shape[0]))
-        for key in loss_vertex:
-            loss[key + "1"] = loss_vertex[key]
-
-        # Loss for normal decoding faces
-        loss_face = self.decoder.loss_face(
-            face_data, v_data, face_mask)
-        for key in loss_face:
-            loss[key + "1"] = loss_face[key]
 
         # Loss for l2 distance from the quantized face features and normal face features
         loss["face_l2"] = nn.functional.mse_loss(
@@ -845,6 +759,117 @@ class AutoEncoder(nn.Module):
 
         return loss
 
+    def intersection(self, true_face_embeddings, v_data):
+        recon_data = {}
+        if v_data is not None:
+            face_adj = v_data["face_adj"]
+            edge_adj = v_data["edge_adj"]
+            inter_edge_features, inter_edge_null_features, inter_vertex_features, inter_vertex_null_features = self.intersector(
+                true_face_embeddings,
+                v_data["edge_face_connectivity"],
+                v_data["vertex_edge_connectivity"],
+                face_adj, v_data["face_mask"],
+                edge_adj, v_data["edge_mask"],
+            )
+            recon_data["inter_edge_null_features"] = inter_edge_null_features
+            recon_data["inter_vertex_null_features"] = inter_vertex_null_features
+            recon_data["inter_edge_features"] = inter_edge_features
+            recon_data["inter_vertex_features"] = inter_vertex_features
+        else:
+            raise
+        return recon_data
+
+    def feature_exchange(self, v_data, v_encoding_result):
+        face_mask = v_encoding_result["face_mask"]
+        edge_mask = v_encoding_result["edge_mask"]
+        vertex_mask = v_encoding_result["vertex_mask"]
+
+        vertex_embeddings = v_encoding_result["vertex_embeddings"]
+        edge_embeddings = v_encoding_result["edge_embeddings"]
+        face_embeddings = v_encoding_result["face_embeddings"]
+
+        # ================== Prepare data for flattened features ==================
+        edge_index_offsets = reduce(edge_mask.long(), 'b ne -> b', 'sum')
+        edge_index_offsets = F.pad(edge_index_offsets.cumsum(dim=0), (1, -1), value=0)
+        face_index_offsets = reduce(face_mask.long(), 'b ne -> b', 'sum')
+        face_index_offsets = F.pad(face_index_offsets.cumsum(dim=0), (1, -1), value=0)
+        vertex_index_offsets = reduce(vertex_mask.long(), 'b ne -> b', 'sum')
+        vertex_index_offsets = F.pad(vertex_index_offsets.cumsum(dim=0), (1, -1), value=0)
+
+        vertex_edge_connectivity = v_data["vertex_edge_connectivity"].clone()
+        vertex_edge_connectivity_valid = (vertex_edge_connectivity != -1).all(dim=-1)
+        # Solve the vertex_edge_connectivity: last two dimension (id_edge)
+        vertex_edge_connectivity[..., 1:] += edge_index_offsets[:, None, None]
+        # Solve the edge_face_connectivity: first (id_vertex)
+        vertex_edge_connectivity[..., 0:1] += vertex_index_offsets[:, None, None]
+        vertex_edge_connectivity = vertex_edge_connectivity[vertex_edge_connectivity_valid]
+
+        edge_face_connectivity = v_data["edge_face_connectivity"].clone()
+        edge_face_connectivity_valid = (edge_face_connectivity != -1).all(dim=-1)
+        # Solve the edge_face_connectivity: last two dimension (id_face)
+        edge_face_connectivity[..., 1:] += face_index_offsets[:, None, None]
+        # Solve the edge_face_connectivity: first dimension (id_edge)
+        edge_face_connectivity[..., 0] += edge_index_offsets[:, None]
+        edge_face_connectivity = edge_face_connectivity[edge_face_connectivity_valid]
+
+        # ================== Self-attention on vertices ==================
+        b, n = vertex_mask.shape
+        batch_indices = torch.arange(b, device=vertex_mask.device).unsqueeze(1).repeat(1, n)
+        batch_indices = batch_indices[vertex_mask]
+        vertex_attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
+        atten_vertex_embeddings = self.vertex_fuser(vertex_embeddings, vertex_attn_mask)
+
+        # ================== Fuse vertex features to the corresponding edges ==================
+        b, n = edge_mask.shape
+        batch_indices = torch.arange(b, device=edge_mask.device).unsqueeze(1).repeat(1, n)
+        batch_indices = batch_indices[edge_mask]
+        edge_attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
+        edge_vertex_embeddings = self.fuser_vertices_to_edges(
+            v_embeddings1=atten_vertex_embeddings,
+            v_embeddings2=edge_embeddings,
+            v_connectivity1_to_2=vertex_edge_connectivity,
+            v_attn_mask=edge_attn_mask
+        )
+
+        # ================== GCN and self-attention on edges ==================
+        edge_embeddings_gcn = self.gcn_on_edges(edge_vertex_embeddings,
+                                                vertex_edge_connectivity[..., 1:].permute(1, 0))
+        atten_edge_embeddings = self.edge_fuser(edge_embeddings_gcn, edge_attn_mask)
+
+        # ================== fuse edges features to the corresponding faces ==================
+        b, n = face_mask.shape
+        batch_indices = torch.arange(b, device=face_mask.device).unsqueeze(1).repeat(1, n)
+        batch_indices = batch_indices[face_mask]
+        face_attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
+        face_edge_embeddings = self.fuser_edges_to_faces(
+            v_connectivity1_to_2=edge_face_connectivity,
+            v_embeddings1=atten_edge_embeddings,
+            v_embeddings2=face_embeddings,
+            v_attn_mask=face_attn_mask,
+        )
+
+        # ================== GCN and self-attention on faces  ==================
+        face_edge_embeddings_gcn = self.gcn_on_faces(face_edge_embeddings,
+                                                     edge_face_connectivity[..., 1:].permute(1, 0),
+                                                     edge_attr=atten_edge_embeddings[edge_face_connectivity[..., 0]])
+
+        atten_face_embeddings = self.face_fuser(face_edge_embeddings_gcn,
+                                                     face_attn_mask)  # This is the true latent
+
+
+        atten_vertex_embeddings = torch.sigmoid(atten_vertex_embeddings)
+        atten_edge_embeddings = torch.sigmoid(atten_edge_embeddings)
+        atten_face_embeddings = torch.sigmoid(atten_face_embeddings)
+
+        exchange_result = {}
+
+        exchange_result["edge_face_connectivity"] = edge_face_connectivity
+        exchange_result["vertex_edge_connectivity"] = vertex_edge_connectivity
+        exchange_result["atten_vertex_embeddings"] = atten_vertex_embeddings
+        exchange_result["atten_edge_embeddings"] = atten_edge_embeddings
+        exchange_result["atten_face_embeddings"] = atten_face_embeddings
+        return exchange_result
+
     def forward(self, v_data,
                 return_recon=False,
                 return_loss=True,
@@ -852,17 +877,45 @@ class AutoEncoder(nn.Module):
                 return_true_loss=False,
                 **kwargs):
         encoding_result = self.encode(v_data)
+        exchange_result = self.feature_exchange(v_data, encoding_result)
 
         if self.with_quantization:
-            face_embeddings = encoding_result["face_embeddings"]
+            face_embeddings = exchange_result['atten_face_embeddings']
             quantized_features, indices, quantization_loss = self.quantizer(face_embeddings)
             quantized_features = self.quantizer_out(quantized_features[...,None])[...,0]
-            encoding_result["face_embeddings"] = quantized_features
+            exchange_result["atten_face_embeddings"] = quantized_features
 
-        recon_data = self.normal_decode(encoding_result)
+        # Decode with normal feature
+        normal_recon_data = self.decoder(
+            encoding_result["face_embeddings"],
+            encoding_result["edge_embeddings"],
+            encoding_result["vertex_embeddings"],
+        )
+        normal_loss = self.loss_decoding(normal_recon_data, v_data, encoding_result)
+
+        true_face_embedding = exchange_result["atten_face_embeddings"]
+        # Intersection
+        intersection_topologies = {}
+        intersection_topologies["face_adj"] = v_data["face_adj"]
+        intersection_topologies["edge_adj"] = v_data["edge_adj"]
+        intersection_topologies["edge_mask"] = encoding_result["edge_mask"]
+        intersection_topologies["face_mask"] = encoding_result["face_mask"]
+        intersection_topologies["edge_face_connectivity"] = exchange_result["edge_face_connectivity"]
+        intersection_topologies["vertex_edge_connectivity"] = exchange_result["vertex_edge_connectivity"]
+        intersections = self.intersection(true_face_embedding, intersection_topologies, )
+
+        intersection_recon_data = self.decoder(
+            encoding_result["face_embeddings"],
+            encoding_result["edge_embeddings"],
+            encoding_result["vertex_embeddings"],
+        )
+        intersection_recon_loss = self.loss(
+            v_data, encoding_result, exchange_result, intersections, intersection_recon_data
+        )
+
+
 
         if return_loss:
-            loss = self.loss_decoding(recon_data, v_data, encoding_result)
 
             loss["total_loss"] = sum(loss.values())
         # Compute model size and flops

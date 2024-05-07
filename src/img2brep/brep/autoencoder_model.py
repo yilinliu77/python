@@ -106,6 +106,12 @@ class AutoEncoder(nn.Module):
                 )
                 self.frozen_models = []
             else:
+                layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, dim_feedforward=512,
+                                                   batch_first=True, dropout=0.1)
+                self.quantizer_in = nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(self.dim_latent))
+                self.quantizer_out = nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(self.dim_latent))
+                self.quantizer_out2 = nn.Linear(self.dim_latent, self.dim_latent)
+
                 self.quantizer = ResidualVQ(
                     dim=self.dim_latent,
                     codebook_dim=32,
@@ -115,21 +121,10 @@ class AutoEncoder(nn.Module):
                     # sample_codebook_temp=0.1,
                     # shared_codebook=True,
 
-                    codebook_size=16384,
+                    codebook_size=2048,
                     # use_cosine_sim=True,
                     # threshold_ema_dead_code=2,
                 )
-
-                # self.quantizer = ResidualLFQ(
-                #     dim=self.dim_latent,
-                #     codebook_size=8192,
-                #     num_quantizers=4
-                # )
-
-                layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, dim_feedforward=256,
-                                                   batch_first=True, dropout=0.1)
-                self.quantizer_proj = nn.TransformerEncoder(layer, 8, norm=nn.LayerNorm(self.dim_latent))
-                self.quantizer_proj2 = nn.Linear(self.dim_latent, self.dim_latent)
 
                 self.frozen_models = [
                     # self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
@@ -430,20 +425,22 @@ class AutoEncoder(nn.Module):
                 loss["quantization_l2"] = nn.functional.mse_loss(true_face_embeddings, atten_face_edge_embeddings)
             else:
                 mask = ~(v_data == 0).all(dim=-1)
-                flattened_features = v_data[mask]
-                quantized_face_embeddings, indices, quantized_loss = self.quantizer(flattened_features[:,None])
-                quantized_face_embeddings = quantized_face_embeddings[:, 0]
-                indices = indices[:, 0]
-
                 # Construct the attention mask
                 b = v_data.shape[0]
                 n = v_data.shape[1]
-                batch_indices = torch.arange(b,device=v_data.device).unsqueeze(1).repeat(1, n)
+                batch_indices = torch.arange(b, device=v_data.device).unsqueeze(1).repeat(1, n)
                 batch_indices = batch_indices[mask]
                 atten_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
-                quantized_features = self.quantizer_proj(quantized_face_embeddings, atten_mask)
-                quantized_features = self.quantizer_proj2(quantized_features)
+
+                flattened_features = v_data[mask]
+                encoded_features = self.quantizer_in(flattened_features, atten_mask)
+                quantized_face_embeddings, indices, quantized_loss = self.quantizer(encoded_features[:,None])
+                quantized_face_embeddings = quantized_face_embeddings[:, 0]
+                indices = indices[:, 0]
+                quantized_features = self.quantizer_out(quantized_face_embeddings, atten_mask)
+                quantized_features = self.quantizer_out2(quantized_features)
                 true_face_embeddings = torch.sigmoid(quantized_features)
+
                 loss["quantization_l2"] = nn.functional.mse_loss(true_face_embeddings, flattened_features)
             loss["quantization_internal"] = quantized_loss.mean()
             loss["total_loss"] = sum(loss.values())

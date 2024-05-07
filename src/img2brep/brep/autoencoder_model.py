@@ -421,7 +421,7 @@ class AutoEncoder(nn.Module):
         if self.with_quantization:
             quantized_face_embeddings, indices, quantized_loss = self.quantizer(v_data["atten_face_embeddings"])
             true_face_embeddings = self.quantizer_out(quantized_face_embeddings.unsqueeze(2))[...,0]
-            v_data["atten_face_embeddings"] = quantized_face_embeddings
+            v_data["atten_face_embeddings"] = true_face_embeddings
             loss["quantization_internal"] = quantized_loss.mean()
         else:
             indices = None

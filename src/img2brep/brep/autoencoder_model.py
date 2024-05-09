@@ -8,7 +8,7 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 # from torch.utils.flop_counter import FlopCounterMode
 from torch_geometric.nn import SAGEConv, GATv2Conv
-from vector_quantize_pytorch import ResidualLFQ, VectorQuantize, ResidualVQ
+from vector_quantize_pytorch import ResidualLFQ, VectorQuantize, ResidualVQ, FSQ, ResidualFSQ
 
 import pytorch_lightning as pl
 
@@ -27,8 +27,14 @@ def l1norm(t):
 def l2norm(t):
     return F.normalize(t, dim=-1, p=2)
 
+def get_attn_mask(v_mask):
+    b, n = v_mask.shape
+    batch_indices = torch.arange(b, device=v_mask.device).unsqueeze(1).repeat(1, n)
+    batch_indices = batch_indices[v_mask]
+    attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
+    return attn_mask
 
-class AutoEncoder(nn.Module):
+class AutoEncoder1(nn.Module):
     def __init__(self,
                  v_conf,
                  ):
@@ -493,7 +499,7 @@ class AutoEncoder(nn.Module):
         return loss, data
 
 
-class AutoEncoder1(nn.Module):
+class AutoEncoder(nn.Module):
     def __init__(self,
                  v_conf,
                  ):
@@ -515,41 +521,16 @@ class AutoEncoder1(nn.Module):
         )
         self.vertices_proj = nn.Sequential(
             nn.Linear(self.dim_shape, self.dim_latent),
-            nn.Sigmoid()
+            # nn.Sigmoid()
         )
         self.edges_proj = nn.Sequential(
             nn.Linear(self.dim_shape, self.dim_latent),
-            nn.Sigmoid()
+            # nn.Sigmoid()
         )
         self.faces_proj = nn.Sequential(
             nn.Linear(self.dim_shape, self.dim_latent),
-            nn.Sigmoid()
+            # nn.Sigmoid()
         )
-
-        # ================== GCN to distribute features across primitives ==================
-        if v_conf["graphconv"] == "GAT":
-            GraphConv = GAT_GraphConv
-        else:
-            GraphConv = SAGE_GraphConv
-        encoder_dims_through_depth_edges = [self.dim_latent for _ in range(4)]
-        encoder_dims_through_depth_faces = [self.dim_latent for _ in range(4)]
-        self.gcn_on_edges = GraphConv(self.dim_latent, encoder_dims_through_depth_edges,
-                                      self.dim_latent)
-        self.gcn_on_faces = GraphConv(self.dim_latent, encoder_dims_through_depth_faces,
-                                      self.dim_latent, edge_dim=self.dim_latent)
-
-        # ================== self attention to aggregate features ==================
-        self.vertex_fuser = Attn_fuser_single(self.dim_latent)
-        self.edge_fuser = Attn_fuser_single(self.dim_latent)
-        self.face_fuser = Attn_fuser_single(self.dim_latent)
-
-        # ================== cross attention to aggregate features ==================
-        self.fuser_vertices_to_edges = Attn_fuser_cross(self.dim_latent)
-        self.fuser_edges_to_faces = Attn_fuser_cross(self.dim_latent)
-
-        # ================== Intersection ==================
-        mod = importlib.import_module('src.img2brep.brep.model_intersector')
-        self.intersector = getattr(mod, v_conf["intersector"])(500, self.dim_latent)
 
         # ================== Decoder ==================
         mod = importlib.import_module('src.img2brep.brep.model_decoder')
@@ -561,77 +542,37 @@ class AutoEncoder1(nn.Module):
         )
 
         self.frozen_models = []
+
         # ================== Quantization ==================
-        self.with_quantization = v_conf["with_quantization"]
-        if self.with_quantization:
-            if False:
-                self.quantizer = VectorQuantize(
-                    dim=self.dim_latent,
-                    codebook_dim=32,  # a number of papers have shown smaller codebook dimension to be acceptable
-                    heads=8,  # number of heads to vector quantize, codebook shared across all heads
-                    separate_codebook_per_head=True,
-                    # whether to have a separate codebook per head. False would mean 1 shared codebook
-                    codebook_size=8196,
-                    accept_image_fmap=False
-                )
-                self.quantizer_proj = nn.Sequential(
-                    nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
-                    nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1),
-                )
-                self.frozen_models = []
-            else:
-                self.quantizer_out = nn.Sequential(
-                    res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
-                    res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
-                    res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
-                    nn.Conv1d(self.dim_latent, self.dim_latent, 1, 1, 0),
-                    nn.Sigmoid(),
-                )
+        self.quantizer_out = nn.Sequential(
+            res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+            res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+            res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+            nn.Conv1d(self.dim_latent, self.dim_latent, 1, 1, 0),
+            # nn.Sigmoid(),
+        )
 
-                self.quantizer = ResidualVQ(
-                    dim=self.dim_latent,
-                    codebook_dim=32,
-                    num_quantizers=8,
-                    codebook_size=2048,
-                )
+        # layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1)
+        # self.quantizer_out = nn.TransformerEncoder(layer, num_layers=4, norm=nn.LayerNorm(self.dim_latent))
+        # self.quantizer_out2 = nn.Sequential(
+        #     nn.Linear(self.dim_latent, self.dim_latent),
+        #     nn.Sigmoid(),
+        # )
 
-                self.frozen_models = [
-                    # self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
-                    # self.gcn_on_edges, self.gcn_on_faces, self.edge_fuser, self.face_fuser,
-                    # self.fuser_vertices_to_edges, self.fuser_edges_to_faces,
-                    # self.decoder, self.intersector
-                ]
+        # self.quantizer = ResidualFSQ(
+        #     num_quantizers=4,
+        #     dim=self.dim_latent,
+        #     num_codebooks=1,
+        #     levels=[8,8,8,5,5,5],
+        # )
 
-        # ================== VAE ==================
-        self.with_vae = v_conf["with_vae"]
-        if self.with_vae:
-            layer = nn.TransformerEncoderLayer(d_model=self.dim_latent * 2, nhead=8, dim_feedforward=512,
-                                               batch_first=True, dropout=0.1)
-            self.vae = nn.Sequential(
-                nn.Linear(self.dim_latent, self.dim_latent * 2),
-                nn.GELU(),
-                nn.TransformerEncoder(layer, 4, norm=nn.LayerNorm(self.dim_latent * 2)),
-                nn.Linear(self.dim_latent * 2, self.dim_latent * 2),
-            )
-            self.vae_weight = v_conf["vae_weight"]
-            layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, dim_feedforward=512,
-                                               batch_first=True, dropout=0.1)
-            self.vae_proj = nn.Sequential(
-                nn.TransformerEncoder(layer, 4, norm=nn.LayerNorm(self.dim_latent)),
-                nn.Linear(self.dim_latent, self.dim_latent),
-            )
-            self.frozen_models = [
-                # self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
-                # self.gcn_on_edges, self.gcn_on_faces, self.edge_fuser, self.face_fuser,
-                # self.fuser_vertices_to_edges, self.fuser_edges_to_faces,
-                # self.decoder, self.intersector
-            ]
+        self.quantizer = ResidualLFQ(
+            num_quantizers=4,
+            dim=self.dim_latent,
+            codebook_size=16384,
+            num_codebooks=1,
+        )
 
-        # ================== Freeze models ==================
-        # for model in self.frozen_models:
-        #     model.eval()
-        #     for param in model.parameters():
-        #         param.requires_grad = False
 
     # Inference (B * num_faces * num_features)
     # Pad features are all zeros
@@ -680,23 +621,6 @@ class AutoEncoder1(nn.Module):
                 dim=1)
             return recon_vertices, recon_edges, recon_faces, face_edge_connectivity, edge_vertex_connectivity
         return recon_vertices, recon_edges, recon_faces
-
-    def encode(self, v_data):
-        # ================== Encode the edge and face points ==================
-        face_embeddings, edge_embeddings, vertex_embeddings, face_mask, edge_mask, vertex_mask = self.encoder(v_data)
-        face_embeddings = self.faces_proj(face_embeddings)
-        edge_embeddings = self.edges_proj(edge_embeddings)
-        vertex_embeddings = self.vertices_proj(vertex_embeddings)
-
-        encoding_result = {}
-
-        encoding_result["face_mask"] = face_mask
-        encoding_result["edge_mask"] = edge_mask
-        encoding_result["vertex_mask"] = vertex_mask
-        encoding_result["face_embeddings"] = face_embeddings
-        encoding_result["edge_embeddings"] = edge_embeddings
-        encoding_result["vertex_embeddings"] = vertex_embeddings
-        return encoding_result
 
     def loss(self, v_data, encoding_result, exchange_result, intersections, intersection_recon_data,):
         edge_mask = encoding_result["edge_mask"]
@@ -876,66 +800,57 @@ class AutoEncoder1(nn.Module):
                 return_face_features=False,
                 return_true_loss=False,
                 **kwargs):
-        encoding_result = self.encode(v_data)
-        exchange_result = self.feature_exchange(v_data, encoding_result)
+        face_embeddings, edge_embeddings, vertex_embeddings, face_mask, edge_mask, vertex_mask = self.encoder(v_data)
+        face_embeddings = self.faces_proj(face_embeddings)
+        edge_embeddings = self.edges_proj(edge_embeddings)
+        vertex_embeddings = self.vertices_proj(vertex_embeddings)
 
+        loss = {}
         if self.with_quantization:
-            face_embeddings = exchange_result['atten_face_embeddings']
-            quantized_features, indices, quantization_loss = self.quantizer(face_embeddings)
-            quantized_features = self.quantizer_out(quantized_features[...,None])[...,0]
-            exchange_result["atten_face_embeddings"] = quantized_features
+            # FSQ with attn
+            # attn_mask = get_attn_mask(face_mask)
+            # quantized_features, indices = self.quantizer(face_embeddings[:,None])
+            # quantized_features = quantized_features[:,0]
+            # indices = indices[:,0]
+            # quantized_features = self.quantizer_out(quantized_features, attn_mask)
+            # true_face_latent = self.quantizer_out2(quantized_features)
+
+            # LFQ with resnet
+            quantized_features, indices, quantization_loss = self.quantizer(face_embeddings[:,None])
+            quantized_features = quantized_features[:,0]
+            indices = indices[:,0]
+            true_face_latent = self.quantizer_out(quantized_features[...,None])[...,0]
+            loss["quantization_internal"] = quantization_loss.mean()
+
+            # LFQ with resnet
+            # quantized_features, indices, quantization_loss = self.quantizer(face_embeddings)
+            # loss["quantization_internal"] = quantization_loss.mean()
+        else:
+            true_face_latent = face_embeddings
 
         # Decode with normal feature
         normal_recon_data = self.decoder(
-            encoding_result["face_embeddings"],
-            encoding_result["edge_embeddings"],
-            encoding_result["vertex_embeddings"],
+            true_face_latent,
+            edge_embeddings,
+            vertex_embeddings,
         )
-        normal_loss = self.loss_decoding(normal_recon_data, v_data, encoding_result)
+        # =============================== Loss for normal decoding ===============================
+        loss.update(self.decoder.loss(
+            normal_recon_data, v_data, face_mask, edge_mask,
+            torch.arange(normal_recon_data["edge_bbox_logits"].shape[0]),
+            vertex_mask,
+            torch.arange(normal_recon_data["vertex_coords_logits"].shape[0])
+        ))
+        loss["total_loss"] = sum(loss.values())
 
-        true_face_embedding = exchange_result["atten_face_embeddings"]
-        # Intersection
-        intersection_topologies = {}
-        intersection_topologies["face_adj"] = v_data["face_adj"]
-        intersection_topologies["edge_adj"] = v_data["edge_adj"]
-        intersection_topologies["edge_mask"] = encoding_result["edge_mask"]
-        intersection_topologies["face_mask"] = encoding_result["face_mask"]
-        intersection_topologies["edge_face_connectivity"] = exchange_result["edge_face_connectivity"]
-        intersection_topologies["vertex_edge_connectivity"] = exchange_result["vertex_edge_connectivity"]
-        intersections = self.intersection(true_face_embedding, intersection_topologies, )
-
-        intersection_recon_data = self.decoder(
-            encoding_result["face_embeddings"],
-            encoding_result["edge_embeddings"],
-            encoding_result["vertex_embeddings"],
-        )
-        intersection_recon_loss = self.loss(
-            v_data, encoding_result, exchange_result, intersections, intersection_recon_data
-        )
-
-
-
-        if return_loss:
-
-            loss["total_loss"] = sum(loss.values())
-        # Compute model size and flops
-        # counter = FlopCounterMode(depth=999)
-        # with counter:
-        #     self.encoder(v_data)
-        # counter = FlopCounterMode(depth=999)
-        # with counter:
-        #     self.decoder(atten_face_edge_embeddings, intersected_edge_features)
         data = {}
         if return_recon:
             # used_edge_indexes = v_data["edge_face_connectivity"][..., 0]
             # used_vertex_indexes = v_data["vertex_edge_connectivity"][..., 0]
-            used_edge_indexes = torch.arange(recon_data["edge_bbox_logits"].shape[0])
-            used_vertex_indexes = torch.arange(recon_data["vertex_coords_logits"].shape[0])
+            used_edge_indexes = torch.arange(normal_recon_data["edge_bbox_logits"].shape[0])
+            used_vertex_indexes = torch.arange(normal_recon_data["vertex_coords_logits"].shape[0])
 
-            face_mask = encoding_result["face_mask"]
-            edge_mask = encoding_result["edge_mask"]
-            vertex_mask = encoding_result["vertex_mask"]
-            recon_face, recon_edges, recon_vertices = self.decoder.inference(recon_data)
+            recon_face, recon_edges, recon_vertices = self.decoder.inference(normal_recon_data)
             recon_face_full = recon_face.new_zeros(v_data["face_points"].shape)
             recon_face_full = recon_face_full.masked_scatter(rearrange(face_mask, '... -> ... 1 1 1'), recon_face)
             recon_face_full[~face_mask] = -1
@@ -967,17 +882,4 @@ class AutoEncoder1(nn.Module):
                 recon_vertices, v_data["vertex_points"][vertex_mask][used_vertex_indexes], reduction='mean')
             loss["true_recon_vertex"] = true_recon_vertex_loss
 
-        if return_face_features:
-            face_embeddings_return = true_face_embeddings.new_zeros(
-                (*face_mask.shape, true_face_embeddings.shape[-1]))
-            face_embeddings_return = face_embeddings_return.masked_scatter(
-                rearrange(face_mask, '... -> ... 1'), true_face_embeddings)
-            data["face_embeddings"] = face_embeddings_return
-
-            if self.with_quantization:
-                quantized_face_indices_return = indices.new_zeros(
-                    (*face_mask.shape, indices.shape[-1]))
-                quantized_face_indices_return = quantized_face_indices_return.masked_scatter(
-                    rearrange(face_mask, '... -> ... 1'), indices)
-                data["quantized_face_indices"] = quantized_face_indices_return
         return loss, data

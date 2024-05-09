@@ -204,6 +204,7 @@ class Discrete_encoder(Continuous_encoder):
             nn.Linear(hidden_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim)
         )
 
         self.edge_encoder = nn.Sequential(
@@ -228,6 +229,7 @@ class Discrete_encoder(Continuous_encoder):
             nn.Linear(hidden_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim)
         )
 
         self.vertex_encoder = nn.Sequential(
@@ -239,6 +241,7 @@ class Discrete_encoder(Continuous_encoder):
             nn.ReLU(),
             res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
             res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
         )
 
     def encode_face(self, v_data):

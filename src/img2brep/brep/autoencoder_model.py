@@ -34,7 +34,7 @@ def get_attn_mask(v_mask):
     attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
     return attn_mask
 
-class AutoEncoder1(nn.Module):
+class AutoEncoder(nn.Module):
     def __init__(self,
                  v_conf,
                  ):
@@ -154,12 +154,26 @@ class AutoEncoder1(nn.Module):
                     nn.Sigmoid(),
                 )
 
-                self.quantizer = ResidualVQ(
+                # self.quantizer = ResidualVQ(
+                #     dim=self.dim_latent,
+                #     codebook_dim=32,
+                #     num_quantizers=8,
+                #     codebook_size=2048,
+                # )
+
+                self.quantizer = ResidualFSQ(
+                    num_quantizers=4,
                     dim=self.dim_latent,
-                    codebook_dim=32,
-                    num_quantizers=8,
-                    codebook_size=2048,
+                    num_codebooks=1,
+                    levels=[8,8,8,5,5,5],
                 )
+
+                # self.quantizer = ResidualLFQ(
+                #     num_quantizers=4,
+                #     dim=self.dim_latent,
+                #     codebook_size=16384,
+                #     num_codebooks=1,
+                # )
 
                 self.frozen_models = [
                     # self.encoder, self.vertices_proj, self.edges_proj, self.faces_proj,
@@ -425,10 +439,12 @@ class AutoEncoder1(nn.Module):
         loss = {}
         # ================== Quantization  ==================
         if self.with_quantization:
-            quantized_face_embeddings, indices, quantized_loss = self.quantizer(v_data["atten_face_embeddings"])
+            quantized_face_embeddings, indices = self.quantizer(v_data["atten_face_embeddings"][:,None])
+            quantized_face_embeddings = quantized_face_embeddings[:,0]
+            indices = indices[:,0]
             true_face_embeddings = self.quantizer_out(quantized_face_embeddings.unsqueeze(2))[...,0]
             v_data["atten_face_embeddings"] = true_face_embeddings
-            loss["quantization_internal"] = quantized_loss.mean()
+            # loss["quantization_internal"] = quantized_loss.mean()
         else:
             indices = None
 
@@ -499,7 +515,7 @@ class AutoEncoder1(nn.Module):
         return loss, data
 
 
-class AutoEncoder(nn.Module):
+class AutoEncoder1(nn.Module):
     def __init__(self,
                  v_conf,
                  ):

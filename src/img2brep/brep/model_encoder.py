@@ -20,11 +20,14 @@ class res_block_1D(nn.Module):
 
 
 class res_block_2D(nn.Module):
-    def __init__(self, dim_in, dim_out, ks=3, st=1, pa=1):
+    def __init__(self, dim_in, dim_out, ks=3, st=1, pa=1, norm=nn.LayerNorm):
         super(res_block_2D, self).__init__()
         self.conv = nn.Conv2d(dim_in, dim_out, kernel_size=ks, stride=st, padding=pa)
         self.act = nn.ReLU()
-        self.norm = nn.LayerNorm(dim_out)
+        if norm is None:
+            self.norm = nn.Identity()
+        else:
+            self.norm = nn.LayerNorm(dim_out)
 
     def forward(self, x):
         x = x + self.conv(x)

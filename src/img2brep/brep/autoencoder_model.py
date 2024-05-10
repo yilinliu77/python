@@ -655,6 +655,7 @@ class AutoEncoder(nn.Module):
         face_bbox_features = self.bbox_encoder(face_bbox)
 
         face_features = self.face_fuser(torch.cat((face_coords_features, face_bbox_features),dim=1))
+        face_features = self.quantizer_in(face_features)
 
         loss = {}
         if self.with_quantization:
@@ -675,14 +676,13 @@ class AutoEncoder(nn.Module):
 
             # FSQ with encoder
             # attn_mask = get_attn_mask(face_mask)
-            quantized_features = self.quantizer_in(face_features)
-            quantized_features, indices = self.quantizer(quantized_features[:, None])
-            quantized_features = quantized_features[:, 0]
+            quantized_features, indices = self.quantizer(face_features[:, None])
+            true_face_latent = quantized_features[:, 0]
             indices = indices[:, 0]
-            true_face_latent = self.quantizer_out(quantized_features)
             # true_face_latent = quantized_features
         else:
             true_face_latent = face_features
+        true_face_latent = self.quantizer_out(true_face_latent)
 
         # Decode with normal feature
         face_bbox_logits = self.bbox_decoder(true_face_latent, )

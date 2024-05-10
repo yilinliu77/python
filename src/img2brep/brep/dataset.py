@@ -66,7 +66,7 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
 
         self.src_data_sum = len(self.data_folders)
 
-        self.check_data(self.dataset_path,v_training_mode)
+        self.check_data(self.dataset_path, v_training_mode)
 
         self.data_sum = len(self.data_folders)
 
@@ -79,7 +79,8 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
         if False and self.feature_dataset_path is not None:
             self.num_max_faces = v_conf['num_max_faces']
             folders = [item.strip() for item in os.listdir(self.feature_dataset_path)]
-            self.folders = [f for f in folders if np.load(os.path.join(self.feature_dataset_path, f)).shape[0] < self.num_max_faces]
+            self.folders = [f for f in folders if
+                            np.load(os.path.join(self.feature_dataset_path, f)).shape[0] < self.num_max_faces]
             print("Pre-load data into memory".format(len(folders) - len(self.folders), self.num_max_faces))
             self.data = []
             for folder in self.folders:
@@ -283,6 +284,47 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
         }
 
 
+class Face_dataset(AutoEncoder_dataset):
+    def __init__(self, v_training_mode, v_conf):
+        super(Face_dataset, self).__init__(v_training_mode, v_conf)
+
+    def __getitem__(self, idx):
+        # idx = 0
+        folder_path = self.data_folders[idx]
+
+        data_npz = np.load(os.path.join(folder_path, "data.npz"))
+
+        # Face sample points (num_faces*20*20*3)
+        face_points = torch.from_numpy(data_npz['sample_points_faces'])
+        line_points = torch.from_numpy(data_npz['sample_points_lines'])
+
+        discrete_face_points, discrete_face_bboxes, discrete_edge_points, discrete_edge_bboxes = (
+            self.discrete_coordinates(face_points, line_points))
+
+        return (
+            Path(folder_path).stem,
+            face_points,
+            discrete_face_points, discrete_face_bboxes,
+        )
+
+    @staticmethod
+    def collate_fn(batch):
+        (v_prefix, face_points,
+         discrete_face_points, discrete_face_bboxes,
+         ) = zip(*batch)
+
+        face_points = pad_sequence(face_points, batch_first=True, padding_value=-1)
+        discrete_face_points = pad_sequence(discrete_face_points, batch_first=True, padding_value=-1)
+        discrete_face_bboxes = pad_sequence(discrete_face_bboxes, batch_first=True, padding_value=-1)
+
+        return {
+            "v_prefix": v_prefix,
+            "face_points": face_points,
+            "discrete_face_points": discrete_face_points,
+            "discrete_face_bboxes": discrete_face_bboxes,
+        }
+
+
 class Face_feature_dataset(torch.utils.data.Dataset):
     def __init__(self, v_training_mode, v_conf):
         super(Face_feature_dataset, self).__init__()
@@ -299,14 +341,14 @@ class Face_feature_dataset(torch.utils.data.Dataset):
         self.is_map = v_conf['is_map']
         self.face_embedding_batch_size = v_conf['face_embedding_batch_size']
         self.length_scaling_factors = int(v_conf['length_scaling_factors']) if v_training_mode == "training" else 1
-        self.folders = [f for f in folders if np.load(self.root/f).shape[0] < self.num_max_faces]
+        self.folders = [f for f in folders if np.load(self.root / f).shape[0] < self.num_max_faces]
         print("Filter out {} folders with faces > {}".format(len(folders) - len(self.folders), self.num_max_faces))
 
         if self.is_map:
             print("Pre-load data into memory".format(len(folders) - len(self.folders), self.num_max_faces))
             self.data = []
             for folder in self.folders:
-                data = torch.from_numpy(np.load(self.root/folder))
+                data = torch.from_numpy(np.load(self.root / folder))
                 self.data.append(data)
             self.data = pad_sequence(self.data, batch_first=True, padding_value=0)
             self.length = max(1, self.data.shape[0] // self.face_embedding_batch_size + 1)
@@ -320,9 +362,9 @@ class Face_feature_dataset(torch.utils.data.Dataset):
         # idx = 0
         if not self.is_map:
             raise NotImplementedError
-            data = torch.from_numpy(np.load(self.root/self.folders[idx % self.length]))
+            data = torch.from_numpy(np.load(self.root / self.folders[idx % self.length]))
         else:
-            idx = torch.arange(self.face_embedding_batch_size * idx, self.face_embedding_batch_size * (idx+1))
+            idx = torch.arange(self.face_embedding_batch_size * idx, self.face_embedding_batch_size * (idx + 1))
             idx = idx % self.data.shape[0]
             data = self.data[idx]
         return data
@@ -330,4 +372,3 @@ class Face_feature_dataset(torch.utils.data.Dataset):
     @staticmethod
     def collate_fn(batch):
         return batch[0]
-

@@ -34,7 +34,7 @@ def get_attn_mask(v_mask):
     attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
     return attn_mask
 
-class AutoEncoder(nn.Module):
+class AutoEncoder1(nn.Module):
     def __init__(self,
                  v_conf,
                  ):
@@ -161,8 +161,17 @@ class AutoEncoder(nn.Module):
                 #     codebook_size=2048,
                 # )
 
+                layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1)
+                self.quantizer_in = nn.Sequential(
+                    res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+                    res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+                    res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
+                    nn.Conv1d(self.dim_latent, self.dim_latent, 1, 1, 0),
+                    nn.Sigmoid(),
+                )
+
                 self.quantizer = ResidualFSQ(
-                    num_quantizers=4,
+                    num_quantizers=16,
                     dim=self.dim_latent,
                     num_codebooks=1,
                     levels=[8,8,8,5,5,5],
@@ -515,7 +524,7 @@ class AutoEncoder(nn.Module):
         return loss, data
 
 
-class AutoEncoder1(nn.Module):
+class AutoEncoder(nn.Module):
     def __init__(self,
                  v_conf,
                  ):
@@ -560,7 +569,24 @@ class AutoEncoder1(nn.Module):
         self.frozen_models = []
 
         # ================== Quantization ==================
+        layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True,
+                                           dropout=0.1, dim_feedforward=self.dim_latent)
+        self.quantizer_in1 = nn.TransformerEncoder(layer, num_layers=2, norm=nn.LayerNorm(self.dim_latent))
+        self.quantizer_in2 = nn.Sequential(
+            nn.Linear(self.dim_latent, 64),
+            nn.ReLU(),
+        )
+        layer = nn.TransformerEncoderLayer(d_model=64, nhead=8, batch_first=True,
+                                           dropout=0.1, dim_feedforward=64)
+        self.quantizer_in3 = nn.TransformerEncoder(layer, num_layers=2, norm=nn.LayerNorm(64))
+        self.quantizer_in4 = nn.Sequential(
+            nn.Linear(64, 6),
+            nn.ReLU(),
+            nn.Linear(6, 6),
+        )
+
         self.quantizer_out = nn.Sequential(
+            nn.Conv1d(6, self.dim_latent, 1, 1, 0),
             res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
             res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
             res_block_1D(self.dim_latent, self.dim_latent, 1, 1, 0),
@@ -568,26 +594,25 @@ class AutoEncoder1(nn.Module):
             # nn.Sigmoid(),
         )
 
-        # layer = nn.TransformerEncoderLayer(d_model=self.dim_latent, nhead=8, batch_first=True, dropout=0.1)
         # self.quantizer_out = nn.TransformerEncoder(layer, num_layers=4, norm=nn.LayerNorm(self.dim_latent))
         # self.quantizer_out2 = nn.Sequential(
         #     nn.Linear(self.dim_latent, self.dim_latent),
         #     nn.Sigmoid(),
         # )
 
-        # self.quantizer = ResidualFSQ(
+        self.quantizer = ResidualFSQ(
+            num_quantizers=4,
+            dim=6,
+            num_codebooks=1,
+            levels=[8,8,8,5,5,5],
+        )
+
+        # self.quantizer = ResidualLFQ(
         #     num_quantizers=4,
         #     dim=self.dim_latent,
+        #     codebook_size=16384,
         #     num_codebooks=1,
-        #     levels=[8,8,8,5,5,5],
         # )
-
-        self.quantizer = ResidualLFQ(
-            num_quantizers=4,
-            dim=self.dim_latent,
-            codebook_size=16384,
-            num_codebooks=1,
-        )
 
 
     # Inference (B * num_faces * num_features)
@@ -816,10 +841,8 @@ class AutoEncoder1(nn.Module):
                 return_face_features=False,
                 return_true_loss=False,
                 **kwargs):
-        face_embeddings, edge_embeddings, vertex_embeddings, face_mask, edge_mask, vertex_mask = self.encoder(v_data)
+        face_embeddings, face_mask = self.encoder.encode_face(v_data)
         face_embeddings = self.faces_proj(face_embeddings)
-        edge_embeddings = self.edges_proj(edge_embeddings)
-        vertex_embeddings = self.vertices_proj(vertex_embeddings)
 
         loss = {}
         if self.with_quantization:
@@ -831,71 +854,57 @@ class AutoEncoder1(nn.Module):
             # quantized_features = self.quantizer_out(quantized_features, attn_mask)
             # true_face_latent = self.quantizer_out2(quantized_features)
 
-            # LFQ with resnet
-            quantized_features, indices, quantization_loss = self.quantizer(face_embeddings[:,None])
+            # # LFQ with resnet
+            # quantized_features, indices, quantization_loss = self.quantizer(face_embeddings[:,None])
+            # quantized_features = quantized_features[:,0]
+            # indices = indices[:,0]
+            # true_face_latent = self.quantizer_out(quantized_features[...,None])[...,0]
+            # loss["quantization_internal"] = quantization_loss.mean()
+
+            # FSQ with encoder
+            attn_mask = get_attn_mask(face_mask)
+            quantized_features = self.quantizer_in1(face_embeddings, attn_mask)
+            quantized_features = self.quantizer_in2(quantized_features)
+            quantized_features = self.quantizer_in3(quantized_features, attn_mask)
+            quantized_features = self.quantizer_in4(quantized_features)
+            quantized_features, indices = self.quantizer(quantized_features[:,None])
             quantized_features = quantized_features[:,0]
             indices = indices[:,0]
             true_face_latent = self.quantizer_out(quantized_features[...,None])[...,0]
-            loss["quantization_internal"] = quantization_loss.mean()
-
-            # LFQ with resnet
-            # quantized_features, indices, quantization_loss = self.quantizer(face_embeddings)
-            # loss["quantization_internal"] = quantization_loss.mean()
+            # true_face_latent = quantized_features
         else:
             true_face_latent = face_embeddings
 
         # Decode with normal feature
-        normal_recon_data = self.decoder(
-            true_face_latent,
-            edge_embeddings,
-            vertex_embeddings,
-        )
+        face_recon_data = self.decoder.decode_face(true_face_latent,)
         # =============================== Loss for normal decoding ===============================
-        loss.update(self.decoder.loss(
-            normal_recon_data, v_data, face_mask, edge_mask,
-            torch.arange(normal_recon_data["edge_bbox_logits"].shape[0]),
-            vertex_mask,
-            torch.arange(normal_recon_data["vertex_coords_logits"].shape[0])
-        ))
+        loss.update(self.decoder.loss_face(
+            face_recon_data, v_data, face_mask))
         loss["total_loss"] = sum(loss.values())
 
         data = {}
         if return_recon:
             # used_edge_indexes = v_data["edge_face_connectivity"][..., 0]
             # used_vertex_indexes = v_data["vertex_edge_connectivity"][..., 0]
-            used_edge_indexes = torch.arange(normal_recon_data["edge_bbox_logits"].shape[0])
-            used_vertex_indexes = torch.arange(normal_recon_data["vertex_coords_logits"].shape[0])
 
-            recon_face, recon_edges, recon_vertices = self.decoder.inference(normal_recon_data)
-            recon_face_full = recon_face.new_zeros(v_data["face_points"].shape)
-            recon_face_full = recon_face_full.masked_scatter(rearrange(face_mask, '... -> ... 1 1 1'), recon_face)
+            bbox_shifts = (self.decoder.bd + 1) // 2 - 1
+            coord_shifts = (self.decoder.cd + 1) // 2 - 1
+
+            face_bbox = (face_recon_data["face_bbox_logits"].argmax(dim=-1) - bbox_shifts) / bbox_shifts
+            face_center = (face_bbox[:, 3:] + face_bbox[:, :3]) / 2
+            face_length = (face_bbox[:, 3:] - face_bbox[:, :3])
+            face_coords = (face_recon_data["face_coords_logits"].argmax(dim=-1) - coord_shifts) / coord_shifts / 2
+            face_coords = face_coords * face_length[:, None, None] + face_center[:, None, None]
+
+            recon_face_full = face_coords.new_zeros(v_data["face_points"].shape)
+            recon_face_full = recon_face_full.masked_scatter(rearrange(face_mask, '... -> ... 1 1 1'), face_coords)
             recon_face_full[~face_mask] = -1
-
-            recon_edge_full = -torch.ones_like(v_data["edge_points"])
-            bbb = recon_edge_full[edge_mask].clone()
-            bbb[used_edge_indexes] = recon_edges
-            recon_edge_full[edge_mask] = bbb
-
-            recon_vertex_full = -torch.ones_like(v_data["vertex_points"])
-            recon_vertex_full = recon_vertex_full.masked_scatter(rearrange(vertex_mask, '... -> ... 1'), recon_vertices)
-            recon_vertex_full[~vertex_mask] = -1
-
-            data["recon_faces"] = recon_face_full
-            data["recon_edges"] = recon_edge_full
-            data["recon_vertices"] = recon_vertex_full
 
         if return_true_loss:
             if not return_recon:
                 raise
             # Compute the true loss with the continuous points
             true_recon_face_loss = nn.functional.mse_loss(
-                data["recon_faces"], v_data["face_points"], reduction='mean')
+                recon_face_full, v_data["face_points"], reduction='mean')
             loss["true_recon_face"] = true_recon_face_loss
-            true_recon_edge_loss = nn.functional.mse_loss(
-                recon_edges, v_data["edge_points"][edge_mask][used_edge_indexes], reduction='mean')
-            loss["true_recon_edge"] = true_recon_edge_loss
-            true_recon_vertex_loss = nn.functional.mse_loss(
-                recon_vertices, v_data["vertex_points"][vertex_mask][used_vertex_indexes], reduction='mean')
-            loss["true_recon_vertex"] = true_recon_vertex_loss
-
         return loss, data

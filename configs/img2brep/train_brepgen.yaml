@@ -1,8 +1,8 @@
 dataset:
   dataset_name: Autoencoder_Dataset
 
-  train_dataset: G:/Dataset/img2brep/deepcad_10000_v2
-  val_dataset: G:/Dataset/img2brep/deepcad_10000_v2
+  train_dataset: G:/Dataset/img2brep/deepcad_whole_training_v2
+  val_dataset: G:/Dataset/img2brep/deepcad_whole_validation_v2
   test_dataset: G:/Dataset/img2brep/deepcad_10000_v2
   train_feature_dataset:
   val_feature_dataset:
@@ -25,7 +25,7 @@ trainer:
   num_worker: 0
   batch_size: 4
   learning_rate: 1e-4
-  check_val_every_n_epoch: 10
+  check_val_every_n_epoch: 1
 #  accelerator: "16-mixed"
   accelerator: "32-true"
 

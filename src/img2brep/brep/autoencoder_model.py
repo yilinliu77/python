@@ -4,10 +4,12 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from sklearn.cluster import KMeans, MiniBatchKMeans
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 # from torch.utils.flop_counter import FlopCounterMode
 from torch_geometric.nn import SAGEConv, GATv2Conv
+from tqdm import tqdm
 from vector_quantize_pytorch import ResidualLFQ, VectorQuantize, ResidualVQ, FSQ, ResidualFSQ
 
 import pytorch_lightning as pl
@@ -36,7 +38,7 @@ def get_attn_mask(v_mask):
     return attn_mask
 
 
-class AutoEncoder1(nn.Module):
+class AutoEncoder(nn.Module):
     def __init__(self,
                  v_conf,
                  ):
@@ -544,7 +546,7 @@ class res_block_linear(nn.Module):
         return out
 
 
-class AutoEncoder(nn.Module):
+class AutoEncoder2(nn.Module):
     def __init__(self,
                  v_conf,
                  ):
@@ -665,7 +667,6 @@ class AutoEncoder(nn.Module):
             Rearrange('... (p c) w h -> ... w h p c', p=3, c=self.cd),
         )
 
-
     def forward(self, v_data,
                 return_recon=False,
                 return_loss=True,
@@ -685,7 +686,7 @@ class AutoEncoder(nn.Module):
         face_coords_features = self.face_encoder(face_coords)
         face_bbox_features = self.bbox_encoder(face_bbox)
 
-        face_features = self.face_fuser(torch.cat((face_coords_features, face_bbox_features),dim=1))
+        face_features = self.face_fuser(torch.cat((face_coords_features, face_bbox_features), dim=1))
         face_features = self.quantizer_in(face_features)
 
         loss = {}
@@ -723,10 +724,10 @@ class AutoEncoder(nn.Module):
         gt_face_coords = v_data["discrete_face_points"][face_mask]
 
         loss_face_coords = nn.functional.cross_entropy(face_coords_logits.flatten(0, -2),
-                                                   gt_face_coords.flatten())
+                                                       gt_face_coords.flatten())
         loss_face_bbox = nn.functional.cross_entropy(face_bbox_logits.flatten(0, -2),
-                                                 gt_face_bbox.flatten())
-        loss["total_loss"] = (loss_face_coords+loss_face_bbox).sum()
+                                                     gt_face_bbox.flatten())
+        loss["total_loss"] = (loss_face_coords + loss_face_bbox).sum()
 
         data = {}
         if return_recon:
@@ -754,3 +755,152 @@ class AutoEncoder(nn.Module):
                 recon_face_full, v_data["face_points"], reduction='mean')
             loss["true_recon_face"] = true_recon_face_loss
         return loss, data
+
+
+def init_code(v_quantizer, v_codebook_size):
+    print("Pre-compute the codebook")
+    training_root=Path(r"G:/Dataset/img2brep/0501_512_512_woquantized_2attn_big_389_training")
+    features = []
+    for file in tqdm(os.listdir("G:/Dataset/img2brep/0501_512_512_woquantized_2attn_big_389_training")):
+        feature = np.load(training_root/file, allow_pickle=True)
+        features.append(feature)
+    features = np.concatenate(features, axis=0)
+    pass
+    # KMEANS
+    kmeans = MiniBatchKMeans(n_clusters=v_codebook_size, random_state=0).fit(features)
+    v_quantizer.layers[0]._codebook = nn.Parameter(torch.tensor(kmeans.cluster_centers_).float())
+
+
+class VQVAEQuantize(nn.Module):
+    """
+    Neural Discrete Representation Learning, van den Oord et al. 2017
+    https://arxiv.org/abs/1711.00937
+
+    Follows the original DeepMind implementation
+    https://github.com/deepmind/sonnet/blob/v2/sonnet/src/nets/vqvae.py
+    https://github.com/deepmind/sonnet/blob/v2/examples/vqvae_example.ipynb
+    """
+    def __init__(self, n_embed, embedding_dim):
+        super().__init__()
+
+        self.embedding_dim = embedding_dim
+        self.n_embed = n_embed
+
+        self.kld_scale = 10.0
+
+        self.embed = nn.Embedding(n_embed, embedding_dim)
+        self.embed.weight.data.uniform_(-0.04,0.04)
+        self.register_buffer('data_initialized', torch.zeros(1))
+
+    def forward(self, z):
+        B, C = z.size()
+
+        # project and flatten out space, so (B, C, H, W) -> (B*H*W, C)
+
+        # DeepMind def does not do this but I find I have to... ;\
+        if False and self.training and self.data_initialized.item() == 0:
+            print('running kmeans!!') # data driven initialization for the embeddings
+            rp = torch.randperm(flatten.size(0))
+            kd = kmeans2(flatten[rp[:20000]].data.cpu().numpy(), self.n_embed, minit='points')
+            self.embed.weight.data.copy_(torch.from_numpy(kd[0]))
+            self.data_initialized.fill_(1)
+            # TODO: this won't work in multi-GPU setups
+
+        dist = (
+            z.pow(2).sum(1, keepdim=True)
+            - 2 * z @ self.embed.weight.t()
+            + self.embed.weight.pow(2).sum(1, keepdim=True).t()
+        )
+        _, ind = (-dist).max(1)
+        ind = ind.view(B)
+
+        # vector quantization cost that trains the embedding vectors
+        z_q = self.embed_code(ind) # (B, H, W, C)
+        commitment_cost = 0.25
+        diff = commitment_cost * (z_q.detach() - z).pow(2).mean() + (z_q - z.detach()).pow(2).mean()
+        diff *= self.kld_scale
+
+        z_q = z + (z_q - z).detach() # noop in forward pass, straight-through gradient estimator in backward pass
+        return z_q, diff, ind
+
+    def embed_code(self, embed_id):
+        return F.embedding(embed_id, self.embed.weight)
+
+
+class Face_vq_fitting(nn.Module):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(Face_vq_fitting, self).__init__()
+
+        hidden_dim = 512
+        self.quantizer_in = nn.Sequential(
+            res_block_linear(hidden_dim, hidden_dim),
+            res_block_linear(hidden_dim, hidden_dim),
+            res_block_linear(hidden_dim, hidden_dim),
+            res_block_linear(hidden_dim, hidden_dim),
+            res_block_linear(hidden_dim, hidden_dim),
+            res_block_linear(hidden_dim, hidden_dim),
+            res_block_linear(hidden_dim, hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+
+        # ================== Quantization ==================
+        self.quantizer = ResidualFSQ(
+            dim=hidden_dim,
+            levels=[8,8,8,5,5,5],
+            num_quantizers=4,
+        )
+        # self.quantizer = ResidualVQ(
+        #     dim=192,
+        #     codebook_dim=192,
+        #     num_quantizers=4,
+        #     codebook_size=self.codebook_size,
+        #
+        #     shared_codebook=True,
+        #     quantize_dropout=False,
+        #
+        #     kmeans_init=False,
+        #     kmeans_iters=10,
+        #     sync_kmeans=True,
+        #     use_cosine_sim=False,
+        #     threshold_ema_dead_code=0,
+        #     stochastic_sample_codes=False,
+        #     sample_codebook_temp=1.,
+        #     straight_through=False,
+        #     reinmax=False,  # using reinmax for improved straight-through, assuming straight through helps at all
+        # )
+        # init_code(self.quantizer, self.codebook_size)
+
+        self.quantizer_out = nn.Sequential(
+            res_block_linear(hidden_dim, hidden_dim),
+            res_block_linear(hidden_dim, hidden_dim),
+            res_block_linear(hidden_dim, hidden_dim),
+            res_block_linear(hidden_dim, hidden_dim),
+            res_block_linear(hidden_dim, hidden_dim),
+            res_block_linear(hidden_dim, hidden_dim),
+            res_block_linear(hidden_dim, hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+
+    def forward(self, v_data,
+                return_recon=False,
+                return_loss=True,
+                return_face_features=False,
+                return_true_loss=False,
+                **kwargs):
+        face_feature = v_data
+        face_mask = (face_feature != 0).all(dim=-1)
+
+        face_feature = face_feature[face_mask]
+        encoded_face_feature = self.quantizer_in(face_feature)
+        true_face_latent, indices  = self.quantizer(encoded_face_feature[:,None])
+        true_face_latent = true_face_latent[:, 0]
+        indices = indices[:, 0]
+        true_face_latent = self.quantizer_out(true_face_latent)
+
+        loss = {}
+        loss["quantization_l2"] = F.mse_loss(true_face_latent, face_feature, reduction='mean')
+        loss["total_loss"] = sum(loss.values())
+
+        return loss, {}

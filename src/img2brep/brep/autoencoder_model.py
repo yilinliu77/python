@@ -527,6 +527,23 @@ class AutoEncoder1(nn.Module):
         return loss, data
 
 
+class res_block_linear(nn.Module):
+    def __init__(self, v_in, v_out):
+        super(res_block_linear, self).__init__()
+        self.conv = nn.Linear(v_in, v_out)
+        self.act = nn.ReLU()
+        if v_in != v_out:
+            self.conv2 = nn.Linear(v_in, v_out)
+        else:
+            self.conv2 = None
+
+    def forward(self, x):
+        out = self.act(self.conv(x))
+        if self.conv2 is not None:
+            out = out + self.conv2(x)
+        return out
+
+
 class AutoEncoder(nn.Module):
     def __init__(self,
                  v_conf,
@@ -548,41 +565,46 @@ class AutoEncoder(nn.Module):
         self.coords_embedding = nn.Embedding(coor_discrete_dim - 1, 64)
 
         self.bbox_encoder = nn.Sequential(
-            nn.Linear(6 * 64, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, hidden_dim // 4),
-            nn.ReLU(),
+            res_block_linear(6 * 64, hidden_dim),
+            res_block_linear(hidden_dim, hidden_dim),
+            res_block_linear(hidden_dim, hidden_dim // 2),
+            res_block_linear(hidden_dim // 2, hidden_dim // 2),
+            res_block_linear(hidden_dim // 2, hidden_dim // 4),
+            res_block_linear(hidden_dim // 4, hidden_dim // 4),
             nn.Linear(hidden_dim // 4, hidden_dim // 4),
         )
 
         self.face_encoder = nn.Sequential(
             nn.Conv2d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
-            nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.ReLU(),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+
             nn.Conv2d(hidden_dim, hidden_dim // 2, kernel_size=7, stride=1, padding=3),
             nn.MaxPool2d(kernel_size=2, stride=2),
             nn.ReLU(),
+            res_block_2D(hidden_dim // 2, hidden_dim // 2, ks=7, st=1, pa=3),
+
             nn.Conv2d(hidden_dim // 2, hidden_dim // 4, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 1)),
+            nn.ReLU(),
+
             nn.Flatten(),
             nn.Linear(hidden_dim // 4, hidden_dim // 4)
         )
 
         self.face_fuser = nn.Sequential(
-            nn.Linear(hidden_dim // 2, hidden_dim // 4),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 4, hidden_dim // 8),
-            nn.ReLU(),
+            res_block_linear(hidden_dim // 2, hidden_dim // 2),
+            res_block_linear(hidden_dim // 2, hidden_dim // 4),
+            res_block_linear(hidden_dim // 4, hidden_dim // 4),
+            res_block_linear(hidden_dim // 4, hidden_dim // 8),
+            res_block_linear(hidden_dim // 8, hidden_dim // 8),
             nn.Linear(hidden_dim // 8, hidden_dim // 8)
         )
 
         # ================== Quantization ==================
         self.quantizer_in = nn.Sequential(
-            nn.Linear(hidden_dim // 8, hidden_dim // 8),
-            nn.ReLU(),
+            res_block_linear(hidden_dim // 8, hidden_dim // 8),
             nn.Linear(hidden_dim // 8, 6),
         )
 
@@ -594,13 +616,13 @@ class AutoEncoder(nn.Module):
         )
 
         self.quantizer_out = nn.Sequential(
-            nn.Linear(6, hidden_dim // 8),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 8, hidden_dim // 4),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 4, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, hidden_dim),
+            res_block_linear(6, hidden_dim // 8),
+            res_block_linear(hidden_dim // 8, hidden_dim // 8),
+            res_block_linear(hidden_dim // 8, hidden_dim // 4),
+            res_block_linear(hidden_dim // 4, hidden_dim // 4),
+            res_block_linear(hidden_dim // 4, hidden_dim // 2),
+            res_block_linear(hidden_dim // 2, hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
         )
 
         # ================== Decoder ==================
@@ -608,13 +630,13 @@ class AutoEncoder(nn.Module):
         self.cd = coor_discrete_dim - 1  # discrete_dim
 
         self.bbox_decoder = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 6 * self.bd),
+            res_block_linear(hidden_dim, hidden_dim),
+            res_block_linear(hidden_dim, hidden_dim * 2),
+            res_block_linear(hidden_dim * 2, hidden_dim * 4),
+            res_block_linear(hidden_dim * 4, hidden_dim * 4),
+            res_block_linear(hidden_dim * 4, hidden_dim * 8),
+            res_block_linear(hidden_dim * 8, hidden_dim * 8),
+            res_block_linear(hidden_dim * 8, 6 * self.bd),
             Rearrange('...(p c) -> ... p c', p=6, c=self.bd),
         )
 
@@ -622,14 +644,23 @@ class AutoEncoder(nn.Module):
         self.coords_decoder = nn.Sequential(
             nn.Linear(self.dim_latent, hidden_dim),
             Rearrange('... c -> ... c 1 1'),
+
+            res_block_2D(hidden_dim, hidden_dim),
             nn.Upsample(scale_factor=4, mode="bilinear"),
             res_block_2D(hidden_dim, hidden_dim),
-            nn.Upsample(scale_factor=2, mode="bilinear"),
+
             res_block_2D(hidden_dim, hidden_dim),
             nn.Upsample(scale_factor=2, mode="bilinear"),
             res_block_2D(hidden_dim, hidden_dim),
+
+            res_block_2D(hidden_dim, hidden_dim),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
             nn.Upsample(size=(20, 20), mode="bilinear"),
-            res_block_2D(hidden_dim, hidden_dim),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+
             nn.Conv2d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
             Rearrange('... (p c) w h -> ... w h p c', p=3, c=self.cd),
         )

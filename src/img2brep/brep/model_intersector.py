@@ -187,8 +187,12 @@ class Attn_intersector_classifier(Intersector):
         self.edge_token = nn.Parameter(torch.rand(dim))
 
         self.classifier = nn.Linear(dim, 1)
+        self.position_embedding = nn.Embedding(2, dim)
 
     def inference(self, v_features, v_type):
+        pos_encoding = self.position_embedding(torch.arange(v_features.shape[1], device=v_features.device)[None, :].repeat(
+            v_features.shape[0], 1))
+        v_features = v_features + pos_encoding
         if v_type == "edge":
             x = self.edge_token[None, None].repeat(v_features.shape[0], 1, 1)
         else:
@@ -211,7 +215,7 @@ class Attn_intersector_classifier(Intersector):
         edge_null_features = self.inference(null_gathered_edges, "edge")
 
         gathered_vertices, null_gathered_vertices = self.prepare_vertex_data(
-            v_edge_embeddings, v_vertex_edge_connectivity, v_edge_adj, v_edge_mask)
+            edge_features, v_vertex_edge_connectivity, v_edge_adj, v_edge_mask)
         vertex_features = self.inference(gathered_vertices, "vertex")
         vertex_null_features = self.inference(null_gathered_vertices, "vertex")
 

@@ -834,6 +834,7 @@ class Face_vq_fitting(nn.Module):
         super(Face_vq_fitting, self).__init__()
 
         hidden_dim = 512
+
         self.quantizer_in = nn.Sequential(
             res_block_linear(hidden_dim, hidden_dim),
             res_block_linear(hidden_dim, hidden_dim),
@@ -848,8 +849,10 @@ class Face_vq_fitting(nn.Module):
         # ================== Quantization ==================
         self.quantizer = ResidualFSQ(
             dim=hidden_dim,
-            levels=[8,8,8,5,5,5],
+            levels=[2]*16,
             num_quantizers=4,
+            num_codebooks=2,
+            keep_num_codebooks_dim=True,
         )
         # self.quantizer = ResidualVQ(
         #     dim=192,

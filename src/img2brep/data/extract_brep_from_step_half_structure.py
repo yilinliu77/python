@@ -4,6 +4,8 @@ from pathlib import Path
 
 import ray, trimesh
 import numpy as np
+from OCC.Core import TopoDS, TopExp
+from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Face, TopoDS_Edge, TopoDS_Vertex, TopoDS_Wire
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX, TopAbs_WIRE
@@ -27,10 +29,12 @@ exception_files = [
 
 num_max_primitives = 100000
 
+
 def check_dir(v_path):
     if os.path.exists(v_path):
         shutil.rmtree(v_path)
     os.makedirs(v_path)
+
 
 def safe_check_dir(v_path):
     if not os.path.exists(v_path):
@@ -91,7 +95,7 @@ def get_brep(v_root, output_root, v_folders):
             num_edges = len(edge_dict)
             vertex_dict = {}
             for vertex in explore_shape(shape, TopAbs_VERTEX):
-                if vertex not in vertex_dict:
+                if vertex not in vertex_dict and vertex.Reversed() not in vertex_dict:
                     vertex_dict[vertex] = len(vertex_dict)
 
             # Sample points in face
@@ -107,15 +111,15 @@ def get_brep(v_root, output_root, v_folders):
                 last_u = surface.LastUParameter()
                 first_v = surface.FirstVParameter()
                 last_v = surface.LastVParameter()
-                u = np.linspace(first_u, last_u, num=20)
-                v = np.linspace(first_v, last_v, num=20)
+                u = np.linspace(first_u, last_u, num=32)
+                v = np.linspace(first_v, last_v, num=32)
                 u, v = np.meshgrid(u, v)
                 points = []
                 for i in range(u.shape[0]):
                     for j in range(u.shape[1]):
                         pnt = surface.Value(u[i, j], v[i, j])
                         points.append(np.array([pnt.X(), pnt.Y(), pnt.Z()], dtype=np.float32))
-                face_sample_points.append(np.stack(points, axis=0).reshape(20, 20, 3))
+                face_sample_points.append(np.stack(points, axis=0).reshape(32, 32, 3))
             face_sample_points = np.stack(face_sample_points, axis=0)
             face_sample_points = transform(face_sample_points)
             assert len(face_dict) == num_faces == face_sample_points.shape[0]
@@ -127,9 +131,10 @@ def get_brep(v_root, output_root, v_folders):
                 if curve.GetType() not in [GeomAbs_Circle, GeomAbs_Line, GeomAbs_Ellipse, GeomAbs_BSplineCurve]:
                     raise ValueError("Unsupported curve type: {}".format(curve.GetType()))
                 # Sample 20 points along it
-                range_start = curve.FirstParameter()
-                range_end = curve.LastParameter()
-                sample_u = np.linspace(range_start, range_end, num=20)
+                # Determine the orientation
+                range_start = curve.FirstParameter() if edge.Orientation() == 0 else curve.LastParameter()
+                range_end = curve.LastParameter() if edge.Orientation() == 0 else curve.FirstParameter()
+                sample_u = np.linspace(range_start, range_end, num=32)
                 sample_points = []
                 for u in sample_u:
                     pnt = curve.Value(u)
@@ -168,17 +173,10 @@ def get_brep(v_root, output_root, v_folders):
                         else:
                             edge_face_look_up_table[edge].append(face)
 
-                        for idv, vertex in enumerate(explore_shape(edge, TopAbs_VERTEX)):
-                            if vertex not in vertex_dict:
-                                raise ValueError("Edge not in edge_dict")
-
-                            if vertex not in vertex_edge_look_up_table:
-                                vertex_edge_look_up_table[vertex] = [edge]
-                            else:
-                                vertex_edge_look_up_table[vertex].append(edge)
-
-                            if idv==1:
-                                local_vertex_edge_connectivity.append((vertex_dict[vertex], edge_dict[edge]))
+                        second_vertex = TopExp.topexp.LastVertex(edge, True)
+                        local_vertex_edge_connectivity.append((
+                            vertex_dict[second_vertex] if second_vertex in vertex_dict else vertex_dict[
+                                second_vertex.Reversed()], edge_dict[edge]))
 
                     for idv in range(len(local_vertex_edge_connectivity)):
                         vertex_edge_connectivity.append((
@@ -284,7 +282,7 @@ if __name__ == '__main__':
     check_dir(output_root)
 
     # single process
-    if False:
+    if True:
         get_brep(data_root, output_root, total_ids)
     else:
         ray.init(

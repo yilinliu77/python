@@ -5,7 +5,8 @@ from pathlib import Path
 import ray, trimesh
 import numpy as np
 from OCC.Core import TopoDS, TopExp
-from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Face, TopoDS_Edge, TopoDS_Vertex, TopoDS_Wire
+from OCC.Core.BRepTools import BRepTools_WireExplorer
+from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Face, TopoDS_Edge, TopoDS_Vertex, TopoDS_Wire, topods_Edge
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX, TopAbs_WIRE
@@ -19,7 +20,7 @@ import traceback, sys
 write_debug_data = False
 data_root = Path(r"G:/Dataset/ABC/raw_data/abc_0000_obj_v00")
 output_root = Path(r"G:/Dataset/img2brep/deepcad_test")
-data_split = r"src/img2brep/data/deepcad_train_10000.txt"
+data_split = r"src/img2brep/data/deepcad_test_whole.txt"
 
 exception_files = [
     r"src/img2brep/data/abc_multiple_component_or_few_faces_ids_.txt",
@@ -163,7 +164,11 @@ def get_brep(v_root, output_root, v_folders):
                 for wire in explore_shape(face, TopAbs_WIRE):
                     loops.append(-2)
                     local_vertex_edge_connectivity = []
-                    for edge in explore_shape(wire, TopAbs_EDGE):
+                    wire_explorer = BRepTools_WireExplorer(wire)
+
+                    while wire_explorer.More():
+                        edge = topods_Edge(wire_explorer.Current())
+                        wire_explorer.Next()
                         if edge not in edge_dict:
                             raise ValueError("Edge not in edge_dict")
                         loops.append(edge_dict[edge])
@@ -278,6 +283,7 @@ if __name__ == '__main__':
     num_original = len(total_ids)
     total_ids = list(set(total_ids) - set(exception_ids))
     total_ids.sort()
+    total_ids=["00005083"]
     print("Total ids: {} -> {}".format(num_original, len(total_ids)))
     check_dir(output_root)
 

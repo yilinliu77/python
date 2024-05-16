@@ -100,17 +100,10 @@ class Continuous_encoder(nn.Module):
         super().__init__()
         hidden_dim = 256
         self.face_encoder = nn.Sequential(
-            nn.Conv2d(3, hidden_dim, kernel_size=7, stride=1, padding=3),
-            Rearrange('b c h w -> b h w c'),
-            nn.LayerNorm(hidden_dim),
-            Rearrange('b h w c -> b c h w'),
-            nn.ReLU(),
+            nn.Conv2d(3, hidden_dim, kernel_size=1, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
             nn.MaxPool2d(kernel_size=2, stride=2),
-            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=5, stride=1, padding=2),
-            Rearrange('b c h w -> b h w c'),
-            nn.LayerNorm(hidden_dim),
-            Rearrange('b h w c -> b c h w'),
-            nn.ReLU(),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
             nn.MaxPool2d(kernel_size=2, stride=2),
             res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.MaxPool2d(kernel_size=2, stride=2),
@@ -121,24 +114,25 @@ class Continuous_encoder(nn.Module):
         )
 
         self.edge_encoder = nn.Sequential(
-            nn.Conv1d(in_channels=3, out_channels=hidden_dim, kernel_size=7, stride=1, padding=3),
-            Rearrange('b c h -> b h c'),
-            nn.LayerNorm(hidden_dim),
-            Rearrange('b h c -> b c h'),
-            nn.ReLU(),
+            nn.Conv1d(in_channels=3, out_channels=hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
             nn.MaxPool1d(kernel_size=2, stride=2),
-            nn.Conv1d(in_channels=hidden_dim, out_channels=hidden_dim, kernel_size=5, stride=1, padding=2),
-            Rearrange('b c h -> b h c'),
-            nn.LayerNorm(hidden_dim),
-            Rearrange('b h c -> b c h'),
-            nn.ReLU(),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
             nn.MaxPool1d(kernel_size=2, stride=2),
             res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.MaxPool1d(kernel_size=2, stride=2),
             res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.AdaptiveAvgPool1d(1),
             nn.Flatten(),
-            nn.Linear(256, hidden_dim)
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+
+        self.vertex_encoder = nn.Sequential(
+            nn.Conv1d(3, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
         )
 
     def encode_face(self, v_data):
@@ -192,6 +186,7 @@ class Discrete_encoder(Continuous_encoder):
             Rearrange('b h w c -> b c h w'),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2),
+
             res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.MaxPool2d(kernel_size=2, stride=2),
             res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),

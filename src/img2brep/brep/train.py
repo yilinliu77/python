@@ -212,6 +212,7 @@ def main(v_cfg: DictConfig):
         num_sanity_val_steps=2,
         check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
         precision=v_cfg["trainer"]["accelerator"],
+        gradient_clip_val=0.5,
         # accumulate_grad_batches=1,
         # profiler=SimpleProfiler(dirpath=log_dir, filename="profiler.txt"),
     )

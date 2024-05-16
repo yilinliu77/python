@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from diffusers import AutoencoderKL
 from sklearn.cluster import KMeans, MiniBatchKMeans
 from torch.optim import Adam
 from torch.utils.data import DataLoader
@@ -907,3 +908,91 @@ class Face_vq_fitting(nn.Module):
         loss["total_loss"] = sum(loss.values())
 
         return loss, {}
+
+
+class AutoEncoder3(nn.Module):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder3, self).__init__()
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+        hidden_dim = 6 if self.with_quantization else 3
+
+        self.encoder = AutoencoderKL(in_channels=3,
+            out_channels=3,
+            down_block_types=['DownEncoderBlock2D', 'DownEncoderBlock2D', 'DownEncoderBlock2D', 'DownEncoderBlock2D'],
+            up_block_types= ['UpDecoderBlock2D', 'UpDecoderBlock2D', 'UpDecoderBlock2D', 'UpDecoderBlock2D'],
+            block_out_channels=[128, 256, 512, 512],
+            layers_per_block=2,
+            act_fn='silu',
+            latent_channels=hidden_dim,
+            norm_num_groups=32,
+            sample_size=512,
+        )
+
+        # ================== Quantization ==================
+        if self.with_quantization:
+            self.quantizer = FSQ(
+                dim=6,
+                num_codebooks=1,
+                levels=[8, 8, 8, 5, 5, 5],
+            )
+
+    def forward(self, v_data,
+                return_recon=False,
+                return_loss=True,
+                return_face_features=False,
+                return_true_loss=False,
+                **kwargs):
+        face_points = v_data["face_points"]
+        face_mask = (face_points != -1).all(dim=-1).all(dim=-1).all(dim=-1)
+
+        flatten_face_points = face_points[face_mask].permute(0, 3, 1, 2)
+        posterior = self.encoder.encode(flatten_face_points).latent_dist
+
+        loss = {}
+        if self.with_quantization:
+            face_features = posterior.mean
+            true_face_latent, indices = self.quantizer(face_features)
+            # true_face_latent = quantized_features[:, 0]
+            # indices = indices[:, 0]
+            # true_face_latent = quantized_features
+            # true_face_latent = self.quantizer_out(true_face_latent)
+        else:
+            true_face_latent = posterior.sample()
+
+        # Decode with normal feature
+        predicted_face_points = self.encoder.decode(true_face_latent).sample
+        # =============================== Loss for normal decoding ===============================
+        loss["face_points"] = nn.functional.l1_loss(flatten_face_points, predicted_face_points)
+        if self.with_quantization:
+            loss["kl"] = posterior.kl().mean()
+            loss["total_loss"] = loss["face_points"] + loss["kl"] * 1e-6
+        else:
+            loss["total_loss"] = loss["face_points"]
+
+        data = {}
+        if return_recon:
+            # used_edge_indexes = v_data["edge_face_connectivity"][..., 0]
+            # used_vertex_indexes = v_data["vertex_edge_connectivity"][..., 0]
+            recon_face_full = predicted_face_points.new_zeros(v_data["face_points"].shape)
+            recon_face_full = recon_face_full.masked_scatter(
+                rearrange(face_mask, '... -> ... 1 1 1'), predicted_face_points)
+            recon_face_full[~face_mask] = -1
+
+        if return_true_loss:
+            if not return_recon:
+                raise
+            # Compute the true loss with the continuous points
+            true_recon_face_loss = nn.functional.mse_loss(
+                recon_face_full, v_data["face_points"], reduction='mean')
+            loss["true_recon_face"] = true_recon_face_loss
+        return loss, data

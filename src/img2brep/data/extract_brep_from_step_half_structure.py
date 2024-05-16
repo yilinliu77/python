@@ -167,7 +167,7 @@ def get_brep(v_root, output_root, v_folders):
                     wire_explorer = BRepTools_WireExplorer(wire)
 
                     while wire_explorer.More():
-                        edge = topods_Edge(wire_explorer.Current())
+                        edge = TopoDS.topods.Edge(wire_explorer.Current())
                         wire_explorer.Next()
                         if edge not in edge_dict:
                             raise ValueError("Edge not in edge_dict")
@@ -288,7 +288,7 @@ if __name__ == '__main__':
     check_dir(output_root)
 
     # single process
-    if True:
+    if False:
         get_brep(data_root, output_root, total_ids)
     else:
         ray.init(
@@ -297,8 +297,8 @@ if __name__ == '__main__':
             # num_cpus=1,
             # local_mode=True
         )
-        num_batches = 40
-        batch_size = len(total_ids) // num_batches + 1
+        batch_size = 100
+        num_batches = len(total_ids) // batch_size + 1
         tasks = []
         for i in range(num_batches):
             tasks.append(

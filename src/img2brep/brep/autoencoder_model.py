@@ -995,4 +995,5 @@ class AutoEncoder3(nn.Module):
             true_recon_face_loss = nn.functional.mse_loss(
                 recon_face_full, v_data["face_points"], reduction='mean')
             loss["true_recon_face"] = true_recon_face_loss
+            data["recon_faces"] = recon_face_full
         return loss, data

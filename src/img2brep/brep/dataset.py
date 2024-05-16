@@ -107,6 +107,9 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
         for folder_path in self.data_folders:
             if not os.path.exists(os.path.join(folder_path, "data.npz")) or folder_path[-8:] in ignore_ids:
                 miss.append(folder_path)
+        # length = []
+        # for folder_path in tqdm(self.data_folders):
+        #     length.append(np.load(os.path.join(folder_path, "data.npz"))["sample_points_faces"].shape[0])
 
         for folder_path in miss:
             self.data_folders.remove(folder_path)

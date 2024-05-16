@@ -974,10 +974,10 @@ class AutoEncoder3(nn.Module):
         # =============================== Loss for normal decoding ===============================
         loss["face_points"] = nn.functional.l1_loss(flatten_face_points, predicted_face_points)
         if self.with_quantization:
+            loss["total_loss"] = loss["face_points"]
+        else:
             loss["kl"] = posterior.kl().mean()
             loss["total_loss"] = loss["face_points"] + loss["kl"] * 1e-6
-        else:
-            loss["total_loss"] = loss["face_points"]
 
         data = {}
         if return_recon:
@@ -985,7 +985,7 @@ class AutoEncoder3(nn.Module):
             # used_vertex_indexes = v_data["vertex_edge_connectivity"][..., 0]
             recon_face_full = predicted_face_points.new_zeros(v_data["face_points"].shape)
             recon_face_full = recon_face_full.masked_scatter(
-                rearrange(face_mask, '... -> ... 1 1 1'), predicted_face_points)
+                rearrange(face_mask, '... -> ... 1 1 1'), predicted_face_points.permute(0,2,3,1))
             recon_face_full[~face_mask] = -1
 
         if return_true_loss:

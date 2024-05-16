@@ -162,11 +162,11 @@ class TrainAutoEncoder(pl.LightningModule):
                 # edge_colors = np.concatenate(
                 #     (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0] * 20, axis=0),
                 #      np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0] * 20, axis=0)), axis=0)
-
+                num_face_points = gt_faces.shape[1] ** 2
                 face_points = np.concatenate((gt_faces, recon_faces), axis=0).reshape(-1, 3)
                 face_colors = np.concatenate(
-                    (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_faces.shape[0] * 400, axis=0),
-                     np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_faces.shape[0] * 400, axis=0)), axis=0)
+                    (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_faces.shape[0] * num_face_points, axis=0),
+                     np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_faces.shape[0] * num_face_points, axis=0)), axis=0)
 
                 pc = o3d.geometry.PointCloud()
                 # pc.points = o3d.utility.Vector3dVector(vertex_points)

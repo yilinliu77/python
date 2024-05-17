@@ -2147,3 +2147,542 @@ class AutoEncoder4(nn.Module):
                     rearrange(face_mask, '... -> ... 1'), indices)
                 data["quantized_face_indices"] = quantized_face_indices_return
         return loss, data
+
+
+class AutoEncoder5(nn.Module):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder5, self).__init__()
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+        self.bd = v_conf["bbox_discrete_dim"] - 1
+        self.cd = v_conf["coor_discrete_dim"] - 1
+        self.bbox_embedding = nn.Embedding(self.bd, 64)
+        self.coords_embedding = nn.Embedding(self.cd, 64)
+
+        hidden_dim = 256
+        self.face_coords = nn.Sequential(
+            nn.Embedding(v_conf["coor_discrete_dim"] - 1, 64),
+            Rearrange('b h w n c -> b (n c) h w'),
+            nn.Conv2d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=1),
+        )
+        self.face_bbox = nn.Sequential(
+            nn.Embedding(self.bd, 64),
+            Rearrange('b n c-> b (n c) 1'),
+            nn.Conv1d(6 * 64, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+
+        self.face_fuser = nn.Sequential(
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+
+        self.edge_bbox = nn.Sequential(
+            nn.Embedding(self.bd, 64),
+            Rearrange('b n c-> b (n c) 1'),
+            nn.Conv1d(6 * 64, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+        self.edge_coords = nn.Sequential(
+            nn.Embedding(self.cd, 64),
+            Rearrange('b h n c -> b (n c) h'),
+            nn.Conv1d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=1),
+        )
+
+        self.edge_fuser = nn.Sequential(
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+
+        self.vertices_encoder = nn.Sequential(
+            nn.Embedding(self.cd, 64),
+            Rearrange('b n c -> b (n c) 1'),
+            nn.Conv1d(3 * 64, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+
+        # ================== Decoder ==================
+        self.face_bbox_decoder = nn.Sequential(
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=4, stride=4),
+            Rearrange('... 1 1 -> ... (1 1)'),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, 6 * self.bd, kernel_size=1, stride=1, padding=0),
+            Rearrange('...(p c) 1-> ... p c', p=6, c=self.bd),
+        )
+
+        self.face_coords_decoder = nn.Sequential(
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.Conv2d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (p c) w h -> ... w h p c', p=3, c=self.cd),
+        )
+
+        self.edge_bbox_decoder = nn.Sequential(
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=4, stride=4),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, 6 * self.bd, kernel_size=1, stride=1, padding=0),
+            Rearrange('...(p c) 1-> ... p c', p=6, c=self.bd),
+        )
+
+        self.edge_coords_decoder = nn.Sequential(
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.Conv1d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (p c) w-> ... w p c', p=3, c=self.cd),
+        )
+
+        self.vertex_coords_decoder = nn.Sequential(
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (p c) 1-> ... (1 p) c', p=3, c=self.cd),
+        )
+
+        self.frozen_models = []
+        # ================== Quantization ==================
+        self.with_quantization = v_conf["with_quantization"]
+        self.with_vae = v_conf["with_vae"]
+        if self.with_quantization:
+            self.quantizer_in = nn.Sequential(
+                nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+            )
+            self.quantizer = FSQ(
+                dim=6,
+                num_codebooks=1,
+                levels=[8, 8, 8, 5, 5, 5],
+            )
+            self.quantizer_out = nn.Sequential(
+                nn.Conv2d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+        elif self.with_vae:
+            self.vae_proj = nn.Sequential(
+                nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+            )
+            self.vae_out = nn.Sequential(
+                nn.Conv2d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+        else:
+            self.bottleneck = nn.Sequential(
+                nn.Identity()
+            )
+
+            self.bottleneck = nn.Sequential(
+                nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+                nn.Conv2d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+
+    # Inference (B * num_faces * num_features)
+    # Pad features are all zeros
+    # B==1 currently
+    def inference(self, v_face_embeddings, return_topology=False):
+        # Use face to intersect edges
+        B = v_face_embeddings.shape[0]
+        device = v_face_embeddings.device
+        assert B == 1
+        num_faces = v_face_embeddings.shape[1]
+        face_idx = torch.stack(torch.meshgrid(
+            torch.arange(num_faces), torch.arange(num_faces), indexing="xy"), dim=2
+        ).reshape(-1, 2).to(device)
+        gathered_face_features = v_face_embeddings[0, face_idx]
+
+        edge_features = self.intersector.inference(gathered_face_features, "edge")
+        edge_intersection_mask = self.intersector.inference_label(edge_features)
+        edge_features = edge_features[edge_intersection_mask]
+        num_edges = edge_features.shape[0]
+
+        # Use edge to intersect vertices
+        edge_idx = torch.stack(torch.meshgrid(
+            torch.arange(num_edges), torch.arange(num_edges), indexing="xy"), dim=2
+        ).reshape(-1, 2).to(device)
+        gathered_edge_features = edge_features[edge_idx]
+
+        if gathered_edge_features.shape[0] < 64 * 64:
+            vertex_features = self.intersector.inference(gathered_edge_features, "vertex")
+            vertex_intersection_mask = self.intersector.inference_label(vertex_features)
+            vertex_features = vertex_features[vertex_intersection_mask]
+        else:
+            vertex_features = gathered_edge_features.new_zeros(0, gathered_edge_features.shape[-1])
+
+        # Decode
+        recon_data = self.decoder(
+            v_face_embeddings.view(-1, v_face_embeddings.shape[-1]),
+            edge_features,
+            vertex_features,
+        )
+        recon_faces, recon_edges, recon_vertices = self.decoder.inference(recon_data)
+        if return_topology:
+            face_edge_connectivity = torch.cat((
+                torch.arange(num_edges, device=device)[:, None], face_idx[edge_intersection_mask],), dim=1)
+            edge_vertex_connectivity = torch.cat((
+                torch.arange(vertex_features.shape[0], device=device)[:, None], edge_idx[vertex_intersection_mask],),
+                dim=1)
+            return recon_vertices, recon_edges, recon_faces, face_edge_connectivity, edge_vertex_connectivity
+        return recon_vertices, recon_edges, recon_faces
+
+    def encode(self, v_data):
+        # ================== Encode the edge and face points ==================
+        face_embeddings, edge_embeddings, vertex_embeddings, face_mask, edge_mask, vertex_mask = self.encoder(v_data)
+        face_embeddings = self.faces_proj(face_embeddings)
+        edge_embeddings = self.edges_proj(edge_embeddings)
+        vertex_embeddings = self.vertices_proj(vertex_embeddings)
+
+        # ================== Prepare data for flattened features ==================
+        edge_index_offsets = reduce(edge_mask.long(), 'b ne -> b', 'sum')
+        edge_index_offsets = F.pad(edge_index_offsets.cumsum(dim=0), (1, -1), value=0)
+        face_index_offsets = reduce(face_mask.long(), 'b ne -> b', 'sum')
+        face_index_offsets = F.pad(face_index_offsets.cumsum(dim=0), (1, -1), value=0)
+        vertex_index_offsets = reduce(vertex_mask.long(), 'b ne -> b', 'sum')
+        vertex_index_offsets = F.pad(vertex_index_offsets.cumsum(dim=0), (1, -1), value=0)
+
+        vertex_edge_connectivity = v_data["vertex_edge_connectivity"].clone()
+        vertex_edge_connectivity_valid = (vertex_edge_connectivity != -1).all(dim=-1)
+        # Solve the vertex_edge_connectivity: last two dimension (id_edge)
+        vertex_edge_connectivity[..., 1:] += edge_index_offsets[:, None, None]
+        # Solve the edge_face_connectivity: first (id_vertex)
+        vertex_edge_connectivity[..., 0:1] += vertex_index_offsets[:, None, None]
+        vertex_edge_connectivity = vertex_edge_connectivity[vertex_edge_connectivity_valid]
+
+        edge_face_connectivity = v_data["edge_face_connectivity"].clone()
+        edge_face_connectivity_valid = (edge_face_connectivity != -1).all(dim=-1)
+        # Solve the edge_face_connectivity: last two dimension (id_face)
+        edge_face_connectivity[..., 1:] += face_index_offsets[:, None, None]
+        # Solve the edge_face_connectivity: first dimension (id_edge)
+        edge_face_connectivity[..., 0] += edge_index_offsets[:, None]
+        edge_face_connectivity = edge_face_connectivity[edge_face_connectivity_valid]
+
+        # ================== Self-attention on vertices ==================
+        b, n = vertex_mask.shape
+        batch_indices = torch.arange(b, device=vertex_mask.device).unsqueeze(1).repeat(1, n)
+        batch_indices = batch_indices[vertex_mask]
+        vertex_attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
+        atten_vertex_embeddings = self.vertex_fuser(vertex_embeddings, vertex_attn_mask)
+
+        # ================== Fuse vertex features to the corresponding edges ==================
+        b, n = edge_mask.shape
+        batch_indices = torch.arange(b, device=edge_mask.device).unsqueeze(1).repeat(1, n)
+        batch_indices = batch_indices[edge_mask]
+        edge_attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
+        edge_vertex_embeddings = self.fuser_vertices_to_edges(
+            v_embeddings1=atten_vertex_embeddings,
+            v_embeddings2=edge_embeddings,
+            v_connectivity1_to_2=vertex_edge_connectivity,
+            v_attn_mask=edge_attn_mask
+        )
+
+        # ================== GCN and self-attention on edges ==================
+        edge_embeddings_gcn = self.gcn_on_edges(edge_vertex_embeddings,
+                                                vertex_edge_connectivity[..., 1:].permute(1, 0))
+        atten_edge_embeddings = self.edge_fuser(edge_embeddings_gcn, edge_attn_mask)
+
+        # ================== fuse edges features to the corresponding faces ==================
+        b, n = face_mask.shape
+        batch_indices = torch.arange(b, device=face_mask.device).unsqueeze(1).repeat(1, n)
+        batch_indices = batch_indices[face_mask]
+        face_attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
+        face_edge_embeddings = self.fuser_edges_to_faces(
+            v_connectivity1_to_2=edge_face_connectivity,
+            v_embeddings1=atten_edge_embeddings,
+            v_embeddings2=face_embeddings,
+            v_attn_mask=face_attn_mask,
+        )
+
+        # ================== GCN and self-attention on faces  ==================
+        face_edge_embeddings_gcn = self.gcn_on_faces(face_edge_embeddings,
+                                                     edge_face_connectivity[..., 1:].permute(1, 0),
+                                                     edge_attr=atten_edge_embeddings[edge_face_connectivity[..., 0]])
+
+        atten_face_embeddings = self.face_fuser(face_edge_embeddings_gcn,
+                                                face_attn_mask)  # This is the true latent
+
+        atten_vertex_embeddings = torch.sigmoid(atten_vertex_embeddings)
+        atten_edge_embeddings = torch.sigmoid(atten_edge_embeddings)
+        atten_face_embeddings = torch.sigmoid(atten_face_embeddings)
+
+        v_data["edge_face_connectivity"] = edge_face_connectivity
+        v_data["vertex_edge_connectivity"] = vertex_edge_connectivity
+        v_data["face_mask"] = face_mask
+        v_data["edge_mask"] = edge_mask
+        v_data["vertex_mask"] = vertex_mask
+        v_data["face_attn_mask"] = face_attn_mask
+        v_data["edge_attn_mask"] = edge_attn_mask
+        v_data["face_embeddings"] = face_embeddings
+        v_data["edge_embeddings"] = edge_embeddings
+        v_data["vertex_embeddings"] = vertex_embeddings
+        v_data["atten_face_embeddings"] = atten_face_embeddings
+        v_data["atten_edge_embeddings"] = atten_edge_embeddings
+        v_data["atten_vertex_embeddings"] = atten_vertex_embeddings
+        return
+
+    def decode(self, v_data=None):
+        # ================== Intersection  ==================
+        recon_data = {}
+        if v_data is not None:
+            face_adj = v_data["face_adj"]
+            edge_adj = v_data["edge_adj"]
+            inter_edge_features, inter_edge_null_features, inter_vertex_features, inter_vertex_null_features = self.intersector(
+                v_data["atten_face_embeddings"],
+                v_data["atten_edge_embeddings"],
+                v_data["edge_face_connectivity"],
+                v_data["vertex_edge_connectivity"],
+                face_adj, v_data["face_mask"],
+                edge_adj, v_data["edge_mask"],
+            )
+
+        else:
+            raise
+
+        # Recover the shape features
+        recon_data["proj_face_features"] = self.intersection_face_decoder(
+            v_data["atten_face_embeddings"][..., None])[..., 0]
+        recon_data["proj_edge_features"] = self.intersection_edge_decoder(inter_edge_features[..., None])[..., 0]
+        recon_data["proj_vertex_features"] = self.intersection_vertex_decoder(inter_vertex_features[..., None])[..., 0]
+
+        recon_data["inter_edge_null_features"] = inter_edge_null_features
+        recon_data["inter_vertex_null_features"] = inter_vertex_null_features
+        recon_data["inter_edge_features"] = inter_edge_features
+        recon_data["inter_vertex_features"] = inter_vertex_features
+
+        # Decode with intersection feature
+        recon_data.update(self.decoder(
+            recon_data["proj_face_features"],
+            recon_data["proj_edge_features"],
+            recon_data["proj_vertex_features"],
+        ))
+        return recon_data
+
+    def loss(self, v_data, v_recon_data):
+        atten_edge_embeddings = v_data["atten_edge_embeddings"]
+        atten_vertex_embeddings = v_data["atten_vertex_embeddings"]
+        edge_mask = v_data["edge_mask"]
+        vertex_mask = v_data["vertex_mask"]
+        face_mask = v_data["face_mask"]
+
+        used_edge_indexes = v_data["edge_face_connectivity"][..., 0]
+        used_vertex_indexes = v_data["vertex_edge_connectivity"][..., 0]
+
+        # ================== Normal Decoding  ==================
+        vertex_data = self.decoder.decode_vertex(v_data["vertex_embeddings"])
+        edge_data = self.decoder.decode_edge(v_data["edge_embeddings"])
+        face_data = self.decoder.decode_face(v_data["face_embeddings"])
+
+        loss = {}
+        # Loss for predicting discrete points from the intersection features
+        loss.update(self.decoder.loss(
+            v_recon_data, v_data, face_mask,
+            edge_mask, used_edge_indexes,
+            vertex_mask, used_vertex_indexes
+        ))
+
+        # Loss for classifying the intersection features
+        loss_edge, loss_vertex = self.intersector.loss(
+            v_recon_data["inter_edge_features"], v_recon_data["inter_edge_null_features"],
+            v_recon_data["inter_vertex_features"], v_recon_data["inter_vertex_null_features"]
+        )
+        loss.update({"intersection_edge": loss_edge})
+        loss.update({"intersection_vertex": loss_vertex})
+
+        # Loss for normal decoding edges
+        loss_edge = self.decoder.loss_edge(
+            edge_data, v_data, edge_mask,
+            torch.arange(atten_edge_embeddings.shape[0]))
+        for key in loss_edge:
+            loss[key + "1"] = loss_edge[key]
+
+        # Loss for normal decoding vertices
+        loss_vertex = self.decoder.loss_vertex(
+            vertex_data, v_data, vertex_mask,
+            torch.arange(atten_vertex_embeddings.shape[0]))
+        for key in loss_vertex:
+            loss[key + "1"] = loss_vertex[key]
+
+        # Loss for normal decoding faces
+        loss_face = self.decoder.loss_face(
+            face_data, v_data, face_mask)
+        for key in loss_face:
+            loss[key + "1"] = loss_face[key]
+
+        loss["face_l2"] = nn.functional.mse_loss(
+            v_recon_data["proj_face_features"], v_data["face_embeddings"], reduction='mean')
+        loss["edge_l2"] = nn.functional.mse_loss(
+            v_recon_data["proj_edge_features"], v_data["edge_embeddings"][used_edge_indexes], reduction='mean')
+        loss["vertex_l2"] = nn.functional.mse_loss(
+            v_recon_data["proj_vertex_features"], v_data["vertex_embeddings"][used_vertex_indexes], reduction='mean')
+        # loss["inter_edge_l2"] = nn.functional.mse_loss(
+        #     v_recon_data["inter_edge_features"], v_data["atten_edge_embeddings"], reduction='mean')
+        loss["total_loss"] = sum(loss.values())
+        return loss
+
+    def forward(self, v_data,
+                return_recon=False,
+                return_loss=True,
+                return_face_features=False,
+                return_true_loss=False,
+                **kwargs):
+        face_mask = (v_data["discrete_face_bboxes"]!=-1).all(dim=-1)
+        face_bbox = self.face_bbox(v_data["discrete_face_bboxes"][face_mask])
+        face_coords = self.face_coords(v_data["discrete_face_points"][face_mask])
+        face_features = self.face_fuser(face_bbox[...,None] + face_coords)
+
+        edge_mask = (v_data["discrete_edge_bboxes"]!=-1).all(dim=-1)
+        edge_bbox = self.edge_bbox(v_data["discrete_edge_bboxes"][edge_mask])
+        edge_coords = self.edge_coords(v_data["discrete_edge_points"][edge_mask])
+        edge_features = self.edge_fuser(edge_bbox + edge_coords)
+
+        vertex_mask = (v_data["discrete_vertex_points"]!=-1).all(dim=-1)
+        vertex_features = self.vertices_encoder(v_data["discrete_vertex_points"][vertex_mask])
+
+        loss = {}
+        # ================== Bottleneck  ==================
+        if self.with_quantization:
+            proj_face_features = self.quantizer_in(face_features)
+            quan_face_features, indices = self.quantizer(proj_face_features)
+            face_features_plus = self.quantizer_out(quan_face_features)
+        elif self.with_vae:
+            mean, logvar = self.vae_proj(face_features).chunk(2, dim=1)
+            std = torch.exp(0.5 * logvar)
+            eps = torch.randn_like(std)
+            sampled_feature = eps.mul(std).add_(mean)
+            face_features_plus = self.vae_out(sampled_feature)
+            loss["kl"] = (-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())) * 1e-6
+        else:
+            face_features_plus = self.bottleneck(face_features)
+
+        pre_face_bbox = self.face_bbox_decoder(face_features_plus)
+        pre_face_coords = self.face_coords_decoder(face_features_plus)
+        pre_edge_bbox = self.edge_bbox_decoder(edge_features)
+        pre_edge_coords = self.edge_coords_decoder(edge_features)
+        pre_vertex_coords = self.vertex_coords_decoder(vertex_features)
+
+        loss["face_bbox1"] = nn.functional.cross_entropy(
+            pre_face_bbox.flatten(0, -2), v_data["discrete_face_bboxes"][face_mask].flatten())
+        loss["face_coords1"] = nn.functional.cross_entropy(
+            pre_face_coords.flatten(0, -2), v_data["discrete_face_points"][face_mask].flatten())
+        loss["edge_bbox1"] = nn.functional.cross_entropy(
+            pre_edge_bbox.flatten(0, -2), v_data["discrete_edge_bboxes"][edge_mask].flatten())
+        loss["edge_coords1"] = nn.functional.cross_entropy(
+            pre_edge_coords.flatten(0, -2), v_data["discrete_edge_points"][edge_mask].flatten())
+        loss["vertex_coords1"] = nn.functional.cross_entropy(
+            pre_vertex_coords.flatten(0, -2), v_data["discrete_vertex_points"][vertex_mask].flatten())
+
+        loss["total_loss"] = sum(loss.values())
+
+        # Compute model size and flops
+        # counter = FlopCounterMode(depth=999)
+        # with counter:
+        #     self.encoder(v_data)
+        # counter = FlopCounterMode(depth=999)
+        # with counter:
+        #     self.decoder(atten_face_edge_embeddings, intersected_edge_features)
+        data = {}
+        if return_recon:
+            bbox_shifts = (self.bd + 1) // 2 - 1
+            coord_shifts = (self.cd + 1) // 2 - 1
+
+            face_bbox = (pre_face_bbox.argmax(dim=-1) - bbox_shifts) / bbox_shifts
+            face_center = (face_bbox[:, 3:] + face_bbox[:, :3]) / 2
+            face_length = (face_bbox[:, 3:] - face_bbox[:, :3])
+            face_coords = (pre_face_coords.argmax(dim=-1) - coord_shifts) / coord_shifts / 2
+            face_coords = face_coords * face_length[:, None, None] + face_center[:, None, None]
+
+            edge_bbox = (pre_edge_bbox.argmax(dim=-1) - bbox_shifts) / bbox_shifts
+            edge_center = (edge_bbox[:, 3:] + edge_bbox[:, :3]) / 2
+            edge_length = (edge_bbox[:, 3:] - edge_bbox[:, :3])
+            edge_coords = (pre_edge_coords.argmax(dim=-1) - coord_shifts) / coord_shifts / 2
+            edge_coords = edge_coords * edge_length[:, None] + edge_center[:, None]
+
+            vertex_coords = (pre_vertex_coords.argmax(dim=-1) - coord_shifts) / coord_shifts
+
+            used_edge_indexes = torch.arange(edge_coords.shape[0], device=edge_coords.device)
+            used_vertex_indexes = torch.arange(vertex_coords.shape[0], device=vertex_coords.device)
+
+            recon_face_full = -torch.ones_like(v_data["face_points"])
+            recon_face_full = recon_face_full.masked_scatter(
+                rearrange(face_mask, '... -> ... 1 1 1'), face_coords)
+
+            recon_edge_full = -torch.ones_like(v_data["edge_points"])
+            bbb = recon_edge_full[edge_mask].clone()
+            bbb[used_edge_indexes] = edge_coords
+            recon_edge_full[edge_mask] = bbb
+
+            recon_vertex_full = -torch.ones_like(v_data["vertex_points"])
+            recon_vertex_full = recon_vertex_full.masked_scatter(
+                rearrange(vertex_mask, '... -> ... 1'), vertex_coords)
+
+            data["recon_faces"] = recon_face_full
+            data["recon_edges"] = recon_edge_full
+            data["recon_vertices"] = recon_vertex_full
+
+        if return_true_loss:
+            if not return_recon:
+                raise
+            # Compute the true loss with the continuous points
+            true_recon_face_loss = nn.functional.l1_loss(
+                face_coords, v_data["face_points"][face_mask], reduction='mean')
+            loss["true_recon_face"] = true_recon_face_loss
+            true_recon_edge_loss = nn.functional.l1_loss(
+                edge_coords, v_data["edge_points"][edge_mask][used_edge_indexes], reduction='mean')
+            loss["true_recon_edge"] = true_recon_edge_loss
+            true_recon_vertex_loss = nn.functional.l1_loss(
+                vertex_coords, v_data["vertex_points"][vertex_mask][used_vertex_indexes], reduction='mean')
+            loss["true_recon_vertex"] = true_recon_vertex_loss
+
+        return loss, data

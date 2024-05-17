@@ -147,8 +147,8 @@ class Continuous_encoder(nn.Module):
 
     def encode_vertex(self, v_data):
         vertex_coords = v_data["vertex_points"]
-        vertex_mask = (vertex_coords != -1).all(dim=-1).all(dim=-1)
-        return self.vertex_encoder(vertex_coords[vertex_mask].permute(0, 2, 1)), vertex_mask
+        vertex_mask = (vertex_coords != -1).all(dim=-1)
+        return self.vertex_encoder(vertex_coords[vertex_mask][:,:,None])[...,0], vertex_mask
 
     def forward(self, v_data):
         face_coords, face_mask = self.encode_face(v_data)

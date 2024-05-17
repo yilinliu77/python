@@ -2318,7 +2318,7 @@ class AutoEncoder5(nn.Module):
                 nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
             )
             self.vae_out = nn.Sequential(
-                nn.Conv2d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+                nn.Conv2d(3, hidden_dim, kernel_size=1, stride=1, padding=0),
             )
         else:
             self.bottleneck = nn.Sequential(

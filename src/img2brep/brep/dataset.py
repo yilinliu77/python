@@ -286,6 +286,156 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
             "face_idx_sequence": face_idx_sequence,
         }
 
+class AutoEncoder_direct_discrete_dataset(AutoEncoder_dataset):
+    def __init__(self, v_training_mode, v_conf):
+        super(AutoEncoder_direct_discrete_dataset, self).__init__(v_training_mode, v_conf)
+
+    def discrete_coordinates(self, face_points, line_points):
+        discrete_face_points = torch.round(
+            face_points * self.cd).long().clamp(-self.cd, self.cd)
+        discrete_face_points += self.cd
+
+        discrete_edge_points = torch.round(
+            line_points * self.cd).long().clamp(-self.cd, self.cd)
+        discrete_edge_points += self.cd
+        return discrete_face_points, discrete_edge_points
+
+    def __getitem__(self, idx):
+        # idx = 0
+        folder_path = self.data_folders[idx]
+
+        data_npz = np.load(os.path.join(folder_path, "data.npz"))
+
+        # Face sample points (num_faces*20*20*3)
+        face_points = torch.from_numpy(data_npz['sample_points_faces'])
+        line_points = torch.from_numpy(data_npz['sample_points_lines'])
+        vertex_points = torch.from_numpy(data_npz['sample_points_vertices'])
+
+        discrete_face_points, discrete_edge_points = (
+            self.discrete_coordinates(face_points, line_points))
+        # Vertex
+        discrete_vertex_points = torch.round(
+            vertex_points * self.cd).long().clamp(-self.cd, self.cd)
+        discrete_vertex_points += self.cd
+
+        # Loops along each face, -2 means start token and -1 means padding (num_faces, max_num_edges_this_face)
+        face_edge_loop = torch.from_numpy(data_npz['face_edge_loop'])
+
+        #  Which of two faces intersect and produce an edge (num_intersection, (id_edge, id_face1, id_face2))
+        edge_face_connectivity = torch.from_numpy(data_npz['edge_face_connectivity'])
+        #  Which of two edges intersect and produce a vertex (num_intersection, (id_vertex, id_edge1, id_edge2))
+        vertex_edge_connectivity = torch.from_numpy(data_npz['vertex_edge_connectivity'])
+
+        if True:
+            face_adj = torch.zeros(face_points.shape[0], face_points.shape[0], dtype=torch.bool)
+            face_adj[edge_face_connectivity[:, 1], edge_face_connectivity[:, 2]] = True
+            face_adj = torch.logical_or(face_adj, face_adj.T)
+            face_adj.diagonal().fill_(True)
+        else:
+            face_adj = torch.from_numpy(data_npz['face_adj'])
+
+        edge_adj = torch.zeros(line_points.shape[0], line_points.shape[0], dtype=torch.bool)
+        edge_adj[vertex_edge_connectivity[:, 1], vertex_edge_connectivity[:, 2]] = True
+        edge_adj = torch.logical_or(edge_adj, edge_adj.T)
+        edge_adj.diagonal().fill_(True)
+
+        face_idx_sequence_c = get_face_idx_sequence(edge_face_connectivity, face_points)
+
+        # Write gt data to file for testing
+        # indices = torch.arange(face_points.shape[0]).repeat_interleave(400)
+        # data = np.array(
+        #     [(face_points.reshape(-1,3)[i,0], face_points.reshape(-1,3)[i,1], face_points.reshape(-1,3)[i,2],indices[i]) for i in range(face_points.shape[0]*400)],
+        #     dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('primitive_index', 'i4')]
+        # )
+        # plyfile.PlyData([
+        #     plyfile.PlyElement.describe(data, 'vertex')
+        # ], text=True).write("face_points.ply")
+        #
+        # indices = torch.arange(line_points.shape[0]).repeat_interleave(20)
+        # data = np.array(
+        #     [(line_points.reshape(-1,3)[i,0], line_points.reshape(-1,3)[i,1], line_points.reshape(-1,3)[i,2],indices[i]) for i in range(line_points.shape[0]*20)],
+        #     dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('primitive_index', 'i4')]
+        # )
+        # plyfile.PlyData([
+        #     plyfile.PlyElement.describe(data, 'vertex')
+        # ], text=True).write("edge_points.ply")
+        return (
+            Path(folder_path).stem,
+            face_points, line_points, vertex_points,
+            discrete_face_points,
+            discrete_edge_points,
+            discrete_vertex_points,
+            face_edge_loop, face_adj, edge_adj,
+            edge_face_connectivity, vertex_edge_connectivity,
+            face_idx_sequence_c,
+        )
+
+    @staticmethod
+    def collate_fn(batch):
+        (v_prefix, face_points, edge_points, vertex_points,
+         discrete_face_points,
+         discrete_edge_points,
+         discrete_vertex_points,
+         face_edge_loop, face_adj, edge_adj,
+         edge_face_connectivity, vertex_edge_connectivity,
+         face_idx_sequence_c,
+         ) = zip(*batch)
+
+        face_points = pad_sequence(face_points, batch_first=True, padding_value=-1)
+        edge_points = pad_sequence(edge_points, batch_first=True, padding_value=-1)
+        vertex_points = pad_sequence(vertex_points, batch_first=True, padding_value=-1)
+        discrete_face_points = pad_sequence(discrete_face_points, batch_first=True, padding_value=-1)
+        discrete_edge_points = pad_sequence(discrete_edge_points, batch_first=True, padding_value=-1)
+        discrete_vertex_points = pad_sequence(discrete_vertex_points, batch_first=True, padding_value=-1)
+
+        edge_face_connectivity = pad_sequence(edge_face_connectivity, batch_first=True, padding_value=-1)
+        vertex_edge_connectivity = pad_sequence(vertex_edge_connectivity, batch_first=True, padding_value=-1)
+        face_idx_sequence = pad_sequence(face_idx_sequence_c, batch_first=True, padding_value=-1)
+
+        # 2D pad
+        max_shape0 = max([item.shape[0] for item in face_edge_loop])
+        max_shape1 = max([item.shape[1] for item in face_edge_loop])
+        face_edge_loop = list(face_edge_loop)
+        for idx in range(len(face_edge_loop)):
+            face_edge_loop[idx] = F.pad(face_edge_loop[idx],
+                                        (0, max_shape1 - face_edge_loop[idx].shape[1],
+                                         0, max_shape0 - face_edge_loop[idx].shape[0]),
+                                        'constant', -1)
+        face_edge_loop = torch.stack(face_edge_loop)
+
+        max_shape0 = max([item.shape[0] for item in face_adj])
+        max_shape1 = max([item.shape[1] for item in face_adj])
+        face_adj = list(face_adj)
+        for idx in range(len(face_adj)):
+            face_adj[idx] = F.pad(face_adj[idx], (0, max_shape1 - face_adj[idx].shape[1],
+                                                  0, max_shape0 - face_adj[idx].shape[0]), 'constant', -1)
+        face_adj = torch.stack(face_adj)
+
+        max_shape0 = max([item.shape[0] for item in edge_adj])
+        max_shape1 = max([item.shape[1] for item in edge_adj])
+        edge_adj = list(edge_adj)
+        for idx in range(len(edge_adj)):
+            edge_adj[idx] = F.pad(edge_adj[idx], (0, max_shape1 - edge_adj[idx].shape[1],
+                                                  0, max_shape0 - edge_adj[idx].shape[0]), 'constant', -1)
+        edge_adj = torch.stack(edge_adj)
+
+        return {
+            "v_prefix": v_prefix,
+            "vertex_points": vertex_points,
+            "edge_points": edge_points,
+            "face_points": face_points,
+            "discrete_face_points": discrete_face_points,
+            "discrete_edge_points": discrete_edge_points,
+            "discrete_vertex_points": discrete_vertex_points,
+
+            "face_edge_loop": face_edge_loop,
+            "face_adj": face_adj,
+            "edge_adj": edge_adj,
+            "edge_face_connectivity": edge_face_connectivity,
+            "vertex_edge_connectivity": vertex_edge_connectivity,
+
+            "face_idx_sequence": face_idx_sequence,
+        }
 
 class Face_dataset(AutoEncoder_dataset):
     def __init__(self, v_training_mode, v_conf):

@@ -2,7 +2,7 @@ dataset:
   dataset_name: Autoencoder_Dataset
 
   train_dataset: D:/img2brep/deepcad_whole_test_v3
-  val_dataset: D:/img2brep/deepcad_whole_train_v3
+  val_dataset: D:/img2brep/deepcad_whole_test_v3
   test_dataset: D:/img2brep/deepcad_whole_test_v3
   train_feature_dataset:
   val_feature_dataset:

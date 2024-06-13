@@ -106,7 +106,8 @@ class TrainAutoEncoder(pl.LightningModule):
         data = batch
 
         loss, recon_data = self.model(data, return_loss=True,
-                                      return_recon=True, return_face_features=False, return_true_loss=True)
+                                      return_recon=self.hydra_conf["trainer"]["output_validation_model"], 
+                                      return_face_features=False, return_true_loss=True)
         total_loss = loss["total_loss"]
         for key in loss:
             if key == "total_loss":

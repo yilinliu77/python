@@ -454,19 +454,30 @@ class Face_dataset(AutoEncoder_dataset):
         discrete_face_points, discrete_face_bboxes, discrete_edge_points, discrete_edge_bboxes = (
             self.discrete_coordinates(face_points, line_points))
 
+        min_face = face_points.min(dim=1).values.min(dim=1).values
+        max_face = face_points.max(dim=1).values.max(dim=1).values
+        discrete_face_points_unnormalized = (
+            face_points * self.cd).long().clamp(-self.cd, self.cd)
+        continuous_face_bboxes = torch.cat([min_face, max_face], dim=-1)
+        discrete_face_points_unnormalized += self.cd
+
         return (
             Path(folder_path).stem,
             face_points,
             discrete_face_points, discrete_face_bboxes,
+            continuous_face_bboxes, discrete_face_points_unnormalized
         )
 
     @staticmethod
     def collate_fn(batch):
         (v_prefix, face_points,
          discrete_face_points, discrete_face_bboxes,
+            continuous_face_bboxes, discrete_face_points_unnormalized
          ) = zip(*batch)
 
         face_points = pad_sequence(face_points, batch_first=True, padding_value=-1)
+        discrete_face_points_unnormalized = pad_sequence(discrete_face_points_unnormalized, batch_first=True, padding_value=-1)
+        continuous_face_bboxes = pad_sequence(continuous_face_bboxes, batch_first=True, padding_value=-1)
         discrete_face_points = pad_sequence(discrete_face_points, batch_first=True, padding_value=-1)
         discrete_face_bboxes = pad_sequence(discrete_face_bboxes, batch_first=True, padding_value=-1)
 
@@ -475,6 +486,8 @@ class Face_dataset(AutoEncoder_dataset):
             "face_points": face_points,
             "discrete_face_points": discrete_face_points,
             "discrete_face_bboxes": discrete_face_bboxes,
+            "continuous_face_bboxes": continuous_face_bboxes,
+            "discrete_face_points_unnormalized": discrete_face_points_unnormalized,
         }
 
 

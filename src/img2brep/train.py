@@ -38,7 +38,7 @@ def main(v_cfg: DictConfig):
     exp_name = v_cfg["trainer"]["exp_name"]
     logger = TensorBoardLogger(
         log_dir,
-        name="autoencoder" if exp_name is None else "autoencoder")
+        name="autoencoder" if exp_name is None else exp_name)
 
     trainer = Trainer(
         default_root_dir=log_dir,

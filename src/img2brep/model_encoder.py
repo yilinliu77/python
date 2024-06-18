@@ -163,6 +163,7 @@ class Separate_encoder(nn.Module):
 
         face_attn_mask = get_attn_mask(face_mask)
         face_features = self.face_fuser(face_features, face_attn_mask)
+        face_features = self.face_proj(face_features)
 
         # Edge
         edge_mask = (v_data["edge_points"] != -1).all(dim=-1).all(dim=-1)

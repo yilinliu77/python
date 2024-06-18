@@ -2,20 +2,13 @@ import importlib
 import os
 from pathlib import Path
 
-import numpy as np
-import torch
 from torch.optim import Adam, SGD
 from torch.utils.data import DataLoader
-# from torch.utils.flop_counter import FlopCounterMode
-from torch_geometric.nn import SAGEConv, GATv2Conv
-from vector_quantize_pytorch import ResidualLFQ, VectorQuantize, ResidualVQ
 
 import pytorch_lightning as pl
 
 from shared.common_utils import *
 from src.img2brep.brep.common import *
-from src.img2brep.brep.model_encoder import GAT_GraphConv, SAGE_GraphConv
-from src.img2brep.brep.model_fuser import Attn_fuser_cross, Attn_fuser_single
 
 import open3d as o3d
 
@@ -42,10 +35,10 @@ class TrainAutoEncoder(pl.LightningModule):
         if not os.path.exists(self.log_root):
             os.makedirs(self.log_root)
 
-        dataset_mod = importlib.import_module('src.img2brep.brep.dataset')
+        dataset_mod = importlib.import_module('src.img2brep.dataset')
         self.dataset_mod = getattr(dataset_mod, self.hydra_conf["dataset"]["dataset_name"])
 
-        model_mod = importlib.import_module('src.img2brep.brep.autoencoder_model')
+        model_mod = importlib.import_module('src.img2brep.autoencoder_model')
         self.model = getattr(model_mod, self.hydra_conf["model"]["model_name"])(self.hydra_conf["model"])
         self.viz = {}
 
@@ -72,17 +65,9 @@ class TrainAutoEncoder(pl.LightningModule):
                           )
 
     def configure_optimizers(self):
-        # optimizer = SGD(self.model.parameters(), lr=self.learning_rate, momentum=0.9, weight_decay=1e-4)
         optimizer = Adam(self.model.parameters(), lr=self.learning_rate)
-        # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=40, T_mult=1, eta_min=1e-8, last_epoch=-1)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.1)
-        # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=100, verbose=True)
         return {
             'optimizer': optimizer,
-            # 'lr_scheduler': {
-            #     'scheduler': scheduler,
-            #     'monitor'  : 'Validation_Loss',
-            #     }
         }
 
     def training_step(self, batch, batch_idx):
@@ -178,8 +163,8 @@ class TrainAutoEncoder(pl.LightningModule):
                     
                     edge_points = np.concatenate((gt_edges, recon_edges), axis=0).reshape(-1, 3)
                     edge_colors = np.concatenate(
-                        (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0] * 20, axis=0),
-                         np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0] * 20, axis=0)), axis=0)
+                        (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0] * 32, axis=0),
+                         np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0] * 32, axis=0)), axis=0)
                     
                     pc.points = o3d.utility.Vector3dVector(vertex_points)
                     pc.colors = o3d.utility.Vector3dVector(vertex_colors / 255.0)

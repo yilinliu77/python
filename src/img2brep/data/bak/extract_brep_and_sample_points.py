@@ -1,12 +1,7 @@
-import os
-import queue
 from pathlib import Path
 
 import ray, trimesh
-import open3d as o3d
-import numpy as np
 import yaml
-from tqdm import tqdm
 import networkx as nx
 from shared.common_utils import *
 
@@ -14,10 +9,8 @@ import igraph as ig
 
 import traceback, sys
 
-from src.img2brep.sample_points import sample_points_on_line, sample_points_on_plane, get_plane_points, \
+from src.img2brep.data.bak.sample_points import sample_points_on_line, sample_points_on_plane, get_plane_points, \
     sample_points_on_circle, sample_points_on_bspline
-
-from scipy.interpolate import BSpline
 
 data_root = Path(r"G:/Dataset/ABC/raw_data/abc_0000_obj_v00")
 # data_split = r"valid_planar_shapes_except_cube.txt"

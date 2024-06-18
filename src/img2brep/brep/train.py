@@ -1,8 +1,5 @@
 import sys
-from tqdm import tqdm
 
-from shared.common_utils import check_dir, safe_check_dir, export_point_cloud
-from src.img2brep.brep.autoregressive import AutoregressiveModel
 from src.img2brep.brep.diffusion import DiffusionModel, TrainDiffusionModel
 from src.img2brep.brep.vae import TrainVaeModel, FineTuningVaeModel
 
@@ -11,7 +8,6 @@ import os.path
 from pathlib import Path
 
 import hydra
-import numpy as np
 # import matplotlib
 # matplotlib.use('Agg')
 import open3d as o3d
@@ -26,11 +22,10 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import LearningRateMonitor
-from pytorch_lightning.profilers import AdvancedProfiler, SimpleProfiler
 from lightning_fabric import seed_everything
 
-from src.img2brep.brep.dataset import AutoEncoder_dataset, Face_feature_dataset
-from src.img2brep.brep.autoencoder import TrainAutoEncoder
+from src.img2brep.brep.dataset import Face_feature_dataset
+from src.img2brep.autoencoder import TrainAutoEncoder
 
 
 class TrainAutoregressiveModel(pl.LightningModule):

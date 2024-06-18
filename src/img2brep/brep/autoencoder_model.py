@@ -1,10 +1,7 @@
 import importlib
-import os
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Union
 
-import numpy as np
-from sympy import true
 import torch
 from diffusers import AutoencoderKL, ModelMixin, ConfigMixin
 from diffusers.configuration_utils import register_to_config
@@ -12,22 +9,16 @@ from diffusers.models.attention_processor import SpatialNorm, AttentionProcessor
 from diffusers.models.modeling_outputs import AutoencoderKLOutput
 from diffusers.utils import is_torch_version
 from diffusers.utils.accelerate_utils import apply_forward_hook
-from sklearn.cluster import KMeans, MiniBatchKMeans
-from torch.optim import Adam
+from sklearn.cluster import MiniBatchKMeans
 from torch.utils.data import DataLoader
 # from torch.utils.flop_counter import FlopCounterMode
-from torch_geometric.nn import SAGEConv, GATv2Conv
 from tqdm import tqdm
 from vector_quantize_pytorch import LFQ, ResidualLFQ, VectorQuantize, ResidualVQ, FSQ, ResidualFSQ
-
-import pytorch_lightning as pl
 
 from shared.common_utils import *
 from src.img2brep.brep.common import *
 from src.img2brep.brep.model_encoder import GAT_GraphConv, SAGE_GraphConv, res_block_1D, res_block_2D
-from src.img2brep.brep.model_fuser import Attn_fuser_cross, Attn_fuser_single
-
-import open3d as o3d
+from src.img2brep.model_fuser import Attn_fuser_cross, Attn_fuser_single
 
 
 def l1norm(t):
@@ -1009,8 +1000,7 @@ class AutoEncoder3(nn.Module):
         return loss, data
 
 
-from diffusers.models.unets.unet_1d_blocks import ResConvBlock, SelfAttention1d, get_down_block, get_up_block, \
-    Upsample1d
+from diffusers.models.unets.unet_1d_blocks import ResConvBlock, SelfAttention1d, get_down_block, Upsample1d
 from diffusers.models.autoencoders.vae import Decoder, DecoderOutput, DiagonalGaussianDistribution, Encoder
 
 

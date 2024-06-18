@@ -188,6 +188,3 @@ if __name__ == '__main__':
         cv2.imshow("img", img)
         cv2.waitKey()
 
-
-
-    points

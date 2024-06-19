@@ -1,10 +1,11 @@
 import torch
-from einops import rearrange
+from einops import rearrange, reduce
 from einops.layers.torch import Rearrange
 from torch import nn
 from torch_geometric.nn import SAGEConv, GATv2Conv
 
-from src.img2brep.model_fuser import Attn_fuser_single
+from src.img2brep.model_fuser import Attn_fuser_single, Attn_fuser_cross
+import torch.nn.functional as F
 
 
 def get_attn_mask(v_mask):
@@ -183,6 +184,87 @@ class Separate_encoder(nn.Module):
 
         return {
             "face_features": face_features,
+            "edge_features": edge_features,
+            "vertex_features": vertex_features,
+            "face_mask": face_mask,
+            "edge_mask": edge_mask,
+            "vertex_mask": vertex_mask,
+        }
+
+
+def prepare_connectivity(v_data, ):
+    face_mask = (v_data["face_points"] != -1).all(dim=-1).all(dim=-1).all(dim=-1)
+    edge_mask = (v_data["edge_points"] != -1).all(dim=-1).all(dim=-1)
+    vertex_mask = (v_data["vertex_points"] != -1).all(dim=-1)
+    # ================== Prepare data for flattened features ==================
+    edge_index_offsets = reduce(edge_mask.long(), 'b ne -> b', 'sum')
+    edge_index_offsets = F.pad(edge_index_offsets.cumsum(dim=0), (1, -1), value=0)
+    face_index_offsets = reduce(face_mask.long(), 'b ne -> b', 'sum')
+    face_index_offsets = F.pad(face_index_offsets.cumsum(dim=0), (1, -1), value=0)
+    vertex_index_offsets = reduce(vertex_mask.long(), 'b ne -> b', 'sum')
+    vertex_index_offsets = F.pad(vertex_index_offsets.cumsum(dim=0), (1, -1), value=0)
+
+    vertex_edge_connectivity = v_data["vertex_edge_connectivity"].clone()
+    vertex_edge_connectivity_valid = (vertex_edge_connectivity != -1).all(dim=-1)
+    # Solve the vertex_edge_connectivity: last two dimension (id_edge)
+    vertex_edge_connectivity[..., 1:] += edge_index_offsets[:, None, None]
+    # Solve the edge_face_connectivity: first (id_vertex)
+    vertex_edge_connectivity[..., 0:1] += vertex_index_offsets[:, None, None]
+    vertex_edge_connectivity = vertex_edge_connectivity[vertex_edge_connectivity_valid]
+    v_data["vertex_edge_connectivity"] = vertex_edge_connectivity
+
+    edge_face_connectivity = v_data["edge_face_connectivity"].clone()
+    edge_face_connectivity_valid = (edge_face_connectivity != -1).all(dim=-1)
+    # Solve the edge_face_connectivity: last two dimension (id_face)
+    edge_face_connectivity[..., 1:] += face_index_offsets[:, None, None]
+    # Solve the edge_face_connectivity: first dimension (id_edge)
+    edge_face_connectivity[..., 0] += edge_index_offsets[:, None]
+    edge_face_connectivity = edge_face_connectivity[edge_face_connectivity_valid]
+    v_data["edge_face_connectivity"] = edge_face_connectivity
+    return
+
+
+class Fused_encoder(Separate_encoder):
+    def __init__(self, dim_shape=256, dim_latent=8, **kwargs):
+        super().__init__(dim_shape, dim_latent)
+        self.fuser_edges_to_faces = Attn_fuser_cross(self.dim_latent)
+
+    def forward(self, v_data):
+        prepare_connectivity(v_data)
+        face_mask = (v_data["face_points"] != -1).all(dim=-1).all(dim=-1).all(dim=-1)
+        face_features = self.face_coords(v_data["face_points"][face_mask])
+
+        face_attn_mask = get_attn_mask(face_mask)
+        face_features = self.face_fuser(face_features, face_attn_mask)
+
+        # Edge
+        edge_mask = (v_data["edge_points"] != -1).all(dim=-1).all(dim=-1)
+        edge_features = self.edge_coords(v_data["edge_points"][edge_mask])
+
+        edge_attn_mask = get_attn_mask(edge_mask)
+        edge_features = self.edge_fuser(edge_features, edge_attn_mask)
+
+        # Vertex
+        vertex_mask = (v_data["vertex_points"] != -1).all(dim=-1)
+        vertex_features = self.vertex_coords(v_data["vertex_points"][vertex_mask])
+
+        vertex_attn_mask = get_attn_mask(vertex_mask)
+        vertex_features = self.vertex_fuser(vertex_features, vertex_attn_mask)
+
+        face_features = self.face_proj(face_features)
+        edge_features = self.edge_proj(edge_features)
+        vertex_features = self.vertex_proj(vertex_features)
+
+        # Fusing
+        face_edge_embeddings = self.fuser_edges_to_faces(
+            v_embeddings1=edge_features,
+            v_embeddings2=face_features,
+            v_connectivity1_to_2=v_data["edge_face_connectivity"],
+            v_attn_mask=face_attn_mask
+        )
+
+        return {
+            "face_features": face_edge_embeddings,
             "edge_features": edge_features,
             "vertex_features": vertex_features,
             "face_mask": face_mask,

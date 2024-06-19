@@ -54,8 +54,9 @@ model:
   with_vae: false
   vae_weight: 0.1
 
-  encoder: "Separate_encoder" # "Separate_encoder",
+  encoder: "Separate_encoder" # "Separate_encoder", "Separate_encoder_late_proj", "Fused_encoder"
   decoder: "Small_decoder" # "Small_decoder",
+  fuser: "Attn_fuser_cross" # "Attn_fuser_cross", "Attn_fuser_cross_big",
   intersector: "Attn_intersector_classifier"  # "Attn_intersector", "Proj_intersector"
   graphconv: "GAT" # "SAGE", "GAT"
 

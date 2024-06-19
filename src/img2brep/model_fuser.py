@@ -4,11 +4,11 @@ from torch import nn
 
 # Cross attention layer
 class Attn_fuser_cross(nn.Module):
-    def __init__(self, dim, dim_forward=256):
+    def __init__(self, dim):
         super().__init__()
         self.atten = nn.ModuleList([
-            nn.TransformerDecoderLayer(dim, 4, dim_feedforward=dim_forward, dropout=0.0, batch_first=True),
-            nn.TransformerDecoderLayer(dim, 4, dim_feedforward=dim_forward, dropout=0.0, batch_first=True),
+            nn.TransformerDecoderLayer(dim, 4, dim_feedforward=dim, dropout=0.0, batch_first=True),
+            nn.TransformerDecoderLayer(dim, 4, dim_feedforward=dim, dropout=0.0, batch_first=True),
         ])
         pass
 
@@ -30,6 +30,19 @@ class Attn_fuser_cross(nn.Module):
                 memory_mask=attn_mask,
             )
         return x
+
+
+# Cross attention layer
+class Attn_fuser_cross_big(Attn_fuser_cross):
+    def __init__(self, dim):
+        super().__init__(dim)
+        self.atten = nn.ModuleList([
+            nn.TransformerDecoderLayer(dim, 4, dim_feedforward=512, dropout=0.0, batch_first=True),
+            nn.TransformerDecoderLayer(dim, 4, dim_feedforward=512, dropout=0.0, batch_first=True),
+            nn.TransformerDecoderLayer(dim, 4, dim_feedforward=512, dropout=0.0, batch_first=True),
+            nn.TransformerDecoderLayer(dim, 4, dim_feedforward=512, dropout=0.0, batch_first=True),
+        ])
+        pass
 
 
 # Self attention layer

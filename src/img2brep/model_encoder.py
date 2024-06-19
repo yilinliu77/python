@@ -1,3 +1,4 @@
+import importlib
 import torch
 from einops import rearrange, reduce
 from einops.layers.torch import Rearrange
@@ -103,7 +104,7 @@ class GAT_GraphConv(nn.Module):
 
 
 class Separate_encoder(nn.Module):
-    def __init__(self, dim_shape=256, dim_latent=8, **kwargs):
+    def __init__(self, dim_shape=256, dim_latent=8, v_conf=None, **kwargs):
         super().__init__()
         self.face_coords = nn.Sequential(
             Rearrange('b h w n -> b n h w'),
@@ -225,9 +226,12 @@ def prepare_connectivity(v_data, ):
 
 
 class Fused_encoder(Separate_encoder):
-    def __init__(self, dim_shape=256, dim_latent=8, **kwargs):
+    def __init__(self, dim_shape=256, dim_latent=8, v_conf=None, **kwargs):
         super().__init__(dim_shape, dim_latent)
-        self.fuser_edges_to_faces = Attn_fuser_cross(self.dim_latent)
+        fuser = importlib.import_module('src.img2brep.model_fuser')
+        self.fuser_edges_to_faces = getattr(fuser, v_conf["fuser"])(
+            dim_shape
+        )
 
     def forward(self, v_data):
         prepare_connectivity(v_data)
@@ -251,10 +255,6 @@ class Fused_encoder(Separate_encoder):
         vertex_attn_mask = get_attn_mask(vertex_mask)
         vertex_features = self.vertex_fuser(vertex_features, vertex_attn_mask)
 
-        face_features = self.face_proj(face_features)
-        edge_features = self.edge_proj(edge_features)
-        vertex_features = self.vertex_proj(vertex_features)
-
         # Fusing
         face_edge_embeddings = self.fuser_edges_to_faces(
             v_embeddings1=edge_features,
@@ -263,11 +263,16 @@ class Fused_encoder(Separate_encoder):
             v_attn_mask=face_attn_mask
         )
 
+        vertex_features = self.vertex_proj(vertex_features)
+        edge_features = self.edge_proj(edge_features)
+        face_features = self.face_proj(face_edge_embeddings)
+
         return {
-            "face_features": face_edge_embeddings,
+            "face_features": face_features,
             "edge_features": edge_features,
             "vertex_features": vertex_features,
             "face_mask": face_mask,
             "edge_mask": edge_mask,
             "vertex_mask": vertex_mask,
         }
+

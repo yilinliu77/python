@@ -151,3 +151,77 @@ class Attn_intersector_classifier(Intersector):
 
     def inference_label(self, v_features):
         return torch.sigmoid(self.classifier(v_features))[:, 0] > 0.5
+
+
+class Attn_intersector_classifier_big(Intersector):
+    def __init__(self, num_max_items=None, dim=256):
+        super().__init__(num_max_items)
+        self.edge_layers = nn.ModuleList([
+            nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
+            nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        ])
+        self.vertex_layers = nn.ModuleList([
+            nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
+            nn.TransformerDecoderLayer(d_model=dim, nhead=4, dim_feedforward=dim, dropout=0.1, batch_first=True),
+        ])
+
+        self.vertex_token = nn.Parameter(torch.rand(dim))
+        self.edge_token = nn.Parameter(torch.rand(dim))
+
+        self.classifier = nn.Linear(dim, 1)
+        self.position_embedding = nn.Embedding(2, dim)
+
+    def inference(self, v_features, v_type):
+        pos_encoding = self.position_embedding(torch.arange(
+            v_features.shape[1],
+            device=v_features.device
+        )[None, :].repeat(v_features.shape[0], 1))
+        v_features = v_features + pos_encoding
+        if v_type == "edge":
+            x = self.edge_token[None, None].repeat(v_features.shape[0], 1, 1)
+        else:
+            x = self.vertex_token[None, None].repeat(v_features.shape[0], 1, 1)
+        for layer in self.edge_layers if v_type == "edge" else self.vertex_layers:
+            x = layer(x, v_features)
+        features = x[:, 0]
+        return features
+
+    def forward(self,
+                sampled_face_feature, v_data,v_encoder_result
+                ):
+        gathered_edges, null_gathered_edges = self.prepare_edge_data(
+            sampled_face_feature,
+            v_data["edge_face_connectivity"],
+            v_data["face_adj"],
+            v_encoder_result["face_mask"])
+        edge_features = self.inference(gathered_edges, "edge")
+        edge_null_features = self.inference(null_gathered_edges, "edge")
+
+        gathered_vertices, null_gathered_vertices = self.prepare_vertex_data(
+            edge_features,
+            v_data["vertex_edge_connectivity"],
+            v_data["edge_adj"],
+            v_encoder_result["edge_mask"]
+        )
+        vertex_features = self.inference(gathered_vertices, "vertex")
+        vertex_null_features = self.inference(null_gathered_vertices, "vertex")
+
+        return edge_features, edge_null_features, vertex_features, vertex_null_features
+
+    def loss(self, edge_features, edge_null_features, vertex_features, vertex_null_features):
+        intersection_feature = torch.cat([edge_features, edge_null_features])
+        gt_label = torch.cat([torch.ones_like(edge_features[:, 0]),
+                              torch.zeros_like(edge_null_features[:, 0])])
+        loss_edge = F.binary_cross_entropy_with_logits(
+            self.classifier(intersection_feature), gt_label[:, None])
+
+        intersection_feature = torch.cat([vertex_features, vertex_null_features])
+        gt_label = torch.cat([torch.ones_like(vertex_features[:, 0]),
+                              torch.zeros_like(vertex_null_features[:, 0])])
+        loss_vertex = F.binary_cross_entropy_with_logits(
+            self.classifier(intersection_feature), gt_label[:, None])
+
+        return loss_edge, loss_vertex
+
+    def inference_label(self, v_features):
+        return torch.sigmoid(self.classifier(v_features))[:, 0] > 0.5

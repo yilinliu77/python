@@ -14,7 +14,7 @@ class Small_decoder(nn.Module):
         super(Small_decoder, self).__init__()
         self.vertex_coords_decoder = nn.Sequential(
             Rearrange('b c -> b c 1'),
-            nn.Conv1d(dim_latent, dim_shape, kernel_size=1, stride=1, padding=0),
+            nn.Conv1d(dim_shape, dim_shape, kernel_size=1, stride=1, padding=0),
             res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
             res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
             res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
@@ -25,7 +25,7 @@ class Small_decoder(nn.Module):
 
         self.edge_coords_decoder = nn.Sequential(
             Rearrange('b c -> b c 1'),
-            nn.Conv1d(dim_latent, dim_shape, kernel_size=1, stride=1, padding=0),
+            nn.Conv1d(dim_shape, dim_shape, kernel_size=1, stride=1, padding=0),
             res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
             nn.Upsample(scale_factor=2, mode="linear"),
             res_block_1D(dim_shape, dim_shape, ks=3, st=1, pa=1),
@@ -45,7 +45,7 @@ class Small_decoder(nn.Module):
         # ================== Decoder ==================
         self.face_coords_decoder = nn.Sequential(
             Rearrange('b c -> b c 1 1'),
-            nn.Conv2d(dim_latent, dim_shape, kernel_size=1, stride=1, padding=0),
+            nn.Conv2d(dim_shape, dim_shape, kernel_size=1, stride=1, padding=0),
             res_block_2D(dim_shape, dim_shape, ks=1, st=1, pa=0),
             nn.Upsample(scale_factor=2, mode="bilinear"),
             res_block_2D(dim_shape, dim_shape, ks=3, st=1, pa=1),

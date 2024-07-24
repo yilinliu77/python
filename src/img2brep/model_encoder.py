@@ -144,7 +144,6 @@ class Separate_encoder(nn.Module):
         )
 
         self.edge_fuser = Attn_fuser_single(dim_shape)
-        self.edge_proj = nn.Linear(dim_shape, dim_latent)
 
         self.vertex_coords = nn.Sequential(
             Rearrange('b c-> b c 1'),
@@ -157,7 +156,6 @@ class Separate_encoder(nn.Module):
         )
 
         self.vertex_fuser = Attn_fuser_single(dim_shape)
-        self.vertex_proj = nn.Linear(dim_shape, dim_latent)
 
     def forward(self, v_data):
         face_mask = (v_data["face_points"] != -1).all(dim=-1).all(dim=-1).all(dim=-1)
@@ -173,7 +171,6 @@ class Separate_encoder(nn.Module):
 
         edge_attn_mask = get_attn_mask(edge_mask)
         edge_features = self.edge_fuser(edge_features, edge_attn_mask)
-        edge_features = self.edge_proj(edge_features)
 
         # Vertex
         vertex_mask = (v_data["vertex_points"] != -1).all(dim=-1)
@@ -181,7 +178,6 @@ class Separate_encoder(nn.Module):
 
         vertex_attn_mask = get_attn_mask(vertex_mask)
         vertex_features = self.vertex_fuser(vertex_features, vertex_attn_mask)
-        vertex_features = self.vertex_proj(vertex_features)
 
         return {
             "face_features": face_features,
@@ -263,8 +259,109 @@ class Fused_encoder(Separate_encoder):
             v_attn_mask=face_attn_mask
         )
 
-        vertex_features = self.vertex_proj(vertex_features)
-        edge_features = self.edge_proj(edge_features)
+        face_features = self.face_proj(face_edge_embeddings)
+
+        return {
+            "face_features": face_features,
+            "edge_features": edge_features,
+            "vertex_features": vertex_features,
+            "face_mask": face_mask,
+            "edge_mask": edge_mask,
+            "vertex_mask": vertex_mask,
+        }
+
+
+class Spatial_encoder(nn.Module):
+    def __init__(self, dim_shape=256, dim_latent=8, v_conf=None, **kwargs):
+        super().__init__()
+        self.face_coords = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, dim_shape, kernel_size=5, stride=1, padding=2),
+            res_block_2D(dim_shape, dim_shape, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 16
+            res_block_2D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 8
+            res_block_2D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 4
+            res_block_2D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+            res_block_2D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+            res_block_2D(dim_shape, dim_shape, ks=1, st=1, pa=0),
+        ) # b c 4 4
+
+        self.face_fuser = Attn_fuser_single(dim_shape * 4 * 4)
+        self.face_fuser_proj = nn.Linear(dim_shape * 4 * 4, dim_shape * 4)
+        self.face_proj = nn.Linear(dim_shape, dim_latent * 2)
+
+        self.edge_coords = nn.Sequential(
+            Rearrange('b h n -> b n h'),
+            nn.Conv1d(3, dim_shape, kernel_size=5, stride=1, padding=2),
+            res_block_1D(dim_shape, dim_shape, ks=5, st=1, pa=2),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 16
+            res_block_1D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 8
+            res_block_1D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 4
+            res_block_1D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+            res_block_1D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+            res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
+        ) # b c 4
+
+        self.edge_fuser = Attn_fuser_single(dim_shape * 4)
+
+        self.vertex_coords = nn.Sequential(
+            Rearrange('b c-> b c 1'),
+            nn.Conv1d(3, dim_shape, kernel_size=1, stride=1, padding=0),
+            res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
+            res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
+            res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
+            res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
+            Rearrange('b c 1 -> b c'),
+        )
+
+        self.vertex_fuser = Attn_fuser_single(dim_shape)
+
+        fuser = importlib.import_module('src.img2brep.model_fuser')
+        self.fuser_edges_to_faces = getattr(fuser, v_conf["fuser"])(
+            dim_shape
+        )
+
+    def forward(self, v_data):
+        prepare_connectivity(v_data)
+        face_mask = (v_data["face_points"] != -1).all(dim=-1).all(dim=-1).all(dim=-1)
+        face_features = self.face_coords(v_data["face_points"][face_mask])
+
+        face_attn_mask = get_attn_mask(face_mask)
+        face_features = self.face_fuser(
+            rearrange(face_features, "b c w h -> b (c w h)"), 
+            face_attn_mask
+        )
+
+        # Edge
+        edge_mask = (v_data["edge_points"] != -1).all(dim=-1).all(dim=-1)
+        edge_features = self.edge_coords(v_data["edge_points"][edge_mask])
+
+        edge_attn_mask = get_attn_mask(edge_mask)
+        edge_features = self.edge_fuser(
+            rearrange(edge_features, "b c w -> b (c w)"), 
+            edge_attn_mask
+        )
+
+        # Vertex
+        vertex_mask = (v_data["vertex_points"] != -1).all(dim=-1)
+        vertex_features = self.vertex_coords(v_data["vertex_points"][vertex_mask])
+
+        vertex_attn_mask = get_attn_mask(vertex_mask)
+        vertex_features = self.vertex_fuser(vertex_features, vertex_attn_mask)
+
+        # Fusing
+        face_edge_embeddings = self.fuser_edges_to_faces(
+            v_embeddings1=edge_features,
+            v_embeddings2=self.face_fuser_proj(face_features),
+            v_connectivity1_to_2=v_data["edge_face_connectivity"],
+            v_attn_mask=face_attn_mask
+        )
+        face_edge_embeddings
+
         face_features = self.face_proj(face_edge_embeddings)
 
         return {

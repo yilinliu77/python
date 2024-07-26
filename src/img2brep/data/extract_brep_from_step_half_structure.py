@@ -4,9 +4,13 @@ from pathlib import Path
 
 import ray, trimesh
 import numpy as np
-from OCC.Core import TopoDS, TopExp
+from OCC.Core import TopoDS, TopExp, BRepBndLib
+from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
+from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 from OCC.Core.BRepTools import BRepTools_WireExplorer
-from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Face, TopoDS_Edge, TopoDS_Vertex, TopoDS_Wire, topods_Edge
+from OCC.Core.Bnd import Bnd_Box
+from OCC.Core.TopLoc import TopLoc_Location
+from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Face, TopoDS_Edge, TopoDS_Vertex, TopoDS_Wire
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX, TopAbs_WIRE
@@ -14,12 +18,14 @@ from OCC.Core.GeomAbs import (GeomAbs_Circle, GeomAbs_Line, GeomAbs_BSplineCurve
                               GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone,
                               GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BSplineSurface)
 from OCC.Core.TopExp import TopExp_Explorer
+from OCC.Core._TopAbs import TopAbs_REVERSED
+from OCC.Core.gp import gp_Trsf, gp_Vec
 from OCC.Extend.DataExchange import read_step_file
 import traceback, sys
 
 write_debug_data = False
-data_root = Path(r"G:/Dataset/ABC/raw_data/abc_0000_obj_v00")
-output_root = Path(r"G:/Dataset/img2brep/deepcad_test")
+data_root = Path(r"C:/DATASET/ABC/raw_data_100/")
+output_root = Path(r"C:/DATASET/ABC/0725_test")
 data_split = r"src/img2brep/data/deepcad_test_whole.txt"
 
 exception_files = [
@@ -54,27 +60,53 @@ def get_brep(v_root, output_root, v_folders):
         try:
             # Load mesh and yml files
             all_files = os.listdir(v_root / v_folder)
-            obj_file = [ff for ff in all_files if ff.endswith(".obj")][0]
             step_file = [ff for ff in all_files if ff.endswith(".step") and "step" in ff][0]
-
-            mesh = trimesh.load_mesh(v_root / v_folder / obj_file, process=False, maintain_order=True)
-
-            # Normalize with bounding box
-            extent = mesh.bounding_box.extents
-            diag = np.linalg.norm(extent)
-            centroid = mesh.bounding_box.centroid
-
-            mesh.vertices -= centroid
-            mesh.vertices /= diag
-
-            transform = lambda x: (x - centroid) / diag
-
-            mesh.export(output_root / v_folder / "mesh.ply")
 
             # Start to extract BREP
             shape = read_step_file(str(v_root / v_folder / step_file), verbosity=False)
             if shape.NbChildren() != 1:
                 raise ValueError("Multiple components: {}; Jump over".format(v_folder))
+
+            # Compute bounding box
+            boundings = 0.9
+            boundingBox = Bnd_Box()
+            BRepBndLib.brepbndlib.Add(shape, boundingBox)
+            xmin, ymin, zmin, xmax, ymax, zmax = boundingBox.Get()
+            scale_x = boundings * 2 / (xmax - xmin)
+            scale_y = boundings * 2 / (ymax - ymin)
+            scale_z = boundings * 2 / (zmax - zmin)
+            scaleFactor = min(scale_x, scale_y, scale_z)
+            translation1 = gp_Vec(-(xmax + xmin) / 2, -(ymax + ymin) / 2, -(zmax + zmin) / 2)
+            trsf1 = gp_Trsf()
+            trsf1.SetTranslationPart(translation1)
+            trsf2 = gp_Trsf()
+            trsf2.SetScaleFactor(scaleFactor)
+            trsf2.Multiply(trsf1)
+
+            transformer = BRepBuilderAPI_Transform(trsf2)
+            transformer.Perform(shape)
+            shape = transformer.Shape()
+            mesh = BRepMesh_IncrementalMesh(shape, 0.001)
+            # Get vertices and faces
+            v = []
+            f = []
+            face_explorer = TopExp_Explorer(shape, TopAbs_FACE)
+            while face_explorer.More():
+                face = face_explorer.Current()
+                loc = TopLoc_Location()
+                triangulation = BRep_Tool.Triangulation(face, loc)
+                cur_vertex_size = len(v)
+                for i in range(1, triangulation.NbNodes() + 1):
+                    pnt = triangulation.Node(i)
+                    v.append([pnt.X(), pnt.Y(), pnt.Z()])
+                for i in range(1, triangulation.NbTriangles() + 1):
+                    t = triangulation.Triangle(i)
+                    if face.Orientation() == TopAbs_REVERSED:
+                        f.append([t.Value(3) + cur_vertex_size - 1, t.Value(2) + cur_vertex_size - 1, t.Value(1) + cur_vertex_size - 1])
+                    else:
+                        f.append([t.Value(1) + cur_vertex_size - 1, t.Value(2) + cur_vertex_size - 1, t.Value(3) + cur_vertex_size - 1])
+                face_explorer.Next()
+            trimesh.Trimesh(vertices=np.array(v), faces=np.array(f)).export(output_root / v_folder / "mesh.ply")
 
             # Function to explore and print the elements of a shape
             def explore_shape(shape, shape_type):
@@ -122,7 +154,6 @@ def get_brep(v_root, output_root, v_folders):
                         points.append(np.array([pnt.X(), pnt.Y(), pnt.Z()], dtype=np.float32))
                 face_sample_points.append(np.stack(points, axis=0).reshape(32, 32, 3))
             face_sample_points = np.stack(face_sample_points, axis=0)
-            face_sample_points = transform(face_sample_points)
             assert len(face_dict) == num_faces == face_sample_points.shape[0]
 
             # Sample points in edges
@@ -142,7 +173,6 @@ def get_brep(v_root, output_root, v_folders):
                     sample_points.append(np.array([pnt.X(), pnt.Y(), pnt.Z()], dtype=np.float32))
                 edge_sample_points.append(np.stack(sample_points, axis=0))
             edge_sample_points = np.stack(edge_sample_points, axis=0)
-            edge_sample_points = transform(edge_sample_points)
             assert len(edge_dict) == num_edges == edge_sample_points.shape[0]
 
             # Sample points in vertices
@@ -151,7 +181,6 @@ def get_brep(v_root, output_root, v_folders):
                 pnt = BRep_Tool.Pnt(vertex)
                 vertex_sample_points.append(np.array([pnt.X(), pnt.Y(), pnt.Z()], dtype=np.float32))
             vertex_sample_points = np.stack(vertex_sample_points, axis=0)
-            vertex_sample_points = transform(vertex_sample_points)
 
             # (N, X) shows every loop with each face, -2 denotes a start token and pad with -1
             face_edge_loop = []
@@ -218,6 +247,13 @@ def get_brep(v_root, output_root, v_folders):
             face_edge_loop = np.array(
                 [i + [-1] * (max_length - len(i)) for i in face_edge_loop], dtype=np.int32)
 
+            # Accelerate the training
+            # Prepare edge face intersection data
+            face_adj = np.zeros((num_faces, num_faces), dtype=bool)
+            face_adj[edge_face_connectivity[:, 1], edge_face_connectivity[:, 2]] = True
+
+            zero_positions = np.stack(np.where(face_adj == 0), axis=1)
+
             data_dict = {
                 'sample_points_vertices': vertex_sample_points.astype(np.float32),
                 'sample_points_lines': edge_sample_points.astype(np.float32),
@@ -226,6 +262,9 @@ def get_brep(v_root, output_root, v_folders):
                 'face_edge_loop': face_edge_loop.astype(np.int64),
                 'edge_face_connectivity': edge_face_connectivity.astype(np.int64),
                 'vertex_edge_connectivity': vertex_edge_connectivity.astype(np.int64),
+
+                "face_adj": face_adj,
+                "zero_positions": zero_positions,
             }
 
             np.savez_compressed(output_root / v_folder / "data.npz", **data_dict)
@@ -283,7 +322,7 @@ if __name__ == '__main__':
     num_original = len(total_ids)
     total_ids = list(set(total_ids) - set(exception_ids))
     total_ids.sort()
-    total_ids=["00005083"]
+    # total_ids=["00000003"]
     print("Total ids: {} -> {}".format(num_original, len(total_ids)))
     check_dir(output_root)
 

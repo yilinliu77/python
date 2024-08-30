@@ -1,11 +1,11 @@
 import importlib
 from pathlib import Path
 import sys
+from einops import rearrange
 import numpy as np
 import open3d as o3d
 
-from src.brepnet.dataset import AutoEncoder_dataset
-from src.brepnet.model import AutoEncoder_base, AutoEncoder_graph
+from src.brepnet.dataset import Diffusion_dataset
 
 sys.path.append('../../../')
 import os.path
@@ -27,10 +27,11 @@ from torch.optim import Adam
 from torchmetrics.classification import BinaryPrecision, BinaryRecall, BinaryAveragePrecision, BinaryF1Score
 from torchmetrics import MetricCollection
 
+import trimesh
 
-class TrainAutoEncoder(pl.LightningModule):
+class TrainDiffusion(pl.LightningModule):
     def __init__(self, hparams):
-        super(TrainAutoEncoder, self).__init__()
+        super(TrainDiffusion, self).__init__()
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
@@ -42,22 +43,23 @@ class TrainAutoEncoder(pl.LightningModule):
         if not os.path.exists(self.log_root):
             os.makedirs(self.log_root)
 
-        self.dataset_mod = AutoEncoder_dataset
+        self.dataset_mod = Diffusion_dataset
 
-        model_mod = importlib.import_module("src.brepnet.model")
+        model_mod = importlib.import_module("src.brepnet.diffusion_model")
         model_mod = getattr(model_mod, self.hydra_conf["model"]["name"])
         # self.model = AutoEncoder_base(self.hydra_conf["model"])
         self.model = model_mod(self.hydra_conf["model"])
         # self.model = torch.compile(self.model)
+
+        model_mod = importlib.import_module("src.brepnet.model")
+        model_mod = getattr(model_mod, self.hydra_conf["model"]["autoencoder"])
+        self.autoencoder = model_mod(hparams["model"])
+        weights = torch.load(self.hydra_conf["model"]["autoencoder_weights"])["state_dict"]
+        weights = {k.replace("model.", ""): v for k, v in weights.items()}
+        self.autoencoder.load_state_dict(weights)
+        for param in self.autoencoder.parameters():
+            param.requires_grad = False
         self.viz = {}
-        pr_computer = {
-            "P_5": BinaryPrecision(threshold=0.5),
-            "P_7": BinaryPrecision(threshold=0.7),
-            "R_5": BinaryRecall(threshold=0.5),
-            "R_7": BinaryRecall(threshold=0.7),
-            "F1": BinaryF1Score(threshold=0.5),
-        }
-        self.pr_computer = MetricCollection(pr_computer)
 
     def train_dataloader(self):
         self.train_dataset = self.dataset_mod("training", self.hydra_conf["dataset"], )
@@ -74,7 +76,7 @@ class TrainAutoEncoder(pl.LightningModule):
     def val_dataloader(self):
         self.valid_dataset = self.dataset_mod("validation", self.hydra_conf["dataset"], )
 
-        return DataLoader(self.valid_dataset, batch_size=1,
+        return DataLoader(self.valid_dataset, batch_size=self.batch_size,
                           collate_fn=self.dataset_mod.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
@@ -91,8 +93,7 @@ class TrainAutoEncoder(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         data = batch
 
-        loss, data = self.model(data, return_loss=True,
-                                return_recon=False, return_face_features=False, return_true_loss=False)
+        loss = self.model(data)
         total_loss = loss["total_loss"]
         for key in loss:
             if key == "total_loss":
@@ -107,8 +108,8 @@ class TrainAutoEncoder(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         data = batch
-
-        loss, recon_data = self.model(data, v_test=True)
+        bs = data["face_features"].shape[0]
+        loss = self.model(data, v_test=True)
         total_loss = loss["total_loss"]
         for key in loss:
             if key == "total_loss":
@@ -119,15 +120,15 @@ class TrainAutoEncoder(pl.LightningModule):
                  sync_dist=True, batch_size=self.batch_size)
 
         if batch_idx == 0:
-            # recon_edges, recon_faces = self.model.inference(recon_data["face_embeddings"])
-            if "recon_faces" in recon_data:
-                self.viz["face_points"] = data["face_points"].cpu().numpy()
-                self.viz["recon_faces"] = recon_data["recon_faces"].cpu().numpy()
-            if "recon_edges" in recon_data:
-                self.viz["edge_points"] = data["edge_points"].cpu().numpy()
-                self.viz["recon_edges"] = recon_data["recon_edges"].cpu().numpy()
-        if "pred" in recon_data:
-            self.pr_computer.update(recon_data["pred"], recon_data["gt"])
+            result = self.inference()
+            self.viz = {}
+            self.viz["recon_faces"] = result["recon_faces"]
+            self.viz["recon_mask"] = result["recon_mask"]
+            self.viz["gt_mask"] = torch.logical_not((data["face_features"]==0).all(dim=-1).all(dim=-1).all(dim=-1))
+            gt_feature = rearrange(data["face_features"], "b n c h w -> (b n) c h w")
+            result = rearrange(self.autoencoder.decode(gt_feature), "(b n) h w c-> b n h w c", b=bs)
+            self.viz["gt_faces"] = result
+
         return total_loss
 
     def on_validation_epoch_end(self):
@@ -135,52 +136,16 @@ class TrainAutoEncoder(pl.LightningModule):
         #     return
 
         if "recon_faces" in self.viz:
-            self.log_dict(self.pr_computer.compute(), prog_bar=False, logger=True, on_step=False, on_epoch=True,
-                        sync_dist=True)
-            self.pr_computer.reset()
-
-        if "recon_faces" in self.viz:
-            v_recon_faces = self.viz["recon_faces"]
-            v_gt_faces = self.viz["face_points"]
-            for idx in range(min(v_gt_faces.shape[0], 4)):
-                if "recon_faces" in self.viz:
-                    gt_faces = v_gt_faces[idx]
-                    recon_faces = v_recon_faces[idx]
-                    gt_faces = gt_faces[(gt_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)]
-                    recon_faces = recon_faces[(recon_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)]
-
-                    num_face_points = gt_faces.shape[1] ** 2
-                    face_points = np.concatenate((gt_faces, recon_faces), axis=0).reshape(-1, 3)
-                    face_colors = np.concatenate(
-                        (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_faces.shape[0] * num_face_points, axis=0),
-                            np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_faces.shape[0] * num_face_points, axis=0)), axis=0)
-
-                    pc = o3d.geometry.PointCloud()
-                    
-                    pc.points = o3d.utility.Vector3dVector(face_points)
-                    pc.colors = o3d.utility.Vector3dVector(face_colors / 255.0)
-                    o3d.io.write_point_cloud(
-                        str(self.log_root / f"{self.trainer.current_epoch:05}_idx_{idx:02}_viz_faces.ply"), pc)
-
-                if "recon_edges" in self.viz:
-                    v_gt_edges = self.viz["edge_points"]
-                    v_recon_edges = self.viz["recon_edges"]
-
-                    recon_edges = v_recon_edges[idx]
-                    gt_edges = v_gt_edges[idx]
-
-                    gt_edges = gt_edges[(gt_edges != -1).all(axis=-1).all(axis=-1)]
-                    recon_edges = recon_edges[(recon_edges != -1).all(axis=-1).all(axis=-1)]
-
-                    edge_points = np.concatenate((gt_edges, recon_edges), axis=0).reshape(-1, 3)
-                    edge_colors = np.concatenate(
-                        (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0] * 32, axis=0),
-                            np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0] * 32, axis=0)), axis=0)
-                    
-                    pc.points = o3d.utility.Vector3dVector(edge_points)
-                    pc.colors = o3d.utility.Vector3dVector(edge_colors / 255.0)
-                    o3d.io.write_point_cloud(
-                        str(self.log_root / f"{self.trainer.current_epoch:05}_idx_{idx:02}_viz_edges.ply"), pc)
+            recon_faces = self.viz["recon_faces"].cpu().numpy()
+            recon_masks = self.viz["recon_mask"].cpu().numpy()
+            gt_faces = self.viz["gt_faces"].cpu().numpy()
+            gt_mask = self.viz["gt_mask"].cpu().numpy()
+            for i in range(self.batch_size):
+                local_face = recon_faces[i][recon_masks[i]]
+                trimesh.PointCloud(local_face.reshape(-1,3)).export(str(self.log_root / "{}_{}_recon_faces.ply".format(self.current_epoch,i)))
+                local_face = gt_faces[i][gt_mask[i]]
+                trimesh.PointCloud(local_face.reshape(-1,3)).export(str(self.log_root / "{}_{}_gt_faces.ply".format(self.current_epoch,i)))
+        self.viz={}
         return
 
     def test_dataloader(self):
@@ -192,7 +157,21 @@ class TrainAutoEncoder(pl.LightningModule):
                           pin_memory=True,
                           )
 
+    def inference(self):
+        bs = self.batch_size
+        face_feature = self.model.inference(bs, self.device)
+        result = rearrange(face_feature, "b n (c h w) -> (b n) c h w", c=8, h=4, w=4)
+        decoded_faces = self.autoencoder.decode(result)
+        result = rearrange(decoded_faces, "(b n) h w c-> b n h w c", b=bs)
+        data = {
+            "recon_faces": result,
+            "recon_mask": (face_feature.abs()>1e-4).all(dim=-1)
+        }
+        return data
+
     def test_step(self, batch, batch_idx):
+        inference_result = self.inference()
+
         data = batch
         loss, recon_data = self.model(data, v_test=True)
         total_loss = loss["total_loss"]
@@ -234,7 +213,7 @@ class TrainAutoEncoder(pl.LightningModule):
         self.pr_computer.reset()
         return
 
-@hydra.main(config_name="train_brepnet.yaml", config_path="../../configs/brepnet/", version_base="1.1")
+@hydra.main(config_name="train_diffusion.yaml", config_path="../../configs/brepnet/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
     torch.set_float32_matmul_precision("medium")
@@ -249,11 +228,11 @@ def main(v_cfg: DictConfig):
     mc = ModelCheckpoint(monitor="Validation_Loss", save_top_k=3, save_last=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
-    model = TrainAutoEncoder(v_cfg)
+    model = TrainDiffusion(v_cfg)
     exp_name = v_cfg["trainer"]["exp_name"]
     logger = TensorBoardLogger(
         log_dir,
-        name="autoencoder" if exp_name is None else exp_name)
+        name="diffusion" if exp_name is None else exp_name)
 
     trainer = Trainer(
         default_root_dir=log_dir,
@@ -272,8 +251,12 @@ def main(v_cfg: DictConfig):
 
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
-        model = TrainAutoEncoder.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint)
+        model = TrainDiffusion.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint)
         model.hydra_conf = v_cfg
+
+        # weights = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
+        # weights = {k.replace("model.", ""): v for k, v in weights.items()}
+        # model.model.load_state_dict(weights)
     # model = torch.compile(model)
     if v_cfg["trainer"].evaluate:
         trainer.test(model)

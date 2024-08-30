@@ -7,7 +7,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 import math
 import torch.utils.model_zoo as model_zoo
-from visualDet3D.networks.utils.registry import BACKBONE_DICT
 
 
 def conv3x3(in_planes, out_planes, stride=1, dilation=1):

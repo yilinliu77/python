@@ -3,7 +3,7 @@ dataset:
 
   train_dataset: D:/img2brep/deepcad_whole_test_v3
   val_dataset: D:/img2brep/deepcad_whole_test_v3
-  test_dataset: D:/img2brep/deepcad_whole_test_v3
+  test_dataset: /mnt/d/img2brep/0825_test
 
 trainer:
   gpu: 1
@@ -26,9 +26,10 @@ trainer:
 
 model:
   name: AutoEncoder_featuredv2
-  dim_latent: 32
-  dim_shape: 32
+  dim_latent: 8
   norm: "layer"
+  autoencoder: AutoEncoder_graph_flattened_tiny
+  autoencoder_weights: outputs_brepnet/2024_08_11_03_23_41/0809_4_16_8_layer/version_0/checkpoints/last.ckpt
 
 hydra:
   run:

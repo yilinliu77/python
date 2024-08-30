@@ -24,9 +24,9 @@ from OCC.Extend.DataExchange import read_step_file
 import traceback, sys
 
 write_debug_data = False
-data_root = Path(r"C:/DATASET/ABC/raw_data_100/")
-output_root = Path(r"C:/DATASET/ABC/0725_test")
-data_split = r"src/img2brep/data/deepcad_test_whole.txt"
+data_root = Path(r"/mnt/e/data/")
+output_root = Path(r"/mnt/d/img2brep/deepcad_whole_train_v4")
+data_split = r"src/img2brep/data/deepcad_train_whole.txt"
 
 exception_files = [
     r"src/img2brep/data/abc_multiple_component_or_few_faces_ids_.txt",

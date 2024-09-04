@@ -866,7 +866,6 @@ class AutoEncoder_graph_atten(AutoEncoder_graph_bigger):
 
         return loss, data
 
-
 # Full continuous VAE
 class AutoEncoder_graph_flattened(nn.Module):
     def __init__(self,
@@ -1554,8 +1553,45 @@ class AutoEncoder_graph_flattened_plus(AutoEncoder_graph_flattened):
         data = {}
         data["recon_faces"] = pre_face_coords
         data["recon_edges"] = pre_edge_coords
+
+        if v_test:
+            device = pre_face_coords.device
+            num_faces = v_data["face_points"].shape[0]
+            face_adj = torch.zeros((num_faces, num_faces), dtype=bool, device=device)
+            conn = v_data["edge_face_connectivity"]
+            face_adj[conn[:, 1], conn[:, 2]] = True
+            indexes = torch.stack(torch.meshgrid(torch.arange(num_faces), torch.arange(num_faces), indexing="ij"), dim=2)
+
+            indexes = indexes.reshape(-1,2)
+            feature_pair = fused_face_features[indexes]
+            feature_pair = rearrange(
+                feature_pair,
+                'b c n h w -> b c (n h w)', c=2
+            )
+            feature_pair = feature_pair + self.face_pos_embedding2[None, :]
+            feature_pair = rearrange(feature_pair, 'b c n -> b (c n) 1')
+
+            feature_pair = self.edge_feature_proj(feature_pair)
+            pred = self.classifier(feature_pair)[...,0]
+            pred = torch.sigmoid(pred) > 0.5
+            data["pred"] = pred
+            data["gt"] = face_adj.reshape(-1)
+
+            data["face_features"] = fused_face_features.cpu().numpy()
+            data["edge_loss"] = nn.functional.l1_loss(
+                pre_edge_coords,
+                gt_edge_points,
+                reduction="none"
+            ).mean(dim=1).mean(dim=1).cpu().numpy()
+            data["face_loss"] = nn.functional.l1_loss(
+                pre_face_coords,
+                v_data["face_points"],
+                reduction="none"
+            ).mean(dim=1).mean(dim=1).mean(dim=1).cpu().numpy()
+
         return loss, data
 
+# Not work
 class AutoEncoder_graph_flattened_bigger(AutoEncoder_graph_flattened_plus):
     def __init__(self,
                  v_conf,
@@ -1670,7 +1706,6 @@ class AutoEncoder_graph_flattened_bigger(AutoEncoder_graph_flattened_plus):
         data["recon_edges"] = pre_edge_coords
         return loss, data
 
-
 class AutoEncoder_graph_test(AutoEncoder_graph_flattened_plus):
     def __init__(self,
                  v_conf,
@@ -1760,3 +1795,170 @@ class AutoEncoder_graph_test(AutoEncoder_graph_flattened_plus):
         data["recon_edges"] = pre_edge_coords
         return loss, data
 
+# Not work
+class AutoEncoder_edge_compressed(AutoEncoder_graph_flattened_plus):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder_edge_compressed, self).__init__(v_conf)
+        ds = self.dim_shape
+        dl = self.dim_latent
+        self.df = dl * 2 * 2
+        df = self.df
+        norm = v_conf["norm"]
+        self.edge_coords = nn.Sequential(
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 8
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 4
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 2
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.Conv1d(ds, dl, kernel_size=1, stride=1, padding=0),
+            Rearrange("b n w -> b (n w)"),
+        ) # b c 1
+        self.edge_coords_decoder = nn.Sequential(
+            Rearrange("b (n w)-> b n w", n=dl, w=2),
+            nn.Conv1d(dl, ds, kernel_size=1, stride=1, padding=0),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.Upsample(scale_factor=2, mode="linear"), # 4
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.Upsample(scale_factor=2, mode="linear"), # 8
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm), 
+            nn.Upsample(scale_factor=2, mode="linear"), # 16
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.Conv1d(ds, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w -> ... w n',),
+        )
+
+        self.graph_face_edge = nn.ModuleList()
+        for i in range(5):
+            self.graph_face_edge.append(GATv2Conv(
+                df, df, 
+                heads=1, edge_dim=dl * 2,
+            ))
+            self.graph_face_edge.append(nn.ReLU())
+
+        bd = 1024 # bottlenek_dim
+        self.edge_feature_proj = nn.Sequential(
+            nn.Conv1d(df * 2, bd, kernel_size=1, stride=1, padding=0),
+            res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+            nn.Conv1d(bd, dl * 2, kernel_size=1, stride=1, padding=0),
+            Rearrange("b n w -> b (n w)"),
+        )
+        self.classifier = nn.Linear(dl*2, 1)
+# Not work
+class AutoEncoder_edge_compressed1(AutoEncoder_edge_compressed):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder_edge_compressed1, self).__init__(v_conf)
+        ds = self.dim_shape
+        dl = self.dim_latent
+        df = self.df
+        norm = v_conf["norm"]
+        
+        layer = nn.TransformerEncoderLayer(
+            df, 8, dim_feedforward=2048, dropout=0.1, 
+            batch_first=True, norm_first=True)
+        self.face_attn = Attn_fuser(layer, 24)
+
+class AutoEncoder_bigger_decoder(AutoEncoder_graph_flattened_plus):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder_bigger_decoder, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        norm = v_conf["norm"]
+        ds = self.dim_shape
+        dl = self.dim_latent
+        self.df = self.dim_latent * 2 * 2
+        df = self.df
+        
+        dd = 512
+        self.edge_coords_decoder = nn.Sequential(
+            Rearrange("b (n w)-> b n w", n=ds, w=2),
+            nn.Conv1d(ds, dd, kernel_size=1, stride=1, padding=0),
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            nn.Upsample(scale_factor=2, mode="linear"), # 4
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            nn.Upsample(scale_factor=2, mode="linear"), # 8
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm), 
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm), 
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm), 
+            nn.Upsample(scale_factor=2, mode="linear"), # 16
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            nn.Conv1d(dd, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w -> ... w n',),
+        )
+        
+class AutoEncoder_more_attn(AutoEncoder_graph_flattened_plus):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder_more_attn, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        norm = v_conf["norm"]
+        ds = self.dim_shape
+        dl = self.dim_latent
+        self.df = self.dim_latent * 2 * 2
+        df = self.df
+        
+        layer = nn.TransformerEncoderLayer(
+            df, 8, dim_feedforward=2048, dropout=0.1, 
+            batch_first=True, norm_first=True)
+        self.face_attn = Attn_fuser(layer, 28)
+
+class AutoEncoder_bigger(AutoEncoder_graph_flattened_plus):
+    def __init__(self,
+                v_conf,
+                ):
+        super(AutoEncoder_bigger, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        norm = v_conf["norm"]
+        ds = self.dim_shape
+        dl = self.dim_latent
+        self.df = self.dim_latent * 2 * 2
+        df = self.df
+        
+        layer = nn.TransformerEncoderLayer(
+            df, 8, dim_feedforward=2048, dropout=0.1, 
+            batch_first=True, norm_first=True)
+        self.face_attn = Attn_fuser(layer, 28)
+
+        dd = 512
+        self.edge_coords_decoder = nn.Sequential(
+            Rearrange("b (n w)-> b n w", n=ds, w=2),
+            nn.Conv1d(ds, dd, kernel_size=1, stride=1, padding=0),
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            nn.Upsample(scale_factor=2, mode="linear"), # 4
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            nn.Upsample(scale_factor=2, mode="linear"), # 8
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm), 
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm), 
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm), 
+            nn.Upsample(scale_factor=2, mode="linear"), # 16
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(dd, dd, ks=3, st=1, pa=1, norm=norm),
+            nn.Conv1d(dd, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w -> ... w n',),
+        )

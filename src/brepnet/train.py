@@ -68,7 +68,7 @@ class TrainAutoEncoder(pl.LightningModule):
                           drop_last=True,
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
-                          prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
+                          prefetch_factor=4 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
                           )
 
     def val_dataloader(self):
@@ -79,7 +79,7 @@ class TrainAutoEncoder(pl.LightningModule):
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
-                          prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
+                          prefetch_factor=4 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
                           )
 
     def configure_optimizers(self):
@@ -91,8 +91,7 @@ class TrainAutoEncoder(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         data = batch
 
-        loss, data = self.model(data, return_loss=True,
-                                return_recon=False, return_face_features=False, return_true_loss=False)
+        loss, data = self.model(data)
         total_loss = loss["total_loss"]
         for key in loss:
             if key == "total_loss":
@@ -101,8 +100,8 @@ class TrainAutoEncoder(pl.LightningModule):
                      sync_dist=True, batch_size=self.batch_size)
         self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
-        if torch.isnan(total_loss).any():
-            print("NAN Loss")
+        # if torch.isnan(total_loss).any():
+            # print("NAN Loss")
         return total_loss
 
     def validation_step(self, batch, batch_idx):
@@ -120,12 +119,12 @@ class TrainAutoEncoder(pl.LightningModule):
 
         if batch_idx == 0:
             # recon_edges, recon_faces = self.model.inference(recon_data["face_embeddings"])
-            if "recon_faces" in recon_data:
+            if "pred_face" in recon_data:
                 self.viz["face_points"] = data["face_points"].cpu().numpy()
-                self.viz["recon_faces"] = recon_data["recon_faces"].cpu().numpy()
-            if "recon_edges" in recon_data:
+                self.viz["recon_faces"] = recon_data["pred_face"]
+            if "pred_edge" in recon_data:
                 self.viz["edge_points"] = data["edge_points"].cpu().numpy()
-                self.viz["recon_edges"] = recon_data["recon_edges"].cpu().numpy()
+                self.viz["recon_edges"] = recon_data["pred_edge"]
         if "pred" in recon_data:
             self.pr_computer.update(recon_data["pred"], recon_data["gt"])
         return total_loss
@@ -162,7 +161,7 @@ class TrainAutoEncoder(pl.LightningModule):
                     o3d.io.write_point_cloud(
                         str(self.log_root / f"{self.trainer.current_epoch:05}_idx_{idx:02}_viz_faces.ply"), pc)
 
-                if "recon_edges" in self.viz:
+                if "recon_edges" in self.viz and self.viz["recon_edges"].shape[0]>0:
                     v_gt_edges = self.viz["edge_points"]
                     v_recon_edges = self.viz["recon_edges"]
 
@@ -204,19 +203,11 @@ class TrainAutoEncoder(pl.LightningModule):
         self.log("Test_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
 
-        self.pr_computer.update(recon_data["pred"], recon_data["gt"])
+        self.pr_computer.update(torch.from_numpy(recon_data["pred_face_adj"].reshape(-1)), torch.from_numpy(recon_data["gt_face_adj"].reshape(-1)))
         if True:
             os.makedirs(self.log_root / "test", exist_ok=True)
-            recon_faces = recon_data["recon_faces"].cpu().numpy()
-            recon_edges = recon_data["recon_edges"].cpu().numpy()
             np.savez_compressed(str(self.log_root / "test" / f"{data['v_prefix'][0]}.npz"), 
-                                recon_faces=recon_faces,
-                                recon_edges=recon_edges,
-                                pred=recon_data["pred"].cpu().numpy(),
-                                gt=recon_data["gt"].cpu().numpy(),
-                                face_features=recon_data["face_features"],
-                                edge_loss=recon_data["edge_loss"],
-                                face_loss=recon_data["face_loss"],
+                                recon_data,
                                 )
             np.savez_compressed(str(self.log_root / "test" / f"{data['v_prefix'][0]}_feature.npz"), 
                                 face_features=recon_data["face_features"],
@@ -268,6 +259,9 @@ def main(v_cfg: DictConfig):
         num_sanity_val_steps=2,
         check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
         precision=v_cfg["trainer"]["accelerator"],
+
+        # profiler="advanced",
+        # max_steps=1000
     )
 
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":

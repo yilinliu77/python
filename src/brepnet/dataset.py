@@ -74,22 +74,23 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
         return len(self.data_folders)
 
     def check_data(self, v_path, v_training_mode):
-        if v_training_mode == "training":
-            filepath = os.path.join(v_path, r"id_larger_than_128_faces.txt")
-        elif v_training_mode == "validation":
-            filepath = os.path.join(v_path, r"id_larger_than_128_faces.txt")
-        else:
-            filepath = os.path.join(v_path, r"id_larger_than_128_faces.txt")
+        filepath = os.path.join(v_path, r"id_larger_than_64_faces.txt")
+        ignore_ids=[]
         if os.path.exists(filepath):
             ignore_ids = [item.strip() for item in open(filepath).readlines()]
         else:
-            ignore_ids = []
-        miss = []
-        for folder_path in self.data_folders:
-            if not os.path.exists(os.path.join(folder_path, "data.npz")) or folder_path[-8:] in ignore_ids:
-                miss.append(folder_path)
+            for folder_path in self.data_folders:
+                if not os.path.exists(os.path.join(folder_path, "data.npz")):
+                    ignore_ids.append(folder_path)
+                    continue
+                data_npz = np.load(os.path.join(folder_path, "data.npz"))
+                if data_npz['sample_points_faces'].shape[0] > 64:
+                    ignore_ids.append(folder_path)
+            with open(filepath, "w") as f:
+                for item in ignore_ids:
+                    f.write(item + "\n")
 
-        for folder_path in miss:
+        for folder_path in ignore_ids:
             self.data_folders.remove(folder_path)
 
     def __getitem__(self, idx):
@@ -98,7 +99,7 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
         data_npz = np.load(os.path.join(folder_path, "data.npz"))
 
         # Face sample points (num_faces*32*32*3)
-        face_points = torch.from_numpy(data_npz['sample_points_faces'][:, ::2,::2])
+        face_points = torch.from_numpy(data_npz['sample_points_faces'][:, ::2, ::2])
         line_points = torch.from_numpy(data_npz['sample_points_lines'][:, ::2])
 
         #  Which of two faces intersect and produce an edge (num_intersection, (id_edge, id_face1, id_face2))
@@ -110,8 +111,8 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
 
         face_adj = torch.from_numpy(data_npz['face_adj'])
         zero_positions = torch.from_numpy(data_npz['zero_positions'])
-        if zero_positions.shape[0] > self.max_intersection:
-            index = np.random.choice(zero_positions.shape[0], self.max_intersection, replace=False)
+        if zero_positions.shape[0] > face_adj.shape[0] * 2:
+            index = np.random.choice(zero_positions.shape[0], face_adj.shape[0] * 2, replace=False)
             zero_positions = zero_positions[index]
         # Assume the number of true intersection is less than self.max_intersection
 
@@ -134,6 +135,7 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
         flat_edge_points = []
         flat_edge_face_connectivity = []
         flat_zero_positions = []
+        num_face_record = []
         
         num_faces = 0
         num_edges = 0
@@ -148,7 +150,8 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
             flat_zero_positions.append(zero_positions[i] + num_faces)
             num_faces+=face_points[i].shape[0]
             num_edges+=edge_points[i].shape[0]
-        
+            num_face_record.append(face_points[i].shape[0])
+        num_face_record = torch.tensor(num_face_record, dtype=torch.long)
         num_sum_edges = sum(edge_conn_num)
         edge_attn_mask = torch.ones((num_sum_edges, num_sum_edges), dtype=bool)
         id_cur = 0
@@ -156,13 +159,16 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
             edge_attn_mask[id_cur:id_cur+edge_conn_num[i], id_cur:id_cur+edge_conn_num[i]] = False
             id_cur+=edge_conn_num[i]
 
+        num_max_faces = num_face_record.max()
+        valid_mask = torch.zeros((bs, num_max_faces), dtype=bool)
+        for i in range(bs):
+            valid_mask[i, :num_face_record[i]] = True
         attn_mask = torch.ones((num_faces, num_faces), dtype=bool)
         id_cur = 0
         for i in range(bs):
             attn_mask[id_cur:id_cur+face_points[i].shape[0], id_cur : id_cur+face_points[i].shape[0]] = False
             id_cur+=face_points[i].shape[0]
             
-
         flat_face_points = torch.cat(flat_face_points, dim=0)
         flat_edge_points = torch.cat(flat_edge_points, dim=0)
         flat_edge_face_connectivity = torch.cat(flat_edge_face_connectivity, dim=0)
@@ -177,6 +183,9 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
             "zero_positions": flat_zero_positions,
             "attn_mask": attn_mask,
             "edge_attn_mask": edge_attn_mask,
+
+            "num_face_record": num_face_record,
+            "valid_mask": valid_mask,
         }
 
 

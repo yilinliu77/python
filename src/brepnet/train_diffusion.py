@@ -160,7 +160,7 @@ class TrainDiffusion(pl.LightningModule):
     def inference(self):
         bs = self.batch_size
         face_feature = self.model.inference(bs, self.device)
-        result = rearrange(face_feature, "b n (c h w) -> (b n) c h w", c=8, h=4, w=4)
+        result = rearrange(face_feature, "b n (c h w) -> (b n) c h w", c=8, h=2, w=2)
         decoded_faces = self.autoencoder.decode(result)
         result = rearrange(decoded_faces, "(b n) h w c-> b n h w c", b=bs)
         data = {

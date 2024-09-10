@@ -27,9 +27,10 @@ trainer:
 model:
   name: AutoEncoder_featuredv2
   dim_latent: 8
+  dim_shape: 256
   norm: "layer"
-  autoencoder: AutoEncoder_graph_flattened_tiny
-  autoencoder_weights: outputs_brepnet/2024_08_11_03_23_41/0809_4_16_8_layer/version_0/checkpoints/last.ckpt
+  autoencoder: AutoEncoder_graph_flattened_plus
+  autoencoder_weights: outputs_brepnet/2024_08_31_04_55_03/0830_dl8_ds256_4gpu/version_0/checkpoints/last.ckpt
 
 hydra:
   run:

@@ -212,7 +212,7 @@ class Diffusion_base(nn.Module):
                  v_conf,
                  ):
         super(Diffusion_base, self).__init__()
-        self.dim_input = 8*4*4
+        self.dim_input = 8*2*2
         self.dim_latent = 768
         self.time_statics = [0 for _ in range(10)]
 
@@ -251,7 +251,7 @@ class Diffusion_base(nn.Module):
         )
 
     def inference(self, bs, device, **kwargs):
-        face_features = torch.randn((bs, 64, 128)).to(device)  
+        face_features = torch.randn((bs, 64, 32)).to(device)  
 
         for t in tqdm(self.noise_scheduler.timesteps):   
             timesteps = t.reshape(-1).to(device)

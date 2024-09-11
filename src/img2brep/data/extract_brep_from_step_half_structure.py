@@ -24,8 +24,8 @@ from OCC.Extend.DataExchange import read_step_file
 import traceback, sys
 
 write_debug_data = False
-data_root = Path(r"/mnt/e/data/")
-output_root = Path(r"/mnt/d/img2brep/deepcad_whole_train_v4")
+data_root = Path(r"d://data")
+output_root = Path(r"d://data/deepcad_whole_train_v5")
 data_split = r"src/img2brep/data/deepcad_train_whole.txt"
 
 exception_files = [
@@ -35,7 +35,7 @@ exception_files = [
 ]
 
 num_max_primitives = 100000
-
+sample_resolution = 32
 
 def check_dir(v_path):
     if os.path.exists(v_path):
@@ -144,15 +144,15 @@ def get_brep(v_root, output_root, v_folders):
                 last_u = surface.LastUParameter()
                 first_v = surface.FirstVParameter()
                 last_v = surface.LastVParameter()
-                u = np.linspace(first_u, last_u, num=32)
-                v = np.linspace(first_v, last_v, num=32)
+                u = np.linspace(first_u, last_u, num=sample_resolution)
+                v = np.linspace(first_v, last_v, num=sample_resolution)
                 u, v = np.meshgrid(u, v)
                 points = []
                 for i in range(u.shape[0]):
                     for j in range(u.shape[1]):
                         pnt = surface.Value(u[i, j], v[i, j])
                         points.append(np.array([pnt.X(), pnt.Y(), pnt.Z()], dtype=np.float32))
-                face_sample_points.append(np.stack(points, axis=0).reshape(32, 32, 3))
+                face_sample_points.append(np.stack(points, axis=0).reshape(sample_resolution, sample_resolution, 3))
             face_sample_points = np.stack(face_sample_points, axis=0)
             assert len(face_dict) == num_faces == face_sample_points.shape[0]
 
@@ -166,7 +166,7 @@ def get_brep(v_root, output_root, v_folders):
                 # Determine the orientation
                 range_start = curve.FirstParameter() if edge.Orientation() == 0 else curve.LastParameter()
                 range_end = curve.LastParameter() if edge.Orientation() == 0 else curve.FirstParameter()
-                sample_u = np.linspace(range_start, range_end, num=32)
+                sample_u = np.linspace(range_start, range_end, num=sample_resolution)
                 sample_points = []
                 for u in sample_u:
                     pnt = curve.Value(u)
@@ -221,6 +221,7 @@ def get_brep(v_root, output_root, v_folders):
 
                 face_edge_loop.append(loops)
 
+            face_face_adj_set = set() # Used to check if two face produce more than 1 edge
             edge_face_connectivity = []
             for edge in edge_face_look_up_table:
                 if edge.Reversed() not in edge_face_look_up_table:
@@ -228,11 +229,21 @@ def get_brep(v_root, output_root, v_folders):
                 if len(edge_face_look_up_table[edge]) != 1:
                     raise ValueError("Edge indexed by more than 1 faces.")
 
+                item = (
+                        face_dict[edge_face_look_up_table[edge][0]],
+                        face_dict[edge_face_look_up_table[edge.Reversed()][0]]
+                )
+
+                if item in face_face_adj_set:
+                    raise ValueError("Two faces produce more than 1 edge.")
+                face_face_adj_set.add(item)
+
                 edge_face_connectivity.append((
                     edge_dict[edge],
                     face_dict[edge_face_look_up_table[edge][0]],
                     face_dict[edge_face_look_up_table[edge.Reversed()][0]]
                 ))
+
 
             # Check
             if len(edge_face_connectivity) != len(edge_dict):
@@ -322,7 +333,7 @@ if __name__ == '__main__':
     num_original = len(total_ids)
     total_ids = list(set(total_ids) - set(exception_ids))
     total_ids.sort()
-    # total_ids=["00000003"]
+    total_ids=["00005083"]
     print("Total ids: {} -> {}".format(num_original, len(total_ids)))
     check_dir(output_root)
 
@@ -333,8 +344,8 @@ if __name__ == '__main__':
         ray.init(
             dashboard_host="0.0.0.0",
             dashboard_port=15000,
-            # num_cpus=1,
-            # local_mode=True
+            num_cpus=1,
+            local_mode=True
         )
         batch_size = 100
         num_batches = len(total_ids) // batch_size + 1

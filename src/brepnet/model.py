@@ -183,6 +183,11 @@ def prepare_connectivity(v_data, ):
     return
 
 
+def flatten_to_batch(v_data, v_mask):
+    
+    pass
+
+
 # Full continuous VAE
 class AutoEncoder_base(nn.Module):
     def __init__(self,
@@ -1553,8 +1558,9 @@ class AutoEncoder_graph_flattened_plus(AutoEncoder_graph_flattened):
         data = {}
         data["recon_faces"] = pre_face_coords
         data["recon_edges"] = pre_edge_coords
-
+        
         if v_test:
+            data = {}
             device = pre_face_coords.device
             num_faces = v_data["face_points"].shape[0]
             face_adj = torch.zeros((num_faces, num_faces), dtype=bool, device=device)
@@ -1562,7 +1568,7 @@ class AutoEncoder_graph_flattened_plus(AutoEncoder_graph_flattened):
             face_adj[conn[:, 1], conn[:, 2]] = True
             indexes = torch.stack(torch.meshgrid(torch.arange(num_faces), torch.arange(num_faces), indexing="ij"), dim=2)
 
-            indexes = indexes.reshape(-1,2)
+            indexes = indexes.reshape(-1,2).to(device)
             feature_pair = fused_face_features[indexes]
             feature_pair = rearrange(
                 feature_pair,
@@ -1574,20 +1580,25 @@ class AutoEncoder_graph_flattened_plus(AutoEncoder_graph_flattened):
             feature_pair = self.edge_feature_proj(feature_pair)
             pred = self.classifier(feature_pair)[...,0]
             pred = torch.sigmoid(pred) > 0.5
-            data["pred"] = pred
-            data["gt"] = face_adj.reshape(-1)
 
-            data["face_features"] = fused_face_features.cpu().numpy()
-            data["edge_loss"] = nn.functional.l1_loss(
-                pre_edge_coords,
-                gt_edge_points,
-                reduction="none"
-            ).mean(dim=1).mean(dim=1).cpu().numpy()
-            data["face_loss"] = nn.functional.l1_loss(
-                pre_face_coords,
-                v_data["face_points"],
-                reduction="none"
-            ).mean(dim=1).mean(dim=1).mean(dim=1).cpu().numpy()
+            pre_edge_coords = self.edge_coords_decoder(feature_pair[pred])
+            pred_edge_face_connectivity = torch.cat((torch.arange(pre_edge_coords.shape[0], device=device)[:,None], indexes[pred]), dim=1)
+
+            data.update({
+                "gt_face_adj": face_adj.cpu().numpy(),
+                "gt_edge_face_connectivity": v_data["edge_face_connectivity"].cpu().numpy(),
+                "gt_edge": v_data["edge_points"].cpu().numpy(),
+                "gt_face": v_data["face_points"].cpu().numpy(),
+
+                "pred_face_adj": pred.reshape(num_faces, num_faces).cpu().numpy(),
+                "pred_edge_face_connectivity": pred_edge_face_connectivity.cpu().numpy(),
+                "pred_edge": pre_edge_coords.cpu().numpy(),
+                "pred_face": pre_face_coords.cpu().numpy(),
+
+                "face_features": fused_face_features.cpu().numpy()
+            })
+            data["edge_loss"] = loss["edge_coords"].cpu().numpy()
+            data["face_loss"] = loss["face_coords"].cpu().numpy()
 
         return loss, data
 
@@ -1963,148 +1974,58 @@ class AutoEncoder_bigger(AutoEncoder_graph_flattened_plus):
             Rearrange('... n w -> ... w n',),
         )
 
+class AutoEncoder_context(AutoEncoder_graph_flattened_plus):
+    def __init__(self, v_conf):
+        super().__init__(v_conf)
 
-class AutoEncoder_test(AutoEncoder_graph_flattened):
-    def __init__(self,
-                 v_conf,
-                 ):
-        super(AutoEncoder_test, self).__init__(v_conf)
-        self.dim_shape = v_conf["dim_shape"]
-        self.dim_latent = v_conf["dim_latent"]
+        layer = nn.TransformerDecoderLayer(self.df, 8, batch_first=True)
+        self.cross_attn = nn.TransformerDecoder(layer, 8)
+
+        self.global_feature = nn.Parameter(torch.randn((1, self.df), dtype=torch.float32))
+
+        bd = 1024
         norm = v_conf["norm"]
-        ds = self.dim_shape
-        dl = self.dim_latent
-        self.df = self.dim_latent * 2 * 2
-        df = self.df
-        self.face_conv1 = nn.Sequential(
-            Rearrange('b h w n -> b n h w'),
-            nn.Conv2d(3, ds, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-        )
-        self.face_coords = nn.Sequential(
-            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
-            nn.MaxPool2d(kernel_size=2, stride=2),  # 8
-            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
-            nn.MaxPool2d(kernel_size=2, stride=2),  # 4
-            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
-            nn.MaxPool2d(kernel_size=2, stride=2),  # 2
-            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
-            nn.Conv2d(ds, dl, kernel_size=1, stride=1, padding=0),
-        )  # b c 4 4
-        self.face_coords_decoder = nn.Sequential(
-            nn.Conv2d(dl, ds, kernel_size=1, stride=1, padding=0),
-            nn.ReLU(),
-            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
-            nn.Upsample(scale_factor=2, mode="bilinear"),
-            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
-            nn.Upsample(scale_factor=2, mode="bilinear"),
-            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
-            nn.Upsample(scale_factor=2, mode="bilinear"),
-            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
-            nn.Conv2d(ds, 3, kernel_size=3, stride=1, padding=1),
-            Rearrange('... n w h -> ... w h n', ),
-        )
-        self.face_pos_embedding = nn.Parameter(torch.randn(ds, 16, 16))
-        self.face_pos_embedding2 = nn.Parameter(torch.randn(2, df))
-
-        self.edge_conv1 = nn.Sequential(
-            Rearrange('b w n -> b n w'),
-            nn.Conv1d(3, ds, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-        )
-        self.edge_coords = nn.Sequential(
-            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
-            nn.MaxPool1d(kernel_size=2, stride=2),  # 8
-            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
-            nn.MaxPool1d(kernel_size=2, stride=2),  # 4
-            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
-            nn.MaxPool1d(kernel_size=2, stride=2),  # 2
-            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
-            nn.Conv1d(ds, ds, kernel_size=1, stride=1, padding=0),
-            Rearrange("b n w -> b (n w)"),
-        )  # b c 1
-        self.edge_coords_decoder = nn.Sequential(
-            Rearrange("b (n w)-> b n w", n=ds, w=2),
-            nn.Conv1d(ds, ds, kernel_size=1, stride=1, padding=0),
-            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
-            nn.Upsample(scale_factor=2, mode="linear"),  # 4
-            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
-            nn.Upsample(scale_factor=2, mode="linear"),  # 8
-            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
-            nn.Upsample(scale_factor=2, mode="linear"),  # 16
-            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
-            nn.Conv1d(ds, 3, kernel_size=1, stride=1, padding=0),
-            Rearrange('... n w -> ... w n', ),
-        )
-        self.edge_pos_embedding = nn.Parameter(torch.randn(ds, 16))
-
-        self.graph_face_edge = nn.ModuleList()
-        for i in range(5):
-            self.graph_face_edge.append(GATv2Conv(
-                df, df,
-                heads=1, edge_dim=ds * 2,
-            ))
-            self.graph_face_edge.append(nn.ReLU())
-
-        layer = nn.TransformerEncoderLayer(
-            df, 8, dim_feedforward=2048, dropout=0.1,
-            batch_first=True, norm_first=False)
-        self.face_attn = Attn_fuser(layer, 12)
-
-        bd = 1024  # bottlenek_dim
         self.edge_feature_proj = nn.Sequential(
-            nn.Conv1d(df * 2, bd, kernel_size=1, stride=1, padding=0),
+            nn.Conv1d(self.df * 3, bd, kernel_size=1, stride=1, padding=0),
             res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
             res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
             res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
             res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
             res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
             res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
-            nn.Conv1d(bd, ds * 2, kernel_size=1, stride=1, padding=0),
+            nn.Conv1d(bd, self.dim_shape * 2, kernel_size=1, stride=1, padding=0),
             Rearrange("b n w -> b (n w)"),
         )
-        self.classifier = nn.Linear(ds * 2, 1)
 
-        self.time_statics = {}
-        # self.face_coords = torch.compile(self.face_coords, dynamic=True)
-        # self.face_coords_decoder = torch.compile(self.face_coords_decoder, dynamic=True)
-        # self.edge_coords = torch.compile(self.edge_coords, dynamic=True)
-        # self.edge_coords_decoder = torch.compile(self.edge_coords_decoder, dynamic=True)
-        # self.edge_feature_proj = torch.compile(self.edge_feature_proj, dynamic=True)
 
-    def intersection(self, v_edge_face_connectivity, v_zero_positions, v_face_feature):
+    def intersection(self, v_edge_face_connectivity, v_zero_positions, v_face_feature, v_gf):
+        true_gf = v_gf[v_edge_face_connectivity[:, 1]]
+        false_gf = v_gf[v_zero_positions[:, 0]]
+        gf = torch.cat((true_gf, false_gf), dim=0).unsqueeze(2)
         true_intersection_embedding = v_face_feature[v_edge_face_connectivity[:, 1:]]
         false_intersection_embedding = v_face_feature[v_zero_positions]
 
-        true_intersection_embedding = rearrange(
-            true_intersection_embedding,
+        intersection_embedding = torch.cat((true_intersection_embedding, false_intersection_embedding), dim=0)
+        id_false_start = true_intersection_embedding.shape[0]
+        intersection_embedding = rearrange(
+            intersection_embedding,
             'b c n h w -> b c (n h w)', c=2
         )
-        false_intersection_embedding = rearrange(
-            false_intersection_embedding,
-            'b c n h w -> b c (n h w)', c=2
-        )
 
-        true_features = true_intersection_embedding + self.face_pos_embedding2[None, :]
-        false_features = false_intersection_embedding + self.face_pos_embedding2[None, :]
+        features = intersection_embedding + self.face_pos_embedding2[None, :]
+        features = rearrange(features, 'b c n -> b (c n) 1')
+        features = torch.cat((features, gf), dim=1)
+        features = self.edge_feature_proj(features)
+        pred = self.classifier(features)
+        
+        gt_labels = torch.ones_like(pred)
+        gt_labels[id_false_start:] = 0
+        loss_edge = F.binary_cross_entropy_with_logits(pred, gt_labels)
+        
+        return loss_edge, features[:id_false_start]
 
-        true_features = rearrange(true_features, 'b c n -> b (c n) 1')
-        false_features = rearrange(false_features, 'b c n -> b (c n) 1')
 
-        true_features = self.edge_feature_proj(true_features)
-        false_features = self.edge_feature_proj(false_features)
-
-        pred_true = self.classifier(true_features)
-        pred_false = self.classifier(false_features)
-
-        gt_true = torch.ones_like(pred_true)
-        gt_false = torch.zeros_like(pred_false)
-        loss_edge = F.binary_cross_entropy_with_logits(pred_true, gt_true) + \
-                    F.binary_cross_entropy_with_logits(pred_false, gt_false)
-
-        return loss_edge, true_features
-
-    def forward(self, v_data, v_test=False, **kwargs):
+    def forward(self, v_data, v_test=False):
         timer = time.time()
         # Encoder
         face_features = self.face_conv1(v_data["face_points"])
@@ -2119,9 +2040,9 @@ class AutoEncoder_test(AutoEncoder_graph_flattened):
         timer = add_timer(self.time_statics, "encode", timer)
 
         # Face graph
-        x = face_features.reshape(-1, 2 * 2 * self.dim_latent)
-        edge_index = edge_face_connectivity[:, 1:].permute(1, 0)
-        edge_attr = edge_features[edge_face_connectivity[:, 0]]
+        x = face_features.reshape(-1, 2*2*self.dim_latent)
+        edge_index=edge_face_connectivity[:, 1:].permute(1,0)
+        edge_attr=edge_features[edge_face_connectivity[:, 0]]
         for layer in self.graph_face_edge:
             if isinstance(layer, GATv2Conv):
                 x = layer(x, edge_index, edge_attr) + x
@@ -2129,8 +2050,20 @@ class AutoEncoder_test(AutoEncoder_graph_flattened):
                 x = layer(x)
 
         # Face attn
-        x = self.face_attn(x, v_data["attn_mask"])
-        fused_face_features = rearrange(x, 'b (n h w) -> b n h w', h=2, w=2)
+        fused_face_features = self.face_attn(x, v_data["attn_mask"])
+        # Global
+        bs = v_data["num_face_record"].shape[0]
+        max_faces = v_data["num_face_record"].max()
+        gf = self.global_feature.repeat(bs,1).unsqueeze(1)
+        # face_batched = torch.ones((bs, max_faces, self.df), dtype=self.global_feature.dtype, device=fused_face_features.device)
+        # # Build the batched face features according to the mask
+        # face_batched[v_data["valid_mask"]] *= fused_face_features
+        # face_batched[torch.logical_not(v_data["valid_mask"])] *= 0.
+        # gf = self.cross_attn(tgt=gf, memory=face_batched, memory_key_padding_mask=torch.logical_not(v_data["valid_mask"]),)[:,0]
+        gf = gf[:,0]
+        gf = gf.repeat_interleave(v_data["num_face_record"], dim=0)
+
+        fused_face_features = rearrange(fused_face_features, 'b (n h w) -> b n h w', h=2, w=2)
         timer = add_timer(self.time_statics, "graph", timer)
 
         pre_face_coords = self.face_coords_decoder(fused_face_features)
@@ -2140,9 +2073,10 @@ class AutoEncoder_test(AutoEncoder_graph_flattened):
         # Intersection
         gt_edge_points = v_data["edge_points"][edge_face_connectivity[:, 0]]
         loss_edge_classification, intersected_edge_feature = self.intersection(
-            edge_face_connectivity,
-            v_data["zero_positions"],
-            fused_face_features,
+            edge_face_connectivity, 
+            v_data["zero_positions"], 
+            fused_face_features, 
+            gf
         )
         timer = add_timer(self.time_statics, "intersection", timer)
 
@@ -2150,8 +2084,8 @@ class AutoEncoder_test(AutoEncoder_graph_flattened):
         timer = add_timer(self.time_statics, "intersection decoding", timer)
 
         # Loss
-        loss = {}
-        loss["edge_classification"] = loss_edge_classification
+        loss={}
+        loss["edge_classification"] = loss_edge_classification * 0.1
         loss["face_coords"] = nn.functional.l1_loss(
             pre_face_coords,
             v_data["face_points"]
@@ -2174,17 +2108,17 @@ class AutoEncoder_test(AutoEncoder_graph_flattened):
         data = {}
         data["recon_faces"] = pre_face_coords
         data["recon_edges"] = pre_edge_coords
-
+        
         if v_test:
+            data = {}
             device = pre_face_coords.device
             num_faces = v_data["face_points"].shape[0]
             face_adj = torch.zeros((num_faces, num_faces), dtype=bool, device=device)
             conn = v_data["edge_face_connectivity"]
             face_adj[conn[:, 1], conn[:, 2]] = True
-            indexes = torch.stack(torch.meshgrid(torch.arange(num_faces), torch.arange(num_faces), indexing="ij"),
-                                  dim=2)
+            indexes = torch.stack(torch.meshgrid(torch.arange(num_faces), torch.arange(num_faces), indexing="ij"), dim=2)
 
-            indexes = indexes.reshape(-1, 2)
+            indexes = indexes.reshape(-1,2).to(device)
             feature_pair = fused_face_features[indexes]
             feature_pair = rearrange(
                 feature_pair,
@@ -2192,57 +2126,28 @@ class AutoEncoder_test(AutoEncoder_graph_flattened):
             )
             feature_pair = feature_pair + self.face_pos_embedding2[None, :]
             feature_pair = rearrange(feature_pair, 'b c n -> b (c n) 1')
-
+            feature_pair = torch.cat((feature_pair, gf[indexes[:,0]][:,:,None]), dim=1)
             feature_pair = self.edge_feature_proj(feature_pair)
-            pred = self.classifier(feature_pair)[..., 0]
+            pred = self.classifier(feature_pair)[...,0]
             pred = torch.sigmoid(pred) > 0.5
-            data["pred"] = pred
-            data["gt"] = face_adj.reshape(-1)
 
-            data["face_features"] = fused_face_features.cpu().numpy()
-            data["edge_loss"] = nn.functional.l1_loss(
-                pre_edge_coords,
-                gt_edge_points,
-                reduction="none"
-            ).mean(dim=1).mean(dim=1).cpu().numpy()
-            data["face_loss"] = nn.functional.l1_loss(
-                pre_face_coords,
-                v_data["face_points"],
-                reduction="none"
-            ).mean(dim=1).mean(dim=1).mean(dim=1).cpu().numpy()
+            pre_edge_coords = self.edge_coords_decoder(feature_pair[pred])
+            pred_edge_face_connectivity = torch.cat((torch.arange(pre_edge_coords.shape[0], device=device)[:,None], indexes[pred]), dim=1)
+
+            data.update({
+                "gt_face_adj": face_adj.cpu().numpy(),
+                "gt_edge_face_connectivity": v_data["edge_face_connectivity"].cpu().numpy(),
+                "gt_edge": v_data["edge_points"].cpu().numpy(),
+                "gt_face": v_data["face_points"].cpu().numpy(),
+
+                "pred_face_adj": pred.reshape(num_faces, num_faces).cpu().numpy(),
+                "pred_edge_face_connectivity": pred_edge_face_connectivity.cpu().numpy(),
+                "pred_edge": pre_edge_coords.cpu().numpy(),
+                "pred_face": pre_face_coords.cpu().numpy(),
+
+                "face_features": fused_face_features.cpu().numpy()
+            })
+            data["edge_loss"] = loss["edge_coords"].cpu().numpy()
+            data["face_loss"] = loss["face_coords"].cpu().numpy()
 
         return loss, data
-
-
-if __name__ == "__main__":
-    conf = {
-        "dim_shape": 256,
-        "dim_latent": 8,
-        "norm": "layer",
-    }
-    model = AutoEncoder_test(conf)
-    model.to("cuda")
-
-    dtype = torch.float32
-    device = torch.device("cuda")
-    data = {
-        "face_points": torch.zeros((8,16,16,3), dtype=dtype, device=device),
-        "edge_points": torch.zeros((24,16,3), dtype=dtype, device=device),
-        "edge_face_connectivity": torch.zeros((18, 3), dtype=torch.long, device=device),
-        "attn_mask": torch.zeros((8, 8), dtype=dtype, device=device),
-        "zero_positions": torch.zeros((18, 2), dtype=torch.long, device=device)
-    }
-
-    times = []
-    for i in range(10):
-        timer = time.time()
-        results = model(data)
-        times.append(time.time()-timer)
-
-    model = torch.compile(model)
-    for i in range(10):
-        timer = time.time()
-        results = model(data)
-        times.append(time.time()-timer)
-
-    pass

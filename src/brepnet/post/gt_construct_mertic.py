@@ -380,11 +380,12 @@ class SamplePointsAndComputeCD:
         all_vertex_acc_cd, all_vertex_com_cd, all_vertex_cd = [], [], []
 
         all_stl_acc_cd, all_stl_com_cd, all_stl_cd = [], [], []
-        num_soild, num_shell, num_compound = 0, 0, 0
+        num_solid, num_shell, num_compound, num_non_solid = 0, 0, 0, 0
 
         solid_acc_cd, solid_com_cd, solid_cd = [], [], []
         shell_acc_cd, shell_com_cd, shell_cd = [], [], []
         compound_acc_cd, compound_com_cd, compound_cd = [], [], []
+        non_solid_acc_cd, non_solid_com_cd, non_solid_cd = [], [], []
 
         for each in tqdm(self.return_dict.values()):
             sum_recon_face += int(each['num_recon_face'])
@@ -411,11 +412,17 @@ class SamplePointsAndComputeCD:
             all_stl_cd.append(each['stl_cd'])
 
             if each['stl_type'] == 'recon_brep.stl':
-                num_soild += 1
+                num_solid += 1
                 solid_acc_cd.append(each['stl_acc_cd'])
                 solid_com_cd.append(each['stl_com_cd'])
                 solid_cd.append(each['stl_cd'])
-            elif each['stl_type'] == 'recon_brep_compound.stl':
+            else:
+                num_non_solid += 1
+                non_solid_acc_cd.append(each['stl_acc_cd'])
+                non_solid_com_cd.append(each['stl_com_cd'])
+                non_solid_cd.append(each['stl_cd'])
+
+            if each['stl_type'] == 'recon_brep_compound.stl':
                 num_shell += 1
                 shell_acc_cd.append(each['stl_acc_cd'])
                 shell_com_cd.append(each['stl_com_cd'])
@@ -450,20 +457,29 @@ class SamplePointsAndComputeCD:
         print("Average COM CD: ", np.mean(all_vertex_com_cd))
         print("Average CD: ", np.mean(all_vertex_cd))
 
-        print("\nSoild: ", num_soild)
-        print("Average Acc CD: ", np.mean(solid_acc_cd))
-        print("Average Com CD: ", np.mean(solid_com_cd))
-        print("Average CD: ", np.mean(solid_cd))
+        print("\nSolid: ", num_solid)
+        if num_solid != 0:
+            print("Average Acc CD: ", np.mean(solid_acc_cd))
+            print("Average Com CD: ", np.mean(solid_com_cd))
+            print("Average CD: ", np.mean(solid_cd))
 
-        # print("\nShell: ", num_shell)
-        # print("Average Acc CD: ", np.mean(shell_acc_cd))
-        # print("Average Com CD: ", np.mean(shell_com_cd))
-        # print("Average CD: ", np.mean(shell_cd))
-        #
-        # print("\nCompound: ", num_compound)
-        # print("Average Acc CD: ", np.mean(compound_acc_cd))
-        # print("Average Com CD: ", np.mean(compound_com_cd))
-        # print("Average CD: ", np.mean(compound_cd))
+        print("\nNon Solid: ", num_non_solid)
+        if num_non_solid != 0:
+            print("Average Acc CD: ", np.mean(non_solid_acc_cd))
+            print("Average Com CD: ", np.mean(non_solid_com_cd))
+            print("Average CD: ", np.mean(non_solid_cd))
+
+        print("\nShell: ", num_shell)
+        if num_shell != 0:
+            print("Average Acc CD: ", np.mean(shell_acc_cd))
+            print("Average Com CD: ", np.mean(shell_com_cd))
+            print("Average CD: ", np.mean(shell_cd))
+
+        print("\nCompound: ", num_compound)
+        if num_compound != 0:
+            print("Average Acc CD: ", np.mean(compound_acc_cd))
+            print("Average Com CD: ", np.mean(compound_com_cd))
+            print("Average CD: ", np.mean(compound_cd))
 
         # data = pd.DataFrame(all_stl_cd, columns=['all_stl_cd'])
         # print(data.info())

@@ -366,10 +366,26 @@ def create_wire(face, edges):
 
     return fix_wire.WireAPIMake()
 
+
+def set_face_uv_periodic(geom_face, tol=FIX_TOLERANCE):
+    u_min, u_max, v_min, v_max = geom_face.Bounds()
+    us = geom_face.Value(u_min, v_min)
+    ue = geom_face.Value(u_max, v_min)
+    if us.Distance(ue) < tol:
+        geom_face.SetUPeriodic()
+    vs = geom_face.Value(u_min, v_min)
+    ve = geom_face.Value(u_min, v_max)
+    if vs.Distance(ve) < tol:
+        geom_face.SetVPeriodic()
+    return geom_face
+
+
 """
 Fit parametric surfaces / curves and trim into B-rep
 """
-def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, debug_face_idx=[]):
+
+
+def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, is_save_face=True, debug_face_idx=[]):
     # Fit surface bspline
     recon_faces = []
     for points in surf_wcs:
@@ -382,7 +398,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
                 uv_points_array.SetValue(u_index, v_index, point_3d)
 
         precision = [1e-10, 1e-8, 1e-6, 1e-3, 1e-2]
-        deg_min, deg_max = 3, 48
+        deg_min, deg_max = 3, 8
         try:
             approx_face = GeomAPI_PointsToBSplineSurface(uv_points_array, deg_min, deg_max, GeomAbs_C2, precision[0]).Surface()
         except Exception as e:
@@ -399,10 +415,11 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
                     except Exception as e:
                         approx_face = GeomAPI_PointsToBSplineSurface(
                                 uv_points_array, deg_min, deg_max, GeomAbs_C2, precision[-1]).Surface()
-        if approx_face.IsUClosed():
-            approx_face.SetUPeriodic()
-        if approx_face.IsVClosed():
-            approx_face.SetVPeriodic()
+        # if approx_face.IsUClosed():
+        #     approx_face.SetUPeriodic()
+        # if approx_face.IsVClosed():
+        #     approx_face.SetVPeriodic()
+        approx_face = set_face_uv_periodic(approx_face)
         recon_faces.append(approx_face)
 
     recon_edges = []
@@ -416,7 +433,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
 
         precision = [1e-10, 1e-8, 1e-6, 1e-3, 1e-2]
         # precision = [5e-3, 8e-3, 5e-2]
-        deg_min, deg_max = 0, 48
+        deg_min, deg_max = 0, 8
 
         try:
             approx_edge = GeomAPI_PointsToBSpline(u_points_array, deg_min, deg_max, GeomAbs_C2, precision[0]).Curve()
@@ -447,10 +464,10 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
         if idx in debug_face_idx:
             is_viz_wire, is_viz_face, is_viz_shell = True, True, True
         else:
-            is_viz_wire, is_viz_face, is_viz_shell = False, False, True
+            is_viz_wire, is_viz_face, is_viz_shell = False, False, False
 
         # 2. Construct wires from edges
-        retry_times = 10 # Might be helpful
+        retry_times = 10  # Might be helpful
         wire_array = None
         for _ in range(retry_times):
             random.shuffle(face_edges)
@@ -567,7 +584,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             start_display()
 
         # save the face as step file and stl file
-        if isdebug and is_face_success:
+        if is_save_face and is_face_success:
             os.makedirs(os.path.join(folder_path, 'recon_face'), exist_ok=True)
             try:
                 write_step_file(face_occ, os.path.join(folder_path, 'recon_face', f'{idx}.step'))
@@ -589,7 +606,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
     sewing.Perform()
     sewn_shell = sewing.SewedShape()
 
-    if isdebug and is_viz_shell:  # sewn_shell.ShapeType() == TopAbs_COMPOUND:
+    if is_viz_shell:  # sewn_shell.ShapeType() == TopAbs_COMPOUND:
         # display it
         display, start_display, add_menu, add_function_to_menu = init_display()
         display.DisplayShape(sewn_shell, update=True)

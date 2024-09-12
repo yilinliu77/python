@@ -1,4 +1,5 @@
 import os
+import random
 import shutil
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Face, TopoDS_Edge, TopoDS_Vertex, TopoDS_Wire
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
-from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX, TopAbs_WIRE
+from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX, TopAbs_WIRE, TopAbs_COMPOUND
 from OCC.Core.GeomAbs import (GeomAbs_Circle, GeomAbs_Line, GeomAbs_BSplineCurve, GeomAbs_Ellipse,
                               GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone,
                               GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BSplineSurface, GeomAbs_C1, GeomAbs_C2)
@@ -31,7 +32,7 @@ from OCC.Extend.DataExchange import read_step_file, write_step_file
 import traceback, sys
 
 from shared.occ_utils import normalize_shape, get_triangulations, get_primitives, get_ordered_edges
-from src.brepnet.post.utils import construct_solid
+# from src.brepnet.post.utils import construct_solid
 
 write_debug_data = False
 check_post_processing = True
@@ -46,7 +47,7 @@ exception_files = [
 ]
 
 num_max_primitives = 100000
-sample_resolution = 32
+sample_resolution = 16
 
 def check_dir(v_path):
     if os.path.exists(v_path):
@@ -63,7 +64,7 @@ def safe_check_dir(v_path):
 def get_brep(v_root, output_root, v_folders):
     # v_folders = ["00001000"]
     single_loop_folder = []
-
+    random.seed(0)
     for idx, v_folder in enumerate(v_folders):
         # for idx, v_folder in enumerate(tqdm(v_folders)):
         safe_check_dir(output_root / v_folder)
@@ -239,39 +240,27 @@ def get_brep(v_root, output_root, v_folders):
                     assert edge not in face_edge_adj[face1]
                     face_edge_adj[face1].append(edge)
 
-                post_faces, is_face_success_list = construct_brep(
+                solid, is_face_success_list = construct_brep(
                     face_sample_points.astype(np.float32),
                     edge_sample_points.astype(np.float32),
                     face_edge_adj,
                     ".",
-                    debug_face_idx=[4]
+                    # debug_face_idx=[4]
                 )
-                if min(is_face_success_list) == False:
+                if solid.ShapeType() == TopAbs_COMPOUND:
                     raise ValueError("Post processing failed")
-                solid = construct_solid(post_faces)
+                write_step_file(solid, str(output_root / v_folder / "post_processed_shape.step"))
                 pass
 
             if not write_debug_data:
                 continue
-            import open3d as o3d
-            # Check
-            # Write face
-            pc_model = o3d.geometry.PointCloud()
-            pc_model.points = o3d.utility.Vector3dVector(face_sample_points.reshape(-1, 3))
-            o3d.io.write_point_cloud(str(output_root / v_folder / "face_sample_points.ply"), pc_model)
-
-            pc_model.points = o3d.utility.Vector3dVector(edge_sample_points.reshape(-1, 3))
-            o3d.io.write_point_cloud(str(output_root / v_folder / "edge_sample_points.ply"), pc_model)
-
-            check_dir(output_root / v_folder / "debug_topology")
-            for i in range(face_edge_loop.shape[0]):
-                points = []
-                for item in face_edge_loop[i]:
-                    if item == -1 or item == -2:
-                        continue
-                    points.append(edge_sample_points[item])
-                pc_model.points = o3d.utility.Vector3dVector(np.stack(points, axis=0).reshape(-1, 3))
-                o3d.io.write_point_cloud(str(output_root / v_folder / "debug_topology" / "{}.ply".format(i)), pc_model)
+            # import open3d as o3d
+            # pc_model = o3d.geometry.PointCloud()
+            # pc_model.points = o3d.utility.Vector3dVector(face_sample_points.reshape(-1, 3))
+            # o3d.io.write_point_cloud(str(output_root / v_folder / "face_sample_points.ply"), pc_model)
+            #
+            # pc_model.points = o3d.utility.Vector3dVector(edge_sample_points.reshape(-1, 3))
+            # o3d.io.write_point_cloud(str(output_root / v_folder / "edge_sample_points.ply"), pc_model)
         except Exception as e:
             with open(output_root / "error.txt", "a") as f:
                 tb_list = traceback.extract_tb(sys.exc_info()[2])
@@ -307,14 +296,14 @@ if __name__ == '__main__':
     check_dir(output_root)
 
     # single process
-    if False:
+    if True:
         get_brep(data_root, output_root, total_ids)
     else:
         ray.init(
             dashboard_host="0.0.0.0",
             dashboard_port=15000,
-            num_cpus=1,
-            local_mode=True
+            # num_cpus=1,
+            # local_mode=True
         )
         batch_size = 100
         num_batches = len(total_ids) // batch_size + 1

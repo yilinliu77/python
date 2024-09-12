@@ -10,19 +10,21 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.nn as nn
-from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeEdge
+from OCC.Core import BRepGProp
+from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeEdge, \
+    BRepBuilderAPI_MakeShell
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Sewing, BRepBuilderAPI_MakeSolid
 from OCC.Core.BRepOffsetAPI import BRepOffsetAPI_Sewing
 
 from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface, GeomAPI_PointsToBSpline
 from OCC.Core.GeomAbs import GeomAbs_C2
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_Wire
-from OCC.Core.ShapeExtend import ShapeExtend_WireData
+from OCC.Core.ShapeExtend import ShapeExtend_WireData, ShapeExtend_FAIL
 from OCC.Core.ShapeFix import ShapeFix_Face, ShapeFix_Wire, ShapeFix_Edge, ShapeFix_Shell, ShapeFix_Solid, \
     ShapeFix_ComposeShell
 from OCC.Core.TColgp import TColgp_Array1OfPnt
 from OCC.Core.TColgp import TColgp_Array2OfPnt
-from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_FORWARD, TopAbs_REVERSED
+from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_FORWARD, TopAbs_REVERSED, TopAbs_SHELL
 from OCC.Core.gp import gp_Pnt, gp_XYZ, gp_Vec
 from OCC.Display.SimpleGui import init_display
 from OCC.Extend.TopologyUtils import TopologyExplorer, WireExplorer
@@ -58,7 +60,7 @@ from OCC.Core.GeomPlate import (GeomPlate_BuildPlateSurface, GeomPlate_PointCons
                                 GeomPlate_MakeApprox, GeomPlate_PlateG0Criterion, GeomPlate_PlateG1Criterion, )
 from OCC.Core.GeomAbs import GeomAbs_C0
 from OCC.Core.TColgp import TColgp_SequenceOfXY, TColgp_SequenceOfXYZ
-from OCC.Core.BRepAdaptor import BRepAdaptor_Curve
+from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 
 from OCC.Core.GProp import GProp_GProps
 from OCC.Core.BRepGProp import brepgprop
@@ -67,7 +69,9 @@ from OCC.Core.Geom import Geom_Line
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_Curve
 from OCC.Core.Geom import Geom_BSplineCurve
 
-FIX_TOLERANCE = 1e-6
+from shared.occ_utils import get_primitives
+
+FIX_TOLERANCE = 1e-1
 
 
 def add_pcurves_to_edges(face):
@@ -76,21 +80,31 @@ def add_pcurves_to_edges(face):
     for wire in top_exp.wires():
         wire_exp = WireExplorer(wire)
         for edge in wire_exp.ordered_edges():
-            edge_fixer.FixAddPCurve(edge, face, False, FIX_TOLERANCE)
+            edge_fixer.FixAddPCurve(edge, face, False, 0.001)
 
 
 def fix_wires(face, debug=False):
     top_exp = TopologyExplorer(face, ignore_orientation=True)
     for wire in top_exp.wires():
         if debug:
-            wire_checker = ShapeAnalysis_Wire(wire, face, FIX_TOLERANCE)
+            wire_checker = ShapeAnalysis_Wire(wire, face, 0.01)
             print(f"Check order 3d {wire_checker.CheckOrder()}")
             print(f"Check 3d gaps {wire_checker.CheckGaps3d()}")
             print(f"Check closed {wire_checker.CheckClosed()}")
             print(f"Check connected {wire_checker.CheckConnected()}")
-        wire_fixer = ShapeFix_Wire(wire, face, FIX_TOLERANCE)
-
+        wire_fixer = ShapeFix_Wire(wire, face, 0.01)
+        wire_fixer.SetFixSmallMode(True)
+        wire_fixer.SetFixEdgeCurvesMode(True)
+        wire_fixer.SetModifyTopologyMode(True)
+        wire_fixer.SetModifyGeometryMode(True)
+        wire_fixer.SetFixGapsByRangesMode(True)
+        wire_fixer.SetFixGaps3dMode(True)
+        wire_fixer.SetFixTailMode(True)
+        wire_fixer.SetFixVertexToleranceMode(True)
+        wire_fixer.SetFixConnectedMode(True)
+        wire_fixer.SetFixShiftedMode(True)
         ok = wire_fixer.Perform()
+        return wire_fixer.Face()
         # assert ok
         # if not ok:
         #     display_trim_faces([face])
@@ -98,8 +112,8 @@ def fix_wires(face, debug=False):
 
 def fix_face(face):
     fixer = ShapeFix_Face(face)
-    fixer.SetPrecision(FIX_TOLERANCE)
-    fixer.SetMaxTolerance(FIX_TOLERANCE)
+    fixer.SetPrecision(0.01)
+    fixer.SetMaxTolerance(0.1)
     # fixer.SetAutoCorrectPrecisionMode(True)
     # fixer.SetFixMissingSeamMode(True)
     # fixer.SetFixOrientationMode(True)
@@ -341,6 +355,75 @@ def compute_mass(geom_face, wire):
     return area
 
 
+def create_surface(points, use_variational_smoothing=True):
+    def fit_face(uv_points_array, precision=1e-3, use_variational_smoothing=True):
+        deg_min, deg_max = 3, 8
+        if use_variational_smoothing:
+            weight_CurveLength, weight_Curvature, weight_Torsion = 1, 10, 10
+            return GeomAPI_PointsToBSplineSurface(uv_points_array, weight_CurveLength, weight_Curvature, weight_Torsion, deg_max,
+                                                  GeomAbs_C2, precision).Surface()
+        else:
+            return GeomAPI_PointsToBSplineSurface(uv_points_array, deg_min, deg_max, GeomAbs_C2, precision).Surface()
+
+    num_u_points, num_v_points = points.shape[0], points.shape[1]
+    uv_points_array = TColgp_Array2OfPnt(1, num_u_points, 1, num_v_points)
+    for u_index in range(1, num_u_points + 1):
+        for v_index in range(1, num_v_points + 1):
+            pt = points[u_index - 1, v_index - 1]
+            point_3d = gp_Pnt(float(pt[0]), float(pt[1]), float(pt[2]))
+            uv_points_array.SetValue(u_index, v_index, point_3d)
+
+    # precision = [1e-10, 1e-8, 1e-6, 1e-3, 1e-2]
+    precision = [1e-4, 1e-3, 5e-2]
+    try:
+        approx_face = fit_face(uv_points_array, precision[0], use_variational_smoothing)
+    except Exception as e:
+        try:
+            approx_face = fit_face(uv_points_array, precision[1], use_variational_smoothing)
+        except Exception as e:
+            try:
+                approx_face = fit_face(uv_points_array, precision[2], use_variational_smoothing)
+            except Exception as e:
+                approx_face = fit_face(uv_points_array, precision[-1], use_variational_smoothing)
+    approx_face = set_face_uv_periodic(approx_face)
+
+    return approx_face
+
+
+def create_edge(points, use_variational_smoothing=True):
+    def fit_edge(u_points_array, precision=1e-3, use_variational_smoothing=True):
+        deg_min, deg_max = 0, 8
+        if use_variational_smoothing:
+            weight_CurveLength, weight_Curvature, weight_Torsion = 1, 10, 10
+            return GeomAPI_PointsToBSpline(u_points_array, weight_CurveLength, weight_Curvature, weight_Torsion, deg_max,
+                                           GeomAbs_C2, precision).Curve()
+        else:
+            return GeomAPI_PointsToBSpline(u_points_array, deg_min, deg_max, GeomAbs_C2, precision).Curve()
+
+    num_u_points = points.shape[0]
+    u_points_array = TColgp_Array1OfPnt(1, num_u_points)
+    for u_index in range(1, num_u_points + 1):
+        pt = points[u_index - 1]
+        point_2d = gp_Pnt(float(pt[0]), float(pt[1]), float(pt[2]))
+        u_points_array.SetValue(u_index, point_2d)
+
+    # precision = [1e-10, 1e-8, 1e-6, 1e-3, 1e-2]
+    precision = [5e-3, 8e-3, 5e-2]
+    # precision = [5e-2]
+
+    try:
+        approx_edge = fit_edge(u_points_array, precision[0], use_variational_smoothing)
+    except Exception as e:
+        try:
+            approx_edge = fit_edge(u_points_array, precision[1], use_variational_smoothing)
+        except Exception as e:
+            try:
+                approx_edge = fit_edge(u_points_array, precision[2], use_variational_smoothing)
+            except Exception as e:
+                approx_edge = fit_edge(u_points_array, precision[-1], use_variational_smoothing)
+    return approx_edge
+
+
 # single loop
 def create_wire(face, edges):
     topo_wire = ShapeExtend_WireData()
@@ -366,71 +449,57 @@ def create_wire(face, edges):
 
     return fix_wire.WireAPIMake()
 
+
+def set_face_uv_periodic(geom_face, tol=5e-3):
+    u_min, u_max, v_min, v_max = geom_face.Bounds()
+    us = geom_face.Value(u_min, v_min)
+    ue = geom_face.Value(u_max, v_min)
+    if us.Distance(ue) < tol:
+        geom_face.SetUPeriodic()
+    vs = geom_face.Value(u_min, v_min)
+    ve = geom_face.Value(u_min, v_max)
+    if vs.Distance(ve) < tol:
+        geom_face.SetVPeriodic()
+    return geom_face
+
+def construct_solid(v_faces):
+    maker = BRepBuilderAPI_MakeSolid()
+    for face in v_faces:
+        sheller = BRepBuilderAPI_MakeShell(BRep_Tool.Surface(face))
+        maker.Add(sheller.Shell())
+    maker.Build()
+    solid = maker.Solid()
+
+    display, start_display, add_menu, add_function_to_menu = init_display()
+    display.DisplayShape(solid, update=True)
+    display.FitAll()
+    start_display()
+
+    fix_solid = ShapeFix_Solid(solid)
+    fix_solid.SetPrecision(FIX_TOLERANCE)
+    fix_solid.SetMaxTolerance(FIX_TOLERANCE)
+    fix_solid.SetFixShellMode(True)
+    fix_solid.SetFixShellOrientationMode(True)
+    fix_solid.SetCreateOpenSolidMode(True)
+    fix_solid.Perform()
+    fixed_solid = fix_solid.Solid()
+
+    return fixed_solid
+
 """
 Fit parametric surfaces / curves and trim into B-rep
 """
 def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, debug_face_idx=[]):
+    print('Building the B-rep...')
     # Fit surface bspline
     recon_faces = []
-    for points in surf_wcs:
-        num_u_points, num_v_points = surf_wcs.shape[1], surf_wcs.shape[2]
-        uv_points_array = TColgp_Array2OfPnt(1, num_u_points, 1, num_v_points)
-        for u_index in range(1, num_u_points + 1):
-            for v_index in range(1, num_v_points + 1):
-                pt = points[u_index - 1, v_index - 1]
-                point_3d = gp_Pnt(float(pt[0]), float(pt[1]), float(pt[2]))
-                uv_points_array.SetValue(u_index, v_index, point_3d)
-
-        precision = [1e-10, 1e-8, 1e-6, 1e-3, 1e-2]
-        deg_min, deg_max = 3, 48
-        try:
-            approx_face = GeomAPI_PointsToBSplineSurface(uv_points_array, deg_min, deg_max, GeomAbs_C2, precision[0]).Surface()
-        except Exception as e:
-            try:
-                approx_face = GeomAPI_PointsToBSplineSurface(uv_points_array, deg_min, deg_max, GeomAbs_C2, precision[1]).Surface()
-            except Exception as e:
-                try:
-                    approx_face = GeomAPI_PointsToBSplineSurface(
-                            uv_points_array, deg_min, deg_max, GeomAbs_C2, precision[2]).Surface()
-                except Exception as e:
-                    try:
-                        approx_face = GeomAPI_PointsToBSplineSurface(
-                                uv_points_array, deg_min, deg_max, GeomAbs_C2, precision[3]).Surface()
-                    except Exception as e:
-                        approx_face = GeomAPI_PointsToBSplineSurface(
-                                uv_points_array, deg_min, deg_max, GeomAbs_C2, precision[-1]).Surface()
-        if approx_face.IsUClosed():
-            approx_face.SetUPeriodic()
-        if approx_face.IsVClosed():
-            approx_face.SetVPeriodic()
+    for surf_points in surf_wcs:
+        approx_face = create_surface(surf_points)
         recon_faces.append(approx_face)
 
     recon_edges = []
     for points in edge_wcs:
-        num_u_points = edge_wcs.shape[1]
-        u_points_array = TColgp_Array1OfPnt(1, num_u_points)
-        for u_index in range(1, num_u_points + 1):
-            pt = points[u_index - 1]
-            point_2d = gp_Pnt(float(pt[0]), float(pt[1]), float(pt[2]))
-            u_points_array.SetValue(u_index, point_2d)
-
-        precision = [1e-10, 1e-8, 1e-6, 1e-3, 1e-2]
-        # precision = [5e-3, 8e-3, 5e-2]
-        deg_min, deg_max = 0, 48
-
-        try:
-            approx_edge = GeomAPI_PointsToBSpline(u_points_array, deg_min, deg_max, GeomAbs_C2, precision[0]).Curve()
-        except Exception as e:
-            try:
-                approx_edge = GeomAPI_PointsToBSpline(u_points_array, deg_min, deg_max, GeomAbs_C2, precision[1]).Curve()
-            except Exception as e:
-                try:
-                    approx_edge = GeomAPI_PointsToBSpline(u_points_array, deg_min, deg_max, GeomAbs_C2, precision[2]).Curve()
-                except Exception as e:
-                    try:
-                        approx_edge = GeomAPI_PointsToBSpline(u_points_array, deg_min, deg_max, GeomAbs_C2, precision[3]).Curve()
-                    except Exception as e:
-                        approx_edge = GeomAPI_PointsToBSpline(u_points_array, deg_min, deg_max, GeomAbs_C2, precision[-1]).Curve()
+        approx_edge = create_edge(points)
         recon_edges.append(approx_edge)
 
     # Create edges from the curve list
@@ -442,15 +511,16 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
     # Cut surface by wire
     is_face_success_list = []
     post_faces = []
-    for idx, (surface, edge_indices) in enumerate(zip(recon_faces, FaceEdgeAdj)):
-        face_edges = [edge_list[edge_idx] for edge_idx in edge_indices]
+    for idx, (surface, edge_incides) in enumerate(zip(recon_faces, FaceEdgeAdj)):
+        face_edges = [edge_list[edge_idx] for edge_idx in edge_incides]
+
         if idx in debug_face_idx:
             is_viz_wire, is_viz_face, is_viz_shell = True, True, True
         else:
-            is_viz_wire, is_viz_face, is_viz_shell = False, False, True
+            is_viz_wire, is_viz_face, is_viz_shell = False, False, False
 
         # 2. Construct wires from edges
-        retry_times = 10 # Might be helpful
+        retry_times = 10
         wire_array = None
         for _ in range(retry_times):
             random.shuffle(face_edges)
@@ -459,7 +529,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             edges_seq = TopTools_HSequenceOfShape()
             for edge in face_edges:
                 edges_seq.Append(edge)
-            wire_array_c = ShapeAnalysis_FreeBounds.ConnectEdgesToWires(edges_seq, FIX_TOLERANCE, False)
+            wire_array_c = ShapeAnalysis_FreeBounds.ConnectEdgesToWires(edges_seq, 0.1, False)
 
             # Check if all wires is valid
             all_wire_valid = True
@@ -500,34 +570,52 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
         sorted_wire_list = [x for _, x in sorted(zip(box_length_list, wire_list), key=lambda pair: pair[0], reverse=True)]
 
         # 5. Construct face using geom surface and wires
+        random.shuffle(sorted_wire_list)
         face_fixer = ShapeFix_Face()
-        face_fixer.Init(surface, FIX_TOLERANCE, True)
+        face_fixer.Init(surface, 0.01, False)
         for wire in sorted_wire_list:
             face_fixer.Add(wire)
-        face_fixer.SetAutoCorrectPrecisionMode(True)
-        face_fixer.SetFixOrientationMode(True)
-        face_fixer.SetFixSplitFaceMode(True)
-        face_fixer.SetFixMissingSeamMode(True)
+        # face_fixer.SetAutoCorrectPrecisionMode(True)
         face_fixer.SetFixWireMode(True)
-        face_fixer.SetFixLoopWiresMode(True)
-        face_fixer.SetFixIntersectingWiresMode(True)
-        face_fixer.SetFixPeriodicDegeneratedMode(True)
+        face_fixer.SetFixOrientationMode(True)
+        # face_fixer.SetFixSplitFaceMode(True)
+        face_fixer.SetFixMissingSeamMode(True)
+        # face_fixer.SetFixLoopWiresMode(True)
+        # face_fixer.SetFixIntersectingWiresMode(True)
+        # face_fixer.SetFixPeriodicDegeneratedMode(True)
+        # face_fixer.SetFixSmallAreaWireMode(True)
+        # face_fixer.Perform()
+        # face_fixer.FixMissingSeam()
+        # face_fixer.FixAddNaturalBound()
+        # face_fixer.FixOrientation()
+        # face_fixer.FixIntersectingWires()
+        # face_fixer.FixPeriodicDegenerated()
+
         face_fixer.Perform()
-        face_fixer.FixMissingSeam()
-        face_fixer.FixAddNaturalBound()
-        face_fixer.FixOrientation()
-        face_fixer.FixIntersectingWires()
-        face_fixer.FixPeriodicDegenerated()
         face_occ = face_fixer.Face()
+        # face_occ = fix_wires(face_occ)
+
+        props = GProp_GProps()
+        BRepGProp.brepgprop.SurfaceProperties(face_occ, props, False, True)
+
+        print(props.Mass())
+        print(face_occ.IsNull())
+        print(face_occ.Infinite())
+        print(face_occ.Closed())
+        print(face_occ.ShapeType())
+        print(face_occ.Checked())
+        print(face_occ.Free())
+        print()
+
         post_faces.append(face_occ)
 
         # display_trim_faces([face_occ])
         if is_viz_face:
-            write_stl_file(face_occ, 'debug.stl', linear_deflection=0.001, angular_deflection=0.5)
+            write_stl_file(face_occ, 'debug.stl', linear_deflection=0.1, angular_deflection=0.5)
             _post_faces = [face_occ]
             # Sew faces into solid
             sewing = BRepBuilderAPI_Sewing()
-            # sewing.SetTolerance(1e-3)
+            sewing.SetTolerance(1e-1)
             for face in _post_faces:
                 sewing.Add(face)
 
@@ -541,43 +629,19 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             display.FitAll()
             start_display()
 
-        # check if the face contains all edges
-        is_face_success = True
-        for edge_idx in edge_indices:
-            # check if all the control vertexes of each edge are in the face
-            is_edge_success = True
-            points = get_edge_vertexes(edge_list[edge_idx])
-            for point in points:
-                dist_shape_shape = BRepExtrema_DistShapeShape(point, face_occ)
-                min_dist = dist_shape_shape.Value()
-                if min_dist > 1e-3:
-                    is_edge_success = False
-                    break
-            if is_edge_success == False:
-                is_face_success = False
-                break
-
-        if isdebug and not is_face_success:
-            print(f"folder_path: {folder_path}, Face {idx} is not valid")
-            display, start_display, add_menu, add_function_to_menu = init_display()
-            display.DisplayShape(face_occ, update=True)
-            for edge in face_edges:
-                display.DisplayShape(edge, update=True)
-            display.FitAll()
-            start_display()
-
         # save the face as step file and stl file
-        if isdebug and is_face_success:
+        if isdebug or True:
             os.makedirs(os.path.join(folder_path, 'recon_face'), exist_ok=True)
-            try:
-                write_step_file(face_occ, os.path.join(folder_path, 'recon_face', f'{idx}.step'))
-                write_stl_file(face_occ, os.path.join(folder_path, 'recon_face', f'{idx}.stl'), linear_deflection=0.001,
-                               angular_deflection=0.5)
-            except:
-                print(f"Error writing step or stl file for face {idx}")
-
-        is_face_success_list.append(is_face_success)
+            # try:
+            # write_step_file(face_occ, os.path.join(folder_path, 'recon_face', f'{idx}.step'))
+            write_stl_file(face_occ, os.path.join(folder_path, 'recon_face', f'{idx}.stl'), linear_deflection=0.001,
+                           angular_deflection=0.5)
+            # except:
+            #     print(f"Error writing step or stl file for face {idx}")
+        is_face_success_list.append(face_occ.Closed())
         pass
+
+    return post_faces, is_face_success_list
 
     # Sew faces into solid
     sewing = BRepBuilderAPI_Sewing()
@@ -589,24 +653,40 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
     sewing.Perform()
     sewn_shell = sewing.SewedShape()
 
-    if isdebug and is_viz_shell:  # sewn_shell.ShapeType() == TopAbs_COMPOUND:
+    maker.Add(sewn_shell)
+    maker.Build()
+    solid = maker.Solid()
+
+    for shell in get_primitives(sewn_shell, TopAbs_SHELL):
+        display, start_display, add_menu, add_function_to_menu = init_display()
+        display.DisplayShape(shell, update=True)
+        display.FitAll()
+        start_display()
+
+    if is_viz_shell or isdebug:  # sewn_shell.ShapeType() == TopAbs_COMPOUND:
         # display it
         display, start_display, add_menu, add_function_to_menu = init_display()
         display.DisplayShape(sewn_shell, update=True)
         display.FitAll()
         start_display()
 
-    if sewn_shell.ShapeType() == TopAbs_COMPOUND:
-        return sewn_shell, is_face_success_list
+    # if sewn_shell.ShapeType() == TopAbs_COMPOUND:
+    #     return sewn_shell, is_face_success_list
 
     # fix the shell
-    # fix_shell = ShapeFix_Shell(sewn_shell)
-    # fix_shell.SetPrecision(FIX_TOLERANCE)
-    # fix_shell.SetMaxTolerance(FIX_TOLERANCE)
-    # fix_shell.SetFixFaceMode(True)
-    # fix_shell.SetFixOrientationMode(True)
-    # fix_shell.Perform()
-    # sewn_shell = fix_shell.Shell()
+    fix_shell = ShapeFix_Shell(sewn_shell)
+    fix_shell.SetPrecision(FIX_TOLERANCE)
+    fix_shell.SetMaxTolerance(FIX_TOLERANCE)
+    fix_shell.SetFixFaceMode(True)
+    # face_fixer = fix_shell.FixFaceTool()
+    # wire_fixer = face_fixer.FixWireTool()
+    # wire_fixer.SetModifyGeometryMode(True)
+    # wire_fixer.SetFixGapsByRangesMode(True)
+    # wire_fixer.SetFixGaps3dMode(True)
+    # wire_fixer.SetFixTailMode(True)
+    fix_shell.SetFixOrientationMode(True)
+    fix_shell.Perform()
+    sewn_shell = fix_shell.Shell()
 
     # Make a solid from the shell
     maker = BRepBuilderAPI_MakeSolid()

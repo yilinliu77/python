@@ -2,9 +2,9 @@ import os
 import shutil
 import sys
 import traceback
+import ray
 
 import numpy as np
-import open3d as o3d
 import tqdm
 from OCC.Core.BRepCheck import BRepCheck_Analyzer, BRepCheck_Status
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
@@ -18,10 +18,8 @@ from shared.common_utils import export_point_cloud
 
 from src.brepnet.post.utils import *
 
-import ray
-
-v_data_root = r"E:\data\img2brep\deepcad_whole_train_v5"
-v_out_root = r"E:\data\img2brep\deepcad_whole_train_v5_out"
+v_data_root = r"/mnt/d/data/deepcad_whole_train_v5"
+v_out_root = r"/mnt/d/data/deepcad_whole_train_v5_out"
 safe_check_dir(v_out_root)
 
 
@@ -107,7 +105,7 @@ def test_():
 if __name__ == '__main__':
     ray.init(
             dashboard_host="0.0.0.0",
-            dashboard_port=8080,
+            dashboard_port=15000,
             # num_cpus=1,
             # local_mode=True
     )

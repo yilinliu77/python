@@ -481,6 +481,7 @@ class SamplePointsAndComputeCD:
             print("Average Com CD: ", np.mean(compound_com_cd))
             print("Average CD: ", np.mean(compound_cd))
 
+        # info
         # data = pd.DataFrame(all_stl_cd, columns=['all_stl_cd'])
         # print(data.info())
         # print(data.describe(percentiles=[0.25, 0.5, 0.75, 0.9, 0.95, 0.99]))

@@ -10,7 +10,8 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.nn as nn
-from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeEdge
+from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeEdge, \
+    BRepBuilderAPI_MakeShell
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Sewing, BRepBuilderAPI_MakeSolid
 from OCC.Core.BRepOffsetAPI import BRepOffsetAPI_Sewing
 
@@ -22,7 +23,7 @@ from OCC.Core.ShapeFix import ShapeFix_Face, ShapeFix_Wire, ShapeFix_Edge, Shape
     ShapeFix_ComposeShell
 from OCC.Core.TColgp import TColgp_Array1OfPnt
 from OCC.Core.TColgp import TColgp_Array2OfPnt
-from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_FORWARD, TopAbs_REVERSED
+from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_FORWARD, TopAbs_REVERSED, TopAbs_SHELL
 from OCC.Core.gp import gp_Pnt, gp_XYZ, gp_Vec
 from OCC.Display.SimpleGui import init_display
 from OCC.Extend.TopologyUtils import TopologyExplorer, WireExplorer
@@ -58,7 +59,7 @@ from OCC.Core.GeomPlate import (GeomPlate_BuildPlateSurface, GeomPlate_PointCons
                                 GeomPlate_MakeApprox, GeomPlate_PlateG0Criterion, GeomPlate_PlateG1Criterion, )
 from OCC.Core.GeomAbs import GeomAbs_C0
 from OCC.Core.TColgp import TColgp_SequenceOfXY, TColgp_SequenceOfXYZ
-from OCC.Core.BRepAdaptor import BRepAdaptor_Curve
+from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 
 from OCC.Core.GProp import GProp_GProps
 from OCC.Core.BRepGProp import brepgprop
@@ -66,6 +67,8 @@ from OCC.Core.BRepGProp import brepgprop
 from OCC.Core.Geom import Geom_Line
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_Curve
 from OCC.Core.Geom import Geom_BSplineCurve
+
+from shared.occ_utils import get_primitives
 
 FIX_TOLERANCE = 1e-1
 
@@ -458,13 +461,34 @@ def set_face_uv_periodic(geom_face, tol=5e-3):
         geom_face.SetVPeriodic()
     return geom_face
 
+def construct_solid(v_faces):
+    maker = BRepBuilderAPI_MakeSolid()
+    for face in v_faces:
+        sheller = BRepBuilderAPI_MakeShell(BRep_Tool.Surface(face))
+        maker.Add(sheller.Shell())
+    maker.Build()
+    solid = maker.Solid()
 
+    display, start_display, add_menu, add_function_to_menu = init_display()
+    display.DisplayShape(solid, update=True)
+    display.FitAll()
+    start_display()
+
+    fix_solid = ShapeFix_Solid(solid)
+    fix_solid.SetPrecision(FIX_TOLERANCE)
+    fix_solid.SetMaxTolerance(FIX_TOLERANCE)
+    fix_solid.SetFixShellMode(True)
+    fix_solid.SetFixShellOrientationMode(True)
+    fix_solid.SetCreateOpenSolidMode(True)
+    fix_solid.Perform()
+    fixed_solid = fix_solid.Solid()
+
+    return fixed_solid
+
+"""
+Fit parametric surfaces / curves and trim into B-rep
+"""
 def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, debug_face_idx=[]):
-    # edge_wcs = unify_edge_endpoints(edge_wcs, FIX_TOLERANCE)
-
-    """
-    Fit parametric surfaces / curves and trim into B-rep
-    """
     print('Building the B-rep...')
     # Fit surface bspline
     recon_faces = []
@@ -487,29 +511,12 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
     is_face_success_list = []
     post_faces = []
     for idx, (surface, edge_incides) in enumerate(zip(recon_faces, FaceEdgeAdj)):
-        # random.shuffle(edge_incides)
         face_edges = [edge_list[edge_idx] for edge_idx in edge_incides]
-        # print_edge(face_edges, is_viz=True)
 
         if idx in debug_face_idx:
             is_viz_wire, is_viz_face, is_viz_shell = True, True, True
         else:
-            is_viz_wire, is_viz_face, is_viz_shell = False, False, True
-
-        # 1. Try to fix T-junction
-        # face_edges_merged = []
-        # for i in range(len(face_edges)):
-        #     for j in range(i + 1, len(face_edges)):
-        #         edge1, edge2 = face_edges[i], face_edges[j]
-        #         merged_edge = try_merge_two_edges(edge1, edge2)
-        #         if merged_edge is not None:
-        #             face_edges_merged.append((i, j, merged_edge))
-        # if len(face_edges_merged) > 0:
-        #     rm_edge_idx = []
-        #     for i, j, merged_edge in face_edges_merged:
-        #         face_edges[i], face_edges[j] = merged_edge, merged_edge
-        #         rm_edge_idx.append(j)
-        #     face_edges = [e for idx, e in enumerate(face_edges) if idx not in rm_edge_idx]
+            is_viz_wire, is_viz_face, is_viz_shell = False, False, False
 
         # 2. Construct wires from edges
         retry_times = 10
@@ -618,33 +625,8 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             display.FitAll()
             start_display()
 
-        # check if the face contains all edges
-        # is_face_success = True
-        # for edge_idx in edge_incides:
-        #     # check if all the control vertexes of each edge are in the face
-        #     is_edge_success = True
-        #     points = get_edge_vertexes(edge_list[edge_idx])
-        #     for point in points:
-        #         dist_shape_shape = BRepExtrema_DistShapeShape(point, face_occ)
-        #         min_dist = dist_shape_shape.Value()
-        #         if min_dist > 1e-2:
-        #             is_edge_success = False
-        #             break
-        #     if is_edge_success == False:
-        #         is_face_success = False
-        #         break
-
-        # if is_viz_face and not is_face_success:
-        #     print(f"folder_path: {folder_path}, Face {idx} is not valid")
-        #     display, start_display, add_menu, add_function_to_menu = init_display()
-        #     display.DisplayShape(face_occ, update=True)
-        #     for edge in face_edges:
-        #         display.DisplayShape(edge, update=True)
-        #     display.FitAll()
-        #     start_display()
-
         # save the face as step file and stl file
-        if True:
+        if isdebug or True:
             os.makedirs(os.path.join(folder_path, 'recon_face'), exist_ok=True)
             try:
                 write_step_file(face_occ, os.path.join(folder_path, 'recon_face', f'{idx}.step'))
@@ -656,6 +638,8 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
         is_face_success_list.append(True)
         pass
 
+    return post_faces, is_face_success_list
+
     # Sew faces into solid
     sewing = BRepBuilderAPI_Sewing()
     sewing.SetTolerance(FIX_TOLERANCE)
@@ -666,6 +650,16 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
     sewing.Perform()
     sewn_shell = sewing.SewedShape()
 
+    maker.Add(sewn_shell)
+    maker.Build()
+    solid = maker.Solid()
+
+    for shell in get_primitives(sewn_shell, TopAbs_SHELL):
+        display, start_display, add_menu, add_function_to_menu = init_display()
+        display.DisplayShape(shell, update=True)
+        display.FitAll()
+        start_display()
+
     if is_viz_shell or isdebug:  # sewn_shell.ShapeType() == TopAbs_COMPOUND:
         # display it
         display, start_display, add_menu, add_function_to_menu = init_display()
@@ -673,8 +667,8 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
         display.FitAll()
         start_display()
 
-    if sewn_shell.ShapeType() == TopAbs_COMPOUND:
-        return sewn_shell, is_face_success_list
+    # if sewn_shell.ShapeType() == TopAbs_COMPOUND:
+    #     return sewn_shell, is_face_success_list
 
     # fix the shell
     fix_shell = ShapeFix_Shell(sewn_shell)

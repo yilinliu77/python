@@ -6,7 +6,7 @@ import ray, trimesh
 import numpy as np
 from OCC.Core import TopoDS, TopExp, BRepBndLib
 from OCC.Core.Approx import Approx_Curve3d
-from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform, BRepBuilderAPI_MakeWire
+from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform, BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeEdge
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 from OCC.Core.BRepTools import BRepTools_WireExplorer
 from OCC.Core.Bnd import Bnd_Box
@@ -30,15 +30,19 @@ from OCC.Core.gp import gp_Trsf, gp_Vec, gp_Pnt
 from OCC.Extend.DataExchange import read_step_file, write_step_file
 import traceback, sys
 
+from shared.occ_utils import normalize_shape, get_triangulations, get_primitives, get_ordered_edges
+from src.brepnet.post.utils import construct_solid
+
 write_debug_data = False
+check_post_processing = True
 data_root = Path(r"d://data")
 output_root = Path(r"d://data/deepcad_whole_train_v5")
-data_split = r"src/img2brep/data/deepcad_train_whole.txt"
+data_split = r"src/brepnet/data/deepcad_train_whole.txt"
 
 exception_files = [
-    r"src/img2brep/data/abc_multiple_component_or_few_faces_ids_.txt",
-    r"src/img2brep/data/abc_cube_ids.txt",
-    r"src/img2brep/data/abc_with_others_ids.txt",
+    r"src/brepnet/data/abc_multiple_component_or_few_faces_ids_.txt",
+    r"src/brepnet/data/abc_cube_ids.txt",
+    r"src/brepnet/data/abc_with_others_ids.txt",
 ]
 
 num_max_primitives = 100000
@@ -74,72 +78,88 @@ def get_brep(v_root, output_root, v_folders):
             if shape.NbChildren() != 1:
                 raise ValueError("Multiple components: {}; Jump over".format(v_folder))
 
-            # Compute bounding box
-            boundings = 0.9
-            boundingBox = Bnd_Box()
-            BRepBndLib.brepbndlib.Add(shape, boundingBox)
-            xmin, ymin, zmin, xmax, ymax, zmax = boundingBox.Get()
-            scale_x = boundings * 2 / (xmax - xmin)
-            scale_y = boundings * 2 / (ymax - ymin)
-            scale_z = boundings * 2 / (zmax - zmin)
-            scaleFactor = min(scale_x, scale_y, scale_z)
-            translation1 = gp_Vec(-(xmax + xmin) / 2, -(ymax + ymin) / 2, -(zmax + zmin) / 2)
-            trsf1 = gp_Trsf()
-            trsf1.SetTranslationPart(translation1)
-            trsf2 = gp_Trsf()
-            trsf2.SetScaleFactor(scaleFactor)
-            trsf2.Multiply(trsf1)
-
-            transformer = BRepBuilderAPI_Transform(trsf2)
-            transformer.Perform(shape)
-            shape = transformer.Shape()
-            # Write step
+            shape = normalize_shape(shape, 0.9)
             write_step_file(shape, str(output_root / v_folder / "normalized_shape.step"))
 
-            mesh = BRepMesh_IncrementalMesh(shape, 0.001)
-            # Get vertices and faces
-            v = []
-            f = []
-            face_explorer = TopExp_Explorer(shape, TopAbs_FACE)
-            while face_explorer.More():
-                face = face_explorer.Current()
-                loc = TopLoc_Location()
-                triangulation = BRep_Tool.Triangulation(face, loc)
-                cur_vertex_size = len(v)
-                for i in range(1, triangulation.NbNodes() + 1):
-                    pnt = triangulation.Node(i)
-                    v.append([pnt.X(), pnt.Y(), pnt.Z()])
-                for i in range(1, triangulation.NbTriangles() + 1):
-                    t = triangulation.Triangle(i)
-                    if face.Orientation() == TopAbs_REVERSED:
-                        f.append([t.Value(3) + cur_vertex_size - 1, t.Value(2) + cur_vertex_size - 1, t.Value(1) + cur_vertex_size - 1])
-                    else:
-                        f.append([t.Value(1) + cur_vertex_size - 1, t.Value(2) + cur_vertex_size - 1, t.Value(3) + cur_vertex_size - 1])
-                face_explorer.Next()
+            v,f = get_triangulations(shape, 0.001)
             trimesh.Trimesh(vertices=np.array(v), faces=np.array(f)).export(output_root / v_folder / "mesh.ply")
-
-            # Function to explore and print the elements of a shape
-            def explore_shape(shape, shape_type):
-                explorer = TopExp_Explorer(shape, shape_type)
-                while explorer.More():
-                    yield explorer.Current()
-                    explorer.Next()
 
             # Explore and list faces, edges, and vertices
             face_dict = {}
-            for face in explore_shape(shape, TopAbs_FACE):
+            for face in get_primitives(shape, TopAbs_FACE):
                 if face not in face_dict:
                     face_dict[face] = len(face_dict)
             num_faces = len(face_dict)
-            edge_dict = {}
-            for edge in explore_shape(shape, TopAbs_EDGE):
-                if edge not in edge_dict:
-                    edge_dict[edge] = len(edge_dict)
-            num_edges = len(edge_dict)
-            vertex_dict = {}
-            for vertex in explore_shape(shape, TopAbs_VERTEX):
-                if vertex not in vertex_dict and vertex.Reversed() not in vertex_dict:
-                    vertex_dict[vertex] = len(vertex_dict)
+
+            # Store the adj faces of each edge
+            edge_face_look_up_table = {}
+            for face in face_dict:
+                edges = get_ordered_edges(face)
+                for wire in edges:
+                    for edge in wire:
+                        if edge not in edge_face_look_up_table:
+                            edge_face_look_up_table[edge] = [face]
+                        else:
+                            edge_face_look_up_table[edge].append(face)
+
+            # For each intersection (face-face), store the corresponding edges
+            face_face_adj_dict = {} # Used to check if two face produce more than 1 edge
+            for edge in edge_face_look_up_table:
+                if edge.Reversed() not in edge_face_look_up_table:
+                    raise ValueError("Edge not in edge_face_look_up_table")
+                if len(edge_face_look_up_table[edge]) != 1:
+                    raise ValueError("Edge indexed by more than 1 faces.")
+
+                item = (
+                    face_dict[edge_face_look_up_table[edge][0]],
+                    face_dict[edge_face_look_up_table[edge.Reversed()][0]]
+                )
+
+                if item not in face_face_adj_dict:
+                    face_face_adj_dict[item] = [edge]
+                else:
+                    face_face_adj_dict[item].append(edge)
+
+            edge_face_connectivity = []
+            # Merge curve if more than 1 edge are produced
+            for key in face_face_adj_dict:
+                curves = [item for item in face_face_adj_dict[key]]
+                if key[0] == key[1]: # Skip seam line
+                    continue
+
+                if len(curves) == 1:
+                    curve = curves[0]
+                else:
+                    wire_builder = BRepBuilderAPI_MakeWire()
+                    for edge in curves:
+                        wire_builder.Add(edge)
+                    if not wire_builder.IsDone():
+                        raise Exception("Error: Wire creation failed")
+                    wire = wire_builder.Wire()
+
+                    sample_points = []
+                    wire_explorer = BRepTools_WireExplorer(wire)
+                    while wire_explorer.More():
+                        edge = TopoDS.topods.Edge(wire_explorer.Current())
+                        curve = BRepAdaptor_Curve(edge)
+                        range_start = curve.FirstParameter() if edge.Orientation() == 0 else curve.LastParameter()
+                        range_end = curve.LastParameter() if edge.Orientation() == 0 else curve.FirstParameter()
+                        sample_u = np.linspace(range_start, range_end, num=sample_resolution)
+                        for u in sample_u:
+                            sample_points.append(curve.Value(u))
+                        wire_explorer.Next()
+                    # Fit BSpline
+                    u_points_array = TColgp_Array1OfPnt(1, len(sample_points))
+                    for i in range(len(sample_points)):
+                        u_points_array.SetValue(i + 1, sample_points[i])
+                    curve = GeomAPI_PointsToBSpline(u_points_array, 0, 8, GeomAbs_C2, 1e-3).Curve()
+                    curve = BRepBuilderAPI_MakeEdge(curve).Edge()
+
+                edge_face_connectivity.append((
+                    curve,
+                    key[0],
+                    key[1]
+                ))
 
             # Sample points in face
             face_sample_points = []
@@ -168,7 +188,10 @@ def get_brep(v_root, output_root, v_folders):
 
             # Sample points in edges
             edge_sample_points = []
-            for edge in edge_dict:
+            num_edges = len(edge_face_connectivity)
+            for i_intersection in range(num_edges):
+                edge, id_face1, id_face2 = edge_face_connectivity[i_intersection]
+                edge_face_connectivity[i_intersection] = (i_intersection,id_face1,id_face2)
                 curve = BRepAdaptor_Curve(edge)
                 if curve.GetType() not in [GeomAbs_Circle, GeomAbs_Line, GeomAbs_Ellipse, GeomAbs_BSplineCurve]:
                     raise ValueError("Unsupported curve type: {}".format(curve.GetType()))
@@ -183,126 +206,7 @@ def get_brep(v_root, output_root, v_folders):
                     sample_points.append(np.array([pnt.X(), pnt.Y(), pnt.Z()], dtype=np.float32))
                 edge_sample_points.append(np.stack(sample_points, axis=0))
             edge_sample_points = np.stack(edge_sample_points, axis=0)
-            assert len(edge_dict) == num_edges == edge_sample_points.shape[0]
-
-            # Sample points in vertices
-            vertex_sample_points = []
-            for vertex in vertex_dict:
-                pnt = BRep_Tool.Pnt(vertex)
-                vertex_sample_points.append(np.array([pnt.X(), pnt.Y(), pnt.Z()], dtype=np.float32))
-            vertex_sample_points = np.stack(vertex_sample_points, axis=0)
-
-            # (N, X) shows every loop with each face, -2 denotes a start token and pad with -1
-            face_edge_loop = []
-            vertex_edge_connectivity = []
-            #
-            edge_face_look_up_table = {}
-            vertex_edge_look_up_table = {}
-            for face in face_dict:
-                loops = []
-                for wire in explore_shape(face, TopAbs_WIRE):
-                    loops.append(-2)
-                    local_vertex_edge_connectivity = []
-                    wire_explorer = BRepTools_WireExplorer(wire)
-
-                    while wire_explorer.More():
-                        edge = TopoDS.topods.Edge(wire_explorer.Current())
-                        wire_explorer.Next()
-                        if edge not in edge_dict:
-                            raise ValueError("Edge not in edge_dict")
-                        loops.append(edge_dict[edge])
-
-                        if edge not in edge_face_look_up_table:
-                            edge_face_look_up_table[edge] = [face]
-                        else:
-                            edge_face_look_up_table[edge].append(face)
-
-                        second_vertex = TopExp.topexp.LastVertex(edge, True)
-                        local_vertex_edge_connectivity.append((
-                            vertex_dict[second_vertex] if second_vertex in vertex_dict else vertex_dict[
-                                second_vertex.Reversed()], edge_dict[edge]))
-
-                    for idv in range(len(local_vertex_edge_connectivity)):
-                        vertex_edge_connectivity.append((
-                            local_vertex_edge_connectivity[idv][0],
-                            local_vertex_edge_connectivity[idv][1],
-                            local_vertex_edge_connectivity[(idv + 1) % len(local_vertex_edge_connectivity)][1]
-                        ))
-
-                face_edge_loop.append(loops)
-
-            face_face_adj_dict = {} # Used to check if two face produce more than 1 edge
-            for edge in edge_face_look_up_table:
-                if edge.Reversed() not in edge_face_look_up_table:
-                    raise ValueError("Edge not in edge_face_look_up_table")
-                if len(edge_face_look_up_table[edge]) != 1:
-                    raise ValueError("Edge indexed by more than 1 faces.")
-
-                item = (
-                        face_dict[edge_face_look_up_table[edge][0]],
-                        face_dict[edge_face_look_up_table[edge.Reversed()][0]]
-                )
-
-                if item not in face_face_adj_dict:
-                    face_face_adj_dict[item] = [edge]
-                else:
-                    face_face_adj_dict[item].append(edge)
-                #
-                # edge_face_connectivity.append((
-                #     edge_dict[edge],
-                #     face_dict[edge_face_look_up_table[edge][0]],
-                #     face_dict[edge_face_look_up_table[edge.Reversed()][0]]
-                # ))
-
-            edge_face_connectivity = []
-            # Merge curve if more than 1 edge are produced
-            for key in face_face_adj_dict:
-                curves = [item for item in face_face_adj_dict[key]]
-                if len(curves) == 1:
-                    edge_face_connectivity.append((
-                        edge_dict[curves[0]],
-                        key[0],
-                        key[1]
-                    ))
-                else:
-                    wire_builder = BRepBuilderAPI_MakeWire()
-                    for edge in curves:
-                        wire_builder.Add(edge)
-                    if not wire_builder.IsDone():
-                        raise Exception("Error: Wire creation failed")
-                    wire = wire_builder.Wire()
-
-                    sample_points = []
-                    wire_explorer = BRepTools_WireExplorer(wire)
-                    while wire_explorer.More():
-                        edge = TopoDS.topods.Edge(wire_explorer.Current())
-                        curve = BRepAdaptor_Curve(edge)
-                        range_start = curve.FirstParameter() if edge.Orientation() == 0 else curve.LastParameter()
-                        range_end = curve.LastParameter() if edge.Orientation() == 0 else curve.FirstParameter()
-                        sample_u = np.linspace(range_start, range_end, num=sample_resolution)
-                        for u in sample_u:
-                            pnt = curve.Value(u)
-                            sample_points.append(np.array([pnt.X(), pnt.Y(), pnt.Z()], dtype=np.float32))
-                        wire_explorer.Next()
-                    # Fit BSpline
-                    u_points_array = TColgp_Array1OfPnt(1, len(sample_points))
-                    for i in range(len(sample_points)):
-                        u_points_array.SetValue(i + 1, gp_Pnt(*sample_points[i]))
-                    curve = GeomAPI_PointsToBSpline(u_points_array, 0, 8, GeomAbs_C2, 1e-3).Curve()
-                    pass
-
-            # Check
-            if len(edge_face_connectivity) != len(edge_dict):
-                raise ValueError("Wrong edge_face_connectivity")
-            # if len(vertex_edge_connectivity) != num_edges / 2 * (num_edges / 2 - 1):
-            #     raise ValueError("Wrong vertex_edge_connectivity")
-
             edge_face_connectivity = np.asarray(edge_face_connectivity, dtype=np.int32)
-            vertex_edge_connectivity = np.asarray(vertex_edge_connectivity, dtype=np.int32)
-
-            max_length = max(len(lst) for lst in face_edge_loop)
-            face_edge_loop = np.array(
-                [i + [-1] * (max_length - len(i)) for i in face_edge_loop], dtype=np.int32)
 
             # Accelerate the training
             # Prepare edge face intersection data
@@ -312,13 +216,10 @@ def get_brep(v_root, output_root, v_folders):
             zero_positions = np.stack(np.where(face_adj == 0), axis=1)
 
             data_dict = {
-                'sample_points_vertices': vertex_sample_points.astype(np.float32),
                 'sample_points_lines': edge_sample_points.astype(np.float32),
                 'sample_points_faces': face_sample_points.astype(np.float32),
 
-                'face_edge_loop': face_edge_loop.astype(np.int64),
                 'edge_face_connectivity': edge_face_connectivity.astype(np.int64),
-                'vertex_edge_connectivity': vertex_edge_connectivity.astype(np.int64),
 
                 "face_adj": face_adj,
                 "zero_positions": zero_positions,
@@ -326,9 +227,32 @@ def get_brep(v_root, output_root, v_folders):
 
             np.savez_compressed(output_root / v_folder / "data.npz", **data_dict)
             # continue
+
+            if check_post_processing:
+                from src.brepnet.post.utils import construct_brep
+
+                face_edge_adj = [[] for _ in range(face_sample_points.shape[0])]
+                for edge_face1_face2 in edge_face_connectivity:
+                    edge, face1, face2 = edge_face1_face2
+                    if face1 == face2:
+                        continue
+                    assert edge not in face_edge_adj[face1]
+                    face_edge_adj[face1].append(edge)
+
+                post_faces, is_face_success_list = construct_brep(
+                    face_sample_points.astype(np.float32),
+                    edge_sample_points.astype(np.float32),
+                    face_edge_adj,
+                    ".",
+                    debug_face_idx=[4]
+                )
+                if min(is_face_success_list) == False:
+                    raise ValueError("Post processing failed")
+                solid = construct_solid(post_faces)
+                pass
+
             if not write_debug_data:
                 continue
-
             import open3d as o3d
             # Check
             # Write face
@@ -364,7 +288,6 @@ def get_brep(v_root, output_root, v_folders):
             f.write(folder + "\n")
 
     return
-
 
 get_brep_ray = ray.remote(get_brep)
 

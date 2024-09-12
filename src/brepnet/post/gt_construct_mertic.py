@@ -127,7 +127,8 @@ class SamplePointsAndComputeCD:
         self.folder_names.sort()
         if is_debug:
             self.folder_names = self.folder_names[:32]
-        self.gen_name_condicate = ['recon_brep.stl', 'recon_brep_invaild.stl', 'recon_brep_compound.stl']
+        # self.gen_name_condicate = ['recon_brep.stl', 'recon_brep_invaild.stl', 'recon_brep_compound.stl']
+        self.gen_name_condicate = ['recon_brep.stl']
         self.SAMPLE_NUM = SAMPLE_NUM
         self.SAMPLE_NUM_FACE = int(10000)
 

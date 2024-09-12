@@ -118,7 +118,7 @@ class SamplePointsAndComputeCD:
     Perform sampleing of points.
     """
 
-    def __init__(self, gt_root, root_path, SAMPLE_NUM=100000, visable_gpu_id=[0],
+    def __init__(self, gt_root, root_path, SAMPLE_NUM=100000, visable_gpu_id=[0, 1, 2, 3, 4, 5, 6, 7],
                  num_cpus=32, batch_size=32, is_save_pc=True, is_debug=False):
         self.gt_root = gt_root
         self.root_path = root_path
@@ -368,7 +368,7 @@ class SamplePointsAndComputeCD:
         print("Loading return dict...")
         self.return_dict = np.load(self.return_dict_save_path, allow_pickle=True)['return_dict'].item()
         print("Return dict length: ", len(self.return_dict.keys()))
-        
+
         print("Computing statistics...")
         sum_recon_face, sum_gt_face = 0, 0
         sum_recon_edge, sum_gt_edge = 0, 0
@@ -526,9 +526,9 @@ if __name__ == '__main__':
     import os
 
     os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
-    app = SamplePointsAndComputeCD(gt_root=r"/mnt/d/data/deepcad_whole_train_v5",
-                                   root_path=r"/mnt/d/data/deepcad_whole_train_v5_out",
-                                   visable_gpu_id=[0, 1, 2, 3, 4, 5, 6, 7], is_save_pc=False, is_debug=True)
+    app = SamplePointsAndComputeCD(gt_root=r"E:\data\img2brep\deepcad_whole_train_v5",
+                                   root_path=r"E:\data\img2brep\deepcad_whole_train_v5_out",
+                                   visable_gpu_id=[0], is_save_pc=False, is_debug=False)
     app.run(is_parallel=False, is_save=True, is_info=True)
     # app.info()
     # app.find_complex()

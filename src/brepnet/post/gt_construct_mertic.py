@@ -367,9 +367,8 @@ class SamplePointsAndComputeCD:
     def info(self):
         print("Loading return dict...")
         self.return_dict = np.load(self.return_dict_save_path, allow_pickle=True)['return_dict'].item()
-        print(type(self.return_dict))
         print("Return dict length: ", len(self.return_dict.keys()))
-
+        
         print("Computing statistics...")
         sum_recon_face, sum_gt_face = 0, 0
         sum_recon_edge, sum_gt_edge = 0, 0
@@ -481,7 +480,6 @@ class SamplePointsAndComputeCD:
             print("Average Com CD: ", np.mean(compound_com_cd))
             print("Average CD: ", np.mean(compound_cd))
 
-        # info
         # data = pd.DataFrame(all_stl_cd, columns=['all_stl_cd'])
         # print(data.info())
         # print(data.describe(percentiles=[0.25, 0.5, 0.75, 0.9, 0.95, 0.99]))

@@ -454,15 +454,15 @@ class SamplePointsAndComputeCD:
         print("Average Com CD: ", np.mean(solid_com_cd))
         print("Average CD: ", np.mean(solid_cd))
 
-        print("\nShell: ", num_shell)
-        print("Average Acc CD: ", np.mean(shell_acc_cd))
-        print("Average Com CD: ", np.mean(shell_com_cd))
-        print("Average CD: ", np.mean(shell_cd))
-
-        print("\nCompound: ", num_compound)
-        print("Average Acc CD: ", np.mean(compound_acc_cd))
-        print("Average Com CD: ", np.mean(compound_com_cd))
-        print("Average CD: ", np.mean(compound_cd))
+        # print("\nShell: ", num_shell)
+        # print("Average Acc CD: ", np.mean(shell_acc_cd))
+        # print("Average Com CD: ", np.mean(shell_com_cd))
+        # print("Average CD: ", np.mean(shell_cd))
+        #
+        # print("\nCompound: ", num_compound)
+        # print("Average Acc CD: ", np.mean(compound_acc_cd))
+        # print("Average Com CD: ", np.mean(compound_com_cd))
+        # print("Average CD: ", np.mean(compound_cd))
 
         # data = pd.DataFrame(all_stl_cd, columns=['all_stl_cd'])
         # print(data.info())

@@ -15,9 +15,11 @@ from OCC.Core.Geom import Geom_BoundedCurve
 from OCC.Core.GeomAPI import GeomAPI_PointsToBSpline
 from OCC.Core.GeomAdaptor import GeomAdaptor_Curve
 from OCC.Core.GeomConvert import GeomConvert_CompCurveToBSplineCurve
+from OCC.Core.ShapeAnalysis import ShapeAnalysis_FreeBounds
 from OCC.Core.ShapeExtend import ShapeExtend_WireData
 from OCC.Core.TColgp import TColgp_Array1OfPnt
 from OCC.Core.TopLoc import TopLoc_Location
+from OCC.Core.TopTools import TopTools_HSequenceOfShape
 from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Face, TopoDS_Edge, TopoDS_Vertex, TopoDS_Wire
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
@@ -36,6 +38,8 @@ from shared.occ_utils import normalize_shape, get_triangulations, get_primitives
 
 write_debug_data = False
 check_post_processing = True
+debug_id = None
+debug_id = "00005083"
 data_root = Path(r"d://data")
 output_root = Path(r"d://data/deepcad_whole_train_v5")
 data_split = r"src/brepnet/data/deepcad_train_whole.txt"
@@ -131,12 +135,13 @@ def get_brep(v_root, output_root, v_folders):
                 if len(curves) == 1:
                     curve = curves[0]
                 else:
-                    wire_builder = BRepBuilderAPI_MakeWire()
+                    edges_seq = TopTools_HSequenceOfShape()
                     for edge in curves:
-                        wire_builder.Add(edge)
-                    if not wire_builder.IsDone():
+                        edges_seq.Append(edge)
+                    wire_array_c = ShapeAnalysis_FreeBounds.ConnectEdgesToWires(edges_seq, 0.001, False)
+                    if wire_array_c.Length() != 1:
                         raise Exception("Error: Wire creation failed")
-                    wire = wire_builder.Wire()
+                    wire = TopoDS.topods.Wire(wire_array_c.First())
 
                     sample_points = []
                     wire_explorer = BRepTools_WireExplorer(wire)
@@ -291,12 +296,12 @@ if __name__ == '__main__':
     num_original = len(total_ids)
     total_ids = list(set(total_ids) - set(exception_ids))
     total_ids.sort()
-    total_ids=["00005083"]
     print("Total ids: {} -> {}".format(num_original, len(total_ids)))
     check_dir(output_root)
 
     # single process
-    if True:
+    if debug_id is not None:
+        total_ids = [debug_id]
         get_brep(data_root, output_root, total_ids)
     else:
         ray.init(

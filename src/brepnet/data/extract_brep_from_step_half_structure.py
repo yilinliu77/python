@@ -41,9 +41,9 @@ write_debug_data = False
 check_post_processing = True
 debug_id = None
 debug_id = "00005083"
-data_root = Path(r"E:\data\img2brep")
-output_root = Path(r"E:\data\img2brep\extract_out")
-data_split = r"E:\data\img2brep\deepcad_train_whole.txt"
+data_root = Path(r"d://data")
+output_root = Path(r"d://data/deepcad_whole_train_v5")
+data_split = r"src/brepnet/data/deepcad_train_whole.txt"
 
 exception_files = [
     r"src/brepnet/data/abc_multiple_component_or_few_faces_ids_.txt",
@@ -251,7 +251,7 @@ def get_brep(v_root, output_root, v_folders):
                         face_sample_points.astype(np.float32),
                         edge_sample_points.astype(np.float32),
                         face_edge_adj,
-                        output_root / v_folder,
+                        ".",
                         # debug_face_idx=[4]
                 )
                 if solid.ShapeType() == TopAbs_COMPOUND:
@@ -289,24 +289,24 @@ def get_brep(v_root, output_root, v_folders):
 get_brep_ray = ray.remote(get_brep)
 
 if __name__ == '__main__':
+    total_ids = [item.strip() for item in open(data_split, "r").readlines()]
+
+    exception_ids = []
+    for file in exception_files:
+        exception_ids += [item.strip() for item in open(file, "r").readlines()]
+    exception_ids = list(set(exception_ids))
+
+    num_original = len(total_ids)
+    total_ids = list(set(total_ids) - set(exception_ids))
+    total_ids.sort()
+    print("Total ids: {} -> {}".format(num_original, len(total_ids)))
+    check_dir(output_root)
+
     # single process
     if debug_id is not None:
         total_ids = [debug_id]
         get_brep(data_root, output_root, total_ids)
     else:
-        total_ids = [item.strip() for item in open(data_split, "r").readlines()]
-
-        exception_ids = []
-        for file in exception_files:
-            exception_ids += [item.strip() for item in open(file, "r").readlines()]
-        exception_ids = list(set(exception_ids))
-
-        num_original = len(total_ids)
-        total_ids = list(set(total_ids) - set(exception_ids))
-        total_ids.sort()
-        print("Total ids: {} -> {}".format(num_original, len(total_ids)))
-        check_dir(output_root)
-
         ray.init(
                 dashboard_host="0.0.0.0",
                 dashboard_port=15000,

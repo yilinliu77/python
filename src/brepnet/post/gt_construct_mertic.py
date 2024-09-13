@@ -1,13 +1,17 @@
-import time, os, random, traceback
+import os
+
 import torch
 import numpy as np
+
 import multiprocessing
 from tqdm import tqdm
 import trimesh
-import argparse
 
 # import pandas as pd
+
 from chamferdist import ChamferDistance
+
+import random
 
 from OCC.Core.STEPControl import STEPControl_Reader
 from OCC.Core.TopExp import TopExp_Explorer
@@ -16,6 +20,9 @@ from OCC.Core.BRep import BRep_Tool
 from OCC.Core.gp import gp_Pnt
 from OCC.Core.IFSelect import IFSelect_RetDone
 from OCC.Extend.DataExchange import read_step_file, write_step_file, write_stl_file
+
+import traceback
+import time, os
 
 
 def write_ply(points, path):
@@ -516,21 +523,11 @@ class SamplePointsAndComputeCD:
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Evaluate The Generated Brep')
-    parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\deepcad_whole_train_v5")
-    parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\deepcad_whole_train_v5_out")
-    parser.add_argument('--used_gpu', type=int, nargs='+', default=[0])
-    args = parser.parse_args()
-    v_data_root = args.data_root
-    v_out_root = args.out_root
-
-    if not os.path.exists(v_data_root):
-        raise ValueError(f"Data root path {v_data_root} does not exist.")
-    if not os.path.exists(v_out_root):
-        raise ValueError(f"Output root path {v_out_root} does not exist.")
+    import os
 
     os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
-    app = SamplePointsAndComputeCD(gt_root=v_data_root, root_path=v_out_root,
+    app = SamplePointsAndComputeCD(gt_root=r"E:\data\img2brep\deepcad_whole_train_v5",
+                                   root_path=r"E:\data\img2brep\deepcad_whole_train_v5_out",
                                    visable_gpu_id=[0], is_save_pc=False, is_debug=False)
     app.run(is_parallel=False, is_save=True, is_info=True)
     # app.info()

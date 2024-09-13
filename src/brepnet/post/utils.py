@@ -68,7 +68,13 @@ from OCC.Core.ShapeAnalysis import ShapeAnalysis_Curve
 from OCC.Core.Geom import Geom_BSplineCurve
 
 FIX_TOLERANCE = 1e-6
-SEWING_TOLERANCE = 1e-4
+CONNECT_TOLERANCE = 1e-3
+SEWING_TOLERANCE = 1e-3
+
+
+# FIX_TOLERANCE = 1e-7
+# CONNECT_TOLERANCE = 1e-7
+# SEWING_TOLERANCE = 1e-7
 
 
 def fix_wires(face, debug=False):
@@ -400,7 +406,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             edges_seq = TopTools_HSequenceOfShape()
             for edge in face_edges:
                 edges_seq.Append(edge)
-            wire_array_c = ShapeAnalysis_FreeBounds.ConnectEdgesToWires(edges_seq, FIX_TOLERANCE, False)
+            wire_array_c = ShapeAnalysis_FreeBounds.ConnectEdgesToWires(edges_seq, CONNECT_TOLERANCE, False)
 
             # Check if all wires is valid
             all_wire_valid = True
@@ -442,7 +448,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
 
         # 5. Construct face using geom surface and wires
         face_fixer = ShapeFix_Face()
-        face_fixer.Init(surface, FIX_TOLERANCE, True)
+        face_fixer.Init(surface, CONNECT_TOLERANCE, True)
         for wire in sorted_wire_list:
             face_fixer.Add(wire)
         face_fixer.SetAutoCorrectPrecisionMode(True)
@@ -464,7 +470,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
 
         # display_trim_faces([face_occ])
         if is_viz_face:
-            write_stl_file(face_occ, 'debug.stl', linear_deflection=0.001, angular_deflection=0.5)
+            # write_stl_file(face_occ, 'debug.stl', linear_deflection=0.001, angular_deflection=0.5)
             _post_faces = [face_occ]
             # Sew faces into solid
             sewing = BRepBuilderAPI_Sewing()

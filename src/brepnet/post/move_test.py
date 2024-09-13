@@ -1,5 +1,6 @@
 import os, shutil
 from tqdm import tqdm
+import argparse
 
 data_root1 = r"/mnt/d/img2brep/0909_test"
 data_root2 = r"/mnt/d/img2brep/deepcad_whole_test_v4"
@@ -22,7 +23,6 @@ for filename in tqdm(all_files):
         if not src_folder:
             # print(f"{folder_names} No optional folder")
             continue
-            # raise
         if not os.path.exists(os.path.join(save_root, folder_names)):
             shutil.copytree(src_folder, os.path.join(save_root, folder_names))
 

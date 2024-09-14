@@ -4,12 +4,13 @@ from shared.common_utils import safe_check_dir, check_dir
 from shared.common_utils import export_point_cloud
 
 from src.brepnet.post.utils import *
+from src.brepnet.post.geom_optimization import optimize_geom, test_optimize_geom
 
 import ray
 import argparse
 
 
-def construct_brep_from_datanpz(data_root, out_root, folder_name_list, isdebug=False):
+def construct_brep_from_datanpz(data_root, out_root, folder_name_list, is_optimize_geom=False, isdebug=False):
     for folder_name in folder_name_list:
         try:
             safe_check_dir(os.path.join(out_root, folder_name))
@@ -41,7 +42,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name_list, isdebug=F
                 face_edge_adj[face1].append(edge)
 
             if isdebug:
-                debug_face_save_path = os.path.join(out_root, folder_name, "debug_face_loop")
+                debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
                 check_dir(debug_face_save_path)
                 export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), face_points.reshape(-1, 3))
                 export_point_cloud(os.path.join(debug_face_save_path, 'edge.ply'), edge_points.reshape(-1, 3))
@@ -51,6 +52,19 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name_list, isdebug=F
                                            edge_points[edge_idx],
                                            np.linspace([1, 0, 0], [0, 1, 0], edge_points[edge_idx].shape[0]))
 
+            # face_points = face_points + np.random.normal(0, 1e-3, size=(face_points.shape[0], 1, 1, 1))
+            # edge_points = edge_points + np.random.normal(0, 1e-3, size=(edge_points.shape[0], 1, 1))
+
+            if is_optimize_geom:
+                face_points, edge_points = optimize_geom(face_points, edge_points, edge_face_connectivity, face_edge_adj)
+
+                if isdebug:
+                    debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
+                    safe_check_dir(debug_face_save_path)
+                    export_point_cloud(os.path.join(debug_face_save_path, 'optimized_face.ply'), face_points.reshape(-1, 3))
+                    export_point_cloud(os.path.join(debug_face_save_path, 'optimized_edge.ply'), edge_points.reshape(-1, 3))
+
+            # Construct Brep from face_points, edge_points, face_edge_adj
             solid, faces_result = construct_brep(face_points, edge_points, face_edge_adj,
                                                  isdebug=isdebug, is_save_face=True,
                                                  folder_path=os.path.join(out_root, folder_name))
@@ -59,12 +73,14 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name_list, isdebug=F
                 print(f"solid is TopAbs_COMPOUND {folder_name}")
                 write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_compound.stl'),
                                linear_deflection=0.01, angular_deflection=0.5)
+                continue
 
             analyzer = BRepCheck_Analyzer(solid)
             if not analyzer.IsValid():
                 print(f"solid is invalid {folder_name}")
                 write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.stl'),
                                linear_deflection=0.01, angular_deflection=0.5)
+                continue
 
             # Valid Solid
             write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
@@ -85,14 +101,13 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name_list, isdebug=F
 construct_brep_from_datanpz_ray = ray.remote(construct_brep_from_datanpz)
 
 
-def test_construct_brep():
-    debug_folder = ["00092435"]
-    construct_brep_from_datanpz(v_data_root, v_out_root, debug_folder, isdebug=True)
+def test_construct_brep(v_data_root, v_out_root):
+    debug_folder = ["00005083"]
+    construct_brep_from_datanpz(v_data_root, v_out_root, debug_folder, is_optimize_geom=False, isdebug=True)
     exit(0)
 
 
 if __name__ == '__main__':
-    # test_construct_brep()
     parser = argparse.ArgumentParser(description='Construct Brep From Data')
     parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\deepcad_whole_train_v5")
     parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\deepcad_whole_train_v5_out")
@@ -102,6 +117,8 @@ if __name__ == '__main__':
     safe_check_dir(v_out_root)
     if not os.path.exists(v_data_root):
         raise ValueError(f"Data root path {v_data_root} does not exist.")
+
+    test_construct_brep(v_data_root, v_out_root)
 
     ray.init(
             dashboard_host="0.0.0.0",

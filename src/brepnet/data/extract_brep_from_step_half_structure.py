@@ -52,7 +52,7 @@ exception_files = [
 ]
 
 num_max_primitives = 100000
-sample_resolution = 16
+sample_resolution = 32
 
 
 def check_dir(v_path):

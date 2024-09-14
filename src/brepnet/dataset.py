@@ -99,8 +99,8 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
         data_npz = np.load(os.path.join(folder_path, "data.npz"))
 
         # Face sample points (num_faces*32*32*3)
-        face_points = torch.from_numpy(data_npz['sample_points_faces'][:, ::2, ::2])
-        line_points = torch.from_numpy(data_npz['sample_points_lines'][:, ::2])
+        face_points = torch.from_numpy(data_npz['sample_points_faces'])
+        line_points = torch.from_numpy(data_npz['sample_points_lines'])
 
         #  Which of two faces intersect and produce an edge (num_intersection, (id_edge, id_face1, id_face2))
         edge_face_connectivity = torch.from_numpy(data_npz['edge_face_connectivity'])

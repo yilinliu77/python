@@ -135,6 +135,8 @@ class TrainAutoEncoder(pl.LightningModule):
         # if self.trainer.sanity_checking:
         #     return
 
+        if self.global_rank != 0:
+            return
         if "recon_faces" in self.viz:
             self.log_dict(self.pr_computer.compute(), prog_bar=False, logger=True, on_step=False, on_epoch=True,
                         sync_dist=True)

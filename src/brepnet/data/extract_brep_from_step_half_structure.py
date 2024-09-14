@@ -34,6 +34,7 @@ from OCC.Extend.DataExchange import read_step_file, write_step_file
 import traceback, sys
 
 from shared.occ_utils import normalize_shape, get_triangulations, get_primitives, get_ordered_edges
+
 # from src.brepnet.post.utils import construct_solid
 
 write_debug_data = False
@@ -52,6 +53,7 @@ exception_files = [
 
 num_max_primitives = 100000
 sample_resolution = 16
+
 
 def check_dir(v_path):
     if os.path.exists(v_path):
@@ -86,7 +88,7 @@ def get_brep(v_root, output_root, v_folders):
             shape = normalize_shape(shape, 0.9)
             write_step_file(shape, str(output_root / v_folder / "normalized_shape.step"))
 
-            v,f = get_triangulations(shape, 0.001)
+            v, f = get_triangulations(shape, 0.001)
             trimesh.Trimesh(vertices=np.array(v), faces=np.array(f)).export(output_root / v_folder / "mesh.ply")
 
             # Explore and list faces, edges, and vertices
@@ -108,7 +110,7 @@ def get_brep(v_root, output_root, v_folders):
                             edge_face_look_up_table[edge].append(face)
 
             # For each intersection (face-face), store the corresponding edges
-            face_face_adj_dict = {} # Used to check if two face produce more than 1 edge
+            face_face_adj_dict = {}  # Used to check if two face produce more than 1 edge
             for edge in edge_face_look_up_table:
                 if edge.Reversed() not in edge_face_look_up_table:
                     raise ValueError("Edge not in edge_face_look_up_table")
@@ -129,7 +131,7 @@ def get_brep(v_root, output_root, v_folders):
             # Merge curve if more than 1 edge are produced
             for key in face_face_adj_dict:
                 curves = [item for item in face_face_adj_dict[key]]
-                if key[0] == key[1]: # Skip seam line
+                if key[0] == key[1]:  # Skip seam line
                     continue
 
                 if len(curves) == 1:
@@ -197,7 +199,7 @@ def get_brep(v_root, output_root, v_folders):
             num_edges = len(edge_face_connectivity)
             for i_intersection in range(num_edges):
                 edge, id_face1, id_face2 = edge_face_connectivity[i_intersection]
-                edge_face_connectivity[i_intersection] = (i_intersection,id_face1,id_face2)
+                edge_face_connectivity[i_intersection] = (i_intersection, id_face1, id_face2)
                 curve = BRepAdaptor_Curve(edge)
                 if curve.GetType() not in [GeomAbs_Circle, GeomAbs_Line, GeomAbs_Ellipse, GeomAbs_BSplineCurve]:
                     raise ValueError("Unsupported curve type: {}".format(curve.GetType()))
@@ -222,13 +224,13 @@ def get_brep(v_root, output_root, v_folders):
             zero_positions = np.stack(np.where(face_adj == 0), axis=1)
 
             data_dict = {
-                'sample_points_lines': edge_sample_points.astype(np.float32),
-                'sample_points_faces': face_sample_points.astype(np.float32),
+                'sample_points_lines'   : edge_sample_points.astype(np.float32),
+                'sample_points_faces'   : face_sample_points.astype(np.float32),
 
                 'edge_face_connectivity': edge_face_connectivity.astype(np.int64),
 
-                "face_adj": face_adj,
-                "zero_positions": zero_positions,
+                "face_adj"              : face_adj,
+                "zero_positions"        : zero_positions,
             }
 
             np.savez_compressed(output_root / v_folder / "data.npz", **data_dict)
@@ -246,11 +248,11 @@ def get_brep(v_root, output_root, v_folders):
                     face_edge_adj[face1].append(edge)
 
                 solid, is_face_success_list = construct_brep(
-                    face_sample_points.astype(np.float32),
-                    edge_sample_points.astype(np.float32),
-                    face_edge_adj,
-                    ".",
-                    # debug_face_idx=[4]
+                        face_sample_points.astype(np.float32),
+                        edge_sample_points.astype(np.float32),
+                        face_edge_adj,
+                        ".",
+                        # debug_face_idx=[4]
                 )
                 if solid.ShapeType() == TopAbs_COMPOUND:
                     raise ValueError("Post processing failed")
@@ -283,6 +285,7 @@ def get_brep(v_root, output_root, v_folders):
 
     return
 
+
 get_brep_ray = ray.remote(get_brep)
 
 if __name__ == '__main__':
@@ -305,18 +308,18 @@ if __name__ == '__main__':
         get_brep(data_root, output_root, total_ids)
     else:
         ray.init(
-            dashboard_host="0.0.0.0",
-            dashboard_port=15000,
-            # num_cpus=1,
-            # local_mode=True
+                dashboard_host="0.0.0.0",
+                dashboard_port=15000,
+                # num_cpus=1,
+                # local_mode=True
         )
         batch_size = 100
         num_batches = len(total_ids) // batch_size + 1
         tasks = []
         for i in range(num_batches):
             tasks.append(
-                get_brep_ray.remote(data_root,
-                                    output_root,
-                                    total_ids[i * batch_size:min(len(total_ids), (i + 1) * batch_size)]))
+                    get_brep_ray.remote(data_root,
+                                        output_root,
+                                        total_ids[i * batch_size:min(len(total_ids), (i + 1) * batch_size)]))
         ray.get(tasks)
         print("Done")

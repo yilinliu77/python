@@ -68,15 +68,13 @@ from OCC.Core.ShapeAnalysis import ShapeAnalysis_Curve
 from OCC.Core.Geom import Geom_BSplineCurve
 
 FIX_TOLERANCE = 1e-6
+CONNECT_TOLERANCE = 1e-3
+SEWING_TOLERANCE = 1e-3
 
 
-def add_pcurves_to_edges(face):
-    edge_fixer = ShapeFix_Edge()
-    top_exp = TopologyExplorer(face, ignore_orientation=True)
-    for wire in top_exp.wires():
-        wire_exp = WireExplorer(wire)
-        for edge in wire_exp.ordered_edges():
-            edge_fixer.FixAddPCurve(edge, face, False, FIX_TOLERANCE)
+# FIX_TOLERANCE = 1e-7
+# CONNECT_TOLERANCE = 1e-7
+# SEWING_TOLERANCE = 1e-7
 
 
 def fix_wires(face, debug=False):
@@ -223,60 +221,6 @@ def has_self_intersections(wire):
     return analysis.CheckSelfIntersection()
 
 
-def try_merge_two_edges(edge1, edge2, ang_tolerance=1 * 3.14 / 180, dis_tolerance=1e-6):
-    vertex1_start = topexp.FirstVertex(edge1)
-    vertex1_end = topexp.LastVertex(edge1)
-    vertex2_start = topexp.FirstVertex(edge2)
-    vertex2_end = topexp.LastVertex(edge2)
-
-    pnt1_start = BRep_Tool.Pnt(vertex1_start)
-    pnt1_end = BRep_Tool.Pnt(vertex1_end)
-    pnt2_start = BRep_Tool.Pnt(vertex2_start)
-    pnt2_end = BRep_Tool.Pnt(vertex2_end)
-
-    sample_points = []
-    curve_data1 = BRep_Tool.Curve(edge1)
-    curve_data2 = BRep_Tool.Curve(edge2)
-    if len(curve_data1) != 3 or len(curve_data2) != 3:
-        return None
-
-    curve1, first1, end1 = curve_data1
-    for i in np.linspace(first1, end1, 10):
-        sample_points.append(curve1.Value(i))
-    curve2, first2, end2 = curve_data2
-    for i in np.linspace(first2, end2, 10):
-        sample_points.append(curve2.Value(i))
-
-    is_colliner = True
-    vec1 = gp_Vec(sample_points[0], sample_points[1])
-    if vec1.Magnitude() == 0:
-        return None
-    for i in range(2, len(sample_points)):
-        vec2 = gp_Vec(sample_points[0], sample_points[i])
-        if vec2.Magnitude() == 0:
-            return None
-        if not vec1.IsParallel(vec2, ang_tolerance):
-            is_colliner = False
-            break
-
-    if not is_colliner:
-        return None
-
-    if pnt1_end.Distance(pnt2_start) < dis_tolerance and pnt1_start.Distance(pnt2_end) < dis_tolerance:
-        return None
-    elif pnt1_end.Distance(pnt2_start) < dis_tolerance:
-        new_start = vertex1_start
-        new_end = vertex2_end
-    elif pnt2_end.Distance(pnt1_start) < dis_tolerance:
-        new_start = vertex2_start
-        new_end = vertex1_end
-    else:
-        return None
-
-    merged_edge = BRepBuilderAPI_MakeEdge(new_start, new_end).Edge()
-    return merged_edge
-
-
 def viz_shape(shape):
     display, start_display, add_menu, add_function_to_menu = init_display()
     display.DisplayShape(shape, update=True)
@@ -366,10 +310,13 @@ def create_wire(face, edges):
 
     return fix_wire.WireAPIMake()
 
+
 """
 Fit parametric surfaces / curves and trim into B-rep
 """
-def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, debug_face_idx=[]):
+
+
+def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, is_save_face=True, debug_face_idx=[]):
     # Fit surface bspline
     recon_faces = []
     for points in surf_wcs:
@@ -447,10 +394,10 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
         if idx in debug_face_idx:
             is_viz_wire, is_viz_face, is_viz_shell = True, True, True
         else:
-            is_viz_wire, is_viz_face, is_viz_shell = False, False, True
+            is_viz_wire, is_viz_face, is_viz_shell = False, False, False
 
         # 2. Construct wires from edges
-        retry_times = 10 # Might be helpful
+        retry_times = 10  # Might be helpful
         wire_array = None
         for _ in range(retry_times):
             random.shuffle(face_edges)
@@ -459,7 +406,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             edges_seq = TopTools_HSequenceOfShape()
             for edge in face_edges:
                 edges_seq.Append(edge)
-            wire_array_c = ShapeAnalysis_FreeBounds.ConnectEdgesToWires(edges_seq, FIX_TOLERANCE, False)
+            wire_array_c = ShapeAnalysis_FreeBounds.ConnectEdgesToWires(edges_seq, CONNECT_TOLERANCE, False)
 
             # Check if all wires is valid
             all_wire_valid = True
@@ -501,7 +448,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
 
         # 5. Construct face using geom surface and wires
         face_fixer = ShapeFix_Face()
-        face_fixer.Init(surface, FIX_TOLERANCE, True)
+        face_fixer.Init(surface, CONNECT_TOLERANCE, True)
         for wire in sorted_wire_list:
             face_fixer.Add(wire)
         face_fixer.SetAutoCorrectPrecisionMode(True)
@@ -523,7 +470,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
 
         # display_trim_faces([face_occ])
         if is_viz_face:
-            write_stl_file(face_occ, 'debug.stl', linear_deflection=0.001, angular_deflection=0.5)
+            # write_stl_file(face_occ, 'debug.stl', linear_deflection=0.001, angular_deflection=0.5)
             _post_faces = [face_occ]
             # Sew faces into solid
             sewing = BRepBuilderAPI_Sewing()
@@ -567,7 +514,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             start_display()
 
         # save the face as step file and stl file
-        if isdebug and is_face_success:
+        if is_save_face and is_face_success:
             os.makedirs(os.path.join(folder_path, 'recon_face'), exist_ok=True)
             try:
                 write_step_file(face_occ, os.path.join(folder_path, 'recon_face', f'{idx}.step'))
@@ -581,7 +528,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
 
     # Sew faces into solid
     sewing = BRepBuilderAPI_Sewing()
-    sewing.SetTolerance(FIX_TOLERANCE)
+    sewing.SetTolerance(SEWING_TOLERANCE)
     for face in post_faces:
         sewing.Add(face)
 

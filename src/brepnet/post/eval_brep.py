@@ -1,18 +1,13 @@
-import os
-import sys
-
+import time, os, random, traceback
 import torch
 import numpy as np
-
 import multiprocessing
 from tqdm import tqdm
 import trimesh
+import argparse
 
 # import pandas as pd
-
 from chamferdist import ChamferDistance
-
-import random
 
 from OCC.Core.STEPControl import STEPControl_Reader
 from OCC.Core.TopExp import TopExp_Explorer
@@ -21,9 +16,6 @@ from OCC.Core.BRep import BRep_Tool
 from OCC.Core.gp import gp_Pnt
 from OCC.Core.IFSelect import IFSelect_RetDone
 from OCC.Extend.DataExchange import read_step_file, write_step_file, write_stl_file
-
-import traceback
-import time, os
 
 
 def write_ply(points, path):
@@ -56,7 +48,7 @@ def get_edge_length(edge, NUM_SEGMENTS=100):
 def read_step_and_get_data(step_file_path, NUM_SAMPLE_EDGE_UNIT=100):
     if not os.path.exists(step_file_path):
         return None, None
-    
+
     shape = read_step_file(step_file_path, verbosity=False)
 
     # face
@@ -119,17 +111,17 @@ class SamplePointsAndComputeCD:
     Perform sampleing of points.
     """
 
-    def __init__(self, root_path, SAMPLE_NUM=100000, num_cpus=32, batch_size=32, is_save_pc=True, is_debug=False):
-        """
-        Constructor.
-        """
+    def __init__(self, gt_root, root_path, SAMPLE_NUM=100000, visable_gpu_id=[0, 1, 2, 3, 4, 5, 6, 7],
+                 num_cpus=32, batch_size=32, is_save_pc=True, is_debug=False):
+        self.gt_root = gt_root
         self.root_path = root_path
         self.folder_names = [folder for folder in os.listdir(root_path) if os.path.isdir(os.path.join(root_path, folder))]
         # self.folder_names = np.load(r"/mnt/d/failed_face_folder.npz")['arr_0']
         self.folder_names.sort()
         if is_debug:
             self.folder_names = self.folder_names[:32]
-        self.gen_name_condicate = ['recon_brep.stl', 'recon_brep_invaild.stl', 'recon_brep_compound.stl']
+        # self.gen_name_condicate = ['recon_brep.stl', 'recon_brep_invaild.stl', 'recon_brep_compound.stl']
+        self.gen_name_condicate = ['recon_brep.stl']
         self.SAMPLE_NUM = SAMPLE_NUM
         self.SAMPLE_NUM_FACE = int(10000)
 
@@ -140,7 +132,7 @@ class SamplePointsAndComputeCD:
         self.chamfer_distance = ChamferDistance()
         self.num_cpus = num_cpus
         self.batch_size = batch_size
-        self.gpu_list = [torch.device(f"cuda:{i}") for i in [0, 1, 2, 3, 4, 5, 6, 7]]
+        self.gpu_list = [torch.device(f"cuda:{i}") for i in visable_gpu_id]
         print("Using GPU list: ", self.gpu_list)
 
         self.return_dict_save_path = os.path.join(os.path.dirname(self.root_path), 'return_dict.npz')
@@ -153,10 +145,10 @@ class SamplePointsAndComputeCD:
             return True
         else:
             return False
-        
+
     def process_one(self, folder_name):
         if os.path.exists(os.path.join(self.root_path, folder_name, 'error.txt')):
-                os.remove(os.path.join(self.root_path, folder_name, 'error.txt'))
+            os.remove(os.path.join(self.root_path, folder_name, 'error.txt'))
         if os.path.exists(os.path.join(self.root_path, folder_name, 'eval.npz')):
             os.remove(os.path.join(self.root_path, folder_name, 'eval.npz'))
 
@@ -188,17 +180,17 @@ class SamplePointsAndComputeCD:
         chamfer_distance = ChamferDistance()
 
         # gt info
-        gt_mesh_path = os.path.join(self.root_path, folder_name, 'mesh.ply')
+        gt_mesh_path = os.path.join(self.gt_root, folder_name, 'mesh.ply')
         gt_mesh = trimesh.load(gt_mesh_path)
         gt_pc, _ = trimesh.sample.sample_surface(gt_mesh, self.SAMPLE_NUM)
         gt_pc_tensor = torch.from_numpy(gt_pc).float().to(device)
 
-        data_npz = np.load(os.path.join(self.root_path, folder_name, 'data.npz'))
+        data_npz = np.load(os.path.join(self.gt_root, folder_name, 'data.npz'))
         result['num_gt_face'] = data_npz['sample_points_faces'].shape[0]
         # result['num_gt_edge'] = data_npz['sample_points_lines'].shape[0]
         # result['num_gt_vertex'] = data_npz['sample_points_vertices'].shape[0]
 
-        gt_step_path = os.path.join(self.root_path, folder_name, 'gt_normalized.step')
+        gt_step_path = os.path.join(self.gt_root, folder_name, 'normalized_shape.step')
         gt_vertexes, gt_edge_points = read_step_and_get_data(gt_step_path)
         result['num_gt_edge'] = len(gt_edge_points)
         result['num_gt_vertex'] = len(gt_vertexes)
@@ -216,9 +208,9 @@ class SamplePointsAndComputeCD:
             recon_face_pc, _ = trimesh.sample.sample_surface(recon_face_stl_mesh, self.SAMPLE_NUM)
             recon_face_pc_tensor = torch.from_numpy(recon_face_pc).float().to(device)
             acc_cd = chamfer_distance(recon_face_pc_tensor.unsqueeze(0), gt_pc_tensor.unsqueeze(0),
-                                        bidirectional=False, point_reduction='mean').cpu().item()
+                                      bidirectional=False, point_reduction='mean').cpu().item()
             com_cd = chamfer_distance(gt_pc_tensor.unsqueeze(0), recon_face_pc_tensor.unsqueeze(0),
-                                        bidirectional=False, point_reduction='mean').cpu().item()
+                                      bidirectional=False, point_reduction='mean').cpu().item()
             cd = (acc_cd + com_cd) / 2
             result['face_acc_cd'].append(acc_cd)
             result['face_com_cd'].append(com_cd)
@@ -237,9 +229,9 @@ class SamplePointsAndComputeCD:
             gen_edge_points = np.concatenate(gen_edge_points, axis=0)
             recon_edge_pc_tensor = torch.from_numpy(gen_edge_points).float().to(device)
             acc_cd = chamfer_distance(recon_edge_pc_tensor.unsqueeze(0), gt_edge_tensor.unsqueeze(0),
-                                        bidirectional=False, point_reduction='mean').cpu().item()
+                                      bidirectional=False, point_reduction='mean').cpu().item()
             com_cd = chamfer_distance(gt_edge_tensor.unsqueeze(0), recon_edge_pc_tensor.unsqueeze(0),
-                                        bidirectional=False, point_reduction='mean').cpu().item()
+                                      bidirectional=False, point_reduction='mean').cpu().item()
             cd = (acc_cd + com_cd) / 2
             result['edge_acc_cd'].append(acc_cd)
             result['edge_com_cd'].append(com_cd)
@@ -251,9 +243,9 @@ class SamplePointsAndComputeCD:
             gen_vertexes = np.stack(gen_vertexes, axis=0)
             recon_vertex_pc_tensor = torch.from_numpy(gen_vertexes).float().to(device)
             acc_cd = chamfer_distance(recon_vertex_pc_tensor.unsqueeze(0), gt_vertex_tensor.unsqueeze(0),
-                                        bidirectional=False, point_reduction='mean').cpu().item()
+                                      bidirectional=False, point_reduction='mean').cpu().item()
             com_cd = chamfer_distance(gt_vertex_tensor.unsqueeze(0), recon_vertex_pc_tensor.unsqueeze(0),
-                                        bidirectional=False, point_reduction='mean').cpu().item()
+                                      bidirectional=False, point_reduction='mean').cpu().item()
             cd = (acc_cd + com_cd) / 2
             result['vertex_acc_cd'].append(acc_cd)
             result['vertex_com_cd'].append(com_cd)
@@ -273,7 +265,7 @@ class SamplePointsAndComputeCD:
         else:
             if os.path.exists(recon_face_dir):
                 gen_mesh = trimesh.util.concatenate([trimesh.load(os.path.join(recon_face_dir, f))
-                                                        for f in os.listdir(recon_face_dir) if f.endswith('.stl')])
+                                                     for f in os.listdir(recon_face_dir) if f.endswith('.stl')])
             else:
                 gen_mesh = None
 
@@ -281,9 +273,9 @@ class SamplePointsAndComputeCD:
             gen_pc, _ = trimesh.sample.sample_surface(gen_mesh, self.SAMPLE_NUM)
             gen_pc_tensor = torch.from_numpy(gen_pc).float().to(device)
             acc_cd = chamfer_distance(gen_pc_tensor.unsqueeze(0), gt_pc_tensor.unsqueeze(0),
-                                        bidirectional=False, point_reduction='mean').cpu().item()
+                                      bidirectional=False, point_reduction='mean').cpu().item()
             com_cd = chamfer_distance(gt_pc_tensor.unsqueeze(0), gen_pc_tensor.unsqueeze(0),
-                                        bidirectional=False, point_reduction='mean').cpu().item()
+                                      bidirectional=False, point_reduction='mean').cpu().item()
             result['stl_acc_cd'] = acc_cd
             result['stl_com_cd'] = com_cd
             result['stl_cd'] = (acc_cd + com_cd) / 2
@@ -335,7 +327,7 @@ class SamplePointsAndComputeCD:
         pool.close()
         pool.join()
 
-    def run(self, is_parallel=False, is_save=False,is_info=False):
+    def run(self, is_parallel=False, is_save=False, is_info=False):
         if is_parallel:
             self.run_parallel()
         else:
@@ -359,7 +351,8 @@ class SamplePointsAndComputeCD:
 
         np.savez_compressed(self.return_dict_save_path, return_dict=return_dict, allow_pickle=True)
         if len(self.exception_folders) != 0:
-            np.savez_compressed(os.path.join(os.path.dirname(self.root_path), 'exception_folders.npz'), exception_folders=self.exception_folders)
+            np.savez_compressed(os.path.join(os.path.dirname(self.root_path), 'exception_folders.npz'),
+                                exception_folders=self.exception_folders)
         print(f"Len exception folders: {len(self.exception_folders)}")
         print(f"Len return dict: {len(return_dict)}")
         print("Return dict is saved in {}".format(self.return_dict_save_path))
@@ -367,7 +360,6 @@ class SamplePointsAndComputeCD:
     def info(self):
         print("Loading return dict...")
         self.return_dict = np.load(self.return_dict_save_path, allow_pickle=True)['return_dict'].item()
-        print(type(self.return_dict))
         print("Return dict length: ", len(self.return_dict.keys()))
 
         print("Computing statistics...")
@@ -380,11 +372,12 @@ class SamplePointsAndComputeCD:
         all_vertex_acc_cd, all_vertex_com_cd, all_vertex_cd = [], [], []
 
         all_stl_acc_cd, all_stl_com_cd, all_stl_cd = [], [], []
-        num_soild, num_shell, num_compound = 0, 0, 0
+        num_solid, num_shell, num_compound, num_non_solid = 0, 0, 0, 0
 
         solid_acc_cd, solid_com_cd, solid_cd = [], [], []
         shell_acc_cd, shell_com_cd, shell_cd = [], [], []
         compound_acc_cd, compound_com_cd, compound_cd = [], [], []
+        non_solid_acc_cd, non_solid_com_cd, non_solid_cd = [], [], []
 
         for each in tqdm(self.return_dict.values()):
             sum_recon_face += int(each['num_recon_face'])
@@ -411,11 +404,17 @@ class SamplePointsAndComputeCD:
             all_stl_cd.append(each['stl_cd'])
 
             if each['stl_type'] == 'recon_brep.stl':
-                num_soild += 1
+                num_solid += 1
                 solid_acc_cd.append(each['stl_acc_cd'])
                 solid_com_cd.append(each['stl_com_cd'])
                 solid_cd.append(each['stl_cd'])
-            elif each['stl_type'] == 'recon_brep_compound.stl':
+            else:
+                num_non_solid += 1
+                non_solid_acc_cd.append(each['stl_acc_cd'])
+                non_solid_com_cd.append(each['stl_com_cd'])
+                non_solid_cd.append(each['stl_cd'])
+
+            if each['stl_type'] == 'recon_brep_compound.stl':
                 num_shell += 1
                 shell_acc_cd.append(each['stl_acc_cd'])
                 shell_com_cd.append(each['stl_com_cd'])
@@ -450,42 +449,33 @@ class SamplePointsAndComputeCD:
         print("Average COM CD: ", np.mean(all_vertex_com_cd))
         print("Average CD: ", np.mean(all_vertex_cd))
 
-        print("\nSoild: ", num_soild)
-        print("Average Acc CD: ", np.mean(solid_acc_cd))
-        print("Average Com CD: ", np.mean(solid_com_cd))
-        print("Average CD: ", np.mean(solid_cd))
+        print("\nSolid: ", num_solid)
+        if num_solid != 0:
+            print("Average Acc CD: ", np.mean(solid_acc_cd))
+            print("Average Com CD: ", np.mean(solid_com_cd))
+            print("Average CD: ", np.mean(solid_cd))
+
+        print("\nNon Solid: ", num_non_solid)
+        if num_non_solid != 0:
+            print("Average Acc CD: ", np.mean(non_solid_acc_cd))
+            print("Average Com CD: ", np.mean(non_solid_com_cd))
+            print("Average CD: ", np.mean(non_solid_cd))
 
         print("\nShell: ", num_shell)
-        print("Average Acc CD: ", np.mean(shell_acc_cd))
-        print("Average Com CD: ", np.mean(shell_com_cd))
-        print("Average CD: ", np.mean(shell_cd))
+        if num_shell != 0:
+            print("Average Acc CD: ", np.mean(shell_acc_cd))
+            print("Average Com CD: ", np.mean(shell_com_cd))
+            print("Average CD: ", np.mean(shell_cd))
 
         print("\nCompound: ", num_compound)
-        print("Average Acc CD: ", np.mean(compound_acc_cd))
-        print("Average Com CD: ", np.mean(compound_com_cd))
-        print("Average CD: ", np.mean(compound_cd))
+        if num_compound != 0:
+            print("Average Acc CD: ", np.mean(compound_acc_cd))
+            print("Average Com CD: ", np.mean(compound_com_cd))
+            print("Average CD: ", np.mean(compound_cd))
 
         # data = pd.DataFrame(all_stl_cd, columns=['all_stl_cd'])
         # print(data.info())
         # print(data.describe(percentiles=[0.25, 0.5, 0.75, 0.9, 0.95, 0.99]))
-
-    def check(self):
-        print("Checking...")
-        acc_cd_list = list(self.acc_cd.values())
-        com_cd_list = list(self.com_cd.values())
-        cd_list = list(self.cd.values())
-        avg_acc_cd = np.mean(acc_cd_list)
-        avg_com_cd = np.mean(com_cd_list)
-        avg_cd = np.mean(cd_list)
-
-        print("Average Acc Chamfer Distance: ", avg_acc_cd)
-        print("Average Com Chamfer Distance: ", avg_com_cd)
-        print("Average Chamfer Distance: ", avg_cd)
-
-        print(f"Success: {len(acc_cd_list)} / {len(self.folder_names)}")
-        np.savez(os.path.join(os.path.dirname(self.root_path), 'acc_cd.npz'), **self.acc_cd)
-        np.savez(os.path.join(os.path.dirname(self.root_path), 'com_cd.npz'), **self.com_cd)
-        np.savez(os.path.join(os.path.dirname(self.root_path), 'cd.npz'), **self.cd)
 
     def rerun_check(self):
         print("Checking CD")
@@ -505,7 +495,8 @@ class SamplePointsAndComputeCD:
         if os.path.exists(save_root):
             shutil.rmtree(save_root)
         os.makedirs(save_root, exist_ok=False)
-        seg_save_root = [os.path.join(save_root, 'face>30'), os.path.join(save_root, 'face>20'), os.path.join(save_root, 'face>10'), os.path.join(save_root, 'else')]
+        seg_save_root = [os.path.join(save_root, 'face>30'), os.path.join(save_root, 'face>20'), os.path.join(save_root, 'face>10'),
+                         os.path.join(save_root, 'else')]
         for each in seg_save_root:
             os.makedirs(each, exist_ok=True)
 
@@ -523,11 +514,24 @@ class SamplePointsAndComputeCD:
                 continue
                 shutil.copytree(os.path.join(self.root_path, folder_name), os.path.join(seg_save_root[3], folder_name))
 
+
 if __name__ == '__main__':
-    folder = sys.argv[1]
-    if not os.path.exists(folder):
-        print(f"Folder {folder} not exists")
-    app = SamplePointsAndComputeCD(root_path=folder, is_save_pc=False, is_debug=False)
-    app.run(is_parallel=True, is_save=True, is_info=True)
+    parser = argparse.ArgumentParser(description='Evaluate The Generated Brep')
+    parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\deepcad_whole_train_v5")
+    parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\deepcad_whole_train_v5_out")
+    parser.add_argument('--used_gpu', type=int, nargs='+', default=[0])
+    args = parser.parse_args()
+    v_data_root = args.data_root
+    v_out_root = args.out_root
+
+    if not os.path.exists(v_data_root):
+        raise ValueError(f"Data root path {v_data_root} does not exist.")
+    if not os.path.exists(v_out_root):
+        raise ValueError(f"Output root path {v_out_root} does not exist.")
+
+    os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
+    app = SamplePointsAndComputeCD(gt_root=v_data_root, root_path=v_out_root,
+                                   visable_gpu_id=[0], is_save_pc=False, is_debug=False)
+    app.run(is_parallel=False, is_save=True, is_info=True)
     # app.info()
     # app.find_complex()

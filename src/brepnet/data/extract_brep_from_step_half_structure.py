@@ -40,9 +40,9 @@ from shared.occ_utils import normalize_shape, get_triangulations, get_primitives
 write_debug_data = False
 check_post_processing = True
 debug_id = None
-debug_id = "00005083"
-data_root = Path(r"d://data")
-output_root = Path(r"d://data/deepcad_whole_train_v5")
+# debug_id = "00005083"
+data_root = Path(r"/mnt/e/data/")
+output_root = Path(r"/mnt/d/img2brep/deepcad_whole_train_v5")
 data_split = r"src/brepnet/data/deepcad_train_whole.txt"
 
 exception_files = [

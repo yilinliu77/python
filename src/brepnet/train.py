@@ -125,14 +125,18 @@ class TrainAutoEncoder(pl.LightningModule):
             if "pred_edge" in recon_data:
                 self.viz["edge_points"] = data["edge_points"].cpu().numpy()
                 self.viz["recon_edges"] = recon_data["pred_edge"]
-        if "pred" in recon_data:
-            self.pr_computer.update(recon_data["pred"], recon_data["gt"])
+        if "gt_face_adj" in recon_data:
+            pred = torch.from_numpy(recon_data["pred_face_adj"]).to(total_loss.device)
+            gt = torch.from_numpy(recon_data["gt_face_adj"]).to(total_loss.device)
+            self.pr_computer.update(pred.reshape(-1), gt.reshape(-1))
         return total_loss
 
     def on_validation_epoch_end(self):
         # if self.trainer.sanity_checking:
         #     return
 
+        if self.global_rank != 0:
+            return
         if "recon_faces" in self.viz:
             self.log_dict(self.pr_computer.compute(), prog_bar=False, logger=True, on_step=False, on_epoch=True,
                         sync_dist=True)

@@ -2157,6 +2157,7 @@ class AutoEncoder_context_KL(AutoEncoder_context):
     def __init__(self, v_conf):
         super().__init__(v_conf)
         self.gaussian_proj = nn.Linear(self.df, self.df*2)
+        self.gaussian_weights = 1e-4
 
     def forward(self, v_data, v_test=False):
         timer = time.time()
@@ -2245,7 +2246,7 @@ class AutoEncoder_context_KL(AutoEncoder_context):
             intersected_edge_feature,
             edge_features[edge_face_connectivity[:, 0]]
         )
-        loss["kl_loss"] = kl_loss
+        loss["kl_loss"] = kl_loss * self.gaussian_weights
         loss["total_loss"] = sum(loss.values())
         timer = add_timer(self.time_statics, "loss", timer)
 

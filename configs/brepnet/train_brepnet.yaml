@@ -29,6 +29,7 @@ model:
   dim_latent: 32
   dim_shape: 32
   norm: "layer"
+  gaussian_weights: 0.0001
 
 hydra:
   run:

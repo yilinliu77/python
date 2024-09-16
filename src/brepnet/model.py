@@ -2157,7 +2157,7 @@ class AutoEncoder_context_KL(AutoEncoder_context):
     def __init__(self, v_conf):
         super().__init__(v_conf)
         self.gaussian_proj = nn.Linear(self.df, self.df*2)
-        self.gaussian_weights = 1e-4
+        self.gaussian_weights = v_conf["gaussian_weights"]
 
     def forward(self, v_data, v_test=False):
         timer = time.time()
@@ -2193,7 +2193,7 @@ class AutoEncoder_context_KL(AutoEncoder_context):
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         fused_face_features = eps.mul(std).add_(mean)
-        kl_loss = (-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())) * 1e-6
+        kl_loss = (-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())) * self.gaussian_weights
 
         # Global
         bs = v_data["num_face_record"].shape[0]
@@ -2246,7 +2246,7 @@ class AutoEncoder_context_KL(AutoEncoder_context):
             intersected_edge_feature,
             edge_features[edge_face_connectivity[:, 0]]
         )
-        loss["kl_loss"] = kl_loss * self.gaussian_weights
+        loss["kl_loss"] = kl_loss
         loss["total_loss"] = sum(loss.values())
         timer = add_timer(self.time_statics, "loss", timer)
 

@@ -1,12 +1,11 @@
 dataset:
-  dataset_name: Autoencoder_Dataset
+  dataset_name: "AutoEncoder_dataset"
 
   train_dataset: D:/img2brep/deepcad_whole_test_v3
   val_dataset: D:/img2brep/deepcad_whole_test_v3
   test_dataset: D:/img2brep/deepcad_whole_test_v3
   train_feature_dataset:
   val_feature_dataset:
-
 
   bbox_discrete_dim: 256
   coor_discrete_dim: 128
@@ -38,12 +37,13 @@ trainer:
   max_epochs: 10000000
   spawn: false
   output: .
+  exp_name:
 
 model:
-  model_name: AutoEncoder
+  model_name: "AutoEncoder_inter"
 
   # Dimension
-  dim_latent: 256
+  dim_latent: 8
   dim_shape: 256
   dim_decoder: 256
   bbox_discrete_dim: 256
@@ -54,8 +54,9 @@ model:
   with_vae: false
   vae_weight: 0.1
 
-  encoder: "Discrete_encoder" # "Continuous_encoder", "Discrete_encoder"
-  decoder: "Discrete_decoder" # "Small_decoder_plus", "Discrete_decoder"
+  encoder: "Separate_encoder" # "Separate_encoder", "Separate_encoder_late_proj", "Fused_encoder"
+  decoder: "Small_decoder" # "Small_decoder",
+  fuser: "Attn_fuser_cross" # "Attn_fuser_cross", "Attn_fuser_cross_big",
   intersector: "Attn_intersector_classifier"  # "Attn_intersector", "Proj_intersector"
   graphconv: "GAT" # "SAGE", "GAT"
 

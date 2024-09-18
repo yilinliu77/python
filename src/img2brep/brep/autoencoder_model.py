@@ -1,9 +1,7 @@
 import importlib
-import os
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Union
 
-import numpy as np
 import torch
 from diffusers import AutoencoderKL, ModelMixin, ConfigMixin
 from diffusers.configuration_utils import register_to_config
@@ -11,22 +9,16 @@ from diffusers.models.attention_processor import SpatialNorm, AttentionProcessor
 from diffusers.models.modeling_outputs import AutoencoderKLOutput
 from diffusers.utils import is_torch_version
 from diffusers.utils.accelerate_utils import apply_forward_hook
-from sklearn.cluster import KMeans, MiniBatchKMeans
-from torch.optim import Adam
+from sklearn.cluster import MiniBatchKMeans
 from torch.utils.data import DataLoader
 # from torch.utils.flop_counter import FlopCounterMode
-from torch_geometric.nn import SAGEConv, GATv2Conv
 from tqdm import tqdm
-from vector_quantize_pytorch import ResidualLFQ, VectorQuantize, ResidualVQ, FSQ, ResidualFSQ
-
-import pytorch_lightning as pl
+from vector_quantize_pytorch import LFQ, ResidualLFQ, VectorQuantize, ResidualVQ, FSQ, ResidualFSQ
 
 from shared.common_utils import *
 from src.img2brep.brep.common import *
 from src.img2brep.brep.model_encoder import GAT_GraphConv, SAGE_GraphConv, res_block_1D, res_block_2D
-from src.img2brep.brep.model_fuser import Attn_fuser_cross, Attn_fuser_single
-
-import open3d as o3d
+from src.img2brep.model_fuser import Attn_fuser_cross, Attn_fuser_single
 
 
 def l1norm(t):
@@ -1012,8 +1004,7 @@ class AutoEncoder3(nn.Module):
         return loss, data
 
 
-from diffusers.models.unets.unet_1d_blocks import ResConvBlock, SelfAttention1d, get_down_block, get_up_block, \
-    Upsample1d
+from diffusers.models.unets.unet_1d_blocks import ResConvBlock, SelfAttention1d, get_down_block, Upsample1d
 from diffusers.models.autoencoders.vae import Decoder, DecoderOutput, DiagonalGaussianDistribution, Encoder
 
 
@@ -2172,20 +2163,22 @@ class AutoEncoder5(nn.Module):
         self.bbox_embedding = nn.Embedding(self.bd, 64)
         self.coords_embedding = nn.Embedding(self.cd, 64)
 
-        hidden_dim = 256
+        hidden_dim = self.dim_shape
         self.face_coords = nn.Sequential(
             nn.Embedding(v_conf["coor_discrete_dim"] - 1, 64),
             Rearrange('b h w n c -> b (n c) h w'),
             nn.Conv2d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
             res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
-            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 16
             res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
-            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 8
             res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
-            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 4
             res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=1),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 2
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 1
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
         )
         self.face_bbox = nn.Sequential(
             nn.Embedding(self.bd, 64),
@@ -2219,14 +2212,16 @@ class AutoEncoder5(nn.Module):
             Rearrange('b h n c -> b (n c) h'),
             nn.Conv1d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
             res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
-            nn.MaxPool1d(kernel_size=2, stride=2),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 16
             res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
-            nn.MaxPool1d(kernel_size=2, stride=2),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 8
             res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
-            nn.MaxPool1d(kernel_size=2, stride=2),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 4
             res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
-            nn.MaxPool1d(kernel_size=2, stride=2),
-            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=1),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 2
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 1
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
         )
 
         self.edge_fuser = nn.Sequential(
@@ -2249,9 +2244,8 @@ class AutoEncoder5(nn.Module):
 
         # ================== Decoder ==================
         self.face_bbox_decoder = nn.Sequential(
-            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
-            nn.MaxPool2d(kernel_size=4, stride=4),
             Rearrange('... 1 1 -> ... (1 1)'),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
             res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
             res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
             res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
@@ -2261,19 +2255,22 @@ class AutoEncoder5(nn.Module):
 
         self.face_coords_decoder = nn.Sequential(
             res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
-            nn.Upsample(scale_factor=2, mode="bilinear"),
+            nn.Upsample(scale_factor=2, mode="bilinear"), # 2
             res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
-            nn.Upsample(scale_factor=2, mode="bilinear"),
+            nn.Upsample(scale_factor=2, mode="bilinear"), # 4
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"), # 8
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"), # 16
             res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
-            nn.Upsample(scale_factor=2, mode="bilinear"),
+            nn.Upsample(scale_factor=2, mode="bilinear"), # 32
             res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
             nn.Conv2d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
             Rearrange('... (p c) w h -> ... w h p c', p=3, c=self.cd),
         )
 
         self.edge_bbox_decoder = nn.Sequential(
-            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
-            nn.MaxPool1d(kernel_size=4, stride=4),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
             res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
             res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
             res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
@@ -2282,12 +2279,16 @@ class AutoEncoder5(nn.Module):
         )
 
         self.edge_coords_decoder = nn.Sequential(
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="linear"), # 2
             res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
-            nn.Upsample(scale_factor=2, mode="linear"),
+            nn.Upsample(scale_factor=2, mode="linear"), # 4
             res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
-            nn.Upsample(scale_factor=2, mode="linear"),
+            nn.Upsample(scale_factor=2, mode="linear"), # 8
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="linear"), # 16
             res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
-            nn.Upsample(scale_factor=2, mode="linear"),
+            nn.Upsample(scale_factor=2, mode="linear"), # 32
             res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
             nn.Conv1d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
             Rearrange('... (p c) w-> ... w p c', p=3, c=self.cd),
@@ -2325,13 +2326,10 @@ class AutoEncoder5(nn.Module):
                 nn.Conv2d(3, hidden_dim, kernel_size=1, stride=1, padding=0),
             )
         else:
+            # 2
             self.bottleneck = nn.Sequential(
-                nn.Identity()
-            )
-
-            self.bottleneck = nn.Sequential(
-                nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
-                nn.Conv2d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+                nn.Conv2d(hidden_dim, self.dim_latent, kernel_size=1, stride=1, padding=0),
+                nn.Conv2d(self.dim_latent, hidden_dim, kernel_size=1, stride=1, padding=0),
             )
 
     # Inference (B * num_faces * num_features)
@@ -2715,11 +2713,15 @@ class AutoEncoder_derect_discrete(nn.Module):
             Rearrange('b h w n c -> b (n c) h w'),
             nn.Conv2d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
             res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
             nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
             res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
             nn.MaxPool2d(kernel_size=2, stride=2),
             res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.MaxPool2d(kernel_size=2, stride=2),
             nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=1),
@@ -2730,11 +2732,15 @@ class AutoEncoder_derect_discrete(nn.Module):
             Rearrange('b h n c -> b (n c) h'),
             nn.Conv1d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
             res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
             nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
             res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
             nn.MaxPool1d(kernel_size=2, stride=2),
             res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.MaxPool1d(kernel_size=2, stride=2),
             nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=1),
@@ -2753,11 +2759,15 @@ class AutoEncoder_derect_discrete(nn.Module):
         # ================== Decoder ==================
         self.face_coords_decoder = nn.Sequential(
             res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.Upsample(scale_factor=2, mode="bilinear"),
             res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
             nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
             res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
             nn.Conv2d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
             Rearrange('... (p c) w h -> ... w h p c', p=3, c=self.cd),
@@ -2765,11 +2775,15 @@ class AutoEncoder_derect_discrete(nn.Module):
 
         self.edge_coords_decoder = nn.Sequential(
             res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
             nn.Upsample(scale_factor=2, mode="linear"),
             res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
             nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
             res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
             nn.Conv1d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
             Rearrange('... (p c) w-> ... w p c', p=3, c=self.cd),
@@ -3151,3 +3165,2254 @@ class AutoEncoder_derect_discrete(nn.Module):
             loss["true_recon_vertex"] = true_recon_vertex_loss
 
         return loss, data
+
+
+class AutoEncoder6(nn.Module):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder6, self).__init__()
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+        self.bd = v_conf["bbox_discrete_dim"] - 1
+        self.cd = v_conf["coor_discrete_dim"] - 1
+        self.bbox_embedding = nn.Embedding(self.bd, 64)
+        self.coords_embedding = nn.Embedding(self.cd, 64)
+
+        hidden_dim = 256
+        self.face_coords = nn.Sequential(
+            nn.Embedding(v_conf["coor_discrete_dim"] - 1, 64),
+            Rearrange('b h w n c -> b (n c) h w'),
+            nn.Conv2d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+        self.face_bbox = nn.Sequential(
+            nn.Embedding(self.bd, 64),
+            Rearrange('b n c-> b (n c) 1'),
+            nn.Conv1d(6 * 64, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+
+        self.face_fuser = nn.Sequential(
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+
+        self.edge_bbox = nn.Sequential(
+            nn.Embedding(self.bd, 64),
+            Rearrange('b n c-> b (n c) 1'),
+            nn.Conv1d(6 * 64, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+        self.edge_coords = nn.Sequential(
+            nn.Embedding(self.cd, 64),
+            Rearrange('b h n c -> b (n c) h'),
+            nn.Conv1d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+
+        self.edge_fuser = nn.Sequential(
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+
+        self.vertices_encoder = nn.Sequential(
+            nn.Embedding(self.cd, 64),
+            Rearrange('b n c -> b (n c) 1'),
+            nn.Conv1d(3 * 64, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+
+        # ================== Decoder ==================
+        self.face_bbox_decoder = nn.Sequential(
+            # res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            # nn.MaxPool2d(kernel_size=4, stride=4),
+            Rearrange('... 1 1 -> ... (1 1)'),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, 6 * self.bd, kernel_size=1, stride=1, padding=0),
+            Rearrange('...(p c) 1-> ... p c', p=6, c=self.bd),
+        )
+
+        self.face_coords_decoder = nn.Sequential(
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.Conv2d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (p c) w h -> ... w h p c', p=3, c=self.cd),
+        )
+
+        self.edge_bbox_decoder = nn.Sequential(
+            # res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            # nn.MaxPool1d(kernel_size=4, stride=4),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, 6 * self.bd, kernel_size=1, stride=1, padding=0),
+            Rearrange('...(p c) 1-> ... p c', p=6, c=self.bd),
+        )
+
+        self.edge_coords_decoder = nn.Sequential(
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.Conv1d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (p c) w-> ... w p c', p=3, c=self.cd),
+        )
+
+        self.vertex_coords_decoder = nn.Sequential(
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (p c) 1-> ... (1 p) c', p=3, c=self.cd),
+        )
+
+        self.frozen_models = []
+        # ================== Quantization ==================
+        self.with_quantization = v_conf["with_quantization"]
+        self.with_vae = v_conf["with_vae"]
+        if self.with_quantization:
+            self.quantizer_in = nn.Sequential(
+                nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+            )
+            self.quantizer = FSQ(
+                dim=6,
+                num_codebooks=1,
+                levels=[8, 8, 8, 5, 5, 5],
+            )
+            self.quantizer_out = nn.Sequential(
+                nn.Conv2d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+        elif self.with_vae:
+            self.vae_proj = nn.Sequential(
+                nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+            )
+            self.vae_out = nn.Sequential(
+                nn.Conv2d(3, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+        else:
+            self.bottleneck = nn.Sequential(
+                nn.Identity()
+            )
+
+            self.bottleneck = nn.Sequential(
+                nn.Conv2d(hidden_dim, 32, kernel_size=1, stride=1, padding=0),
+                nn.Conv2d(32, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+
+    def forward(self, v_data,
+                return_recon=False,
+                return_loss=True,
+                return_face_features=False,
+                return_true_loss=False,
+                **kwargs):
+        face_mask = (v_data["discrete_face_bboxes"]!=-1).all(dim=-1)
+        face_bbox = self.face_bbox(v_data["discrete_face_bboxes"][face_mask])
+        face_coords = self.face_coords(v_data["discrete_face_points"][face_mask])
+        face_features = self.face_fuser(face_bbox[...,None] + face_coords)
+
+        edge_mask = (v_data["discrete_edge_bboxes"]!=-1).all(dim=-1)
+        edge_bbox = self.edge_bbox(v_data["discrete_edge_bboxes"][edge_mask])
+        edge_coords = self.edge_coords(v_data["discrete_edge_points"][edge_mask])
+        edge_features = self.edge_fuser(edge_bbox + edge_coords)
+
+        vertex_mask = (v_data["discrete_vertex_points"]!=-1).all(dim=-1)
+        vertex_features = self.vertices_encoder(v_data["discrete_vertex_points"][vertex_mask])
+
+        loss = {}
+        # ================== Bottleneck  ==================
+        if self.with_quantization:
+            proj_face_features = self.quantizer_in(face_features)
+            quan_face_features, indices = self.quantizer(proj_face_features)
+            face_features_plus = self.quantizer_out(quan_face_features)
+        elif self.with_vae:
+            mean, logvar = self.vae_proj(face_features).chunk(2, dim=1)
+            std = torch.exp(0.5 * logvar)
+            eps = torch.randn_like(std)
+            sampled_feature = eps.mul(std).add_(mean)
+            face_features_plus = self.vae_out(sampled_feature)
+            loss["kl"] = (-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())) * 1e-6
+        else:
+            face_features_plus = self.bottleneck(face_features)
+
+        pre_face_bbox = self.face_bbox_decoder(face_features_plus)
+        pre_face_coords = self.face_coords_decoder(face_features_plus)
+        pre_edge_bbox = self.edge_bbox_decoder(edge_features)
+        pre_edge_coords = self.edge_coords_decoder(edge_features)
+        pre_vertex_coords = self.vertex_coords_decoder(vertex_features)
+
+        loss["face_bbox1"] = nn.functional.cross_entropy(
+            pre_face_bbox.flatten(0, -2), v_data["discrete_face_bboxes"][face_mask].flatten())
+        loss["face_coords1"] = nn.functional.cross_entropy(
+            pre_face_coords.flatten(0, -2), v_data["discrete_face_points"][face_mask].flatten())
+        loss["edge_bbox1"] = nn.functional.cross_entropy(
+            pre_edge_bbox.flatten(0, -2), v_data["discrete_edge_bboxes"][edge_mask].flatten())
+        loss["edge_coords1"] = nn.functional.cross_entropy(
+            pre_edge_coords.flatten(0, -2), v_data["discrete_edge_points"][edge_mask].flatten())
+        loss["vertex_coords1"] = nn.functional.cross_entropy(
+            pre_vertex_coords.flatten(0, -2), v_data["discrete_vertex_points"][vertex_mask].flatten())
+
+        loss["total_loss"] = sum(loss.values())
+
+        # Compute model size and flops
+        # counter = FlopCounterMode(depth=999)
+        # with counter:
+        #     self.encoder(v_data)
+        # counter = FlopCounterMode(depth=999)
+        # with counter:
+        #     self.decoder(atten_face_edge_embeddings, intersected_edge_features)
+        data = {}
+        if return_recon:
+            bbox_shifts = (self.bd + 1) // 2 - 1
+            coord_shifts = (self.cd + 1) // 2 - 1
+
+            face_bbox = (pre_face_bbox.argmax(dim=-1) - bbox_shifts) / bbox_shifts
+            face_center = (face_bbox[:, 3:] + face_bbox[:, :3]) / 2
+            face_length = (face_bbox[:, 3:] - face_bbox[:, :3])
+            face_coords = (pre_face_coords.argmax(dim=-1) - coord_shifts) / coord_shifts / 2
+            face_coords = face_coords * face_length[:, None, None] + face_center[:, None, None]
+
+            edge_bbox = (pre_edge_bbox.argmax(dim=-1) - bbox_shifts) / bbox_shifts
+            edge_center = (edge_bbox[:, 3:] + edge_bbox[:, :3]) / 2
+            edge_length = (edge_bbox[:, 3:] - edge_bbox[:, :3])
+            edge_coords = (pre_edge_coords.argmax(dim=-1) - coord_shifts) / coord_shifts / 2
+            edge_coords = edge_coords * edge_length[:, None] + edge_center[:, None]
+
+            vertex_coords = (pre_vertex_coords.argmax(dim=-1) - coord_shifts) / coord_shifts
+
+            used_edge_indexes = torch.arange(edge_coords.shape[0], device=edge_coords.device)
+            used_vertex_indexes = torch.arange(vertex_coords.shape[0], device=vertex_coords.device)
+
+            recon_face_full = -torch.ones_like(v_data["face_points"])
+            recon_face_full = recon_face_full.masked_scatter(
+                rearrange(face_mask, '... -> ... 1 1 1'), face_coords)
+
+            recon_edge_full = -torch.ones_like(v_data["edge_points"])
+            bbb = recon_edge_full[edge_mask].clone()
+            bbb[used_edge_indexes] = edge_coords
+            recon_edge_full[edge_mask] = bbb
+
+            recon_vertex_full = -torch.ones_like(v_data["vertex_points"])
+            recon_vertex_full = recon_vertex_full.masked_scatter(
+                rearrange(vertex_mask, '... -> ... 1'), vertex_coords)
+
+            data["recon_faces"] = recon_face_full
+            data["recon_edges"] = recon_edge_full
+            data["recon_vertices"] = recon_vertex_full
+
+        if return_true_loss:
+            if not return_recon:
+                raise
+            # Compute the true loss with the continuous points
+            true_recon_face_loss = nn.functional.l1_loss(
+                face_coords, v_data["face_points"][face_mask], reduction='mean')
+            loss["true_recon_face"] = true_recon_face_loss
+            true_recon_edge_loss = nn.functional.l1_loss(
+                edge_coords, v_data["edge_points"][edge_mask][used_edge_indexes], reduction='mean')
+            loss["true_recon_edge"] = true_recon_edge_loss
+            true_recon_vertex_loss = nn.functional.l1_loss(
+                vertex_coords, v_data["vertex_points"][vertex_mask][used_vertex_indexes], reduction='mean')
+            loss["true_recon_vertex"] = true_recon_vertex_loss
+
+        return loss, data
+
+
+class AutoEncoder77(nn.Module):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder77, self).__init__()
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+        self.bd = v_conf["bbox_discrete_dim"] - 1
+        self.cd = v_conf["coor_discrete_dim"] - 1
+        self.bbox_embedding = nn.Embedding(self.bd, 64)
+        self.coords_embedding = nn.Embedding(self.cd, 64)
+
+        hidden_dim = 128
+        self.face_coords = nn.Sequential(
+            nn.Embedding(v_conf["coor_discrete_dim"] - 1, 64),
+            Rearrange('b h w n c -> b (n c) h w'),
+            nn.Conv2d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+            Rearrange('... 1 1 -> ... (1 1)'),
+        )
+        
+        self.face_bbox = nn.Sequential(
+            nn.Embedding(self.bd, 64),
+            Rearrange('b n c-> b (n c) 1'),
+            nn.Conv1d(6 * 64, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            nn.Conv1d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+        )
+
+        self.face_fuser = nn.Sequential(
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+
+        self.edge_bbox = nn.Sequential(
+            nn.Embedding(self.bd, 64),
+            Rearrange('b n c-> b (n c) 1'),
+            nn.Conv1d(6 * 64, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            res_block_1D(hidden_dim, hidden_dim, 1, 1, 0),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+        self.edge_coords = nn.Sequential(
+            nn.Embedding(self.cd, 64),
+            Rearrange('b h n c -> b (n c) h'),
+            nn.Conv1d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+
+        self.edge_fuser = nn.Sequential(
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+
+        self.vertices_encoder = nn.Sequential(
+            nn.Embedding(self.cd, 64),
+            Rearrange('b n c -> b (n c) 1'),
+            nn.Conv1d(3 * 64, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+        )
+
+        # ================== Decoder ==================
+        self.face_bbox_decoder = nn.Sequential(
+            nn.Conv1d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, 6 * self.bd, kernel_size=1, stride=1, padding=0),
+            Rearrange('...(p c) 1-> ... p c', p=6, c=self.bd),
+        )
+
+        self.face_coords_decoder = nn.Sequential(
+            Rearrange('... (1 1) -> ... 1 1'),
+            nn.Conv2d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.Conv2d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (p c) w h -> ... w h p c', p=3, c=self.cd),
+        )
+
+        self.edge_bbox_decoder = nn.Sequential(
+            # res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            # nn.MaxPool1d(kernel_size=4, stride=4),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, 6 * self.bd, kernel_size=1, stride=1, padding=0),
+            Rearrange('...(p c) 1-> ... p c', p=6, c=self.bd),
+        )
+
+        self.edge_coords_decoder = nn.Sequential(
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            res_block_1D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.Conv1d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (p c) w-> ... w p c', p=3, c=self.cd),
+        )
+
+        self.vertex_coords_decoder = nn.Sequential(
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (p c) 1-> ... (1 p) c', p=3, c=self.cd),
+        )
+
+        self.frozen_models = []
+        # ================== Quantization ==================
+        self.with_quantization = v_conf["with_quantization"]
+        self.with_vae = v_conf["with_vae"]
+        if self.with_quantization:
+            self.quantizer_in = nn.Sequential(
+                nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+            )
+            self.quantizer = FSQ(
+                dim=6,
+                num_codebooks=1,
+                levels=[8, 8, 8, 5, 5, 5],
+            )
+            self.quantizer_out = nn.Sequential(
+                nn.Conv2d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+        elif self.with_vae:
+            self.vae_proj = nn.Sequential(
+                nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+            )
+            self.vae_out = nn.Sequential(
+                nn.Conv2d(3, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+        else:
+            self.bottleneck = nn.Sequential(
+                nn.Identity()
+            )
+
+            self.bottleneck = nn.Sequential(
+                nn.Conv2d(hidden_dim, 32, kernel_size=1, stride=1, padding=0),
+                nn.Conv2d(32, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+
+    def forward(self, v_data,
+                return_recon=False,
+                return_loss=True,
+                return_face_features=False,
+                return_true_loss=False,
+                **kwargs):
+        face_mask = (v_data["discrete_face_bboxes"]!=-1).all(dim=-1)
+        face_coords = self.face_coords(v_data["discrete_face_points"][face_mask])
+        pre_face_coords=self.face_coords_decoder(face_coords)
+
+        face_bbox = self.face_bbox(v_data["discrete_face_bboxes"][face_mask])
+        pre_face_bbox=self.face_bbox_decoder(face_bbox)
+
+        loss={}
+        loss["face_coords"] = nn.functional.cross_entropy(
+            pre_face_coords.flatten(0, -2), v_data["discrete_face_points"][face_mask].flatten())
+        loss["face_bbox"] = nn.functional.cross_entropy(
+            pre_face_bbox.flatten(0, -2), v_data["discrete_face_bboxes"][face_mask].flatten())
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if return_recon:
+            bbox_shifts = (self.bd + 1) // 2 - 1
+            coord_shifts = (self.cd + 1) // 2 - 1
+
+            face_bbox = (pre_face_bbox.argmax(dim=-1) - bbox_shifts) / bbox_shifts
+            face_center = (face_bbox[:, 3:] + face_bbox[:, :3]) / 2
+            face_length = (face_bbox[:, 3:] - face_bbox[:, :3])
+            face_coords = (pre_face_coords.argmax(dim=-1) - coord_shifts) / coord_shifts / 2
+            face_coords = face_coords * face_length[:, None, None] + face_center[:, None, None]
+
+            recon_face_full = -torch.ones_like(v_data["face_points"])
+            recon_face_full = recon_face_full.masked_scatter(
+                rearrange(face_mask, '... -> ... 1 1 1'), face_coords)
+
+            data["recon_faces"] = recon_face_full
+
+        if return_true_loss:
+            if not return_recon:
+                raise
+            # Compute the true loss with the continuous points
+            true_recon_face_loss = nn.functional.l1_loss(
+                face_coords, v_data["face_points"][face_mask], reduction='mean')
+            loss["true_recon_face"] = true_recon_face_loss
+
+
+        return loss, data
+
+
+class AutoEncoder8(nn.Module):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder8, self).__init__()
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+        self.bd = v_conf["bbox_discrete_dim"] - 1
+        self.cd = v_conf["coor_discrete_dim"] - 1
+
+        hidden_dim = 256
+        self.face_coords = nn.Sequential(
+            nn.Embedding(self.cd, 64),
+            Rearrange('b h w n c -> b (n c) h w'),
+            nn.Conv2d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, 12, kernel_size=1, stride=1, padding=0),
+            Rearrange('... 1 1 -> ... (1 1)'),
+        )
+        
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            Rearrange('... (1 1) -> ... 1 1'),
+            nn.Conv2d(12, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.Conv2d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (p c) w h -> ... w h p c', p=3, c=self.cd),
+        )
+
+        self.frozen_models = []
+        # ================== Quantization ==================
+        self.with_quantization = v_conf["with_quantization"]
+        self.with_vae = v_conf["with_vae"]
+        if self.with_quantization:
+            self.quantizer_in = nn.Sequential(
+                nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+            )
+            self.quantizer = FSQ(
+                dim=6,
+                num_codebooks=1,
+                levels=[8, 8, 8, 5, 5, 5],
+            )
+            self.quantizer_out = nn.Sequential(
+                nn.Conv2d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+        elif self.with_vae:
+            self.vae_proj = nn.Sequential(
+                nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+            )
+            self.vae_out = nn.Sequential(
+                nn.Conv2d(3, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+        else:
+            self.bottleneck = nn.Sequential(
+                nn.Identity()
+            )
+
+            self.bottleneck = nn.Sequential(
+                nn.Conv2d(hidden_dim, 32, kernel_size=1, stride=1, padding=0),
+                nn.Conv2d(32, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+
+    def forward(self, v_data,
+                return_recon=False,
+                return_loss=True,
+                return_face_features=False,
+                return_true_loss=False,
+                **kwargs):
+        face_mask = (v_data["discrete_face_bboxes"]!=-1).all(dim=-1)
+        face_coords = self.face_coords(v_data["discrete_face_points_unnormalized"][face_mask])
+        pre_face_coords=self.face_coords_decoder(face_coords)
+
+        loss={}
+        loss["face_coords"] = nn.functional.cross_entropy(
+            pre_face_coords.flatten(0, -2), v_data["discrete_face_points_unnormalized"][face_mask].flatten())
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if return_recon:
+            bbox_shifts = (self.bd + 1) // 2 - 1
+            coord_shifts = (self.cd + 1) // 2 - 1
+
+            face_coords = (pre_face_coords.argmax(dim=-1) - coord_shifts) / coord_shifts
+            face_coords = face_coords
+
+            recon_face_full = -torch.ones_like(v_data["face_points"])
+            recon_face_full = recon_face_full.masked_scatter(
+                rearrange(face_mask, '... -> ... 1 1 1'), face_coords)
+
+            data["recon_faces"] = recon_face_full
+
+        if return_true_loss:
+            if not return_recon:
+                raise
+            # Compute the true loss with the continuous points
+            true_recon_face_loss = nn.functional.l1_loss(
+                face_coords, v_data["face_points"][face_mask], reduction='mean')
+            loss["true_recon_face"] = true_recon_face_loss
+
+
+        return loss, data
+
+
+class AutoEncoder9(nn.Module):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder9, self).__init__()
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+        self.bd = v_conf["bbox_discrete_dim"] - 1
+        self.cd = v_conf["coor_discrete_dim"] - 1
+
+        hidden_dim = 128
+        self.face_coords = nn.Sequential(
+            nn.Embedding(self.cd, 64),
+            Rearrange('b h w n c -> b (n c) h w'),
+            nn.Conv2d(3 * 64, hidden_dim, kernel_size=7, stride=1, padding=3),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+            Rearrange('... 1 1 -> ... (1 1)'),
+        )
+        
+        self.fuser = nn.Sequential(
+            res_block_1D(12, 12, ks=1, st=1, pa=0),
+            res_block_1D(12, 12, ks=1, st=1, pa=0),
+            res_block_1D(12, 12, ks=1, st=1, pa=0),
+            nn.Conv1d(12, 6, 1, 1, 0),
+            nn.ReLU(),
+            nn.Conv1d(6, 12, 1, 1, 0),
+            nn.ReLU(),
+            res_block_1D(12, 12, ks=1, st=1, pa=0),
+            res_block_1D(12, 12, ks=1, st=1, pa=0),
+            res_block_1D(12, 12, ks=1, st=1, pa=0),
+        )
+
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            Rearrange('... (1 1) -> ... 1 1'),
+            nn.Conv2d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=7, st=1, pa=3),
+            nn.Conv2d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (p c) w h -> ... w h p c', p=3, c=self.cd),
+        )
+
+        self.frozen_models = []
+        # ================== Quantization ==================
+        self.with_quantization = v_conf["with_quantization"]
+        self.with_vae = v_conf["with_vae"]
+        if self.with_quantization:
+            self.quantizer_in = nn.Sequential(
+                nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+            )
+            self.quantizer = FSQ(
+                dim=6,
+                num_codebooks=1,
+                levels=[8, 8, 8, 5, 5, 5],
+            )
+            self.quantizer_out = nn.Sequential(
+                nn.Conv2d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+        elif self.with_vae:
+            self.vae_proj = nn.Sequential(
+                nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+            )
+            self.vae_out = nn.Sequential(
+                nn.Conv2d(3, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+        else:
+            self.bottleneck = nn.Sequential(
+                nn.Identity()
+            )
+
+            self.bottleneck = nn.Sequential(
+                nn.Conv2d(hidden_dim, 32, kernel_size=1, stride=1, padding=0),
+                nn.Conv2d(32, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+
+    def forward(self, v_data,
+                return_recon=False,
+                return_loss=True,
+                return_face_features=False,
+                return_true_loss=False,
+                **kwargs):
+        face_mask = (v_data["discrete_face_bboxes"]!=-1).all(dim=-1)
+        face_coords = self.face_coords(v_data["discrete_face_points"][face_mask])
+
+        feat = torch.cat([face_coords, v_data["continuous_face_bboxes"][face_mask][...,None]], dim=-2)
+        feat = self.fuser(feat)
+        pre_face_coords=self.face_coords_decoder(feat[...,:6,:])
+
+        loss={}
+        loss["face_coords"] = nn.functional.cross_entropy(
+            pre_face_coords.flatten(0, -2), v_data["discrete_face_points"][face_mask].flatten())
+        loss["face_bbox"] = nn.functional.l1_loss(
+            feat[...,6:,0], v_data["continuous_face_bboxes"][face_mask])
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if return_recon:
+            bbox_shifts = (self.bd + 1) // 2 - 1
+            coord_shifts = (self.cd + 1) // 2 - 1
+
+            face_bbox = feat[...,6:,0]
+            face_center = (face_bbox[:, 3:] + face_bbox[:, :3]) / 2
+            face_length = (face_bbox[:, 3:] - face_bbox[:, :3])
+            face_coords = (pre_face_coords.argmax(dim=-1) - coord_shifts) / coord_shifts / 2
+            face_coords = face_coords * face_length[:, None, None] + face_center[:, None, None]
+
+            recon_face_full = -torch.ones_like(v_data["face_points"])
+            recon_face_full = recon_face_full.masked_scatter(
+                rearrange(face_mask, '... -> ... 1 1 1'), face_coords)
+
+            data["recon_faces"] = recon_face_full
+
+        if return_true_loss:
+            if not return_recon:
+                raise
+            # Compute the true loss with the continuous points
+            true_recon_face_loss = nn.functional.l1_loss(
+                face_coords, v_data["face_points"][face_mask], reduction='mean')
+            loss["true_recon_face"] = true_recon_face_loss
+
+
+        return loss, data
+
+
+class AutoEncoder10(AutoEncoder8):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder10, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+        self.bd = v_conf["bbox_discrete_dim"] - 1
+        self.cd = v_conf["coor_discrete_dim"] - 1
+
+        hidden_dim = 512
+        self.face_coords = nn.Sequential(
+            nn.Embedding(self.cd, 64),
+            Rearrange('b h w n c -> b (n c) h w'),
+            nn.Conv2d(3 * 64, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, 12, kernel_size=1, stride=1, padding=0),
+            Rearrange('... 1 1 -> ... (1 1)'),
+        )
+        
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            Rearrange('... (1 1) -> ... 1 1'),
+            nn.Conv2d(12, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Conv2d(hidden_dim, 3 * self.cd, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (p c) w h -> ... w h p c', p=3, c=self.cd),
+        )
+
+        self.frozen_models = []
+        # ================== Quantization ==================
+        self.with_quantization = v_conf["with_quantization"]
+        self.with_vae = v_conf["with_vae"]
+        if self.with_quantization:
+            self.quantizer_in = nn.Sequential(
+                nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+            )
+            self.quantizer = FSQ(
+                dim=6,
+                num_codebooks=1,
+                levels=[8, 8, 8, 5, 5, 5],
+            )
+            self.quantizer_out = nn.Sequential(
+                nn.Conv2d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+        elif self.with_vae:
+            self.vae_proj = nn.Sequential(
+                nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+            )
+            self.vae_out = nn.Sequential(
+                nn.Conv2d(3, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+        else:
+            self.bottleneck = nn.Sequential(
+                nn.Identity()
+            )
+
+            self.bottleneck = nn.Sequential(
+                nn.Conv2d(hidden_dim, 32, kernel_size=1, stride=1, padding=0),
+                nn.Conv2d(32, hidden_dim, kernel_size=1, stride=1, padding=0),
+            )
+
+# Continuous 
+class AutoEncoder11(AutoEncoder8):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder11, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+
+        hidden_dim = 256
+        self.face_coords = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, 12, kernel_size=1, stride=1, padding=0),
+        )
+        
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            nn.Conv2d(12, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Conv2d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w h -> ... w h n',),
+        )
+
+    def forward(self, v_data,
+                return_recon=False,
+                return_loss=True,
+                return_face_features=False,
+                return_true_loss=False,
+                **kwargs):
+        face_mask = (v_data["face_points"]!=-1).all(dim=-1).all(dim=-1).all(dim=-1)
+        face_coords = self.face_coords(v_data["face_points"][face_mask])
+        pre_face_coords=self.face_coords_decoder(face_coords)
+
+        loss={}
+        loss["face_coords"] = nn.functional.l1_loss(
+            pre_face_coords, 
+            v_data["face_points"][face_mask]
+        )
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if return_recon:
+            bbox_shifts = (self.bd + 1) // 2 - 1
+            coord_shifts = (self.cd + 1) // 2 - 1
+
+            face_coords = pre_face_coords
+
+            recon_face_full = -torch.ones_like(v_data["face_points"])
+            recon_face_full = recon_face_full.masked_scatter(
+                rearrange(face_mask, '... -> ... 1 1 1'), face_coords.to(recon_face_full.dtype))
+
+            data["recon_faces"] = recon_face_full
+
+        if return_true_loss:
+            if not return_recon:
+                raise
+            # Compute the true loss with the continuous points
+            true_recon_face_loss = nn.functional.l1_loss(
+                face_coords, v_data["face_points"][face_mask], reduction='mean')
+            loss["true_recon_face"] = true_recon_face_loss
+
+
+        return loss, data
+
+
+# Continuous wo norm
+class AutoEncoder12(AutoEncoder11):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder12, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+
+        hidden_dim = 256
+        self.face_coords = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2, norm=None),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1, norm=None),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1, norm=None),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1, norm=None),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1, norm=None),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, 12, kernel_size=1, stride=1, padding=0),
+        )
+        
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            nn.Conv2d(12, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0, norm=None),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1, norm=None),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1, norm=None),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1, norm=None),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2, norm=None),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2, norm=None),
+            nn.Conv2d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w h -> ... w h n',),
+        )
+
+
+# Large continuous
+class AutoEncoder13(AutoEncoder11):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder13, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+
+        hidden_dim = 1024
+        self.face_coords = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, 12, kernel_size=1, stride=1, padding=0),
+        )
+        
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            nn.Conv2d(12, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Conv2d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w h -> ... w h n',),
+        )
+
+
+# Large continuous wo norm
+class AutoEncoder14(AutoEncoder11):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder14, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+
+        hidden_dim = 1024
+        self.face_coords = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2, norm=None),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1, norm=None),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1, norm=None),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1, norm=None),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1, norm=None),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, 12, kernel_size=1, stride=1, padding=0),
+        )
+        
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            nn.Conv2d(12, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0, norm=None),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1, norm=None),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1, norm=None),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1, norm=None),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2, norm=None),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2, norm=None),
+            nn.Conv2d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w h -> ... w h n',),
+        )
+
+
+# Continuous smaller hidden
+class AutoEncoder15(AutoEncoder11):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder15, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+
+        hidden_dim = 128
+        self.face_coords = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+        )
+        
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            nn.Conv2d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Conv2d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w h -> ... w h n',),
+        )
+
+
+# Continuous smaller Bottleneck better than 15
+class AutoEncoder16(AutoEncoder11):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder16, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+
+        hidden_dim = 256
+        self.face_coords = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+        )
+        
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            nn.Conv2d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Conv2d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w h -> ... w h n',),
+        )
+
+
+# Continuous quantization with FSQ
+class AutoEncoder17(AutoEncoder11):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder17, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+
+        hidden_dim = 256
+        self.face_coords = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, 6, kernel_size=1, stride=1, padding=0),
+            Rearrange('b n 1 1 -> b 1 n'),
+        )
+        
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            Rearrange('b 1 n -> b n 1 1'),
+            nn.Conv2d(6, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Conv2d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w h -> ... w h n',),
+        )
+
+        self.quantizer = FSQ(
+            dim=6,
+            num_codebooks=1,
+            levels=[8, 8, 8, 5, 5, 5],
+        )
+
+    def forward(self, v_data,
+                return_recon=False,
+                return_loss=True,
+                return_face_features=False,
+                return_true_loss=False,
+                **kwargs):
+        face_mask = (v_data["face_points"]!=-1).all(dim=-1).all(dim=-1).all(dim=-1)
+        face_coords = self.face_coords(v_data["face_points"][face_mask])
+        quan_face_features, indices = self.quantizer(face_coords)
+        pre_face_coords=self.face_coords_decoder(quan_face_features)
+
+        loss={}
+        loss["face_coords"] = nn.functional.l1_loss(
+            pre_face_coords, 
+            v_data["face_points"][face_mask]
+        )
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if return_recon:
+            bbox_shifts = (self.bd + 1) // 2 - 1
+            coord_shifts = (self.cd + 1) // 2 - 1
+
+            face_coords = pre_face_coords
+
+            recon_face_full = -torch.ones_like(v_data["face_points"])
+            recon_face_full = recon_face_full.masked_scatter(
+                rearrange(face_mask, '... -> ... 1 1 1'), face_coords.to(recon_face_full.dtype))
+
+            data["recon_faces"] = recon_face_full
+
+        if return_true_loss:
+            if not return_recon:
+                raise
+            # Compute the true loss with the continuous points
+            true_recon_face_loss = nn.functional.l1_loss(
+                face_coords, v_data["face_points"][face_mask], reduction='mean')
+            loss["true_recon_face"] = true_recon_face_loss
+
+
+        return loss, data
+
+
+# Continuous quantization with LFQ
+class AutoEncoder18(AutoEncoder11):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder18, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+
+        hidden_dim = 256
+        self.face_coords = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, 16, kernel_size=1, stride=1, padding=0),
+            Rearrange('b n 1 1 -> b 1 n'),
+        )
+        
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            Rearrange('b 1 n -> b n 1 1'),
+            nn.Conv2d(16, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Conv2d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w h -> ... w h n',),
+        )
+
+        self.quantizer = LFQ(
+            codebook_size=65536,
+            dim=16,
+            entropy_loss_weight=0.1,
+            diversity_gamma=1.
+        )
+
+    def forward(self, v_data,
+                return_recon=False,
+                return_loss=True,
+                return_face_features=False,
+                return_true_loss=False,
+                **kwargs):
+        face_mask = (v_data["face_points"]!=-1).all(dim=-1).all(dim=-1).all(dim=-1)
+        face_coords = self.face_coords(v_data["face_points"][face_mask])
+        quan_face_features, indices, entropy_aux_loss = self.quantizer(face_coords)
+        pre_face_coords=self.face_coords_decoder(quan_face_features)
+
+        loss={}
+        loss["entropy_aux_loss"] = entropy_aux_loss.mean()
+        loss["face_coords"] = nn.functional.l1_loss(
+            pre_face_coords, 
+            v_data["face_points"][face_mask]
+        )
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if return_recon:
+            bbox_shifts = (self.bd + 1) // 2 - 1
+            coord_shifts = (self.cd + 1) // 2 - 1
+
+            face_coords = pre_face_coords
+
+            recon_face_full = -torch.ones_like(v_data["face_points"])
+            recon_face_full = recon_face_full.masked_scatter(
+                rearrange(face_mask, '... -> ... 1 1 1'), face_coords.to(recon_face_full.dtype))
+
+            data["recon_faces"] = recon_face_full
+
+        if return_true_loss:
+            if not return_recon:
+                raise
+            # Compute the true loss with the continuous points
+            true_recon_face_loss = nn.functional.l1_loss(
+                face_coords, v_data["face_points"][face_mask], reduction='mean')
+            loss["true_recon_face"] = true_recon_face_loss
+
+
+        return loss, data
+
+
+# Continuous quantization with ResidualLFQ
+class AutoEncoder19(AutoEncoder18):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder19, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+
+        hidden_dim = 256
+        self.face_coords = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, 16, kernel_size=1, stride=1, padding=0),
+            Rearrange('b n 1 1 -> b 1 n'),
+        )
+        
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            Rearrange('b 1 n -> b n 1 1'),
+            nn.Conv2d(16, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Conv2d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w h -> ... w h n',),
+        )
+
+        self.quantizer = ResidualLFQ(
+            commitment_loss_weight=1.,
+            codebook_size=65536,
+            dim=16,
+            num_quantizers=2,
+            frac_per_sample_entropy = 1.,
+            quantize_dropout=True,
+            quantize_dropout_cutoff_index=1,
+            quantize_dropout_multiple_of=1,
+        )
+
+
+
+# Continuous quantization with ResidualVQ
+class AutoEncoder20(AutoEncoder11):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder20, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+
+        hidden_dim = 256
+        self.face_coords = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+            Rearrange('b n 1 1 -> b 1 n'),
+        )
+        
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            Rearrange('b 1 n -> b n 1 1'),
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Conv2d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w h -> ... w h n',),
+        )
+
+        self.quantizer = ResidualVQ(
+            dim=hidden_dim,
+            num_quantizers=2,      # specify number of quantizers
+            codebook_size=16384,    # codebook size
+            shared_codebook=True,
+            commitment_weight = 1.,
+            stochastic_sample_codes=True,
+            kmeans_init=True,
+            threshold_ema_dead_code=2,
+        )
+
+    def forward(self, v_data,
+                return_recon=False,
+                return_loss=True,
+                return_face_features=False,
+                return_true_loss=False,
+                **kwargs):
+        face_mask = (v_data["face_points"]!=-1).all(dim=-1).all(dim=-1).all(dim=-1)
+        face_coords = self.face_coords(v_data["face_points"][face_mask])
+        quan_face_features, indices, entropy_aux_loss = self.quantizer(face_coords)
+        pre_face_coords=self.face_coords_decoder(quan_face_features)
+
+        loss={}
+        loss["entropy_aux_loss"] = entropy_aux_loss.mean()
+        loss["face_coords"] = nn.functional.l1_loss(
+            pre_face_coords, 
+            v_data["face_points"][face_mask]
+        )
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if return_recon:
+            bbox_shifts = (self.bd + 1) // 2 - 1
+            coord_shifts = (self.cd + 1) // 2 - 1
+
+            face_coords = pre_face_coords
+
+            recon_face_full = -torch.ones_like(v_data["face_points"])
+            recon_face_full = recon_face_full.masked_scatter(
+                rearrange(face_mask, '... -> ... 1 1 1'), face_coords.to(recon_face_full.dtype))
+
+            data["recon_faces"] = recon_face_full
+
+        if return_true_loss:
+            if not return_recon:
+                raise
+            # Compute the true loss with the continuous points
+            true_recon_face_loss = nn.functional.l1_loss(
+                face_coords, v_data["face_points"][face_mask], reduction='mean')
+            loss["true_recon_face"] = true_recon_face_loss
+
+
+        return loss, data
+
+
+
+# Continuous VAE
+class AutoEncoder21(AutoEncoder11):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder21, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+
+        hidden_dim = 256
+        self.face_coords = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, 16, kernel_size=1, stride=1, padding=0),
+        )
+        
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            nn.Conv2d(8, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Conv2d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w h -> ... w h n',),
+        )
+
+    def forward(self, v_data,
+                return_recon=False,
+                return_loss=True,
+                return_face_features=False,
+                return_true_loss=False,
+                **kwargs):
+        face_mask = (v_data["face_points"]!=-1).all(dim=-1).all(dim=-1).all(dim=-1)
+        face_coords = self.face_coords(v_data["face_points"][face_mask])
+        mean = face_coords[:,:8]
+        logvar = face_coords[:,8:]
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        sampled_feature = eps.mul(std).add_(mean)
+        pre_face_coords=self.face_coords_decoder(sampled_feature)
+
+        loss={}
+        loss["kl"] = (-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())) * 1e-6
+        loss["face_coords"] = nn.functional.l1_loss(
+            pre_face_coords, 
+            v_data["face_points"][face_mask]
+        )
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if return_recon:
+            bbox_shifts = (self.bd + 1) // 2 - 1
+            coord_shifts = (self.cd + 1) // 2 - 1
+
+            face_coords = pre_face_coords
+
+            recon_face_full = -torch.ones_like(v_data["face_points"])
+            recon_face_full = recon_face_full.masked_scatter(
+                rearrange(face_mask, '... -> ... 1 1 1'), face_coords.to(recon_face_full.dtype))
+
+            data["recon_faces"] = recon_face_full
+
+        if return_true_loss:
+            if not return_recon:
+                raise
+            # Compute the true loss with the continuous points
+            true_recon_face_loss = nn.functional.l1_loss(
+                face_coords, v_data["face_points"][face_mask], reduction='mean')
+            loss["true_recon_face"] = true_recon_face_loss
+
+
+        return loss, data
+
+
+# Continuous VAE 1e-5 weights
+class AutoEncoder22(AutoEncoder11):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder22, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+
+        hidden_dim = 256
+        self.face_coords = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(hidden_dim, 16, kernel_size=1, stride=1, padding=0),
+        )
+        
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            nn.Conv2d(8, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Conv2d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w h -> ... w h n',),
+        )
+
+    def forward(self, v_data,
+                return_recon=False,
+                return_loss=True,
+                return_face_features=False,
+                return_true_loss=False,
+                **kwargs):
+        face_mask = (v_data["face_points"]!=-1).all(dim=-1).all(dim=-1).all(dim=-1)
+        face_coords = self.face_coords(v_data["face_points"][face_mask])
+        mean = face_coords[:,:8]
+        logvar = face_coords[:,8:]
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        sampled_feature = eps.mul(std).add_(mean)
+        pre_face_coords=self.face_coords_decoder(sampled_feature)
+
+        loss={}
+        loss["kl"] = (-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())) * 1e-5
+        loss["face_coords"] = nn.functional.l1_loss(
+            pre_face_coords, 
+            v_data["face_points"][face_mask]
+        )
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if return_recon:
+            bbox_shifts = (self.bd + 1) // 2 - 1
+            coord_shifts = (self.cd + 1) // 2 - 1
+
+            face_coords = pre_face_coords
+
+            recon_face_full = -torch.ones_like(v_data["face_points"])
+            recon_face_full = recon_face_full.masked_scatter(
+                rearrange(face_mask, '... -> ... 1 1 1'), face_coords.to(recon_face_full.dtype))
+
+            data["recon_faces"] = recon_face_full
+
+        if return_true_loss:
+            if not return_recon:
+                raise
+            # Compute the true loss with the continuous points
+            true_recon_face_loss = nn.functional.l1_loss(
+                face_coords, v_data["face_points"][face_mask], reduction='mean')
+            loss["true_recon_face"] = true_recon_face_loss
+
+
+        return loss, data
+
+
+# Continuous VAE with attention
+class AutoEncoder23(AutoEncoder11):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder23, self).__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+
+        hidden_dim = 256
+        self.face_coords = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            Rearrange('b c 1 1 -> b c'),
+        )
+
+        self.face_fuser = Attn_fuser_single(hidden_dim)
+        self.face_proj = nn.Linear(hidden_dim, 16)
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            Rearrange('b c -> b c 1 1'),
+            nn.Conv2d(8, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Conv2d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w h -> ... w h n',),
+        )
+
+    def forward(self, v_data,
+                return_recon=False,
+                return_loss=True,
+                return_face_features=False,
+                return_true_loss=False,
+                **kwargs):
+        face_mask = (v_data["face_points"]!=-1).all(dim=-1).all(dim=-1).all(dim=-1)
+        face_features = self.face_coords(v_data["face_points"][face_mask])
+
+        b, n = face_mask.shape
+        batch_indices = torch.arange(b, device=face_mask.device).unsqueeze(1).repeat(1, n)
+        batch_indices = batch_indices[face_mask]
+        face_attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
+        face_features = self.face_fuser(face_features, face_attn_mask)
+
+        # VAE
+        face_vae = self.face_proj(face_features)
+        mean = face_vae[:,:8]
+        logvar = face_vae[:,8:]
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        sampled_feature = eps.mul(std).add_(mean)
+        pre_face_coords = self.face_coords_decoder(sampled_feature)
+
+        loss={}
+        loss["kl"] = (-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())) * 1e-6
+        loss["face_coords"] = nn.functional.l1_loss(
+            pre_face_coords, 
+            v_data["face_points"][face_mask]
+        )
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if return_recon:
+            bbox_shifts = (self.bd + 1) // 2 - 1
+            coord_shifts = (self.cd + 1) // 2 - 1
+
+            face_coords = pre_face_coords
+
+            recon_face_full = -torch.ones_like(v_data["face_points"])
+            recon_face_full = recon_face_full.masked_scatter(
+                rearrange(face_mask, '... -> ... 1 1 1'), face_coords.to(recon_face_full.dtype))
+
+            data["recon_faces"] = recon_face_full
+
+        if return_true_loss:
+            if not return_recon:
+                raise
+            # Compute the true loss with the continuous points
+            true_recon_face_loss = nn.functional.l1_loss(
+                face_coords, v_data["face_points"][face_mask], reduction='mean')
+            loss["true_recon_face"] = true_recon_face_loss
+
+
+        return loss, data
+
+
+# Continuous VAE edges and vertices
+class AutoEncoder24(nn.Module):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super(AutoEncoder24, self).__init__()
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.with_quantization = v_conf["with_quantization"]
+        self.finetune_decoder = v_conf["finetune_decoder"]
+        self.pad_id = -1
+
+        self.time_statics = [0 for _ in range(10)]
+
+        # ================== Convolutional encoder ==================
+
+        hidden_dim = 256
+        self.face_coords = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            Rearrange('b c 1 1 -> b c'),
+        )
+
+        self.face_fuser = Attn_fuser_single(hidden_dim)
+        self.face_proj = nn.Linear(hidden_dim, 16)
+        # ================== Decoder ==================
+        self.face_coords_decoder = nn.Sequential(
+            Rearrange('b c -> b c 1 1'),
+            nn.Conv2d(8, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_2D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="bilinear"),
+            res_block_2D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Conv2d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w h -> ... w h n',),
+        )
+
+        # ================== Convolutional encoder edges ==================
+        hidden_dim = 256
+        self.edge_coords = nn.Sequential(
+            Rearrange('b h n -> b n h'),
+            nn.Conv1d(3, hidden_dim, kernel_size=5, stride=1, padding=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            Rearrange('b c 1 -> b c'),
+        )
+
+        self.edge_fuser = Attn_fuser_single(hidden_dim)
+        self.edge_proj = nn.Linear(hidden_dim, 8)
+        # ================== Decoder ==================
+        self.edge_coords_decoder = nn.Sequential(
+            Rearrange('b c -> b c 1'),
+            nn.Conv1d(8, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=3, st=1, pa=1),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Upsample(scale_factor=2, mode="linear"),
+            res_block_1D(hidden_dim, hidden_dim, ks=5, st=1, pa=2),
+            nn.Conv1d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w-> ... w n',),
+        )
+
+        # ================== Convolutional encoder vertex ==================
+        hidden_dim = 256
+        self.vertex_coords = nn.Sequential(
+            Rearrange('b c-> b c 1'),
+            nn.Conv1d(3, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            Rearrange('b c 1 -> b c'),
+        )
+
+        self.vertex_fuser = Attn_fuser_single(hidden_dim)
+        self.vertex_proj = nn.Linear(hidden_dim, 8)
+        # ================== Decoder ==================
+        self.vertex_coords_decoder = nn.Sequential(
+            Rearrange('b c -> b c 1'),
+            nn.Conv1d(8, hidden_dim, kernel_size=1, stride=1, padding=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            res_block_1D(hidden_dim, hidden_dim, ks=1, st=1, pa=0),
+            nn.Conv1d(hidden_dim, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... c 1-> ... c',),
+        )
+
+    def forward(self, v_data,
+                return_recon=False,
+                return_loss=True,
+                return_face_features=False,
+                return_true_loss=False,
+                **kwargs):
+        face_mask = (v_data["face_points"]!=-1).all(dim=-1).all(dim=-1).all(dim=-1)
+        face_features = self.face_coords(v_data["face_points"][face_mask])
+
+        b, n = face_mask.shape
+        batch_indices = torch.arange(b, device=face_mask.device).unsqueeze(1).repeat(1, n)
+        batch_indices = batch_indices[face_mask]
+        face_attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
+        face_features = self.face_fuser(face_features, face_attn_mask)
+
+        # VAE
+        face_vae = self.face_proj(face_features)
+        mean = face_vae[:,:8]
+        logvar = face_vae[:,8:]
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        sampled_feature = eps.mul(std).add_(mean)
+        pre_face_coords = self.face_coords_decoder(sampled_feature)
+
+        # Edge
+        edge_mask = (v_data["edge_points"]!=-1).all(dim=-1).all(dim=-1)
+        edge_features = self.edge_coords(v_data["edge_points"][edge_mask])
+
+        b, n = edge_mask.shape
+        batch_indices = torch.arange(b, device=edge_mask.device).unsqueeze(1).repeat(1, n)
+        batch_indices = batch_indices[edge_mask]
+        edge_attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
+        edge_features = self.edge_fuser(edge_features, edge_attn_mask)
+        edge_features = self.edge_proj(edge_features)
+        pre_edge_coords = self.edge_coords_decoder(edge_features)
+
+        # Vertex
+        vertex_mask = (v_data["vertex_points"]!=-1).all(dim=-1)
+        vertex_features = self.vertex_coords(v_data["vertex_points"][vertex_mask])
+
+        b, n = vertex_mask.shape
+        batch_indices = torch.arange(b, device=vertex_mask.device).unsqueeze(1).repeat(1, n)
+        batch_indices = batch_indices[vertex_mask]
+        vertex_attn_mask = ~(batch_indices.unsqueeze(0) == batch_indices.unsqueeze(1))
+        vertex_features = self.vertex_fuser(vertex_features, vertex_attn_mask)
+        vertex_features = self.vertex_proj(vertex_features)
+        pre_vertex_coords = self.vertex_coords_decoder(vertex_features)
+
+        loss={}
+        loss["kl"] = (-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())) * 1e-6
+        loss["face_coords"] = nn.functional.l1_loss(
+            pre_face_coords, 
+            v_data["face_points"][face_mask]
+        )
+        loss["edge_coords"] = nn.functional.l1_loss(
+            pre_edge_coords, 
+            v_data["edge_points"][edge_mask]
+        )
+        loss["vertex_coords"] = nn.functional.l1_loss(
+            pre_vertex_coords, 
+            v_data["vertex_points"][vertex_mask]
+        )
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if return_recon:
+            recon_face_full = -torch.ones_like(v_data["face_points"])
+            recon_face_full = recon_face_full.masked_scatter(
+                rearrange(face_mask, '... -> ... 1 1 1'), pre_face_coords.to(recon_face_full.dtype))
+
+            recon_edge_full = -torch.ones_like(v_data["edge_points"])
+            recon_edge_full = recon_edge_full.masked_scatter(
+                rearrange(edge_mask, '... -> ... 1 1'), pre_edge_coords.to(recon_face_full.dtype))
+
+            recon_vertex_full = -torch.ones_like(v_data["vertex_points"])
+            recon_vertex_full = recon_vertex_full.masked_scatter(
+                rearrange(vertex_mask, '... -> ... 1'), pre_vertex_coords.to(recon_face_full.dtype))
+
+            data["recon_faces"] = recon_face_full
+            data["recon_edges"] = recon_edge_full
+            data["recon_vertices"] = recon_vertex_full
+
+        if return_true_loss:
+            if not return_recon:
+                raise
+            # Compute the true loss with the continuous points
+            true_recon_face_loss = nn.functional.l1_loss(
+                pre_face_coords, v_data["face_points"][face_mask], reduction='mean')
+            true_recon_edge_loss = nn.functional.l1_loss(
+                pre_edge_coords, v_data["edge_points"][edge_mask], reduction='mean')
+            true_recon_vertex_loss = nn.functional.l1_loss(
+                pre_vertex_coords, v_data["vertex_points"][vertex_mask], reduction='mean')
+            loss["true_recon_face"] = true_recon_face_loss
+            loss["true_recon_edge"] = true_recon_edge_loss
+            loss["true_recon_vertex"] = true_recon_vertex_loss
+
+        return loss, data
+

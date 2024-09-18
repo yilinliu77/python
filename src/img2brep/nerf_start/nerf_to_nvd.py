@@ -14,10 +14,8 @@ from torch.utils.data import DataLoader
 from torchmetrics import MetricCollection
 from torchmetrics.classification import BinaryF1Score
 
-from shared.common_utils import export_point_cloud, sigmoid
-
-from src.img2brep.nerf2nvd_dataset import nerf2nvd_dataset
-from src.neural_bsp.model import conv_block, up_conv, U_Net_3D
+from src.img2brep.nerf_start.nerf2nvd_dataset import nerf2nvd_dataset
+from src.neural_bsp.model import conv_block, up_conv
 from diffusers import PNDMPipeline
 
 
@@ -400,7 +398,7 @@ class Diffusion_phase(pl.LightningModule):
         return
 
 
-@hydra.main(config_name="nerf2nvd.yaml", config_path="../../configs/img2brep/", version_base="1.1")
+@hydra.main(config_name="nerf2nvd.yaml", config_path="../../../configs/img2brep/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
     torch.set_float32_matmul_precision("medium")

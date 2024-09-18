@@ -1,7 +1,7 @@
-from src.img2brep.brep.autoencoder import AutoEncoder
+from src.img2brep.autoencoder import AutoEncoder
 from src.img2brep.brep.dataset import *
 import hydra
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 
 @hydra.main(config_name="train_brepgen.yaml", config_path="../../../configs/img2brep/", version_base="1.1")

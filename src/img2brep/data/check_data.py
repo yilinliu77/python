@@ -6,8 +6,8 @@ import open3d as o3d
 from shared.common_utils import *
 
 if __name__ == '__main__':
-    root = Path(r"G:/Dataset/img2brep/deepcad_test")
-    viz_id = "00000007"
+    root = Path(r"D:/data")
+    viz_id = "00005083"
 
     mesh = o3d.io.read_triangle_mesh(str(root/viz_id/"mesh.ply"))
 
@@ -25,7 +25,6 @@ if __name__ == '__main__':
 
     print("Show edge face connectivity")
     for id_edge, id_face1, id_face2 in edge_face_connectivity:
-
         edge = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(edge_points[id_edge])).paint_uniform_color([1, 0, 0])
 
         face = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(

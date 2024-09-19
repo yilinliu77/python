@@ -76,10 +76,10 @@ EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
 FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 10e-2]
 
 FIX_TOLERANCE = 1e-2
-FIX_PRECISION = 1e-3
+FIX_PRECISION = 1e-2
 CONNECT_TOLERANCE = 8e-2
 SEWING_TOLERANCE = 8e-2
-USE_VARIATIONAL_SMOOTHING = True
+USE_VARIATIONAL_SMOOTHING = False
 weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1.2, 1.5
 IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, False
 CONTINUITY = GeomAbs_C2
@@ -335,6 +335,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
         wire_list = create_wire_from_unordered_edges(face_edges)
 
         # visualize the constructed wire
+
         if is_viz_wire:
             viz_shapes(wire_list)
 

@@ -517,8 +517,8 @@ class SamplePointsAndComputeCD:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Evaluate The Generated Brep')
-    parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\deepcad_whole_train_v5")
-    parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\deepcad_whole_train_v5_out")
+    parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\deepcad_whole_v5\deepcad_whole_test_v5")
+    parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\0916_context_test_out")
     parser.add_argument('--used_gpu', type=int, nargs='+', default=[0])
     args = parser.parse_args()
     v_data_root = args.data_root

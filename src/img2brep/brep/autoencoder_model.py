@@ -233,10 +233,14 @@ class AutoEncoder(nn.Module):
             vertex_features = gathered_edge_features.new_zeros(0, gathered_edge_features.shape[-1])
 
         # Decode
+        proj_face_features = self.intersection_face_decoder(v_face_embeddings[0, ..., None])[..., 0]
+        proj_edge_features = self.intersection_edge_decoder(edge_features[..., None])[..., 0]
+        proj_vertex_features = self.intersection_vertex_decoder(vertex_features[..., None])[..., 0]
+
         recon_data = self.decoder(
-            v_face_embeddings.view(-1, v_face_embeddings.shape[-1]),
-            edge_features,
-            vertex_features,
+            proj_face_features,
+            proj_edge_features,
+            proj_vertex_features,
         )
         recon_faces, recon_edges, recon_vertices = self.decoder.inference(recon_data)
         if return_topology:

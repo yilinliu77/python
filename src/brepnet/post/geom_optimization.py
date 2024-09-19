@@ -66,6 +66,10 @@ class STModel(nn.Module):
 
 class Geom_Optimization():
     def __init__(self, recon_face, recon_edge, edge_face_connectivity, face_edge_adj, vertex_tolerance=1e-1, max_iter=100):
+        self.edge_face_connectivity = edge_face_connectivity
+        self.face_edge_adj = face_edge_adj
+        recon_face, recon_edge = self.get_init_estimation(recon_face, recon_edge)
+
         self.recon_face = torch.FloatTensor(recon_face).cuda().requires_grad_(False)
         self.recon_edge = torch.FloatTensor(recon_edge).cuda().requires_grad_(False)
 
@@ -100,6 +104,51 @@ class Geom_Optimization():
 
         self.chamfer_dist = ChamferDistance()
         self.max_iter = max_iter
+
+
+
+    def get_init_estimation(self, recon_face, recon_edge):
+        edge_face_connectivity = self.edge_face_connectivity
+        face_edge_adj = self.face_edge_adj
+        cache_dict = {}
+        for conec in edge_face_connectivity:
+            if (conec[1], conec[2]) in cache_dict:
+                cache_dict[(conec[1], conec[2])].append(conec[0])
+            elif (conec[2], conec[1]) in cache_dict:
+                cache_dict[(conec[2], conec[1])].append(conec[0])
+            else:
+                cache_dict[(conec[1], conec[2])] = [conec[0]]
+
+        # Duplicate edges if it appears once
+        new_dict = {}
+        for key, value in cache_dict.items():
+            if len(value) == 1:
+                new_edge = recon_edge[value[0]][::-1][None, :]
+                edge_face_connectivity = np.concatenate([
+                    edge_face_connectivity,
+                    np.array((recon_edge.shape[0], key[1], key[0]))[None, :]
+                ], axis=0)
+                new_dict[key] = recon_edge.shape[0]
+                face_edge_adj[key[1]].append(recon_edge.shape[0])
+                recon_edge = np.concatenate([recon_edge, new_edge], axis=0)
+        for key, value in new_dict.items():
+            cache_dict[key].append(value)
+        # Check which half edge is better
+        computer = ChamferDistance()
+        for (id_face1, id_face2), id_edges in cache_dict.items():
+            face1 = torch.from_numpy(recon_face[id_face1])
+            face2 = torch.from_numpy(recon_face[id_face2])
+            edge1 = torch.from_numpy(recon_edge[id_edges[0]])
+            edge2 = torch.from_numpy(recon_edge[id_edges[1]])
+            dist1 = (computer(edge1.reshape(1, -1, 3), face1.reshape(1, -1, 3)) +
+                     computer(edge1.reshape(1, -1, 3),face2.reshape(1, -1, 3)))
+            dist2 = (computer(edge2.reshape(1, -1, 3), face1.reshape(1, -1, 3)) +
+                     computer(edge2.reshape(1, -1, 3),face2.reshape(1, -1, 3)))
+            if dist1 > dist2:
+                recon_edge[id_edges[0]] = recon_edge[id_edges[1]][::-1]
+            elif dist1 < dist2:
+                recon_edge[id_edges[1]] = recon_edge[id_edges[0]][::-1]
+        return recon_face, recon_edge
 
     def apply_all_transform(self):
         # for face_idx in range(self.recon_face.shape[0]):
@@ -166,8 +215,12 @@ class Geom_Optimization():
                 pbar.update(1)
         print('Optimization finished!')
 
-    def get_transfomed_data(self):
-        return self.transformed_recon_face.detach().cpu().numpy(), self.transformed_recon_edge.detach().cpu().numpy()
+    def get_transformed_data(self):
+        return (self.transformed_recon_face.detach().cpu().numpy(),
+                self.transformed_recon_edge.detach().cpu().numpy(),
+                self.edge_face_connectivity,
+                self.face_edge_adj
+        )
 
     def get_transform(self):
         return self.model.surf_st.detach().cpu().numpy(), self.model.edge_st.detach().cpu().numpy()

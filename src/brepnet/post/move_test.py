@@ -2,7 +2,7 @@ import os, shutil
 from tqdm import tqdm
 import argparse
 
-data_root1 = r"/mnt/d/img2brep/0909_test"
+data_root1 = r"D:/img2brep/0916_context_test"
 data_root2 = r"/mnt/d/img2brep/deepcad_whole_test_v4"
 save_root = r"/mnt/d/img2brep/0909_test_export"
 os.makedirs(save_root, exist_ok=True)

@@ -1,4 +1,5 @@
 import os, sys, shutil, traceback, tqdm
+from pathlib import Path
 
 from shared.common_utils import safe_check_dir, check_dir
 from shared.common_utils import export_point_cloud
@@ -20,15 +21,15 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name_list, is_optimi
                 os.remove(os.path.join(out_root, folder_name, 'recon_brep.step'))
 
             # specify the key to get the face points, edge points and edge_face_connectivity in data.npz
-            data_npz = np.load(os.path.join(data_root, folder_name, 'data.npz'))
+            data_npz = np.load(os.path.join(data_root, folder_name, 'data.npz'), allow_pickle=True)["arr_0"].item()
             if 'sample_points_faces' in data_npz:
                 face_points = data_npz['sample_points_faces']  # Face sample points (num_faces*20*20*3)
                 edge_points = data_npz['sample_points_lines']  # Edge sample points (num_lines*20*3)
                 edge_face_connectivity = data_npz['edge_face_connectivity']  # (num_intersection, (id_edge, id_face1, id_face2))
-            elif 'face_points' in data_npz:
-                face_points = data_npz['face_points']
-                edge_points = data_npz['edge_points']
-                edge_face_connectivity = data_npz['edge_face_connectivity']
+            elif 'pred_face' in data_npz:
+                face_points = data_npz['pred_face']
+                edge_points = data_npz['pred_edge']
+                edge_face_connectivity = data_npz['pred_edge_face_connectivity']
             else:
                 raise ValueError(f"Unknown data npz format {folder_name}")
 
@@ -42,10 +43,17 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name_list, is_optimi
                 face_edge_adj[face1].append(edge)
 
             if isdebug:
-                debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
+                debug_face_save_path = Path(os.path.join(out_root, folder_name, "debug_face_loop"))
                 check_dir(debug_face_save_path)
-                export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), face_points.reshape(-1, 3))
-                export_point_cloud(os.path.join(debug_face_save_path, 'edge.ply'), edge_points.reshape(-1, 3))
+                check_dir(debug_face_save_path/"faces")
+                check_dir(debug_face_save_path/"edges")
+                export_point_cloud(debug_face_save_path/ 'face.ply', face_points.reshape(-1, 3))
+                export_point_cloud(debug_face_save_path/'edge.ply', edge_points.reshape(-1, 3))
+                for ie in range(edge_points.shape[0]):
+                    export_point_cloud(debug_face_save_path / "edges"/ (str(ie)+'.ply'), edge_points[ie].reshape(-1, 3))
+                for iface in range(face_points.shape[0]):
+                    export_point_cloud(debug_face_save_path / 'faces'/(str(iface)+'.ply'), face_points[iface].reshape(-1, 3))
+
                 for face_idx in range(len(face_edge_adj)):
                     for idx, edge_idx in enumerate(face_edge_adj[face_idx]):
                         export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}_edge{idx}_{edge_idx}.ply"),
@@ -56,7 +64,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name_list, is_optimi
             # edge_points = edge_points + np.random.normal(0, 1e-3, size=(edge_points.shape[0], 1, 1))
 
             if is_optimize_geom:
-                face_points, edge_points = optimize_geom(face_points, edge_points, edge_face_connectivity, face_edge_adj)
+                face_points, edge_points, edge_face_connectivity, face_edge_adj = optimize_geom(
+                    face_points, edge_points, edge_face_connectivity, face_edge_adj)
 
                 if isdebug:
                     debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
@@ -103,7 +112,7 @@ construct_brep_from_datanpz_ray = ray.remote(construct_brep_from_datanpz)
 
 def test_construct_brep(v_data_root, v_out_root):
     debug_folder = ["00005083"]
-    construct_brep_from_datanpz(v_data_root, v_out_root, debug_folder, is_optimize_geom=False, isdebug=True)
+    construct_brep_from_datanpz(v_data_root, v_out_root, debug_folder, is_optimize_geom=True, isdebug=True)
     exit(0)
 
 

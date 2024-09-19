@@ -20,15 +20,15 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name_list, is_optimi
                 os.remove(os.path.join(out_root, folder_name, 'recon_brep.step'))
 
             # specify the key to get the face points, edge points and edge_face_connectivity in data.npz
-            data_npz = np.load(os.path.join(data_root, folder_name, 'data.npz'))
+            data_npz = np.load(os.path.join(data_root, folder_name, 'data.npz'), allow_pickle=True)['arr_0'].item()
             if 'sample_points_faces' in data_npz:
                 face_points = data_npz['sample_points_faces']  # Face sample points (num_faces*20*20*3)
                 edge_points = data_npz['sample_points_lines']  # Edge sample points (num_lines*20*3)
                 edge_face_connectivity = data_npz['edge_face_connectivity']  # (num_intersection, (id_edge, id_face1, id_face2))
-            elif 'face_points' in data_npz:
-                face_points = data_npz['face_points']
-                edge_points = data_npz['edge_points']
-                edge_face_connectivity = data_npz['edge_face_connectivity']
+            elif 'pred_face' in data_npz:
+                face_points = data_npz['pred_face']
+                edge_points = data_npz['pred_edge']
+                edge_face_connectivity = data_npz['pred_edge_face_connectivity']
             else:
                 raise ValueError(f"Unknown data npz format {folder_name}")
 
@@ -49,7 +49,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name_list, is_optimi
                 for face_idx in range(len(face_edge_adj)):
                     for idx, edge_idx in enumerate(face_edge_adj[face_idx]):
                         export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}_edge{idx}_{edge_idx}.ply"),
-                                           edge_points[edge_idx],
+                                           edge_points[edge_idx].reshape(-1, 3),
                                            np.linspace([1, 0, 0], [0, 1, 0], edge_points[edge_idx].shape[0]))
 
             # face_points = face_points + np.random.normal(0, 1e-3, size=(face_points.shape[0], 1, 1, 1))
@@ -102,15 +102,15 @@ construct_brep_from_datanpz_ray = ray.remote(construct_brep_from_datanpz)
 
 
 def test_construct_brep(v_data_root, v_out_root):
-    debug_folder = ["00005083"]
-    construct_brep_from_datanpz(v_data_root, v_out_root, debug_folder, is_optimize_geom=False, isdebug=True)
+    debug_folder = ["00072639"]
+    construct_brep_from_datanpz(v_data_root, v_out_root, debug_folder, is_optimize_geom=True, isdebug=True)
     exit(0)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Construct Brep From Data')
-    parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\deepcad_whole_train_v5")
-    parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\deepcad_whole_train_v5_out")
+    parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\0916_context_test")
+    parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\0916_context_test_out")
     args = parser.parse_args()
     v_data_root = args.data_root
     v_out_root = args.out_root
@@ -118,7 +118,7 @@ if __name__ == '__main__':
     if not os.path.exists(v_data_root):
         raise ValueError(f"Data root path {v_data_root} does not exist.")
 
-    test_construct_brep(v_data_root, v_out_root)
+    # test_construct_brep(v_data_root, v_out_root)
 
     ray.init(
             dashboard_host="0.0.0.0",

@@ -11,6 +11,8 @@ from einops import rearrange, reduce
 from torch_geometric.nn import GATv2Conv
 from vector_quantize_pytorch import FSQ, ResidualFSQ
 
+from src.brepnet.dataset import continuous_coord, denormalize_coord
+
 def add_timer(time_statics, v_attr, timer):
     if v_attr not in time_statics:
         time_statics[v_attr] = 0.
@@ -2661,3 +2663,307 @@ class AutoEncoder_context_codebook(AutoEncoder_context):
 
         return loss, data
 
+# Continuous
+class AutoEncoder_pure(nn.Module):
+    def __init__(self, v_conf):
+        super().__init__()
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        norm = v_conf["norm"]
+        ds = self.dim_shape
+        dl = self.dim_latent
+        self.df = self.dim_latent * 2 * 2
+        df = self.df
+        self.face_conv1 = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(3, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+        )
+        self.face_coords = nn.Sequential(
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=4, stride=4), # 4
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveMaxPool2d((3, 3)), # 2
+            nn.Conv2d(ds, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, dl, kernel_size=1, stride=1, padding=0),
+        )
+        self.face_coords_decoder = nn.Sequential(
+            nn.Conv2d(dl, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Upsample(size=(4, 4), mode="bilinear"),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Upsample(scale_factor=4, mode="bilinear"),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... c w h -> ... w h c',c=3),
+        ) 
+        
+        self.time_statics = {}
+
+    def forward(self, v_data, v_test=False):
+        timer = time.time()
+        # Encoder
+        face_features = self.face_conv1(v_data["face_points"])
+        face_features = self.face_coords(face_features)
+
+        pre_face_coords = self.face_coords_decoder(face_features)
+
+        # Loss
+        loss={}
+        loss["face_coords"] = nn.functional.l1_loss(
+            pre_face_coords,
+            v_data["face_points"]
+        )
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if v_test:
+            data["pred_face"] = pre_face_coords.detach().cpu().numpy()
+            data["gt_face"] = v_data["face_points"].detach().cpu().numpy()
+
+        return loss, data
+
+# Continuous with center and points loss
+class AutoEncoder_pure2(AutoEncoder_pure):
+    def __init__(self, v_conf):
+        super().__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        norm = v_conf["norm"]
+        ds = self.dim_shape
+        dl = self.dim_latent
+        self.df = self.dim_latent * 2 * 2
+        df = self.df
+        self.face_points_decoder = nn.Sequential(
+            nn.Conv2d(dl, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Upsample(size=(4, 4), mode="bilinear"),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Upsample(scale_factor=4, mode="bilinear"),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... c w h -> ... w h c',c=3),
+        )
+        self.face_center_scale_decoder = nn.Sequential(
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(dl, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, 3 * 2, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (c n) w h -> ... (w h c) n', c=3, n=2),
+        )
+        
+        self.time_statics = {}
+
+
+    def forward(self, v_data, v_test=False):
+        timer = time.time()
+        # Encoder
+        face_features = self.face_conv1(v_data["face_points"])
+        bottleneck_feature = self.face_coords(face_features)
+
+        face_points = self.face_points_decoder(bottleneck_feature)
+        face_center_scale = self.face_center_scale_decoder(bottleneck_feature)
+        face_center = face_center_scale[..., 0]
+        face_scale = face_center_scale[..., 1]
+        pred_face = denormalize_coord(face_points, face_center, face_scale)
+
+        # Loss
+        loss={}
+        loss["face_coords"] = nn.functional.l1_loss(
+            pred_face,
+            v_data["face_points"]
+        )
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if v_test:
+            data["gt_face"] = v_data["face_points"].cpu().numpy()
+            data["pred_face"] = pred_face.cpu().numpy()
+
+        return loss, data
+
+# Continuous with center and individual loss
+class AutoEncoder_pure3(AutoEncoder_pure2):
+    def __init__(self, v_conf):
+        super().__init__(v_conf)
+
+    def forward(self, v_data, v_test=False):
+        timer = time.time()
+        # Encoder
+        face_features = self.face_conv1(v_data["face_points"])
+        bottleneck_feature = self.face_coords(face_features)
+
+        face_points = self.face_points_decoder(bottleneck_feature)
+        face_center_scale = self.face_center_scale_decoder(bottleneck_feature)
+        face_center = face_center_scale[..., 0]
+        face_scale = face_center_scale[..., 1]
+
+        # Loss
+        loss={}
+        loss["face_coords_norm"] = nn.functional.l1_loss(
+            face_points,
+            v_data["face_points_norm"]
+        )
+        loss["face_center"] = nn.functional.l1_loss(
+            face_center,
+            v_data["face_center"]
+        )
+        loss["face_scale"] = nn.functional.l1_loss(
+            face_scale,
+            v_data["face_scale"]
+        )
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if v_test:
+            data["gt_face"] = v_data["face_points"].cpu().numpy()
+            pred_face = denormalize_coord(face_points,face_center,face_scale)
+            loss["face_coords"] = nn.functional.l1_loss(
+                pred_face,
+                v_data["face_points"]
+            )
+            data["pred_face"] = pred_face.cpu().numpy()
+
+        return loss, data
+    
+# Discrete with individual loss
+class AutoEncoder_pure4(AutoEncoder_pure):
+    def __init__(self, v_conf):
+        super().__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        norm = v_conf["norm"]
+        ds = self.dim_shape
+        dl = self.dim_latent
+        self.df = self.dim_latent * 2 * 2
+        df = self.df
+        discrete_dim = 256
+        self.face_points_decoder = nn.Sequential(
+            nn.Conv2d(dl, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Upsample(size=(4, 4), mode="bilinear"),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Upsample(scale_factor=4, mode="bilinear"),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(ds, 3 * 256, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (c d) w h -> ... w h c d',c=3),
+        )
+        self.face_center_scale_decoder = nn.Sequential(
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(dl, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, ds, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(ds, 3 * 2 * 256, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (c d n) w h -> ... (w h c) d n', c=3, n=2),
+        )
+        self.time_statics = {}
+
+    def forward(self, v_data, v_test=False):
+        timer = time.time()
+        # Encoder
+        face_features = self.face_conv1(v_data["face_points"])
+        bottleneck_feature = self.face_coords(face_features)
+
+        face_points = self.face_points_decoder(bottleneck_feature)
+        face_center_scale = self.face_center_scale_decoder(bottleneck_feature)
+        face_center = face_center_scale[..., 0]
+        face_scale = face_center_scale[..., 1]
+        # Loss
+        loss={}
+        loss["discrete_face_points"] = nn.functional.cross_entropy(
+            face_points.reshape(-1, 256),
+            v_data["face_points_discrete"].reshape(-1)
+        )
+        loss["discrete_face_center"] = nn.functional.cross_entropy(
+            face_center.reshape(-1, 256),
+            v_data["face_center_discrete"].reshape(-1)
+        )
+        loss["discrete_face_scale"] = nn.functional.cross_entropy(
+            face_scale.reshape(-1, 256),
+            v_data["face_scale_discrete"].reshape(-1)
+        )
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if v_test:
+            face_points = face_points.argmax(dim=-1)
+            face_center = face_center.argmax(dim=-1)
+            face_scale = face_scale.argmax(dim=-1)
+            pred_face = denormalize_coord(*continuous_coord(face_points, face_center, face_scale, 256))
+            data["gt_face"] = denormalize_coord(*continuous_coord(
+                v_data["face_points_discrete"], 
+                v_data["face_center_discrete"], 
+                v_data["face_scale_discrete"], 256)).cpu().numpy()
+            loss["face_coords"] = nn.functional.l1_loss(
+                pred_face,
+                v_data["face_points"]
+            )
+            data["pred_face"]=pred_face.cpu().numpy()
+
+        return loss, data

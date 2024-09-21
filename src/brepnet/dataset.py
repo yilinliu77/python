@@ -278,12 +278,12 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
             "face_points_norm": flat_face_points_norm,
             "edge_points_norm": flat_edge_points_norm,
 
-            "face_points_discrete": flat_face_points_discrete,
-            "edge_points_discrete": flat_edge_points_discrete,
-            "face_center_discrete": flat_face_center_discrete,
-            "face_scale_discrete": flat_face_scale_discrete,
-            "edge_center_discrete": flat_edge_center_discrete,
-            "edge_scale_discrete": flat_edge_scale_discrete,
+            # "face_points_discrete": flat_face_points_discrete,
+            # "edge_points_discrete": flat_edge_points_discrete,
+            # "face_center_discrete": flat_face_center_discrete,
+            # "face_scale_discrete": flat_face_scale_discrete,
+            # "edge_center_discrete": flat_edge_center_discrete,
+            # "edge_scale_discrete": flat_edge_scale_discrete,
         }
 
 

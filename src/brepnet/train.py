@@ -118,17 +118,14 @@ class TrainAutoEncoder(pl.LightningModule):
                  sync_dist=True, batch_size=self.batch_size)
 
         if batch_idx == 0:
-            # recon_edges, recon_faces = self.model.inference(recon_data["face_embeddings"])
             if "pred_face" in recon_data:
                 self.viz["face_points"] = data["face_points"].cpu().numpy()
-                self.viz["recon_faces"] = recon_data["pred_face"]
+                self.viz["recon_faces"] = recon_data["pred_face"].cpu().numpy()
             if "pred_edge" in recon_data:
                 self.viz["edge_points"] = data["edge_points"].cpu().numpy()
-                self.viz["recon_edges"] = recon_data["pred_edge"]
+                self.viz["recon_edges"] = recon_data["pred_edge"].cpu().numpy()
         if "gt_face_adj" in recon_data:
-            pred = torch.from_numpy(recon_data["pred_face_adj"]).to(total_loss.device)
-            gt = torch.from_numpy(recon_data["gt_face_adj"]).to(total_loss.device)
-            self.pr_computer.update(pred.reshape(-1), gt.reshape(-1))
+            self.pr_computer.update(recon_data["pred_face_adj"], recon_data["gt_face_adj"])
         return total_loss
 
     def on_validation_epoch_end(self):
@@ -143,46 +140,40 @@ class TrainAutoEncoder(pl.LightningModule):
             return
 
         if "recon_faces" in self.viz:
-            v_recon_faces = self.viz["recon_faces"]
-            v_gt_faces = self.viz["face_points"]
-            if "recon_faces" in self.viz:
-                gt_faces = v_gt_faces
-                recon_faces = v_recon_faces
-                gt_faces = gt_faces[(gt_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)]
-                recon_faces = recon_faces[(recon_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)]
+            gt_faces = self.viz["face_points"]
+            recon_faces = self.viz["recon_faces"]
+            gt_faces = gt_faces[(gt_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)]
+            recon_faces = recon_faces[(recon_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)]
 
-                num_face_points = gt_faces.shape[1] ** 2
-                face_points = np.concatenate((gt_faces, recon_faces), axis=0).reshape(-1, 3)
-                face_colors = np.concatenate(
-                    (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_faces.shape[0] * num_face_points, axis=0),
-                        np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_faces.shape[0] * num_face_points, axis=0)), axis=0)
+            num_face_points = gt_faces.shape[1] ** 2
+            face_points = np.concatenate((gt_faces, recon_faces), axis=0).reshape(-1, 3)
+            face_colors = np.concatenate(
+                (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_faces.shape[0] * num_face_points, axis=0),
+                    np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_faces.shape[0] * num_face_points, axis=0)), axis=0)
 
-                pc = o3d.geometry.PointCloud()
-                
-                pc.points = o3d.utility.Vector3dVector(face_points)
-                pc.colors = o3d.utility.Vector3dVector(face_colors / 255.0)
-                o3d.io.write_point_cloud(
-                    str(self.log_root / f"{self.trainer.current_epoch:05}_viz_faces.ply"), pc)
+            pc = o3d.geometry.PointCloud()
+            pc.points = o3d.utility.Vector3dVector(face_points)
+            pc.colors = o3d.utility.Vector3dVector(face_colors / 255.0)
+            o3d.io.write_point_cloud(
+                str(self.log_root / f"{self.trainer.current_epoch:05}_viz_faces.ply"), pc)
 
-            if "recon_edges" in self.viz and self.viz["recon_edges"].shape[0]>0:
-                v_gt_edges = self.viz["edge_points"]
-                v_recon_edges = self.viz["recon_edges"]
+        if "recon_edges" in self.viz and self.viz["recon_edges"].shape[0]>0:
+            recon_edges = self.viz["recon_edges"]
+            gt_edges = self.viz["edge_points"]
 
-                recon_edges = v_recon_edges
-                gt_edges = v_gt_edges
+            gt_edges = gt_edges[(gt_edges != -1).all(axis=-1).all(axis=-1)]
+            recon_edges = recon_edges[(recon_edges != -1).all(axis=-1).all(axis=-1)]
 
-                gt_edges = gt_edges[(gt_edges != -1).all(axis=-1).all(axis=-1)]
-                recon_edges = recon_edges[(recon_edges != -1).all(axis=-1).all(axis=-1)]
-
-                edge_points = np.concatenate((gt_edges, recon_edges), axis=0).reshape(-1, 3)
-                edge_colors = np.concatenate(
-                    (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0] * 32, axis=0),
-                        np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0] * 32, axis=0)), axis=0)
-                
-                pc.points = o3d.utility.Vector3dVector(edge_points)
-                pc.colors = o3d.utility.Vector3dVector(edge_colors / 255.0)
-                o3d.io.write_point_cloud(
-                    str(self.log_root / f"{self.trainer.current_epoch:05}_viz_edges.ply"), pc)
+            edge_points = np.concatenate((gt_edges, recon_edges), axis=0).reshape(-1, 3)
+            edge_colors = np.concatenate(
+                (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0] * 32, axis=0),
+                    np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0] * 32, axis=0)), axis=0)
+            
+            pc = o3d.geometry.PointCloud()
+            pc.points = o3d.utility.Vector3dVector(edge_points)
+            pc.colors = o3d.utility.Vector3dVector(edge_colors / 255.0)
+            o3d.io.write_point_cloud(
+                str(self.log_root / f"{self.trainer.current_epoch:05}_viz_edges.ply"), pc)
         return
 
     def test_dataloader(self):

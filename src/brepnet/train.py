@@ -5,7 +5,6 @@ import numpy as np
 import open3d as o3d
 
 from src.brepnet.dataset import AutoEncoder_dataset
-from src.brepnet.model import AutoEncoder_base, AutoEncoder_graph
 
 sys.path.append('../../../')
 import os.path

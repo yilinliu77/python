@@ -9,8 +9,12 @@ from einops.layers.torch import Rearrange
 from einops import rearrange, reduce
 
 from torch_geometric.nn import GATv2Conv
+<<<<<<< HEAD
 from torch_scatter import scatter_mean
 from vector_quantize_pytorch import FSQ, ResidualFSQ
+=======
+from vector_quantize_pytorch import FSQ, ResidualFSQ, ResidualLFQ, ResidualVQ
+>>>>>>> 64c1260d4a47e5304c9fd34dd9d1b8f1cc71e4ff
 
 from src.brepnet.dataset import continuous_coord, denormalize_coord
 
@@ -2520,18 +2524,25 @@ class AutoEncoder_context_KL(AutoEncoder_context):
 
         return loss, data
 
-class AutoEncoder_context_codebook(AutoEncoder_context):
+class AutoEncoder_context_fsq(AutoEncoder_context):
     def __init__(self, v_conf):
         super().__init__(v_conf)
-        self.quantizer = FSQ(
-            dim = self.dim_latent,
-            levels = [8, 8, 8, 5, 5, 5],
-        )
-        # self.quantizer = ResidualFSQ(
-        #     dim = self.dim_latent,
+        # self.quantizer = FSQ(
+        #     dim = self.dim_latent * 2 * 2,
         #     levels = [8, 8, 8, 5, 5, 5],
-        #     num_quantizers = 2
         # )
+        self.quantizer = ResidualFSQ(
+            dim = self.dim_latent * 2 * 2,
+            levels = [8, 8, 8, 5, 5, 5],
+            num_quantizers = 4
+        )
+
+    def code(self, fused_face_features):
+        fused_face_features = rearrange(fused_face_features, 'b n c -> b 1 (n c)')
+        fused_face_features, indices = self.quantizer(fused_face_features)
+        fused_face_features = rearrange(fused_face_features, 'b 1 (n c) -> b n c', c=self.dim_latent)
+        code_book_loss = None
+        return fused_face_features, indices, code_book_loss
 
     def forward(self, v_data, v_test=False):
         timer = time.time()
@@ -2561,7 +2572,7 @@ class AutoEncoder_context_codebook(AutoEncoder_context):
         fused_face_features = self.face_attn(x, v_data["attn_mask"])
         fused_face_features = rearrange(fused_face_features, 'b (n h w) -> b n (h w)', h=2, w=2)
         fused_face_features = rearrange(fused_face_features, 'b n c -> b c n')
-        fused_face_features, indices = self.quantizer(fused_face_features)
+        fused_face_features, indices, code_book_loss = self.code(fused_face_features)
         fused_face_features = rearrange(fused_face_features, 'b (h w) n -> b n h w', h=2, w=2)
         
         # Global
@@ -2597,6 +2608,8 @@ class AutoEncoder_context_codebook(AutoEncoder_context):
 
         # Loss
         loss={}
+        if code_book_loss is not None:
+            loss["code_book"] = code_book_loss
         loss["edge_classification"] = loss_edge_classification * 0.1
         loss["face_coords"] = nn.functional.l1_loss(
             pre_face_coords,
@@ -2664,6 +2677,45 @@ class AutoEncoder_context_codebook(AutoEncoder_context):
 
         return loss, data
 
+class AutoEncoder_context_lfq(AutoEncoder_context_fsq):
+    def __init__(self, v_conf):
+        super().__init__(v_conf)
+        # self.quantizer = FSQ(
+        #     dim = self.dim_latent,
+        #     levels = [8, 8, 8, 5, 5, 5],
+        # )
+        self.quantizer = ResidualLFQ(
+            dim = self.dim_latent * 2 * 2,
+            num_quantizers = 4,
+            codebook_size = 16384,
+        )
+
+    def code(self, fused_face_features):
+        fused_face_features = rearrange(fused_face_features, 'b n c -> b 1 (n c)')
+        fused_face_features, indices, code_book_loss = self.quantizer(fused_face_features)
+        fused_face_features = rearrange(fused_face_features, 'b 1 (n c) -> b n c', c=self.dim_latent)
+        return fused_face_features, indices, code_book_loss.mean()
+
+class AutoEncoder_context_vq(AutoEncoder_context_lfq):
+    def __init__(self, v_conf):
+        super().__init__(v_conf)
+        # self.quantizer = FSQ(
+        #     dim = self.dim_latent,
+        #     levels = [8, 8, 8, 5, 5, 5],
+        # )
+        self.quantizer = ResidualVQ(
+            dim = self.dim_latent * 2 * 2,
+            num_quantizers = 4,
+            codebook_dim = 16,
+            codebook_size = 16384,
+            shared_codebook = True,
+        )
+
+    def code(self, fused_face_features):
+        fused_face_features = rearrange(fused_face_features, 'b n c -> b 1 (n c)')
+        fused_face_features, indices, code_book_loss = self.quantizer(fused_face_features)
+        fused_face_features = rearrange(fused_face_features, 'b 1 (n c) -> b n c', c=self.dim_latent)
+        return fused_face_features, indices, code_book_loss.mean()
 # Continuous
 class AutoEncoder_pure(nn.Module):
     def __init__(self, v_conf):

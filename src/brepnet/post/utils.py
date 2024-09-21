@@ -12,10 +12,9 @@ import torch
 import torch.nn as nn
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeEdge
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Sewing, BRepBuilderAPI_MakeSolid
-from OCC.Core.BRepOffsetAPI import BRepOffsetAPI_Sewing
 
 from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface, GeomAPI_PointsToBSpline
-from OCC.Core.GeomAbs import GeomAbs_C2
+from OCC.Core.GeomAbs import GeomAbs_C0, GeomAbs_C1, GeomAbs_C2
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_Wire
 from OCC.Core.ShapeExtend import ShapeExtend_WireData
 from OCC.Core.ShapeFix import ShapeFix_Face, ShapeFix_Wire, ShapeFix_Edge, ShapeFix_Shell, ShapeFix_Solid, \
@@ -56,7 +55,6 @@ from OCC.Core.BRepCheck import BRepCheck_Analyzer
 
 from OCC.Core.GeomPlate import (GeomPlate_BuildPlateSurface, GeomPlate_PointConstraint, GeomPlate_CurveConstraint,
                                 GeomPlate_MakeApprox, GeomPlate_PlateG0Criterion, GeomPlate_PlateG1Criterion, )
-from OCC.Core.GeomAbs import GeomAbs_C0
 from OCC.Core.TColgp import TColgp_SequenceOfXY, TColgp_SequenceOfXYZ
 from OCC.Core.BRepAdaptor import BRepAdaptor_Curve
 
@@ -71,11 +69,20 @@ from OCC.Core.Geom import Geom_BSplineCurve
 # CONNECT_TOLERANCE = 1e-3
 # SEWING_TOLERANCE = 1e-3
 
-FITTING_TOLERANCE = 1e-5
-FIX_TOLERANCE = 1e-3
-CONNECT_TOLERANCE = 1e-3
-SEWING_TOLERANCE = 1e-3
+# EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
+# FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 10e-2]
+
+EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
+FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 10e-2]
+
+FIX_TOLERANCE = 1e-2
+FIX_PRECISION = 1e-2
+CONNECT_TOLERANCE = 8e-2
+SEWING_TOLERANCE = 8e-2
 USE_VARIATIONAL_SMOOTHING = False
+weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1.2, 1.5
+IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, False
+CONTINUITY = GeomAbs_C2
 
 
 def get_edge_vertexes(edge):
@@ -123,24 +130,28 @@ class Colors:
 
 
 def create_surface(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
-    def fit_face(uv_points_array, precision, use_variational_smoothing=True):
+    def fit_face(uv_points_array, precision, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
         deg_min, deg_max = 3, 8
         if use_variational_smoothing:
-            weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
+            # weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
             return GeomAPI_PointsToBSplineSurface(uv_points_array, weight_CurveLength, weight_Curvature, weight_Torsion, deg_max,
-                                                  GeomAbs_C2, precision).Surface()
+                                                  CONTINUITY, precision).Surface()
         else:
-            return GeomAPI_PointsToBSplineSurface(uv_points_array, deg_min, deg_max, GeomAbs_C2, precision).Surface()
+            return GeomAPI_PointsToBSplineSurface(uv_points_array, deg_min, deg_max, CONTINUITY, precision).Surface()
 
-    def set_face_uv_periodic(geom_face, tol=CONNECT_TOLERANCE):
+    def set_face_uv_periodic(geom_face, points, tol=2e-3):
+        u_intervals = np.sqrt(np.sum((points - np.roll(points, axis=0, shift=1)) ** 2, axis=2)).mean(axis=1)
+        v_intervals = np.sqrt(np.sum((points - np.roll(points, axis=1, shift=1)) ** 2, axis=2)).mean(axis=0)
+
         u_min, u_max, v_min, v_max = geom_face.Bounds()
         us = geom_face.Value(u_min, v_min)
         ue = geom_face.Value(u_max, v_min)
-        if us.Distance(ue) < tol:
+        if us.Distance(ue) < np.median(u_intervals) * 0.25:
             geom_face.SetUPeriodic()
+
         vs = geom_face.Value(u_min, v_min)
         ve = geom_face.Value(u_min, v_max)
-        if vs.Distance(ve) < tol:
+        if vs.Distance(ve) < np.median(v_intervals) * 0.25:
             geom_face.SetVPeriodic()
         return geom_face
 
@@ -152,7 +163,7 @@ def create_surface(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
             point_3d = gp_Pnt(float(pt[0]), float(pt[1]), float(pt[2]))
             uv_points_array.SetValue(u_index, v_index, point_3d)
 
-    precision = [FITTING_TOLERANCE, FITTING_TOLERANCE * 2, FITTING_TOLERANCE * 5, FITTING_TOLERANCE * 10]
+    precision = FACE_FITTING_TOLERANCE
     try:
         approx_face = fit_face(uv_points_array, precision[0], use_variational_smoothing)
     except Exception as e:
@@ -163,20 +174,20 @@ def create_surface(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
                 approx_face = fit_face(uv_points_array, precision[2], use_variational_smoothing)
             except Exception as e:
                 approx_face = fit_face(uv_points_array, precision[-1], use_variational_smoothing)
-    approx_face = set_face_uv_periodic(approx_face)
+    approx_face = set_face_uv_periodic(approx_face, points)
 
     return approx_face
 
 
 def create_edge(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
-    def fit_edge(u_points_array, precision, use_variational_smoothing=True):
+    def fit_edge(u_points_array, precision, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
         deg_min, deg_max = 0, 8
         if use_variational_smoothing:
-            weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
+            # weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
             return GeomAPI_PointsToBSpline(u_points_array, weight_CurveLength, weight_Curvature, weight_Torsion, deg_max,
-                                           GeomAbs_C2, precision).Curve()
+                                           CONTINUITY, precision).Curve()
         else:
-            return GeomAPI_PointsToBSpline(u_points_array, deg_min, deg_max, GeomAbs_C2, precision).Curve()
+            return GeomAPI_PointsToBSpline(u_points_array, deg_min, deg_max, CONTINUITY, precision).Curve()
 
     num_u_points = points.shape[0]
     u_points_array = TColgp_Array1OfPnt(1, num_u_points)
@@ -185,7 +196,7 @@ def create_edge(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
         point_2d = gp_Pnt(float(pt[0]), float(pt[1]), float(pt[2]))
         u_points_array.SetValue(u_index, point_2d)
 
-    precision = [FITTING_TOLERANCE, FITTING_TOLERANCE * 2, FITTING_TOLERANCE * 5, FITTING_TOLERANCE * 10]
+    precision = EDGE_FITTING_TOLERANCE
     try:
         approx_edge = fit_edge(u_points_array, precision[0], use_variational_smoothing)
     except Exception as e:
@@ -199,7 +210,7 @@ def create_edge(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
     return approx_edge
 
 
-def create_wire_from_unordered_edges(face_edges, max_retry_times=10, is_sort_by_length=False):
+def create_wire_from_unordered_edges(face_edges, max_retry_times=3, is_sort_by_length=True):
     wire_array = None
     for _ in range(max_retry_times):
         random.shuffle(face_edges)
@@ -241,14 +252,31 @@ def create_wire_from_unordered_edges(face_edges, max_retry_times=10, is_sort_by_
 def create_trimmed_face(surface, wire_list):
     face_fixer = ShapeFix_Face()
     face_fixer.Init(surface, CONNECT_TOLERANCE, True)
+    wire_seq = TopTools_HSequenceOfShape()
     for wire in wire_list:
+        wire_seq.Append(wire)
         face_fixer.Add(wire)
+
+    # face_fixer.FixWireTool().SetModifyGeometryMode(True)
+    # face_fixer.FixWireTool().SetMaxTolerance(CONNECT_TOLERANCE)
+    # face_fixer.FixWireTool().SetPrecision(FIX_PRECISION)
+    # face_fixer.FixWireTool().SetFixShiftedMode(True)
+    # face_fixer.FixWireTool().SetFixGaps2dMode(True)
+    # face_fixer.FixWireTool().SetFixGaps3dMode(True)
+    # face_fixer.FixWireTool().SetClosedWireMode(True)
+    # face_fixer.FixWireTool().SetFixTailMode(True)
+    # face_fixer.FixWireTool().SetFixSeamMode(True)
+    # face_fixer.FixWireTool().Perform()
+    # face_fixer.FixWireTool().FixGaps2d()
+    # face_fixer.FixWireTool().FixGaps3d()
+    # face_fixer.FixWireTool().FixConnected()
+
     face_fixer.SetAutoCorrectPrecisionMode(False)
-    face_fixer.SetPrecision(CONNECT_TOLERANCE)
+    face_fixer.SetPrecision(FIX_PRECISION)
     face_fixer.SetMaxTolerance(CONNECT_TOLERANCE)
     face_fixer.SetFixOrientationMode(True)
-    face_fixer.SetFixSplitFaceMode(True)
     face_fixer.SetFixMissingSeamMode(True)
+    face_fixer.SetFixSplitFaceMode(True)
     face_fixer.SetFixWireMode(True)
     face_fixer.SetFixLoopWiresMode(True)
     face_fixer.SetFixIntersectingWiresMode(True)
@@ -263,12 +291,7 @@ def create_trimmed_face(surface, wire_list):
     face_fixer.FixWiresTwoCoincEdges()
     face_fixer.FixIntersectingWires()
     face_fixer.FixPeriodicDegenerated()
-    face_fixer.Perform()
 
-    # wire_arr = TopTools_HSequenceOfShape()
-    # for wire in wire_list:
-    #     wire_arr.Append(wire)
-    # face_fixer.FixLoopWire(wire_arr)
     face_occ = face_fixer.Face()
     return face_occ
 
@@ -306,12 +329,13 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
         if idx in debug_face_idx:
             is_viz_wire, is_viz_face, is_viz_shell = True, True, True
         else:
-            is_viz_wire, is_viz_face, is_viz_shell = False, False, False
+            is_viz_wire, is_viz_face, is_viz_shell = IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL
 
         # 2. Construct wires from edges
         wire_list = create_wire_from_unordered_edges(face_edges)
 
         # visualize the constructed wire
+
         if is_viz_wire:
             viz_shapes(wire_list)
 
@@ -348,7 +372,6 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
     ###################################### 3. Sew solid ##########################################
     sewing = BRepBuilderAPI_Sewing()
     sewing.SetTolerance(SEWING_TOLERANCE)
-    # sewing.SetLocalTolerancesMode(True)
     for face in trimmed_faces:
         sewing.Add(face)
     sewing.Perform()

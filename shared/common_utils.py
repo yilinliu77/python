@@ -284,4 +284,4 @@ def export_point_cloud(v_file_path, v_pcs, v_color=None):
         pc.normals = o3d.utility.Vector3dVector(v_pcs[:, 3:6])
     if v_color is not None:
         pc.colors = o3d.utility.Vector3dVector(v_color)
-    o3d.io.write_point_cloud(v_file_path, pc)
+    o3d.io.write_point_cloud(str(v_file_path), pc)

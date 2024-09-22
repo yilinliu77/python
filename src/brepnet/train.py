@@ -92,13 +92,13 @@ class TrainAutoEncoder(pl.LightningModule):
 
         loss, data = self.model(data)
         total_loss = loss["total_loss"]
-        for key in loss:
-            if key == "total_loss":
-                continue
-            self.log(f"Training_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                     sync_dist=True, batch_size=self.batch_size)
-        self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True, batch_size=self.batch_size)
+        # for key in loss:
+        #     if key == "total_loss":
+        #         continue
+        #     self.log(f"Training_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
+        #              sync_dist=True, batch_size=self.batch_size)
+        # self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
+        #          sync_dist=True, batch_size=self.batch_size)
         # if torch.isnan(total_loss).any():
             # print("NAN Loss")
         return total_loss
@@ -244,17 +244,19 @@ def main(v_cfg: DictConfig):
         logger=logger,
         accelerator='gpu',
         strategy="ddp_find_unused_parameters_true" if v_cfg["trainer"].gpu > 1 else "auto",
+        # strategy="auto",
         devices=v_cfg["trainer"].gpu,
-        enable_model_summary=False,
+        enable_model_summary=True,
         callbacks=[mc, lr_monitor],
         max_epochs=int(v_cfg["trainer"]["max_epochs"]),
         # max_epochs=2,
         num_sanity_val_steps=2,
         check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
         precision=v_cfg["trainer"]["accelerator"],
-
+        gradient_clip_algorithm="norm",
+        gradient_clip_val=0.5,
         # profiler="advanced",
-        # max_steps=1000
+        # max_steps=100
     )
 
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":

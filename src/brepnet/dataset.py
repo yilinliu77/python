@@ -178,46 +178,16 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
             edge_face_connectivity
         ) = zip(*batch)
         bs = len(v_prefix)
-        flat_face_points = []
-        flat_edge_points = []
-        flat_edge_face_connectivity = []
         flat_zero_positions = []
-        flat_face_points_norm = []
-        flat_edge_points_norm = []
-        flat_face_center = []
-        flat_face_scale = []
-        flat_edge_center = []
-        flat_edge_scale = []
-        flat_face_points_discrete = []
-        flat_edge_points_discrete = []
-        flat_face_center_discrete = []
-        flat_face_scale_discrete = []
-        flat_edge_center_discrete = []
-        flat_edge_scale_discrete = []
         num_face_record = []
         
         num_faces = 0
         num_edges = 0
         edge_conn_num = []
         for i in range(bs):
-            flat_face_points.append(face_points[i])
-            flat_edge_points.append(edge_points[i])
-            flat_face_points_norm.append(face_points_norm[i])
-            flat_edge_points_norm.append(edge_points_norm[i])
-            flat_face_center.append(face_center[i])
-            flat_face_scale.append(face_scale[i])
-            flat_edge_center.append(edge_center[i])
-            flat_edge_scale.append(edge_scale[i])
-            flat_face_points_discrete.append(face_points_discrete[i])
-            flat_edge_points_discrete.append(edge_points_discrete[i])
-            flat_face_center_discrete.append(face_center_discrete[i])
-            flat_face_scale_discrete.append(face_scale_discrete[i])
-            flat_edge_center_discrete.append(edge_center_discrete[i])
-            flat_edge_scale_discrete.append(edge_scale_discrete[i])
             edge_face_connectivity[i][:, 0] += num_edges
             edge_face_connectivity[i][:, 1:] += num_faces
             edge_conn_num.append(edge_face_connectivity[i].shape[0])
-            flat_edge_face_connectivity.append(edge_face_connectivity[i])
             flat_zero_positions.append(zero_positions[i] + num_faces)
             num_faces+=face_points[i].shape[0]
             num_edges+=edge_points[i].shape[0]
@@ -240,30 +210,15 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
             attn_mask[id_cur:id_cur+face_points[i].shape[0], id_cur : id_cur+face_points[i].shape[0]] = False
             id_cur+=face_points[i].shape[0]
             
-        flat_face_points = torch.cat(flat_face_points, dim=0)
-        flat_edge_points = torch.cat(flat_edge_points, dim=0)
-        flat_face_points_norm = torch.cat(flat_face_points_norm, dim=0)
-        flat_edge_points_norm = torch.cat(flat_edge_points_norm, dim=0)
-        flat_face_center = torch.cat(flat_face_center, dim=0)
-        flat_face_scale = torch.cat(flat_face_scale, dim=0)
-        flat_edge_center = torch.cat(flat_edge_center, dim=0)
-        flat_edge_scale = torch.cat(flat_edge_scale, dim=0)
-
-        flat_face_points_discrete = torch.cat(flat_face_points_discrete, dim=0)
-        flat_edge_points_discrete = torch.cat(flat_edge_points_discrete, dim=0)
-        flat_face_center_discrete = torch.cat(flat_face_center_discrete, dim=0)
-        flat_face_scale_discrete = torch.cat(flat_face_scale_discrete, dim=0)
-        flat_edge_center_discrete = torch.cat(flat_edge_center_discrete, dim=0)
-        flat_edge_scale_discrete = torch.cat(flat_edge_scale_discrete, dim=0)
-        flat_edge_face_connectivity = torch.cat(flat_edge_face_connectivity, dim=0)
+        dtype=torch.float32
         flat_zero_positions = torch.cat(flat_zero_positions, dim=0)
 
         return {
             "v_prefix": v_prefix,
-            "edge_points": flat_edge_points,
-            "face_points": flat_face_points,
+            "edge_points": torch.cat(edge_points, dim=0),
+            "face_points": torch.cat(face_points, dim=0),
 
-            "edge_face_connectivity": flat_edge_face_connectivity,
+            "edge_face_connectivity": torch.cat(edge_face_connectivity, dim=0),
             "zero_positions": flat_zero_positions,
             "attn_mask": attn_mask,
             "edge_attn_mask": edge_attn_mask,
@@ -271,12 +226,12 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
             "num_face_record": num_face_record,
             "valid_mask": valid_mask,
 
-            "face_center": flat_face_center,
-            "face_scale": flat_face_scale,
-            "edge_center": flat_edge_center,
-            "edge_scale": flat_edge_scale,
-            "face_points_norm": flat_face_points_norm,
-            "edge_points_norm": flat_edge_points_norm,
+            "face_points_norm": torch.cat(face_points_norm, dim=0),
+            "face_center": torch.cat(face_center, dim=0),
+            "face_scale": torch.cat(face_scale, dim=0),
+            "edge_points_norm": torch.cat(edge_points_norm, dim=0),
+            "edge_center": torch.cat(edge_center, dim=0),
+            "edge_scale": torch.cat(edge_scale, dim=0),
 
             # "face_points_discrete": flat_face_points_discrete,
             # "edge_points_discrete": flat_edge_points_discrete,

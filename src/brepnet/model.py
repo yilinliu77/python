@@ -3209,7 +3209,11 @@ class AutoEncoder_0921(nn.Module):
         
         self.gaussian_weights = v_conf["gaussian_weights"]
         if self.gaussian_weights > 0:
-            self.gaussian_proj = nn.Linear(self.df, self.df*2)
+            self.gaussian_proj = nn.Sequential(
+                nn.Linear(self.df, self.df*2),
+                nn.LeakyReLU(),
+                nn.Linear(self.df*2, self.df*2),
+            )
 
         self.times = {
             "encoder": 0,

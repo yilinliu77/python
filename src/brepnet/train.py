@@ -11,7 +11,7 @@ import os.path
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
-
+from datetime import datetime
 import torch
 
 import pytorch_lightning as pl
@@ -92,15 +92,15 @@ class TrainAutoEncoder(pl.LightningModule):
 
         loss, data = self.model(data)
         total_loss = loss["total_loss"]
-        # for key in loss:
-        #     if key == "total_loss":
-        #         continue
-        #     self.log(f"Training_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
-        #              sync_dist=True, batch_size=self.batch_size)
-        # self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-        #          sync_dist=True, batch_size=self.batch_size)
-        # if torch.isnan(total_loss).any():
-            # print("NAN Loss")
+        for key in loss:
+            if key == "total_loss":
+                continue
+            self.log(f"Training_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                     sync_dist=True, batch_size=self.batch_size)
+        self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                 sync_dist=True, batch_size=self.batch_size)
+        if torch.isnan(total_loss).any():
+            print("NAN Loss")
         return total_loss
 
     def validation_step(self, batch, batch_idx):
@@ -224,9 +224,10 @@ def main(v_cfg: DictConfig):
     torch.set_float32_matmul_precision("medium")
     print(OmegaConf.to_yaml(v_cfg))
 
+    exp_name = v_cfg["trainer"]["exp_name"]
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
-    log_dir = hydra_cfg['runtime']['output_dir']
-    v_cfg["trainer"]["output"] = os.path.join(log_dir, v_cfg["trainer"]["output"])
+    log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name + "/" + str(datetime.now().strftime("%y-%m-%d-%H-%M-%S"))
+    v_cfg["trainer"]["output"] = log_dir
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
 
@@ -234,10 +235,8 @@ def main(v_cfg: DictConfig):
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
     model = TrainAutoEncoder(v_cfg)
-    exp_name = v_cfg["trainer"]["exp_name"]
     logger = TensorBoardLogger(
-        log_dir,
-        name="autoencoder" if exp_name is None else exp_name)
+        log_dir)
 
     trainer = Trainer(
         default_root_dir=log_dir,
@@ -253,8 +252,8 @@ def main(v_cfg: DictConfig):
         num_sanity_val_steps=2,
         check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
         precision=v_cfg["trainer"]["accelerator"],
-        gradient_clip_algorithm="norm",
-        gradient_clip_val=0.5,
+        # gradient_clip_algorithm="norm",
+        # gradient_clip_val=0.5,
         # profiler="advanced",
         # max_steps=100
     )

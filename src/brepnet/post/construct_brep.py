@@ -136,10 +136,10 @@ if __name__ == '__main__':
     if not os.path.exists(v_data_root):
         raise ValueError(f"Data root path {v_data_root} does not exist.")
 
-    test_construct_brep(v_data_root, v_out_root)
-    # all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
-    all_folders = os.listdir(r"E:\data\img2brep\0916_context_test_out1_seg\else")
-    check_dir(v_out_root)
+    # test_construct_brep(v_data_root, v_out_root)
+    all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
+    # all_folders = os.listdir(r"E:\data\img2brep\0916_context_test_out1_seg\else")
+    # check_dir(v_out_root)
     if not is_cover:
         all_folders = [folder for folder in all_folders if not os.path.exists(os.path.join(v_out_root, folder))]
     all_folders.sort()

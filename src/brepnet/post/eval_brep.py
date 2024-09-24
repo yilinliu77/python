@@ -2,6 +2,8 @@ import time, os, random, traceback
 import torch
 import numpy as np
 import multiprocessing
+
+from OCC.Core.BRepAdaptor import BRepAdaptor_Curve
 from tqdm import tqdm
 import trimesh
 import argparse
@@ -89,19 +91,18 @@ def read_step_and_get_data(step_file_path, NUM_SAMPLE_EDGE_UNIT=100):
                 break
         if not is_saved:
             topods_edge_list.append(edge)
-            curve_data = BRep_Tool.Curve(edge)
-            if curve_data and len(curve_data) == 3:
-                curve_handle, first, last = curve_data
-                NUM_SAMPLE_EDGE = int(get_edge_length(edge, NUM_SEGMENTS=32) * NUM_SAMPLE_EDGE_UNIT)
-                u_values = np.linspace(first, last, NUM_SAMPLE_EDGE)
-                points_on_edge = []
-                for u in u_values:
-                    point = curve_handle.Value(u)
-                    points_on_edge.append((point.X(), point.Y(), point.Z()))
-                if len(points_on_edge) != 0:
-                    points_on_edge = np.array(points_on_edge)
-                    points_on_edge.reshape(-1, 3)
-                    edge_points.append(points_on_edge)
+            curve_handle = BRepAdaptor_Curve(edge).Curve()
+            first, last = curve_handle.FirstParameter(), curve_handle.LastParameter()
+            NUM_SAMPLE_EDGE = int(get_edge_length(edge, NUM_SEGMENTS=32) * NUM_SAMPLE_EDGE_UNIT)
+            u_values = np.linspace(first, last, NUM_SAMPLE_EDGE)
+            points_on_edge = []
+            for u in u_values:
+                point = curve_handle.Value(u)
+                points_on_edge.append((point.X(), point.Y(), point.Z()))
+            if len(points_on_edge) != 0:
+                points_on_edge = np.array(points_on_edge)
+                points_on_edge.reshape(-1, 3)
+                edge_points.append(points_on_edge)
         edge_explorer.Next()
     return vertexes, edge_points
 
@@ -120,6 +121,8 @@ class SamplePointsAndComputeCD:
         self.folder_names.sort()
         if is_debug:
             self.folder_names = self.folder_names[:32]
+        # self.folder_names = [f for f in self.folder_names if os.path.exists(os.path.join(self.root_path, f, 'recon_brep.step'))]
+        # self.folder_names = self.folder_names[0:100]
         # self.gen_name_condicate = ['recon_brep.stl', 'recon_brep_invaild.stl', 'recon_brep_compound.stl']
         self.gen_name_condicate = ['recon_brep.stl']
         self.SAMPLE_NUM = SAMPLE_NUM
@@ -491,38 +494,47 @@ class SamplePointsAndComputeCD:
 
     def find_complex(self):
         import shutil
-        save_root = os.path.join(os.path.dirname(self.root_path), 'segment_by_face_num')
+        save_root = self.root_path.rstrip('\\') + '_seg'
         if os.path.exists(save_root):
             shutil.rmtree(save_root)
         os.makedirs(save_root, exist_ok=False)
-        seg_save_root = [os.path.join(save_root, 'face>30'), os.path.join(save_root, 'face>20'), os.path.join(save_root, 'face>10'),
-                         os.path.join(save_root, 'else')]
+        seg_save_root = [os.path.join(save_root, 'face_30'), os.path.join(save_root, 'face_20'), os.path.join(save_root, 'face_10'),
+                         os.path.join(save_root, 'face_0'), os.path.join(save_root, 'else')]
         for each in seg_save_root:
             os.makedirs(each, exist_ok=True)
 
         random.shuffle(self.folder_names)
-        self.folder_names = self.folder_names[0:2000]
         for folder_name in tqdm(self.folder_names):
-            data_npz = np.load(os.path.join(self.root_path, folder_name, 'data.npz'))
-            if data_npz['sample_points_faces'].shape[0] > 30:
+            if not os.path.exists(os.path.join(self.root_path, folder_name, 'recon_brep.step')):
+                shutil.copytree(os.path.join(self.root_path, folder_name), os.path.join(seg_save_root[4], folder_name))
+                continue
+            if not os.path.exists(os.path.join(self.root_path, folder_name, 'eval.npz')):
+                continue
+            result = np.load(os.path.join(self.root_path, folder_name, 'eval.npz'), allow_pickle=True)['result'].item()
+            face_num = result['num_recon_face']
+            if face_num > 30:
                 shutil.copytree(os.path.join(self.root_path, folder_name), os.path.join(seg_save_root[0], folder_name))
-            elif data_npz['sample_points_faces'].shape[0] > 20:
+            elif face_num > 20:
                 shutil.copytree(os.path.join(self.root_path, folder_name), os.path.join(seg_save_root[1], folder_name))
-            elif data_npz['sample_points_faces'].shape[0] > 10:
+            elif face_num > 10:
                 shutil.copytree(os.path.join(self.root_path, folder_name), os.path.join(seg_save_root[2], folder_name))
             else:
-                continue
                 shutil.copytree(os.path.join(self.root_path, folder_name), os.path.join(seg_save_root[3], folder_name))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Evaluate The Generated Brep')
-    parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\deepcad_whole_train_v5")
-    parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\deepcad_whole_train_v5_out")
+    parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\deepcad_whole_v5\deepcad_whole_test_v5")
+    parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\0916_context_test_out")
     parser.add_argument('--used_gpu', type=int, nargs='+', default=[0])
+    parser.add_argument('--is_parallel', type=bool, default=False)
+    parser.add_argument('--num_cpus', type=int, default=32)
+    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--is_save_pc', type=bool, default=False)
     args = parser.parse_args()
     v_data_root = args.data_root
     v_out_root = args.out_root
+    is_parallel = args.is_parallel
 
     if not os.path.exists(v_data_root):
         raise ValueError(f"Data root path {v_data_root} does not exist.")
@@ -531,7 +543,10 @@ if __name__ == '__main__':
 
     os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
     app = SamplePointsAndComputeCD(gt_root=v_data_root, root_path=v_out_root,
-                                   visable_gpu_id=[0], is_save_pc=False, is_debug=False)
-    app.run(is_parallel=False, is_save=True, is_info=True)
+                                   visable_gpu_id=args.used_gpu,
+                                   num_cpus=args.num_cpus, batch_size=args.batch_size,
+                                   is_save_pc=args.is_save_pc, is_debug=False)
+
+    # app.run(is_parallel=is_parallel, is_save=True, is_info=True)
     # app.info()
-    # app.find_complex()
+    app.find_complex()

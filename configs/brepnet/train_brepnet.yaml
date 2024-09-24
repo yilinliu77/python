@@ -22,17 +22,17 @@ trainer:
   max_epochs: 10000000
   spawn: false
   output: .
-  exp_name:
+  exp_name: test
 
 model:
   name: AutoEncoder_featuredv2
   dim_latent: 32
   dim_shape: 32
   norm: "layer"
-  gaussian_weights: 0.0001
+  gaussian_weights: 1e-6
 
 hydra:
   run:
-    dir: ./outputs_brepnet/${now:%Y_%m_%d_%H_%M_%S}
+    dir: ./outputs_brepnet
   job:
     chdir: False

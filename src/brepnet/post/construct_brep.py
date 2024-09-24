@@ -123,9 +123,9 @@ def test_construct_brep(v_data_root, v_out_root):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Construct Brep From Data')
-    parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\0916_context_test")
-    parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\0916_context_test_out")
-    parser.add_argument('--is_cover', type=bool, default=False)
+    parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test")
+    parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test_out")
+    parser.add_argument('--is_cover', type=bool, default=True)
     parser.add_argument('--is_use_ray', type=bool, default=True)
     args = parser.parse_args()
     v_data_root = args.data_root

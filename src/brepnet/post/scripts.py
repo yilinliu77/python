@@ -21,5 +21,20 @@ def move():
             shutil.copy(os.path.join(data_root, folder_names + ".npz"), os.path.join(tgt_path, "data.npz"))
 
 
+def count_success():
+    data_root = r"E:\data\img2brep\0916_context_test_out"
+    failed_root = r"E:\data\img2brep\failed"
+    os.makedirs(failed_root, exist_ok=True)
+    all_files = os.listdir(data_root)
+    all_files.sort()
+
+    for filename in tqdm(all_files):
+        if os.path.exists(os.path.join(data_root, filename, "recon_brep.step")):
+            continue
+        else:
+            shutil.copytree(os.path.join(data_root, filename), os.path.join(failed_root, filename))
+
+
 if __name__ == '__main__':
-    move()
+    # move()
+    count_success()

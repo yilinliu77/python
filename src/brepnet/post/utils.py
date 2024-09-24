@@ -14,7 +14,7 @@ from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeWire, BRepBuilderAPI_Make
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Sewing, BRepBuilderAPI_MakeSolid
 
 from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface, GeomAPI_PointsToBSpline
-from OCC.Core.GeomAbs import GeomAbs_C0, GeomAbs_C1, GeomAbs_C2
+from OCC.Core.GeomAbs import GeomAbs_C0, GeomAbs_C1, GeomAbs_C2, GeomAbs_Cylinder, GeomAbs_Plane
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_Wire
 from OCC.Core.ShapeExtend import ShapeExtend_WireData
 from OCC.Core.ShapeFix import ShapeFix_Face, ShapeFix_Wire, ShapeFix_Edge, ShapeFix_Shell, ShapeFix_Solid, \
@@ -56,7 +56,7 @@ from OCC.Core.BRepCheck import BRepCheck_Analyzer
 from OCC.Core.GeomPlate import (GeomPlate_BuildPlateSurface, GeomPlate_PointConstraint, GeomPlate_CurveConstraint,
                                 GeomPlate_MakeApprox, GeomPlate_PlateG0Criterion, GeomPlate_PlateG1Criterion, )
 from OCC.Core.TColgp import TColgp_SequenceOfXY, TColgp_SequenceOfXYZ
-from OCC.Core.BRepAdaptor import BRepAdaptor_Curve
+from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 
 from OCC.Core.GProp import GProp_GProps
 from OCC.Core.BRepGProp import brepgprop
@@ -73,15 +73,17 @@ from OCC.Core.Geom import Geom_BSplineCurve
 # FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 10e-2]
 
 EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
-FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 10e-2]
+FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 8e-2]
 
 FIX_TOLERANCE = 1e-2
 FIX_PRECISION = 1e-2
-CONNECT_TOLERANCE = 8e-2
-SEWING_TOLERANCE = 8e-2
-USE_VARIATIONAL_SMOOTHING = False
-weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1.2, 1.5
-IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, False
+CONNECT_TOLERANCE = 3e-2
+SEWING_TOLERANCE = 3e-2
+TRANSFER_PRECISION = 1e-3
+MAX_DISTANCE_THRESHOLD = 1e-1
+USE_VARIATIONAL_SMOOTHING = True
+weight_CurveLength, weight_Curvature, weight_Torsion = 0.4, 0.4, 0.2
+IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, True
 CONTINUITY = GeomAbs_C2
 
 
@@ -93,6 +95,49 @@ def get_edge_vertexes(edge):
         vertexes.append(vertex)
         vertex_explorer.Next()
     return vertexes
+
+
+def expore_edges(shape):
+    edge_explorer = TopExp_Explorer(shape, TopAbs_EDGE)
+    edges = []
+    while edge_explorer.More():
+        edge = topods.Edge(edge_explorer.Current())
+        edges.append(edge)
+        edge_explorer.Next()
+    return edges
+
+
+def check_edges_similarity(edge1, edge2, dis_threshold=1e-1):
+    def sample_edge(edge, sample_num=16):
+        curve = BRepAdaptor_Curve(edge).Curve()
+        first, last = curve.FirstParameter(), curve.LastParameter()
+        points = []
+        for i in range(sample_num):
+            param = first + (last - first) * i / (sample_num - 1)
+            point = curve.Value(param)
+            points.append(point)
+        return points
+
+    edge1_sample_points = sample_edge(edge1)
+    edge2_sample_points = sample_edge(edge2)
+
+    if edge1_sample_points is None or edge2_sample_points is None:
+        return False, -1
+
+    dis_list1 = []
+    for p1, p2 in zip(edge1_sample_points, edge2_sample_points):
+        dis = p1.Distance(p2)
+        dis_list1.append(dis)
+
+    dis_list2 = []
+    for p1, p2 in zip(edge1_sample_points, edge2_sample_points[::-1]):
+        dis = p1.Distance(p2)
+        dis_list2.append(dis)
+
+    dis_list = dis_list1 if sum(dis_list1) < sum(dis_list2) else dis_list2
+
+    is_similar = all([dis < dis_threshold for dis in dis_list])
+    return is_similar, np.mean(dis_list)
 
 
 def calculate_wire_bounding_box_length(wire):
@@ -113,6 +158,17 @@ def viz_shapes(shapes, transparency=0):
             display.DisplayShape(shape, update=True, color=Colors.random_color(), transparency=transparency)
     display.FitAll()
     start_display()
+
+
+def check_edges_in_face(face, edges, dist_tol=CONNECT_TOLERANCE):
+    for edge in edges:
+        edge_vertexes = get_edge_vertexes(edge)
+        for vertex in edge_vertexes:
+            dist_shape_shape = BRepExtrema_DistShapeShape(vertex, face)
+            min_dist = dist_shape_shape.Value()
+            if min_dist > dist_tol:
+                return False
+    return True
 
 
 class Colors:
@@ -146,12 +202,12 @@ def create_surface(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
         u_min, u_max, v_min, v_max = geom_face.Bounds()
         us = geom_face.Value(u_min, v_min)
         ue = geom_face.Value(u_max, v_min)
-        if us.Distance(ue) < np.median(u_intervals) * 0.25:
+        if us.Distance(ue) < np.mean(u_intervals):
             geom_face.SetUPeriodic()
 
         vs = geom_face.Value(u_min, v_min)
         ve = geom_face.Value(u_min, v_max)
-        if vs.Distance(ve) < np.median(v_intervals) * 0.25:
+        if vs.Distance(ve) < np.mean(v_intervals):
             geom_face.SetVPeriodic()
         return geom_face
 
@@ -249,27 +305,28 @@ def create_wire_from_unordered_edges(face_edges, max_retry_times=3, is_sort_by_l
     return wire_list
 
 
-def create_trimmed_face(surface, wire_list):
+def create_trimmed_face_from_wire(geom_face, wire_list):
+    is_periodic = geom_face.IsUPeriodic() or geom_face.IsVPeriodic()
+
     face_fixer = ShapeFix_Face()
-    face_fixer.Init(surface, CONNECT_TOLERANCE, True)
+    face_fixer.Init(geom_face, CONNECT_TOLERANCE, True)
     wire_seq = TopTools_HSequenceOfShape()
     for wire in wire_list:
         wire_seq.Append(wire)
         face_fixer.Add(wire)
 
-    # face_fixer.FixWireTool().SetModifyGeometryMode(True)
-    # face_fixer.FixWireTool().SetMaxTolerance(CONNECT_TOLERANCE)
-    # face_fixer.FixWireTool().SetPrecision(FIX_PRECISION)
-    # face_fixer.FixWireTool().SetFixShiftedMode(True)
-    # face_fixer.FixWireTool().SetFixGaps2dMode(True)
-    # face_fixer.FixWireTool().SetFixGaps3dMode(True)
-    # face_fixer.FixWireTool().SetClosedWireMode(True)
-    # face_fixer.FixWireTool().SetFixTailMode(True)
-    # face_fixer.FixWireTool().SetFixSeamMode(True)
-    # face_fixer.FixWireTool().Perform()
-    # face_fixer.FixWireTool().FixGaps2d()
-    # face_fixer.FixWireTool().FixGaps3d()
-    # face_fixer.FixWireTool().FixConnected()
+    face_fixer.FixWireTool().SetModifyGeometryMode(True)
+    face_fixer.FixWireTool().SetMaxTolerance(CONNECT_TOLERANCE)
+    face_fixer.FixWireTool().SetPrecision(FIX_PRECISION)
+    face_fixer.FixWireTool().SetFixShiftedMode(True)
+    face_fixer.FixWireTool().SetFixGaps2dMode(True)
+    face_fixer.FixWireTool().SetFixGaps3dMode(True)
+    face_fixer.FixWireTool().SetClosedWireMode(True)
+    face_fixer.FixWireTool().SetFixTailMode(True)
+    face_fixer.FixWireTool().Perform()
+    face_fixer.FixWireTool().FixGaps2d()
+    face_fixer.FixWireTool().FixGaps3d()
+    face_fixer.FixWireTool().FixConnected()
 
     face_fixer.SetAutoCorrectPrecisionMode(False)
     face_fixer.SetPrecision(FIX_PRECISION)
@@ -285,70 +342,127 @@ def create_trimmed_face(surface, wire_list):
     face_fixer.SetRemoveSmallAreaFaceMode(True)
     face_fixer.Perform()
 
-    face_fixer.FixMissingSeam()
-    face_fixer.FixAddNaturalBound()
-    face_fixer.FixOrientation()
-    face_fixer.FixWiresTwoCoincEdges()
-    face_fixer.FixIntersectingWires()
-    face_fixer.FixPeriodicDegenerated()
+    try:
+        face_fixer.FixAddNaturalBound()
+        face_fixer.FixOrientation()
+        face_fixer.FixMissingSeam()
+        face_fixer.FixWiresTwoCoincEdges()
+        face_fixer.FixIntersectingWires()
+        face_fixer.FixPeriodicDegenerated()
+        face_fixer.FixOrientation()
+    except Exception as e:
+        print(f"Error fixing face {e}")
 
     face_occ = face_fixer.Face()
+
     return face_occ
 
 
-def check_edges_in_face(face, edges, dist_tol=CONNECT_TOLERANCE):
-    for edge in edges:
-        edge_vertexes = get_edge_vertexes(edge)
-        for vertex in edge_vertexes:
-            dist_shape_shape = BRepExtrema_DistShapeShape(vertex, face)
-            min_dist = dist_shape_shape.Value()
-            if min_dist > dist_tol:
-                return False
-    return True
+def create_trimmed_face1(geom_face, face_edges):
+    wire_list = create_wire_from_unordered_edges(face_edges)
+    if wire_list is None:
+        return None, None, False
+    trimmed_face = create_trimmed_face_from_wire(geom_face, wire_list)
+    face_analyzer = BRepCheck_Analyzer(trimmed_face)
+    is_face_valid = face_analyzer.IsValid()
+    return wire_list, trimmed_face, is_face_valid
 
 
-"""
-Fit parametric surfaces / curves and trim into B-rep
-"""
+def create_trimmed_face2(geom_face, topo_face, face_edges):
+    # try to find the replaced edge
+    topo_face_edges = expore_edges(topo_face)
+    replace_dict = {}
+    for idx1, checked_edge in enumerate(face_edges):
+        optional_edges = {}
+        for idx2, replaced_edge in enumerate(topo_face_edges):
+            is_similar, mean_dis = check_edges_similarity(checked_edge, replaced_edge)
+            if is_similar:
+                optional_edges[idx2] = mean_dis
+        if len(optional_edges) == 0:
+            continue
+        optimal_edge_idx = min(optional_edges, key=optional_edges.get)
+        replace_dict[idx1] = optimal_edge_idx
+        face_edges[idx1] = topo_face_edges[optimal_edge_idx]
+    return create_trimmed_face1(geom_face, face_edges)
 
 
+def try_create_trimmed_face(geom_face, topo_face, face_edges):
+    wire_list1, trimmed_face1, is_face_valid1 = create_trimmed_face1(geom_face, face_edges)
+    if is_face_valid1:
+        return wire_list1, trimmed_face1, 0
+
+    wire_list2, trimmed_face2, is_face_valid2 = create_trimmed_face2(geom_face, topo_face, face_edges)
+    if is_face_valid2:
+        return wire_list2, trimmed_face2, 1
+
+    return wire_list1, topo_face, 2
+
+
+# Fit parametric surfaces / curves and trim into B-rep
 def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, is_save_face=True, debug_face_idx=[]):
-    ##################################### 1. Fit primitives #####################################
-    recon_faces = [create_surface(points) for points in surf_wcs]
+    print(f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
+    recon_geom_faces = [create_surface(points) for points in surf_wcs]
+    recon_topo_faces = [BRepBuilderAPI_MakeFace(geom_face, 1e-3).Face() for geom_face in recon_geom_faces]
     recon_curves = [create_edge(points) for points in edge_wcs]
-
-    # Create edges from the curve list
     recon_edge = [BRepBuilderAPI_MakeEdge(curve).Edge() for curve in recon_curves]
 
-    ###################################### 2. Trim Face ##########################################
+    # if isdebug:
+    #     viz_shapes(recon_geom_faces, transparency=0.5)
+    #     os.makedirs(os.path.join(folder_path, 'fitting_geom_face'), exist_ok=True)
+    #     for idx, geom_face in enumerate(recon_geom_faces):
+    #         if idx != 15:
+    #             continue
+    #         topo_face_from_geom = BRepBuilderAPI_MakeFace(geom_face, 1e-3).Face()
+    #         # write_stl_file(topo_face_from_geom, os.path.join(folder_path, 'fitting_face', f'{idx}.stl'), linear_deflection=0.1,
+    #         #                angular_deflection=0.5)
+    #         viz_shapes([topo_face_from_geom], transparency=0.5)
+
+    print(f"{Colors.GREEN}################################ 2. Trim Face ######################################{Colors.RESET}")
     # Cut surface by wire
     is_face_success_list = []
     trimmed_faces = []
-    for idx, (surface, face_edge_idx) in enumerate(zip(recon_faces, FaceEdgeAdj)):
+    for idx, (geom_face, topo_face, face_edge_idx) in enumerate(zip(recon_geom_faces, recon_topo_faces, FaceEdgeAdj)):
         face_edges = [recon_edge[edge_idx] for edge_idx in face_edge_idx]
         if idx in debug_face_idx:
             is_viz_wire, is_viz_face, is_viz_shell = True, True, True
         else:
             is_viz_wire, is_viz_face, is_viz_shell = IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL
 
-        # 2. Construct wires from edges
-        wire_list = create_wire_from_unordered_edges(face_edges)
+        # 3. Construct face using geom surface and wires
+        wire_list, trimmed_face, method_type = try_create_trimmed_face(geom_face, topo_face, face_edges)
 
         # visualize the constructed wire
-
         if is_viz_wire:
-            viz_shapes(wire_list)
-
-        # 3. Construct face using geom surface and wires
-        trimmed_face = create_trimmed_face(surface, wire_list)
-        trimmed_faces.append(trimmed_face)
+            shapes = wire_list
+            display, start_display, add_menu, add_function_to_menu = init_display()
+            if len(shapes) == 1:
+                display.DisplayShape(shapes[0], update=True)
+            else:
+                for shape in shapes:
+                    display.DisplayShape(shape, update=True, color=Colors.random_color())
+            display.FitAll()
+            start_display()
+            # viz_shapes(wire_list)
 
         if is_viz_face:
-            viz_shapes([trimmed_face])
+            shapes = [trimmed_face]
+            display, start_display, add_menu, add_function_to_menu = init_display()
+            if len(shapes) == 1:
+                display.DisplayShape(shapes[0], update=True)
+            else:
+                for shape in shapes:
+                    display.DisplayShape(shape, update=True, color=Colors.random_color())
+            display.FitAll()
+            start_display()
+            # viz_shapes([trimmed_face])
 
         # check if the face contains all edges
         is_face_success = check_edges_in_face(trimmed_face, face_edges)
         is_face_success_list.append(is_face_success)
+        if is_face_success:
+            trimmed_faces.append(trimmed_face)
+        else:
+            trimmed_faces.append(trimmed_face)
 
         if isdebug and not is_face_success:
             print(f"{Colors.RED}Folder_path: {folder_path}, Face {idx} is not valid{Colors.RESET}")
@@ -364,12 +478,12 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             os.makedirs(os.path.join(folder_path, 'recon_face'), exist_ok=True)
             try:
                 write_step_file(trimmed_face, os.path.join(folder_path, 'recon_face', f'{idx}.step'))
-                write_stl_file(trimmed_face, os.path.join(folder_path, 'recon_face', f'{idx}.stl'), linear_deflection=0.001,
+                write_stl_file(trimmed_face, os.path.join(folder_path, 'recon_face', f'{idx}.stl'), linear_deflection=0.1,
                                angular_deflection=0.5)
             except:
                 print(f"Error writing step or stl file for face {idx}")
 
-    ###################################### 3. Sew solid ##########################################
+    print(f"{Colors.GREEN}################################ 3. Sew solid ################################{Colors.RESET}")
     sewing = BRepBuilderAPI_Sewing()
     sewing.SetTolerance(SEWING_TOLERANCE)
     for face in trimmed_faces:
@@ -384,13 +498,13 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
         return sewn_shell, is_face_success_list
 
     # fix the shell
-    # fix_shell = ShapeFix_Shell(sewn_shell)
-    # fix_shell.SetPrecision(FIX_TOLERANCE)
-    # fix_shell.SetMaxTolerance(FIX_TOLERANCE)
-    # fix_shell.SetFixFaceMode(True)
-    # fix_shell.SetFixOrientationMode(True)
-    # fix_shell.Perform()
-    # sewn_shell = fix_shell.Shell()
+    fix_shell = ShapeFix_Shell(sewn_shell)
+    fix_shell.SetPrecision(FIX_PRECISION)
+    fix_shell.SetMaxTolerance(FIX_TOLERANCE)
+    fix_shell.SetFixFaceMode(True)
+    fix_shell.SetFixOrientationMode(True)
+    fix_shell.Perform()
+    sewn_shell = fix_shell.Shell()
 
     maker = BRepBuilderAPI_MakeSolid()
     maker.Add(sewn_shell)
@@ -402,8 +516,9 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
     fix_solid.SetMaxTolerance(FIX_TOLERANCE)
     fix_solid.SetFixShellMode(True)
     fix_solid.SetFixShellOrientationMode(True)
-    fix_solid.SetCreateOpenSolidMode(True)
+    fix_solid.SetCreateOpenSolidMode(False)
     fix_solid.Perform()
     fixed_solid = fix_solid.Solid()
 
+    print(f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
     return fixed_solid, is_face_success_list

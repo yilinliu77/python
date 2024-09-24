@@ -57,6 +57,20 @@ def get_wire_length(face_edge):
     return torch.norm(face_edge[:, 1::, :] - face_edge[:, 0:-1, :], dim=-1).sum()
 
 
+def check_edge_validity(edge_point, face_point1, face_point2):
+    computer = ChamferDistance()
+    edge_point = torch.from_numpy(edge_point)
+    face_point1 = torch.from_numpy(face_point1)
+    face_point2 = torch.from_numpy(face_point2)
+    dst1 = computer(edge_point.reshape(1, -1, 3), face_point1.reshape(1, -1, 3))
+    dst2 = computer(edge_point.reshape(1, -1, 3), face_point2.reshape(1, -1, 3))
+    if dst1 < 5e-3 and dst2 < 5e-3:
+        return True
+    else:
+        return False
+    # return (abs(dst1 - dst2) / torch.min(dst1, dst2)) < 0.25
+
+
 class STModel(nn.Module):
     def __init__(self, init_surf_st, init_edge_st):
         super().__init__()
@@ -119,18 +133,37 @@ class Geom_Optimization():
 
         # Duplicate edges if it appears once
         new_dict = {}
+        del_key = []
         for key, value in cache_dict.items():
             if len(value) == 1:
-                new_edge = recon_edge[value[0]][::-1][None, :]
-                edge_face_connectivity = np.concatenate([
-                    edge_face_connectivity,
-                    np.array((recon_edge.shape[0], key[1], key[0]))[None, :]
-                ], axis=0)
-                new_dict[key] = recon_edge.shape[0]
-                face_edge_adj[key[1]].append(recon_edge.shape[0])
-                recon_edge = np.concatenate([recon_edge, new_edge], axis=0)
+                is_egde_valid = check_edge_validity(recon_edge[value[0]], recon_face[key[0]], recon_face[key[1]])
+                if is_egde_valid:
+                    # should fix the missing edge
+                    new_edge = recon_edge[value[0]][::-1][None, :]
+                    edge_face_connectivity = np.concatenate([
+                        edge_face_connectivity,
+                        np.array((recon_edge.shape[0], key[1], key[0]))[None, :]
+                    ], axis=0)
+                    new_dict[key] = recon_edge.shape[0]
+                    face_edge_adj[key[1]].append(recon_edge.shape[0])
+                    recon_edge = np.concatenate([recon_edge, new_edge], axis=0)
+                else:
+                    # remove the invalid edge
+                    edge_face_connectivity = edge_face_connectivity[edge_face_connectivity[:, 0] != value[0]]
+                    if value[0] in face_edge_adj[key[0]]:
+                        face_edge_adj[key[0]].remove(value[0])
+                    elif value[0] in face_edge_adj[key[1]]:
+                        face_edge_adj[key[1]].remove(value[0])
+                    del_key.append(key)
+            # else:
+            #     is_egde_valid = check_edge_validity(recon_edge[value[0]], recon_face[key[0]], recon_face[key[1]])
+            #     assert is_egde_valid
+
         for key, value in new_dict.items():
             cache_dict[key].append(value)
+        for key in del_key:
+            del cache_dict[key]
+
         # Check which half edge is better
         computer = ChamferDistance()
         for (id_face1, id_face2), id_edges in cache_dict.items():
@@ -203,7 +236,7 @@ class Geom_Optimization():
                 self.apply_all_transform()
                 loss = self.loss()
                 self.optimizer.zero_grad()
-                if loss < 0.01:
+                if loss < 0.003:
                     print(f'Early stop at iter {iter}')
                     break
                 loss.backward()

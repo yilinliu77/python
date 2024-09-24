@@ -427,6 +427,8 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             is_viz_wire, is_viz_face, is_viz_shell = True, True, True
         else:
             is_viz_wire, is_viz_face, is_viz_shell = IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL
+        if not isdebug:
+            is_viz_wire, is_viz_face, is_viz_shell = False, False, False
 
         # 3. Construct face using geom surface and wires
         wire_list, trimmed_face, method_type = try_create_trimmed_face(geom_face, topo_face, face_edges)

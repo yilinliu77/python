@@ -86,8 +86,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
     analyzer = BRepCheck_Analyzer(solid)
     if not analyzer.IsValid():
         print(f"solid is invalid {folder_name}")
-        write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.stl'), linear_deflection=0.001,
-                       angular_deflection=0.5)
+        write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.stl'))
         write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.step'))
         # recon_face_dir = os.path.join(out_root, folder_name, 'recon_face')
         # gen_mesh = trimesh.util.concatenate(

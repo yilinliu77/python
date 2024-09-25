@@ -97,7 +97,7 @@ def get_edge_vertexes(edge):
     return vertexes
 
 
-def expore_edges(shape):
+def explore_edges(shape):
     edge_explorer = TopExp_Explorer(shape, TopAbs_EDGE)
     edges = []
     while edge_explorer.More():
@@ -370,7 +370,7 @@ def create_trimmed_face1(geom_face, face_edges):
 
 def create_trimmed_face2(geom_face, topo_face, face_edges):
     # try to find the replaced edge
-    topo_face_edges = expore_edges(topo_face)
+    topo_face_edges = explore_edges(topo_face)
     replace_dict = {}
     for idx1, checked_edge in enumerate(face_edges):
         optional_edges = {}

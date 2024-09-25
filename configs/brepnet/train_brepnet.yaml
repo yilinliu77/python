@@ -15,6 +15,7 @@ trainer:
   accelerator: "32-true"
 
   # Evaluation
+  compile: false
   evaluate: false
   test_output_dir:
   resume_from_checkpoint:

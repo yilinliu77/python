@@ -58,6 +58,9 @@ class TrainAutoEncoder(pl.LightningModule):
         }
         self.pr_computer = MetricCollection(pr_computer)
 
+        if hparams["trainer"]["compile"]:
+            self.model = torch.compile(self.model, dynamic=True)
+
     def train_dataloader(self):
         self.train_dataset = self.dataset_mod("training", self.hydra_conf["dataset"], )
 
@@ -279,6 +282,8 @@ def main(v_cfg: DictConfig):
         trainer.test(model)
     else:
         trainer.fit(model)
+    
+    # print(model.model.times)
 
 
 if __name__ == '__main__':

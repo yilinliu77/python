@@ -3451,7 +3451,6 @@ class AutoEncoder_0921(nn.Module):
             "pred_edge": pred_edge_points,
         }
     
-
 class AutoEncoder_0925(nn.Module):
     def __init__(self, v_conf):
         super().__init__()
@@ -3526,11 +3525,14 @@ class AutoEncoder_0925(nn.Module):
             self.graph_face_edge.append(nn.LeakyReLU())
         
         bd = 768 # bottlenek_dim
-        self.face_attn_proj_in = nn.Linear(df, bd)
+        self.face_attn_proj_in = nn.Sequential(
+            nn.Linear(df, bd),
+            nn.LayerNorm(bd),
+        )
         self.face_attn_proj_out = nn.Linear(bd, df)
         layer = nn.TransformerEncoderLayer(
             bd, 8, dim_feedforward=2048, dropout=0.1, 
-            batch_first=True, norm_first=False)
+            batch_first=True, norm_first=True)
         self.face_attn = Attn_fuser(layer, 24)
 
         self.global_feature1 = nn.Sequential(
@@ -3649,7 +3651,7 @@ class AutoEncoder_0925(nn.Module):
             )
 
         self.times = {
-            "encoder": 0,
+            "Encoder": 0,
             "Fuser": 0,
             "Sample": 0,
             "global": 0,
@@ -3693,9 +3695,16 @@ class AutoEncoder_0925(nn.Module):
         kl_loss = (-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())) * self.gaussian_weights
         return fused_face_features, kl_loss
 
-    def forward(self, v_data, v_test=False):
+    def profile_time(self, timer, key):
+        torch.cuda.synchronize()
+        self.times[key] += time.time() - timer
         timer = time.time()
+        return timer
+
+    def forward(self, v_data, v_test=False):
+        # torch.cuda.synchronize()
         # Encoder
+        # timer = time.time()
         face_features = self.face_conv1(v_data["face_points"])
         face_features = face_features + self.face_pos_embedding
         face_features = self.face_coords(face_features)
@@ -3703,8 +3712,7 @@ class AutoEncoder_0925(nn.Module):
         edge_features = self.edge_conv1(v_data["edge_points"])
         edge_features = edge_features + self.edge_pos_embedding
         edge_features = self.edge_coords(edge_features)
-        self.times["encoder"] += time.time() - timer
-        timer = time.time()
+        # timer = self.profile_time(timer, "Encoder")
 
         # Fuser
         edge_face_connectivity = v_data["edge_face_connectivity"]
@@ -3723,8 +3731,6 @@ class AutoEncoder_0925(nn.Module):
         x = self.face_attn(x, v_data["attn_mask"])
         x = self.face_attn_proj_out(x)
         fused_face_features = x
-        self.times["Fuser"] += time.time() - timer
-        timer = time.time()
 
         # Global
         bs = v_data["num_face_record"].shape[0]
@@ -3735,12 +3741,10 @@ class AutoEncoder_0925(nn.Module):
         gf = gf.repeat_interleave(v_data["num_face_record"], dim=0)
         face_z = torch.cat((fused_face_features, gf), dim=1)
         face_z = self.global_feature2(face_z)
-        self.times["global"] += time.time() - timer
-        timer = time.time()
+        # timer = self.profile_time(timer, "Fuser")
 
         face_z, kl_loss = self.sample(face_z, v_is_test=v_test)
-        self.times["Sample"] += time.time() - timer
-        timer = time.time()
+        # timer = self.profile_time(timer, "Sample")
 
         # Intersection
         loss_edge_classification, intersected_edge_feature = self.intersection(
@@ -3748,8 +3752,7 @@ class AutoEncoder_0925(nn.Module):
             v_data["zero_positions"], 
             face_z, 
         )
-        self.times["Intersection"] += time.time() - timer
-        timer = time.time()
+        # timer = self.profile_time(timer, "Intersection")
 
         face_points_local = self.face_points_decoder(face_z)
         face_center_scale = self.face_center_scale_decoder(face_z)
@@ -3765,8 +3768,7 @@ class AutoEncoder_0925(nn.Module):
         edge_center_scale1 = self.edge_center_scale_decoder(edge_features)
         edge_center1 = edge_center_scale1[..., 0]
         edge_scale1 = torch.sigmoid(edge_center_scale1[..., 1]) * 2
-        self.times["Decoder"] += time.time() - timer
-        timer = time.time()
+        # timer = self.profile_time(timer, "Decoder")
 
         # Loss
         loss={}
@@ -3812,8 +3814,7 @@ class AutoEncoder_0925(nn.Module):
         if self.gaussian_weights > 0:
             loss["kl_loss"] = kl_loss
         loss["total_loss"] = sum(loss.values())
-        self.times["Loss"] += time.time() - timer
-        timer = time.time()
+        # timer = self.profile_time(timer, "Loss")
 
         data = {}
         if v_test:

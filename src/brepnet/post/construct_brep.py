@@ -170,5 +170,5 @@ if __name__ == '__main__':
         for i in range(num_batches):
             tasks.append(construct_brep_from_datanpz_batch_ray.remote(v_data_root, v_out_root,
                                                                       all_folders[i * batch_size:(i + 1) * batch_size]))
-        ray.get(tasks, timeout=60 * 5)
+        ray.get(tasks)
     print("Done")

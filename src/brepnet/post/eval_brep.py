@@ -284,23 +284,10 @@ def eval_batch(eval_root, gt_root, folder_name_list, SAMPLE_NUM=100000):
                 print(f"An error occurred on line {last_traceback.lineno} in {last_traceback.name}\n\n")
 
 
-eval_batch_remote = ray.remote(num_gpus=0.1, max_retries=3)(eval_batch)
+eval_batch_remote = ray.remote(num_gpus=0.12, max_retries=3)(eval_batch)
 
 
-def compute_statistics(eval_root, seg_by_face_num=True):
-    if seg_by_face_num:
-        seg_root = eval_root.rstrip('\\') + '_seg_by_face_num'
-        if os.path.exists(seg_root):
-            shutil.rmtree(seg_root)
-        os.makedirs(seg_root, exist_ok=False)
-        seg_save_root = [os.path.join(seg_root, 'face_30'),
-                         os.path.join(seg_root, 'face_20'),
-                         os.path.join(seg_root, 'face_10'),
-                         os.path.join(seg_root, 'face_0'),
-                         os.path.join(seg_root, 'else')]
-        for each in seg_save_root:
-            os.makedirs(each, exist_ok=True)
-
+def compute_statistics(eval_root):
     sum_recon_face, sum_gt_face = 0, 0
     sum_recon_edge, sum_gt_edge = 0, 0
     sum_recon_vertex, sum_gt_vertex = 0, 0
@@ -359,6 +346,9 @@ def compute_statistics(eval_root, seg_by_face_num=True):
             valid_solid_acc_cd.append(result['stl_acc_cd'])
             valid_solid_com_cd.append(result['stl_com_cd'])
             valid_solid_cd.append(result['stl_cd'])
+            if result['stl_acc_cd'] > 0.001:
+                print(f"Valid solid {folder_name} has a large CD: {result['stl_cd']}")
+
         elif result['stl_type'] == shape_type[1]:
             num_invalid_solid += 1
             invalid_solid_acc_cd.append(result['stl_acc_cd'])
@@ -380,17 +370,6 @@ def compute_statistics(eval_root, seg_by_face_num=True):
             compound_acc_cd.append(result['stl_acc_cd'])
             compound_com_cd.append(result['stl_com_cd'])
             compound_cd.append(result['stl_cd'])
-
-        if seg_by_face_num and result['stl_type'] == shape_type[0]:
-            face_num = int(result['num_recon_face'])
-            if face_num > 30:
-                shutil.copytree(os.path.join(eval_root, folder_name), os.path.join(seg_save_root[0], folder_name))
-            elif face_num > 20:
-                shutil.copytree(os.path.join(eval_root, folder_name), os.path.join(seg_save_root[1], folder_name))
-            elif face_num > 10:
-                shutil.copytree(os.path.join(eval_root, folder_name), os.path.join(seg_save_root[2], folder_name))
-            else:
-                shutil.copytree(os.path.join(eval_root, folder_name), os.path.join(seg_save_root[3], folder_name))
 
     if len(exception_folders) != 0:
         print(f"Found exception folders: {exception_folders}")
@@ -452,8 +431,45 @@ def compute_statistics(eval_root, seg_by_face_num=True):
     # print(data.describe(percentiles=[0.25, 0.5, 0.75, 0.9, 0.95, 0.99]))
 
     print(f"Exception folders: {len(exception_folders)}")
-    if seg_by_face_num:
-        print(f"Seg by face num, saved in : {seg_root}")
+
+
+def seg_by_face_num(eval_root):
+    seg_root = eval_root.rstrip('\\') + '_seg_by_face_num'
+    if os.path.exists(seg_root):
+        shutil.rmtree(seg_root)
+    os.makedirs(seg_root, exist_ok=False)
+    seg_save_root = [os.path.join(seg_root, 'face_30'),
+                     os.path.join(seg_root, 'face_20'),
+                     os.path.join(seg_root, 'face_10'),
+                     os.path.join(seg_root, 'face_0'),
+                     os.path.join(seg_root, 'else')]
+    for each in seg_save_root:
+        os.makedirs(each, exist_ok=True)
+
+    all_folders = [folder for folder in os.listdir(eval_root) if os.path.isdir(os.path.join(eval_root, folder))]
+    exception_folders = []
+    for folder_name in tqdm(all_folders):
+        if not os.path.exists(os.path.join(eval_root, folder_name, 'eval.npz')):
+            exception_folders.append(folder_name)
+            continue
+
+        result = np.load(os.path.join(eval_root, folder_name, 'eval.npz'), allow_pickle=True)['result'].item()
+        if result['num_recon_face'] == 0:
+            exception_folders.append(folder_name)
+            continue
+
+        if result['stl_type'] == shape_type[0]:
+            face_num = int(result['num_recon_face'])
+            if face_num > 30:
+                shutil.copytree(os.path.join(eval_root, folder_name), os.path.join(seg_save_root[0], folder_name))
+            elif face_num > 20:
+                shutil.copytree(os.path.join(eval_root, folder_name), os.path.join(seg_save_root[1], folder_name))
+            elif face_num > 10:
+                shutil.copytree(os.path.join(eval_root, folder_name), os.path.join(seg_save_root[2], folder_name))
+            else:
+                shutil.copytree(os.path.join(eval_root, folder_name), os.path.join(seg_save_root[3], folder_name))
+
+    print(f"Seg by face num, saved in : {seg_root}")
 
 
 def test_eval_one(eval_root, gt_root):
@@ -469,12 +485,14 @@ if __name__ == '__main__':
     parser.add_argument('--is_use_ray', type=bool, default=True)
     parser.add_argument('--num_cpus', type=int, default=32)
     parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--is_cover', type=bool, default=False)
     args = parser.parse_args()
     eval_root = args.eval_root
     gt_root = args.gt_root
     is_use_ray = args.is_use_ray
     batch_size = args.batch_size
     num_cpus = args.num_cpus
+    is_cover = args.is_cover
 
     if not os.path.exists(eval_root):
         raise ValueError(f"Data root path {eval_root} does not exist.")
@@ -484,6 +502,12 @@ if __name__ == '__main__':
     # test_eval_one(eval_root, gt_root)
 
     all_folders = [folder for folder in os.listdir(eval_root) if os.path.isdir(os.path.join(eval_root, folder))]
+    print(f"Total {len(all_folders)} folders to evaluate")
+
+    if not is_cover:
+        print("Filtering the folders that have eval.npz")
+        all_folders = [folder for folder in all_folders if not os.path.exists(os.path.join(eval_root, folder, 'eval.npz'))]
+        print(f"Total {len(all_folders)} folders to evaluate")
 
     if not is_use_ray:
         # random.shuffle(self.folder_names)
@@ -504,5 +528,5 @@ if __name__ == '__main__':
         ray.get(tasks)
 
     print("Computing statistics...")
-    compute_statistics(eval_root, seg_by_face_num=True)
+    compute_statistics(eval_root)
     print("Done")

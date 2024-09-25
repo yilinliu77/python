@@ -395,7 +395,8 @@ def try_create_trimmed_face(geom_face, topo_face, face_edges):
     if is_face_valid2:
         return wire_list2, trimmed_face2, 1
 
-    return wire_list1, topo_face, 2
+    return wire_list1, trimmed_face1, 0
+    # return wire_list1, topo_face, 2
 
 
 # Fit parametric surfaces / curves and trim into B-rep
@@ -432,6 +433,9 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
 
         # 3. Construct face using geom surface and wires
         wire_list, trimmed_face, method_type = try_create_trimmed_face(geom_face, topo_face, face_edges)
+
+        if method_type == 2:
+            continue
 
         # visualize the constructed wire
         if is_viz_wire:

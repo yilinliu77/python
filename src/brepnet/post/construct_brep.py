@@ -83,7 +83,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
     analyzer = BRepCheck_Analyzer(solid)
     if not analyzer.IsValid():
         print(f"solid is invalid {folder_name}")
-        write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.stl'))
+        write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.stl'), linear_deflection=0.001,
+                       angular_deflection=0.5)
         write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.step'))
         # recon_face_dir = os.path.join(out_root, folder_name, 'recon_face')
         # gen_mesh = trimesh.util.concatenate(
@@ -93,7 +94,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
 
     # Valid Solid
     write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
-    write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01, angular_deflection=0.5)
+    write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.001, angular_deflection=0.5)
 
 
 def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list, is_optimize_geom=True, isdebug=False):
@@ -116,7 +117,7 @@ construct_brep_from_datanpz_batch_ray = ray.remote(construct_brep_from_datanpz_b
 
 
 def test_construct_brep(v_data_root, v_out_root):
-    debug_folder = "00005247"
+    debug_folder = "00052336"
     construct_brep_from_datanpz(v_data_root, v_out_root, debug_folder, is_optimize_geom=True, isdebug=True)
     exit(0)
 

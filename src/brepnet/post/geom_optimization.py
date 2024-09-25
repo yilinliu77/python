@@ -84,11 +84,13 @@ class Geom_Optimization():
         self.face_edge_adj = face_edge_adj
         recon_face, recon_edge = self.get_init_estimation(recon_face, recon_edge)
 
-        self.recon_face = torch.FloatTensor(recon_face).cuda().requires_grad_(False)
-        self.recon_edge = torch.FloatTensor(recon_edge).cuda().requires_grad_(False)
+        self.device = torch.device("cpu")
 
-        self.transformed_recon_face = torch.FloatTensor(recon_face).cuda().requires_grad_(False)
-        self.transformed_recon_edge = torch.FloatTensor(recon_edge).cuda().requires_grad_(False)
+        self.recon_face = torch.FloatTensor(recon_face).to(self.device).requires_grad_(False)
+        self.recon_edge = torch.FloatTensor(recon_edge).to(self.device).requires_grad_(False)
+
+        self.transformed_recon_face = torch.FloatTensor(recon_face).to(self.device).requires_grad_(False)
+        self.transformed_recon_edge = torch.FloatTensor(recon_edge).to(self.device).requires_grad_(False)
 
         self.edge_face_connectivity = edge_face_connectivity
         self.face_edge_adj = face_edge_adj
@@ -114,7 +116,7 @@ class Geom_Optimization():
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=1e-3, betas=(0.95, 0.999), weight_decay=1e-6, eps=1e-08, )
         self.scheduler = StepLR(self.optimizer, step_size=100, gamma=0.1)
 
-        self.model = self.model.cuda().train()
+        self.model = self.model.to(self.device).train()
 
         self.chamfer_dist = ChamferDistance()
         self.max_iter = max_iter

@@ -77,11 +77,11 @@ FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 8e-2]
 
 FIX_TOLERANCE = 1e-2
 FIX_PRECISION = 1e-2
-CONNECT_TOLERANCE = 3e-2
-SEWING_TOLERANCE = 3e-2
+CONNECT_TOLERANCE = 8e-2
+SEWING_TOLERANCE = 8e-2
 TRANSFER_PRECISION = 1e-3
 MAX_DISTANCE_THRESHOLD = 1e-1
-USE_VARIATIONAL_SMOOTHING = True
+USE_VARIATIONAL_SMOOTHING = False
 weight_CurveLength, weight_Curvature, weight_Torsion = 0.4, 0.4, 0.2
 IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, True
 CONTINUITY = GeomAbs_C2
@@ -363,7 +363,7 @@ def create_trimmed_face1(geom_face, face_edges):
     if wire_list is None:
         return None, None, False
     trimmed_face = create_trimmed_face_from_wire(geom_face, wire_list)
-    face_analyzer = BRepCheck_Analyzer(trimmed_face)
+    face_analyzer = BRepCheck_Analyzer(trimmed_face, False)
     is_face_valid = face_analyzer.IsValid()
     return wire_list, trimmed_face, is_face_valid
 
@@ -389,13 +389,13 @@ def create_trimmed_face2(geom_face, topo_face, face_edges):
 def try_create_trimmed_face(geom_face, topo_face, face_edges):
     wire_list1, trimmed_face1, is_face_valid1 = create_trimmed_face1(geom_face, face_edges)
     if is_face_valid1:
-        return wire_list1, trimmed_face1, 0
+        return wire_list1, trimmed_face1, True
 
     wire_list2, trimmed_face2, is_face_valid2 = create_trimmed_face2(geom_face, topo_face, face_edges)
     if is_face_valid2:
-        return wire_list2, trimmed_face2, 1
+        return wire_list2, trimmed_face2, True
 
-    return wire_list1, topo_face, 2
+    return wire_list2, trimmed_face2, False
 
 
 # Fit parametric surfaces / curves and trim into B-rep
@@ -431,7 +431,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             is_viz_wire, is_viz_face, is_viz_shell = False, False, False
 
         # 3. Construct face using geom surface and wires
-        wire_list, trimmed_face, method_type = try_create_trimmed_face(geom_face, topo_face, face_edges)
+        wire_list, trimmed_face, is_valid = try_create_trimmed_face(geom_face, topo_face, face_edges)
 
         # visualize the constructed wire
         if is_viz_wire:
@@ -459,14 +459,10 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             # viz_shapes([trimmed_face])
 
         # check if the face contains all edges
-        is_face_success = check_edges_in_face(trimmed_face, face_edges)
-        is_face_success_list.append(is_face_success)
-        if is_face_success:
-            trimmed_faces.append(trimmed_face)
-        else:
-            trimmed_faces.append(trimmed_face)
+        # is_face_success = check_edges_in_face(trimmed_face, face_edges)
+        is_face_success_list.append(is_valid)
 
-        if isdebug and not is_face_success:
+        if False and isdebug and not is_valid:
             print(f"{Colors.RED}Folder_path: {folder_path}, Face {idx} is not valid{Colors.RESET}")
             display, start_display, add_menu, add_function_to_menu = init_display()
             display.DisplayShape(trimmed_face, update=True)
@@ -476,7 +472,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             start_display()
 
         # save the face as step file and stl file
-        if is_save_face and is_face_success:
+        if is_save_face and is_valid:
             os.makedirs(os.path.join(folder_path, 'recon_face'), exist_ok=True)
             try:
                 write_step_file(trimmed_face, os.path.join(folder_path, 'recon_face', f'{idx}.step'))
@@ -485,7 +481,13 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             except:
                 print(f"Error writing step or stl file for face {idx}")
 
+        if is_valid:
+            trimmed_faces.append(trimmed_face)
+
     print(f"{Colors.GREEN}################################ 3. Sew solid ################################{Colors.RESET}")
+    if len(trimmed_faces) < 2:
+        return None, is_face_success_list
+
     sewing = BRepBuilderAPI_Sewing()
     sewing.SetTolerance(SEWING_TOLERANCE)
     for face in trimmed_faces:

@@ -196,11 +196,23 @@ class TrainAutoEncoder(pl.LightningModule):
         self.log("Test_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
 
-        self.pr_computer.update(torch.from_numpy(recon_data["pred_face_adj"].reshape(-1)), torch.from_numpy(recon_data["gt_face_adj"].reshape(-1)))
+        self.pr_computer.update(recon_data["pred_face_adj"].reshape(-1), recon_data["gt_face_adj"].reshape(-1))
         if True:
             os.makedirs(self.log_root / "test", exist_ok=True)
             np.savez_compressed(str(self.log_root / "test" / f"{data['v_prefix'][0]}.npz"), 
-                                recon_data,
+                                pred_face_adj=recon_data["pred_face_adj"].cpu().numpy(),
+                                pred_face=recon_data["pred_face"].cpu().numpy(),
+                                pred_edge=recon_data["pred_edge"].cpu().numpy(),
+                                pred_edge_face_connectivity=recon_data["pred_edge_face_connectivity"].cpu().numpy(),
+
+                                gt_face_adj=recon_data["gt_face_adj"].cpu().numpy(),
+                                gt_face=recon_data["gt_face"],
+                                gt_edge=recon_data["gt_edge"],
+                                gt_edge_face_connectivity=recon_data["gt_edge_face_connectivity"],
+
+                                face_loss=loss["face_coords"].cpu().item(),
+                                edge_loss=loss["edge_coords"].cpu().item(),
+                                edge_loss_ori=loss["edge_coords1"].cpu().item(),
                                 )
             np.savez_compressed(str(self.log_root / "test" / f"{data['v_prefix'][0]}_feature.npz"), 
                                 face_features=recon_data["face_features"],

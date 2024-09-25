@@ -1,9 +1,9 @@
 dataset:
   dataset_name: "AutoEncoder_dataset"
 
-  train_dataset: D:/img2brep/deepcad_whole_test_v3
-  val_dataset: D:/img2brep/deepcad_whole_test_v3
-  test_dataset: D:/img2brep/deepcad_whole_test_v3
+  train_dataset: /mnt/d/deepcad_whole_test_v5
+  val_dataset: /mnt/d/deepcad_whole_test_v5
+  test_dataset: /mnt/d/deepcad_whole_test_v5
 
 trainer:
   gpu: 1

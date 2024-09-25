@@ -141,7 +141,7 @@ def eval_one(eval_root, gt_root, folder_name, SAMPLE_NUM=100000):
         'stl_com_cd'      : 0,
         'stl_cd'          : 0,
     }
-    device = torch.device('cpu')
+    device = torch.device('cuda')
     chamfer_distance = ChamferDistance()
 
     # gt info
@@ -173,8 +173,8 @@ def eval_one(eval_root, gt_root, folder_name, SAMPLE_NUM=100000):
 
     # face
     recon_face_dir = os.path.join(eval_root, folder_name, 'recon_face')
-    recon_face_stl_name = [f for f in os.listdir(recon_face_dir) if f.endswith('.stl')]
     if os.path.exists(recon_face_dir) and len(os.listdir(recon_face_dir)) != 0:
+        recon_face_stl_name = [f for f in os.listdir(recon_face_dir) if f.endswith('.stl')]
         result['num_recon_face'] = len(recon_face_stl_name)
         recon_face_stl_mesh = trimesh.util.concatenate([trimesh.load(os.path.join(recon_face_dir, f)) for f in recon_face_stl_name])
         recon_face_pc, _ = trimesh.sample.sample_surface(recon_face_stl_mesh, SAMPLE_NUM)
@@ -483,16 +483,14 @@ if __name__ == '__main__':
     parser.add_argument('--eval_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test_out")
     parser.add_argument('--gt_root', type=str, default=r"E:\data\img2brep\deepcad_whole_v5\deepcad_whole_test_v5")
     parser.add_argument('--is_use_ray', type=bool, default=True)
+    parser.add_argument('--is_cover', type=bool, default=True)
     parser.add_argument('--num_cpus', type=int, default=32)
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--is_cover', type=bool, default=False)
     args = parser.parse_args()
     eval_root = args.eval_root
     gt_root = args.gt_root
     is_use_ray = args.is_use_ray
-    batch_size = args.batch_size
-    num_cpus = args.num_cpus
     is_cover = args.is_cover
+    num_cpus = args.num_cpus
 
     if not os.path.exists(eval_root):
         raise ValueError(f"Data root path {eval_root} does not exist.")
@@ -517,7 +515,7 @@ if __name__ == '__main__':
         ray.init(
                 dashboard_host="0.0.0.0",
                 dashboard_port=8080,
-                num_cpus=num_cpus,
+                # num_cpus=num_cpus,
                 # local_mode=True
         )
         batch_size = 1

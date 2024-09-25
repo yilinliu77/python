@@ -70,6 +70,9 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
     solid, faces_result = construct_brep(face_points, edge_points, face_edge_adj,
                                          isdebug=isdebug, is_save_face=True,
                                          folder_path=os.path.join(out_root, folder_name))
+    if solid is None:
+        print(f"solid is None {folder_name}")
+        return
 
     if solid.ShapeType() == TopAbs_COMPOUND:
         print(f"solid is TopAbs_COMPOUND {folder_name}")
@@ -94,7 +97,10 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
 
     # Valid Solid
     write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
-    write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.001, angular_deflection=0.5)
+    try:
+        write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01, angular_deflection=0.5)
+    except Exception as e:
+        write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'))
 
 
 def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list, is_optimize_geom=True, isdebug=False):
@@ -113,11 +119,11 @@ def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list, is_
                 shutil.rmtree(os.path.join(out_root, folder_name))
 
 
-construct_brep_from_datanpz_batch_ray = ray.remote(construct_brep_from_datanpz_batch)
+construct_brep_from_datanpz_batch_ray = ray.remote(max_retries=2)(construct_brep_from_datanpz_batch)
 
 
 def test_construct_brep(v_data_root, v_out_root):
-    debug_folder = "00052336"
+    debug_folder = "00840100"
     construct_brep_from_datanpz(v_data_root, v_out_root, debug_folder, is_optimize_geom=True, isdebug=True)
     exit(0)
 
@@ -145,6 +151,8 @@ if __name__ == '__main__':
         all_folders = [folder for folder in all_folders if not os.path.exists(os.path.join(v_out_root, folder))]
     all_folders.sort()
 
+    # all_folders = all_folders[:100]
+
     if not is_use_ray:
         # random.shuffle(all_folders)
         for i in tqdm.tqdm(range(len(all_folders))):
@@ -162,5 +170,5 @@ if __name__ == '__main__':
         for i in range(num_batches):
             tasks.append(construct_brep_from_datanpz_batch_ray.remote(v_data_root, v_out_root,
                                                                       all_folders[i * batch_size:(i + 1) * batch_size]))
-        ray.get(tasks)
+        ray.get(tasks, timeout=60 * 5)
     print("Done")

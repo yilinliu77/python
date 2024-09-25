@@ -49,5 +49,5 @@ def check_eval(data_root):
 if __name__ == '__main__':
     # data_root = sys.argv[1]
     # move(data_root)
-    # count_success(data_root)
-    check_eval(data_root)
+    count_success(data_root)
+    # check_eval(data_root)

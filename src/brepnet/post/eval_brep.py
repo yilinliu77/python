@@ -141,7 +141,7 @@ def eval_one(eval_root, gt_root, folder_name, SAMPLE_NUM=100000):
         'stl_com_cd'      : 0,
         'stl_cd'          : 0,
     }
-    device = torch.device('cuda')
+    device = torch.device('cpu')
     chamfer_distance = ChamferDistance()
 
     # gt info
@@ -249,8 +249,8 @@ def eval_one(eval_root, gt_root, folder_name, SAMPLE_NUM=100000):
         gen_mesh = trimesh.load(str(os.path.join(eval_root, folder_name, gen_stl_name[0])))
     else:
         recon_face_dir = os.path.join(eval_root, folder_name, 'recon_face')
-        recon_face_stl_name = [f for f in os.listdir(recon_face_dir) if f.endswith('.stl')]
-        if len(recon_face_stl_name) != 0:
+        if os.path.exists(recon_face_dir) and len(os.listdir(recon_face_dir)) != 0:
+            recon_face_stl_name = [f for f in os.listdir(recon_face_dir) if f.endswith('.stl')]
             gen_mesh = trimesh.util.concatenate([trimesh.load(os.path.join(recon_face_dir, f)) for f in recon_face_stl_name])
         else:
             gen_mesh = None
@@ -284,7 +284,7 @@ def eval_batch(eval_root, gt_root, folder_name_list, SAMPLE_NUM=100000):
                 print(f"An error occurred on line {last_traceback.lineno} in {last_traceback.name}\n\n")
 
 
-eval_batch_remote = ray.remote(num_gpus=0.12, max_retries=3)(eval_batch)
+eval_batch_remote = ray.remote(max_retries=3)(eval_batch)
 
 
 def compute_statistics(eval_root):

@@ -2381,7 +2381,8 @@ class AutoEncoder_context_KL(AutoEncoder_context):
     def __init__(self, v_conf):
         super().__init__(v_conf)
         self.gaussian_proj = nn.Linear(self.df, self.df*2)
-        self.gaussian_weights = v_conf["gaussian_weights"]
+        self.gaussian_weights = 1e-6
+        # self.gaussian_weights = v_conf["gaussian_weights"]
 
     def forward(self, v_data, v_test=False):
         timer = time.time()
@@ -2416,7 +2417,10 @@ class AutoEncoder_context_KL(AutoEncoder_context):
         logvar = fused_face_features_gau[:, :, 1]
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
-        fused_face_features = eps.mul(std).add_(mean)
+        if v_test:
+            fused_face_features = mean
+        else:
+            fused_face_features = eps.mul(std).add_(mean)
         kl_loss = (-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())) * self.gaussian_weights
 
         # Global
@@ -3392,6 +3396,7 @@ class AutoEncoder_0921(nn.Module):
             conn = v_data["edge_face_connectivity"]
             face_adj[conn[:, 1], conn[:, 2]] = True
             
+            data["face_features"] = face_z.detach().cpu().numpy()
             data["gt_face_adj"] = face_adj.reshape(-1)
             data["gt_face"] = v_data["face_points"].detach().cpu().numpy()
             data["gt_edge"] = v_data["edge_points"].detach().cpu().numpy()

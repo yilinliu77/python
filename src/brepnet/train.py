@@ -100,7 +100,7 @@ class TrainAutoEncoder(pl.LightningModule):
                 continue
             self.log(f"Training_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                      sync_dist=True, batch_size=self.batch_size)
-        self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
+        self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
         if torch.isnan(total_loss).any():
             print("NAN Loss")

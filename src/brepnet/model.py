@@ -3525,10 +3525,7 @@ class AutoEncoder_0925(nn.Module):
             self.graph_face_edge.append(nn.LeakyReLU())
         
         bd = 768 # bottlenek_dim
-        self.face_attn_proj_in = nn.Sequential(
-            nn.Linear(df, bd),
-            nn.LayerNorm(bd),
-        )
+        self.face_attn_proj_in = nn.Linear(df, bd)
         self.face_attn_proj_out = nn.Linear(bd, df)
         layer = nn.TransformerEncoderLayer(
             bd, 8, dim_feedforward=2048, dropout=0.1, 
@@ -3647,6 +3644,7 @@ class AutoEncoder_0925(nn.Module):
             self.gaussian_proj = nn.Sequential(
                 nn.Linear(self.df, self.df*2),
                 nn.LeakyReLU(),
+                nn.LayerNorm(self.df*2),
                 nn.Linear(self.df*2, self.df*2),
             )
 
@@ -3757,17 +3755,17 @@ class AutoEncoder_0925(nn.Module):
         face_points_local = self.face_points_decoder(face_z)
         face_center_scale = self.face_center_scale_decoder(face_z)
         face_center = face_center_scale[..., 0]
-        face_scale = torch.sigmoid(face_center_scale[..., 1]) * 2
+        face_scale = face_center_scale[..., 1]
 
         edge_points_local = self.edge_points_decoder(intersected_edge_feature)
         edge_center_scale = self.edge_center_scale_decoder(intersected_edge_feature)
         edge_center = edge_center_scale[..., 0]
-        edge_scale = torch.sigmoid(edge_center_scale[..., 1])  * 2
+        edge_scale = edge_center_scale[..., 1]
 
         edge_points_local1 = self.edge_points_decoder(edge_features)
         edge_center_scale1 = self.edge_center_scale_decoder(edge_features)
         edge_center1 = edge_center_scale1[..., 0]
-        edge_scale1 = torch.sigmoid(edge_center_scale1[..., 1]) * 2
+        edge_scale1 = edge_center_scale1[..., 1]
         # timer = self.profile_time(timer, "Decoder")
 
         # Loss
@@ -3863,13 +3861,13 @@ class AutoEncoder_0925(nn.Module):
         edge_points_local = self.edge_points_decoder(feature_pair[pred_labels])
         edge_center_scale = self.edge_center_scale_decoder(feature_pair[pred_labels])
         edge_center = edge_center_scale[..., 0]
-        edge_scale = torch.sigmoid(edge_center_scale[..., 1]) * 2
+        edge_scale = edge_center_scale[..., 1]
         pred_edge_points = denormalize_coord(edge_points_local, edge_center, edge_scale)
 
         face_points_local = self.face_points_decoder(v_face_features)
         face_center_scale = self.face_center_scale_decoder(v_face_features)
         face_center = face_center_scale[..., 0]
-        face_scale = torch.sigmoid(face_center_scale[..., 1]) * 2
+        face_scale = face_center_scale[..., 1]
         pred_face_points = denormalize_coord(face_points_local, face_center, face_scale)
 
         pred_edge_face_connectivity = torch.cat((torch.arange(pred_edge_points.shape[0], device=device)[:,None], indexes[pred_labels]), dim=1)

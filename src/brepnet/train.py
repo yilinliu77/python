@@ -218,7 +218,7 @@ class TrainAutoEncoder(pl.LightningModule):
                                 edge_loss_ori=loss["edge_coords1"].cpu().item(),
                                 )
             np.savez_compressed(str(self.log_root / "test" / f"{data['v_prefix'][0]}_feature.npz"), 
-                                face_features=recon_data["face_features"],
+                                face_features=recon_data["face_features"].cpu().numpy(),
                                 )
 
     def on_test_epoch_end(self):

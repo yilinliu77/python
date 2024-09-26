@@ -248,6 +248,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         self.mode = v_training_mode
         self.conf = v_conf
         self.max_intersection = 500
+        self.face_z_dataset = v_conf['face_z']
         if v_training_mode == "testing":
             self.dataset_path = Path(v_conf['test_dataset'])
         elif v_training_mode == "training":
@@ -256,12 +257,15 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             self.dataset_path = Path(v_conf['val_dataset'])
         else:
             raise
+        filelist1 = os.listdir(self.dataset_path)
+        filelist2 = [item[:8] for item in os.listdir(self.face_z_dataset) if item.endswith("feature.npz")]
+        filelist = list(set(filelist1) & set(filelist2))
+        filelist.sort()
+
         self.max_faces = 64
-        self.data_folders = [self.dataset_path/item for item in os.listdir(self.dataset_path) if
-                            item.endswith("feature.npz")]
-        self.data_folders.sort()
-        self.data_folders = self.data_folders
-        self.check_data(self.dataset_path, self.max_faces)
+        if v_conf["scale_factor"] != 1: # Overfitting mode
+            self.data_folders = filelist[:100] * int(v_conf["scale_factor"])
+        self.data_folders = filelist
         return
 
     def __len__(self):
@@ -290,14 +294,14 @@ class Diffusion_dataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         # idx = 0
         folder_path = self.data_folders[idx]
-        data_npz = np.load(str(folder_path))
+        data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "_feature.npz"))
 
         face_features = torch.from_numpy(data_npz['face_features'])
         padded_face_features = torch.zeros((self.max_faces, *face_features.shape[1:]), dtype=torch.float32)
         padded_face_features[:face_features.shape[0]] = face_features
         return (
-            Path(folder_path).stem,
-            face_features
+            folder_path,
+            padded_face_features
         )
 
     @staticmethod
@@ -305,11 +309,8 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         (
             v_prefix, v_face_features
         ) = zip(*batch)
-        bs = len(v_prefix)
-        
-        # Pad with 0
-        face_features = pad_sequence(v_face_features, batch_first=True, padding_value=0)
 
+        face_features = torch.stack(v_face_features, dim=0)
         return {
             "v_prefix": v_prefix,
             "face_features": face_features,

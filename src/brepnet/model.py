@@ -3782,6 +3782,7 @@ class AutoEncoder_0925(nn.Module):
 
         pred_edge_face_connectivity = torch.cat((torch.arange(pred_edge_points.shape[0], device=device)[:,None], indexes[pred_labels]), dim=1)
         return {
+            "face_features": v_face_features,
             "pred_face_adj": pred_labels.reshape(-1),
             "pred_edge_face_connectivity": pred_edge_face_connectivity,
             "pred_face": pred_face_points,

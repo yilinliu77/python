@@ -382,7 +382,7 @@ class Diffusion_base(nn.Module):
         data = {}
         if self.is_stored_z:
             face_features = v_data["face_features"]
-            data["face_z"] = face_features
+            data["padded_face_z"] = face_features
         else:
             encoding_result = self.ae_model.encode(v_data, v_test)
             data.update(encoding_result)

@@ -119,7 +119,7 @@ class TrainDiffusion(pl.LightningModule):
         self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
 
-        if batch_idx == 0:
+        if batch_idx == 0 and self.global_rank == 0:
             result = self.model.inference(1, self.device)[0]
             self.viz = {}
             self.viz["recon_faces"] = result["pred_face"]
@@ -129,6 +129,8 @@ class TrainDiffusion(pl.LightningModule):
     def on_validation_epoch_end(self):
         # if self.trainer.sanity_checking:
         #     return
+        if self.global_rank != 0:
+            return
 
         if "recon_faces" in self.viz:
             recon_faces = self.viz["recon_faces"].cpu().numpy()

@@ -37,7 +37,7 @@ model:
   dim_shape: 768
   gaussian_weights: 0
   norm: "layer"
-  autoencoder_weights: D:/img2brep/0925_pure.ckpt
+  autoencoder_weights: 
 
 hydra:
   run:

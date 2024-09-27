@@ -75,18 +75,19 @@ from OCC.Core.Geom import Geom_BSplineCurve
 # FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 10e-2]
 
 EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
-FACE_FITTING_TOLERANCE = [5e-2, 5e-2, 8e-2]
+FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 1.5e-1]
 
 FIX_TOLERANCE = 1e-2
 FIX_PRECISION = 1e-2
-CONNECT_TOLERANCE = 8e-2
+# CONNECT_TOLERANCE = 2e-2
+CONNECT_TOLERANCE = [8e-2, 5e-2, 2e-2,]
 SEWING_TOLERANCE = 8e-2
 TRANSFER_PRECISION = 1e-3
 MAX_DISTANCE_THRESHOLD = 1e-1
 USE_VARIATIONAL_SMOOTHING = False
 weight_CurveLength, weight_Curvature, weight_Torsion = 0.4, 0.4, 0.2
 IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, True
-CONTINUITY = GeomAbs_C2
+CONTINUITY = GeomAbs_C1
 
 
 # EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
@@ -284,7 +285,7 @@ def create_edge(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
     return approx_edge
 
 
-def create_wire_from_unordered_edges(face_edges, max_retry_times=3, is_sort_by_length=True):
+def create_wire_from_unordered_edges(face_edges, connected_tolerance, max_retry_times=3, is_sort_by_length=True):
     wire_array = None
     for _ in range(max_retry_times):
         random.shuffle(face_edges)
@@ -292,7 +293,7 @@ def create_wire_from_unordered_edges(face_edges, max_retry_times=3, is_sort_by_l
         edges_seq = TopTools_HSequenceOfShape()
         for edge in face_edges:
             edges_seq.Append(edge)
-        wire_array_c = ShapeAnalysis_FreeBounds.ConnectEdgesToWires(edges_seq, CONNECT_TOLERANCE, False)
+        wire_array_c = ShapeAnalysis_FreeBounds.ConnectEdgesToWires(edges_seq, connected_tolerance, False)
 
         # Check if all wires is valid
         all_wire_valid = True
@@ -323,18 +324,18 @@ def create_wire_from_unordered_edges(face_edges, max_retry_times=3, is_sort_by_l
     return wire_list
 
 
-def create_trimmed_face_from_wire(geom_face, wire_list):
+def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
     is_periodic = geom_face.IsUPeriodic() or geom_face.IsVPeriodic()
 
     face_fixer = ShapeFix_Face()
-    face_fixer.Init(geom_face, CONNECT_TOLERANCE, True)
+    face_fixer.Init(geom_face, connected_tolerance, True)
     wire_seq = TopTools_HSequenceOfShape()
     for wire in wire_list:
         wire_seq.Append(wire)
         face_fixer.Add(wire)
 
     face_fixer.FixWireTool().SetModifyGeometryMode(True)
-    face_fixer.FixWireTool().SetMaxTolerance(CONNECT_TOLERANCE)
+    face_fixer.FixWireTool().SetMaxTolerance(connected_tolerance)
     face_fixer.FixWireTool().SetPrecision(FIX_PRECISION)
     face_fixer.FixWireTool().SetFixShiftedMode(True)
     face_fixer.FixWireTool().SetFixGaps2dMode(True)
@@ -348,7 +349,7 @@ def create_trimmed_face_from_wire(geom_face, wire_list):
 
     face_fixer.SetAutoCorrectPrecisionMode(False)
     face_fixer.SetPrecision(FIX_PRECISION)
-    face_fixer.SetMaxTolerance(CONNECT_TOLERANCE)
+    face_fixer.SetMaxTolerance(connected_tolerance)
     face_fixer.SetFixOrientationMode(True)
     face_fixer.SetFixMissingSeamMode(True)
     face_fixer.SetFixSplitFaceMode(True)
@@ -376,17 +377,17 @@ def create_trimmed_face_from_wire(geom_face, wire_list):
     return face_occ
 
 
-def create_trimmed_face1(geom_face, face_edges):
-    wire_list = create_wire_from_unordered_edges(face_edges)
+def create_trimmed_face1(geom_face, face_edges, connected_tolerance):
+    wire_list = create_wire_from_unordered_edges(face_edges, connected_tolerance)
     if wire_list is None:
         return None, None, False
-    trimmed_face = create_trimmed_face_from_wire(geom_face, wire_list)
+    trimmed_face = create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance)
     face_analyzer = BRepCheck_Analyzer(trimmed_face, False)
     is_face_valid = face_analyzer.IsValid()
     return wire_list, trimmed_face, is_face_valid
 
 
-def create_trimmed_face2(geom_face, topo_face, face_edges):
+def create_trimmed_face2(geom_face, topo_face, face_edges, connected_tolerance):
     # try to find the replaced edge
     topo_face_edges = explore_edges(topo_face)
     replace_dict = {}
@@ -401,15 +402,15 @@ def create_trimmed_face2(geom_face, topo_face, face_edges):
         optimal_edge_idx = min(optional_edges, key=optional_edges.get)
         replace_dict[idx1] = optimal_edge_idx
         face_edges[idx1] = topo_face_edges[optimal_edge_idx]
-    return create_trimmed_face1(geom_face, face_edges)
+    return create_trimmed_face1(geom_face, face_edges, connected_tolerance)
 
 
-def try_create_trimmed_face(geom_face, topo_face, face_edges):
-    wire_list1, trimmed_face1, is_face_valid1 = create_trimmed_face1(geom_face, face_edges)
+def try_create_trimmed_face(geom_face, topo_face, face_edges, connected_tolerance):
+    wire_list1, trimmed_face1, is_face_valid1 = create_trimmed_face1(geom_face, face_edges, connected_tolerance)
     if is_face_valid1:
         return wire_list1, trimmed_face1, True
 
-    wire_list2, trimmed_face2, is_face_valid2 = create_trimmed_face2(geom_face, topo_face, face_edges)
+    wire_list2, trimmed_face2, is_face_valid2 = create_trimmed_face2(geom_face, topo_face, face_edges, connected_tolerance)
     if is_face_valid2:
         return wire_list2, trimmed_face2, True
 
@@ -417,7 +418,7 @@ def try_create_trimmed_face(geom_face, topo_face, face_edges):
 
 
 # Fit parametric surfaces / curves and trim into B-rep
-def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, is_save_face=True, debug_face_idx=[]):
+def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_path, isdebug=False, is_save_face=True, debug_face_idx=[]):
     print(f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
     recon_geom_faces = [create_surface(points) for points in surf_wcs]
     recon_topo_faces = [BRepBuilderAPI_MakeFace(geom_face, 1e-3).Face() for geom_face in recon_geom_faces]
@@ -449,7 +450,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             is_viz_wire, is_viz_face, is_viz_shell = False, False, False
 
         # 3. Construct face using geom surface and wires
-        wire_list, trimmed_face, is_valid = try_create_trimmed_face(geom_face, topo_face, face_edges)
+        wire_list, trimmed_face, is_valid = try_create_trimmed_face(geom_face, topo_face, face_edges, connected_tolerance)
 
         # visualize the constructed wire
         if is_viz_wire:
@@ -490,7 +491,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             start_display()
 
         # save the face as step file and stl file
-        # is_save_face=False
+        is_save_face=False
         if is_save_face and is_valid:
             os.makedirs(os.path.join(folder_path, 'recon_face'), exist_ok=True)
             try:

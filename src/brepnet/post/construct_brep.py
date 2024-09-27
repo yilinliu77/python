@@ -1,3 +1,4 @@
+import copy
 import os, sys, shutil, traceback, tqdm
 
 from shared.common_utils import safe_check_dir, check_dir
@@ -41,6 +42,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
     if isdebug:
         debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
         safe_check_dir(debug_face_save_path)
+        export_edges(edge_points,
+                     os.path.join(debug_face_save_path, 'before_optimized_edge.obj'))
         export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), face_points.reshape(-1, 3))
         export_point_cloud(os.path.join(debug_face_save_path, 'edge.ply'), edge_points.reshape(-1, 3))
         for face_idx in range(len(face_edge_adj)):
@@ -57,18 +60,39 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
                                                                                                          edge_face_connectivity,
                                                                                                          face_edge_adj,
                                                                                                          max_iter=100)
-
         if isdebug:
             debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
             safe_check_dir(debug_face_save_path)
             optimized_edge_points = np.delete(edge_points, remove_edge_idx, axis=0)
             export_point_cloud(os.path.join(debug_face_save_path, 'optimized_face.ply'), face_points.reshape(-1, 3))
-            export_point_cloud(os.path.join(debug_face_save_path, 'optimized_edge.ply'), optimized_edge_points.reshape(-1, 3))
+            export_edges(optimized_edge_points, os.path.join(debug_face_save_path, 'optimized_edge.obj'))
 
     # Construct Brep from face_points, edge_points, face_edge_adj
-    solid, faces_result = construct_brep(face_points, edge_points, face_edge_adj,
-                                         isdebug=isdebug, is_save_face=True,
-                                         folder_path=os.path.join(out_root, folder_name))
+    connected_tolerances = copy.deepcopy(CONNECT_TOLERANCE)
+    solid = None
+    while len(connected_tolerances) > 0:
+        connected_tolerance = connected_tolerances.pop()
+        solid, faces_result = construct_brep(face_points, edge_points, face_edge_adj, connected_tolerance,
+                                             isdebug=isdebug, is_save_face=True,
+                                             folder_path=os.path.join(out_root, folder_name))
+        if solid is None:
+            continue
+
+        if solid.ShapeType() == TopAbs_COMPOUND:
+            continue
+
+        analyzer = BRepCheck_Analyzer(solid)
+        if not analyzer.IsValid():
+            continue
+
+        # Valid Solid
+        write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
+        # try:
+        #     write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01, angular_deflection=0.5)
+        # except Exception as e:
+        #     write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'))
+        break
+
     if solid is None:
         print(f"solid is None {folder_name}")
         return
@@ -78,7 +102,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
         # write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_compound.stl'))
         recon_face_dir = os.path.join(out_root, folder_name, 'recon_face')
         gen_mesh = trimesh.util.concatenate(
-                [trimesh.load(os.path.join(recon_face_dir, f)) for f in os.listdir(recon_face_dir) if f.endswith('.stl')])
+            [trimesh.load(os.path.join(recon_face_dir, f)) for f in os.listdir(recon_face_dir) if f.endswith('.stl')])
         # gen_mesh.export(os.path.join(out_root, folder_name, 'recon_brep_compound.stl'))
         return
 

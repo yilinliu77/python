@@ -5,6 +5,7 @@ import numpy as np
 from chamferdist import ChamferDistance
 from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
+import trimesh
 
 
 def get_bbox_minmax(point_cloud):
@@ -44,7 +45,7 @@ def apply_transform_batch(tensor, transform):
     src_shape = tensor.shape
     if len(src_shape) > 3:
         tensor = tensor.reshape(tensor.shape[0], -1, 3)
-    scales = transform[:, 1].view(-1, 1, 1)
+    scales = transform[:, 0].view(-1, 1, 1)
     offsets = transform[:, 1:].view(-1, 1, 3)
     centers = tensor.mean(dim=1, keepdim=True)
     scaled_tensor = (tensor - centers) * scales + centers + offsets
@@ -192,7 +193,8 @@ def merge_edge_endpoints(edge_wcs, tol):
 class STModel(nn.Module):
     def __init__(self, init_surf_st, init_edge_st):
         super().__init__()
-        self.surf_st = nn.Parameter(torch.FloatTensor([1, 0, 0, 0]).unsqueeze(0).repeat(init_surf_st, 1))
+        self.surf_st = torch.FloatTensor([1, 0, 0, 0]).unsqueeze(0).repeat(init_surf_st, 1)
+        # self.surf_st = nn.Parameter(torch.FloatTensor([1, 0, 0, 0]).unsqueeze(0).repeat(init_surf_st, 1))
         self.edge_st = nn.Parameter(torch.FloatTensor([1, 0, 0, 0]).unsqueeze(0).repeat(init_edge_st, 1))
 
 
@@ -203,13 +205,108 @@ class Geom_Optimization():
         self.face_edge_adj = face_edge_adj
 
         self.device = torch.device("cpu")
+        # self.device = torch.device("cuda")
 
         self.recon_face = torch.FloatTensor(recon_face).to(self.device).requires_grad_(False)
+        res = self.recon_face.shape[1]
+        densities = (torch.linalg.norm(
+            self.recon_face[:,0,0] - self.recon_face[:,res//2,res//2], dim=-1) * 10).to(torch.long) * res
+
+        self.face_points_candidates = []
+        for face,density in zip(self.recon_face, densities):
+            x = torch.linspace(-1, 1, density).to(self.device)
+            y = torch.linspace(-1, 1, density).to(self.device)
+            x, y = torch.meshgrid(x, y, indexing='ij')
+            coords = torch.stack([x, y], dim=-1).reshape(1, -1, 1, 2)
+            self.face_points_candidates.append(torch.nn.functional.grid_sample(
+                face[None].permute(0,3,1,2), coords, align_corners=True)[0,:,:,0].permute(1,0))
         self.recon_edge = torch.FloatTensor(recon_edge).to(self.device).requires_grad_(False)
 
         self.transformed_recon_face = torch.FloatTensor(recon_face).to(self.device).requires_grad_(False)
         self.transformed_recon_edge = torch.FloatTensor(recon_edge).to(self.device).requires_grad_(False)
 
+        inv_edge_face_connectivity = {}
+        for edge_idx, face_idx1, face_idx2 in edge_face_connectivity:
+            inv_edge_face_connectivity[(face_idx1, face_idx2)] = edge_idx
+
+        pair1 = []
+        pair2 = []
+        face_adj = np.zeros((recon_face.shape[0], recon_face.shape[0]), dtype=bool)
+        face_adj[edge_face_connectivity[:, 1], edge_face_connectivity[:, 2]] = True
+        # Set the diagonal to False
+        np.fill_diagonal(face_adj, False)
+        face_adj = np.logical_or(face_adj, face_adj.T)
+        # Find the 3-node ring of the face
+        for face1 in range(self.recon_face.shape[0]):
+            for face2 in range(self.recon_face.shape[0]):
+                if not face_adj[face1, face2]:
+                    continue
+                for face3 in range(self.recon_face.shape[0]):
+                    if not face_adj[face1, face3]:
+                        continue
+                    if not face_adj[face2, face3]:
+                        continue
+
+                    g1 = [inv_edge_face_connectivity[(face1, face2)]]
+
+                    def dis(a, b):
+                        return torch.norm(self.recon_edge[a, 0] - self.recon_edge[b, 0])
+                    if (dis(g1[0], inv_edge_face_connectivity[(face1, face3)])
+                            < dis(g1[0], inv_edge_face_connectivity[(face3, face1)])):
+                        g1.append(inv_edge_face_connectivity[(face1, face3)])
+                    else:
+                        g1.append(inv_edge_face_connectivity[(face3, face1)])
+
+                    if (dis(g1[0], inv_edge_face_connectivity[(face2, face3)])
+                            < dis(g1[0], inv_edge_face_connectivity[(face3, face2)])):
+                        g1.append(inv_edge_face_connectivity[(face2, face3)])
+                    else:
+                        g1.append(inv_edge_face_connectivity[(face3, face2)])
+
+                    g2 = [inv_edge_face_connectivity[(face2, face1)]]
+                    if (dis(g2[0], inv_edge_face_connectivity[(face2, face3)])
+                            < dis(g2[0], inv_edge_face_connectivity[(face3, face2)])):
+                        g2.append(inv_edge_face_connectivity[(face2, face3)])
+                    else:
+                        g2.append(inv_edge_face_connectivity[(face3, face2)])
+
+                    if (dis(g2[0], inv_edge_face_connectivity[(face1, face3)])
+                            < dis(g2[0], inv_edge_face_connectivity[(face3, face1)])):
+                        g2.append(inv_edge_face_connectivity[(face1, face3)])
+                    else:
+                        g2.append(inv_edge_face_connectivity[(face3, face1)])
+
+                    dis1 = self.recon_edge[g1]
+                    dis1 = torch.norm(dis1[0, 0] - dis1[1, 0], dim=-1) + torch.norm(dis1[0, 0] - dis1[2, 0], dim=-1) + torch.norm(dis1[1, 0] - dis1[2, 0], dim=-1)
+
+                    dis2 = self.recon_edge[g2]
+                    dis2 = torch.norm(dis2[0, 0] - dis2[1, 0], dim=-1) + torch.norm(dis2[0, 0] - dis2[2, 0], dim=-1) + torch.norm(dis2[1, 0] - dis2[2, 0], dim=-1)
+
+                    if dis1 > 3e-1 and dis2 > 3e-1:
+                        continue
+
+                    if dis1.sum() < dis2.sum():
+                        pair1.append(g1)
+                    else:
+                        pair1.append(g2)
+
+                    g2 = []
+                    if inv_edge_face_connectivity[(face1, face2)] in pair1[-1]:
+                        g2.append(inv_edge_face_connectivity[(face2, face1)])
+                    else:
+                        g2.append(inv_edge_face_connectivity[(face1, face2)])
+                    if inv_edge_face_connectivity[(face1, face3)] in pair1[-1]:
+                        g2.append(inv_edge_face_connectivity[(face3, face1)])
+                    else:
+                        g2.append(inv_edge_face_connectivity[(face1, face3)])
+                    if inv_edge_face_connectivity[(face2, face3)] in pair1[-1]:
+                        g2.append(inv_edge_face_connectivity[(face3, face2)])
+                    else:
+                        g2.append(inv_edge_face_connectivity[(face2, face3)])
+                    pair2.append(g2)
+
+        self.pair1 = np.asarray(pair1)
+        self.pair2 = np.asarray(pair2)
         vertexes = self.recon_edge[:, [0, -1], :].reshape(-1, 3)
         dist_matrix = torch.sqrt(torch.clamp(torch.sum((vertexes.unsqueeze(1) - vertexes.unsqueeze(0)) ** 2, dim=-1), min=1e-6))
         self.penalized_vertex = torch.stack(
@@ -218,8 +315,9 @@ class Geom_Optimization():
         # init_surf_st, init_edge_st = self.get_init_st()
         self.model = STModel(self.recon_face.shape[0], self.recon_edge.shape[0])
 
-        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=8e-4, betas=(0.95, 0.999), weight_decay=1e-6, eps=1e-08, )
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-2)
         self.model = self.model.to(self.device).train()
+        self.model.surf_st = self.model.surf_st.to(self.device)
 
         self.chamfer_dist = ChamferDistance()
         self.max_iter = max_iter
@@ -232,14 +330,15 @@ class Geom_Optimization():
         # self.save1 = self.transformed_recon_face.clone()
         # self.save2 = self.transformed_recon_edge.clone()
 
-        self.transformed_recon_face = apply_transform_batch(self.recon_face, self.model.surf_st)
+        # self.transformed_recon_face = apply_transform_batch(self.recon_face, self.model.surf_st)
         self.transformed_recon_edge = apply_transform_batch(self.recon_edge, self.model.edge_st)
 
         # assert torch.allclose(self.save1, self.transformed_recon_face)
         # assert torch.allclose(self.save2, self.transformed_recon_edge)
 
     def dist(self, pc1, pc2, point_reduction='mean'):
-        return self.chamfer_dist(pc1.reshape(1, -1, 3), pc2.reshape(1, -1, 3), point_reduction=point_reduction)
+        return self.chamfer_dist(
+            pc1.reshape(1, -1, 3), pc2.reshape(1, -1, 3), batch_reduction="mean", point_reduction=point_reduction)
 
     def get_optimized_mask(self, tol=5e-3):
         need_optimized = []
@@ -253,11 +352,28 @@ class Geom_Optimization():
     def loss(self):
         adj_distance_loss = 0
         for edge_idx, face_idx1, face_idx2 in self.edge_face_connectivity:
-            edge_to_face1 = self.dist(self.transformed_recon_edge[edge_idx], self.transformed_recon_face[face_idx1])
-            edge_to_face2 = self.dist(self.transformed_recon_edge[edge_idx], self.transformed_recon_face[face_idx2])
+            edge_to_face1 = self.dist(self.transformed_recon_edge[edge_idx], self.face_points_candidates[face_idx1])
+            edge_to_face2 = self.dist(self.transformed_recon_edge[edge_idx], self.face_points_candidates[face_idx2])
+
+            # edge_to_face1 = torch.cdist(self.transformed_recon_edge[edge_idx],
+            #             self.transformed_recon_face[face_idx1].reshape(-1, 3)).min(dim=1)[0].mean()
+            # edge_to_face2 = torch.cdist(self.transformed_recon_edge[edge_idx],
+            #                             self.transformed_recon_face[face_idx2].reshape(-1, 3)).min(dim=1)[0].mean()
+
             adj_distance_loss_c = (edge_to_face1 + edge_to_face2) / 2
-            if adj_distance_loss_c > 5e-3:
-                adj_distance_loss += adj_distance_loss_c
+            # if adj_distance_loss_c > 5e-3:
+            adj_distance_loss += adj_distance_loss_c
+
+        endpoints = self.transformed_recon_edge[self.pair1, 0]
+        endpoints_loss1 = torch.linalg.norm(endpoints[:,0] - endpoints[:,1], dim=-1).mean()
+        endpoints_loss2 = torch.linalg.norm(endpoints[:,0] - endpoints[:,2], dim=-1).mean()
+        endpoints_loss3 = torch.linalg.norm(endpoints[:,1] - endpoints[:,2], dim=-1).mean()
+
+        endpoints = self.transformed_recon_edge[self.pair2, -1]
+        endpoints_loss4 = torch.linalg.norm(endpoints[:,0] - endpoints[:,1], dim=-1).mean()
+        endpoints_loss5 = torch.linalg.norm(endpoints[:,0] - endpoints[:,2], dim=-1).mean()
+        endpoints_loss6 = torch.linalg.norm(endpoints[:,1] - endpoints[:,2], dim=-1).mean()
+        endpoints_loss = (endpoints_loss1 + endpoints_loss2 + endpoints_loss3 + endpoints_loss4 + endpoints_loss5 + endpoints_loss6) / 6
 
         if self.penalized_vertex.shape[0] != 0:
             penalized_vertex_pair = self.transformed_recon_edge[:, [0, -1], :].reshape(-1, 3)[self.penalized_vertex]
@@ -265,21 +381,24 @@ class Geom_Optimization():
         else:
             compat_vertexes_loss = 0
 
-        sum_loss = adj_distance_loss + compat_vertexes_loss
-        return sum_loss
+        # sum_loss = adj_distance_loss + compat_vertexes_loss
+        sum_loss = adj_distance_loss + endpoints_loss
+        # sum_loss = endpoints_loss
+        return sum_loss, adj_distance_loss.detach(), endpoints_loss.detach()
 
     def run(self):
         with tqdm(total=self.max_iter, desc='Geom Optimization', unit='iter') as pbar:
             for iter in range(self.max_iter):
                 self.apply_all_transform()
-                loss = self.loss()
+                loss, adj_distance_loss, endpoints_loss = self.loss()
                 self.optimizer.zero_grad()
                 if loss < 0.001:
                     print(f'Early stop at iter {iter}')
                     break
                 loss.backward()
                 self.optimizer.step()
-                pbar.set_postfix(loss=loss.item())
+                pbar.set_postfix(
+                    loss=loss.item(), adj=adj_distance_loss.cpu().item(), end=endpoints_loss.cpu().item())
                 pbar.update(1)
         print('Optimization finished!')
 

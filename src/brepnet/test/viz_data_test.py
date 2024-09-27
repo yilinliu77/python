@@ -15,7 +15,7 @@ def export(v_points, f_file, v_color=None):
 
 root=Path(r"D:/img2brep/2024_09_22_21_57_44_0921_pure")
 output_root=Path(r"D:/img2brep/temp")
-prefix = ""
+prefix = "00005247"
 
 if __name__ == '__main__':
     check_dir(output_root)
@@ -25,7 +25,7 @@ if __name__ == '__main__':
     if prefix == "":
         files = files[:10]
     else:
-        files = [prefix]
+        files = [prefix+".npz"]
     for file in files:
         if file.endswith("feature.npz"):
             continue

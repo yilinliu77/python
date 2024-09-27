@@ -16,7 +16,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
     check_dir(os.path.join(out_root, folder_name))
 
     # specify the key to get the face points, edge points and edge_face_connectivity in data.npz
-    data_npz = np.load(os.path.join(data_root, folder_name, 'data.npz'), allow_pickle=True)['arr_0'].item()
+    # data_npz = np.load(os.path.join(data_root, folder_name, 'data.npz'), allow_pickle=True)['arr_0'].item()
+    data_npz = np.load(os.path.join(data_root, folder_name, 'data.npz'), allow_pickle=True)
     if 'sample_points_faces' in data_npz:
         face_points = data_npz['sample_points_faces']  # Face sample points (num_faces*20*20*3)
         edge_points = data_npz['sample_points_lines']  # Edge sample points (num_lines*20*3)
@@ -55,7 +56,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
         face_points, edge_points, edge_face_connectivity, face_edge_adj, remove_edge_idx = optimize_geom(face_points, edge_points,
                                                                                                          edge_face_connectivity,
                                                                                                          face_edge_adj,
-                                                                                                         max_iter=0)
+                                                                                                         max_iter=100)
 
         if isdebug:
             debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
@@ -78,7 +79,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
         recon_face_dir = os.path.join(out_root, folder_name, 'recon_face')
         gen_mesh = trimesh.util.concatenate(
                 [trimesh.load(os.path.join(recon_face_dir, f)) for f in os.listdir(recon_face_dir) if f.endswith('.stl')])
-        gen_mesh.export(os.path.join(out_root, folder_name, 'recon_brep_compound.stl'))
+        # gen_mesh.export(os.path.join(out_root, folder_name, 'recon_brep_compound.stl'))
         return
 
     analyzer = BRepCheck_Analyzer(solid)
@@ -94,10 +95,10 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
 
     # Valid Solid
     write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
-    try:
-        write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01, angular_deflection=0.5)
-    except Exception as e:
-        write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'))
+    # try:
+    #     write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01, angular_deflection=0.5)
+    # except Exception as e:
+    #     write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'))
 
 
 def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list, is_optimize_geom=True, isdebug=False):
@@ -119,9 +120,9 @@ def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list, is_
 construct_brep_from_datanpz_batch_ray = ray.remote(max_retries=2)(construct_brep_from_datanpz_batch)
 
 
-def test_construct_brep(v_data_root, v_out_root):
+def test_construct_brep(v_data_root, v_out_root, v_prefix):
     # debug_folder = os.listdir(v_out_root)
-    debug_folder = ["00120885"]
+    debug_folder = [v_prefix]
     for folder in debug_folder:
         construct_brep_from_datanpz(v_data_root, v_out_root, folder, is_optimize_geom=True, isdebug=True)
     exit(0)
@@ -132,7 +133,8 @@ if __name__ == '__main__':
     parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test")
     parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test_out")
     parser.add_argument('--is_cover', type=bool, default=True)
-    parser.add_argument('--is_use_ray', type=bool, default=False)
+    parser.add_argument('--is_use_ray', action='store_true')
+    parser.add_argument('--prefix', type=str, default="")
     args = parser.parse_args()
     v_data_root = args.data_root
     v_out_root = args.out_root
@@ -142,7 +144,8 @@ if __name__ == '__main__':
     if not os.path.exists(v_data_root):
         raise ValueError(f"Data root path {v_data_root} does not exist.")
 
-    # test_construct_brep(v_data_root, v_out_root)
+    if args.prefix != "":
+        test_construct_brep(v_data_root, v_out_root, args.prefix)
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
     # all_folders = os.listdir(r"E:\data\img2brep\0916_context_test_out1_seg\else")
     # check_dir(v_out_root)

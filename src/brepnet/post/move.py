@@ -79,7 +79,7 @@ def calculate_valid_percentage(shape):
 
 
 def check_invalid(data_root):
-    all_files = os.listdir(data_root)
+    all_files = [item for item in os.listdir(data_root) if os.path.isdir(os.path.join(data_root, item))]
     all_files.sort()
 
     exception_save_root = data_root + "_exception"
@@ -118,8 +118,9 @@ def check_invalid(data_root):
 
 
 if __name__ == '__main__':
-    # data_root = sys.argv[1]
-    # move(data_root)
+    if sys.argv[1] == "move":
+        move(sys.argv[2])
+    else:
+        check_invalid(sys.argv[2])
     # count_success(data_root)
     # check_eval(data_root)
-    check_invalid(r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test_out")

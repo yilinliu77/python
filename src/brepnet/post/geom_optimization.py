@@ -305,11 +305,19 @@ def optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj,
     geom_opt.run()
     recon_face, recon_edge, edge_face_connectivity, face_edge_adj = geom_opt.get_transformed_data()
 
+    dirs = (recon_edge[:,[0,-1]]-np.mean(recon_edge, axis=1,keepdims=True))
+    cos_dir = (dirs[:,0]*dirs[:,1]).sum(axis=1)/np.linalg.norm(dirs[:,0],axis=1)/np.linalg.norm(dirs[:,1],axis=1)
+    flag = cos_dir > 0.75
+
+    delta = recon_edge[:, [0,-1]].mean(axis=1)
+    recon_edge[flag,0] = delta[flag]
+    recon_edge[flag,-1] = delta[flag]
+
     # 4. Force to merge the edge endpoints
-    recon_edge = merge_edge_endpoints(recon_edge, 0.03)
+    # recon_edge = merge_edge_endpoints(recon_edge, 0.03)
 
     # 5. Check and remove the invalid edge
-    remove_invalid_edge = False
+    remove_invalid_edge = True
     if remove_invalid_edge:
         recon_face, recon_edge, edge_face_connectivity, face_edge_adj, remove_edge_idx = fix_final_estimation(recon_face, recon_edge,
                                                                                                               edge_face_connectivity,

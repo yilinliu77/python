@@ -490,11 +490,12 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             start_display()
 
         # save the face as step file and stl file
+        # is_save_face=False
         if is_save_face and is_valid:
             os.makedirs(os.path.join(folder_path, 'recon_face'), exist_ok=True)
             try:
-                write_step_file(trimmed_face, os.path.join(folder_path, 'recon_face', f'{idx}.step'))
-                write_stl_file(trimmed_face, os.path.join(folder_path, 'recon_face', f'{idx}.stl'))
+                write_step_file(trimmed_face, os.path.join(folder_path, 'recon_face', f'{idx}_{1 if is_valid else 0}.step'))
+                write_stl_file(trimmed_face, os.path.join(folder_path, 'recon_face', f'{idx}_{1 if is_valid else 0}.stl'))
             except:
                 print(f"Error writing step or stl file for face {idx}")
 

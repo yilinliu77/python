@@ -146,7 +146,7 @@ def fix_init_estimation(recon_face, recon_edge, edge_face_connectivity, face_edg
     return recon_face, recon_edge, edge_face_connectivity, face_edge_adj
 
 
-def fix_final_estimation(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, tol=1e-2):
+def fix_final_estimation(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, tol=2e-2):
     # check and remove the invalid edge
     remove_edge_idx = []
     for edge_idx, face_idx1, face_idx2 in edge_face_connectivity:
@@ -306,14 +306,18 @@ def optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj,
     recon_face, recon_edge, edge_face_connectivity, face_edge_adj = geom_opt.get_transformed_data()
 
     # 4. Force to merge the edge endpoints
-    recon_edge = merge_edge_endpoints(recon_edge, 1e-4)
+    recon_edge = merge_edge_endpoints(recon_edge, 0.03)
 
     # 5. Check and remove the invalid edge
-    recon_face, recon_edge, edge_face_connectivity, face_edge_adj, remove_edge_idx = fix_final_estimation(recon_face, recon_edge,
-                                                                                                          edge_face_connectivity,
-                                                                                                          face_edge_adj)
+    remove_invalid_edge = False
+    if remove_invalid_edge:
+        recon_face, recon_edge, edge_face_connectivity, face_edge_adj, remove_edge_idx = fix_final_estimation(recon_face, recon_edge,
+                                                                                                              edge_face_connectivity,
+                                                                                                              face_edge_adj)
 
-    return recon_face, recon_edge, edge_face_connectivity, face_edge_adj, remove_edge_idx
+        return recon_face, recon_edge, edge_face_connectivity, face_edge_adj, remove_edge_idx
+    else:
+        return recon_face, recon_edge, edge_face_connectivity, face_edge_adj, []
 
 
 def test_optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, debug_face_save_path):

@@ -121,7 +121,7 @@ construct_brep_from_datanpz_batch_ray = ray.remote(max_retries=2)(construct_brep
 
 def test_construct_brep(v_data_root, v_out_root):
     # debug_folder = os.listdir(v_out_root)
-    debug_folder = ["00000093"]
+    debug_folder = ["00986248"]
     for folder in debug_folder:
         construct_brep_from_datanpz(v_data_root, v_out_root, folder, is_optimize_geom=True, isdebug=True)
     exit(0)
@@ -142,7 +142,7 @@ if __name__ == '__main__':
     if not os.path.exists(v_data_root):
         raise ValueError(f"Data root path {v_data_root} does not exist.")
 
-    test_construct_brep(v_data_root, v_out_root)
+    # test_construct_brep(v_data_root, v_out_root)
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
     # all_folders = os.listdir(r"E:\data\img2brep\0916_context_test_out1_seg\else")
     # check_dir(v_out_root)

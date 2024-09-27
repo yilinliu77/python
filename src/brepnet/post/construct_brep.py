@@ -13,11 +13,7 @@ import trimesh
 
 def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_geom=True, isdebug=False):
     print(f"{Colors.GREEN}############################# Processing {folder_name} #############################{Colors.RESET}")
-    safe_check_dir(os.path.join(out_root, folder_name))
-    if os.path.exists(os.path.join(out_root, folder_name, 'recon_brep.stl')):
-        os.remove(os.path.join(out_root, folder_name, 'recon_brep.stl'))
-    if os.path.exists(os.path.join(out_root, folder_name, 'recon_brep.step')):
-        os.remove(os.path.join(out_root, folder_name, 'recon_brep.step'))
+    check_dir(os.path.join(out_root, folder_name))
 
     # specify the key to get the face points, edge points and edge_face_connectivity in data.npz
     data_npz = np.load(os.path.join(data_root, folder_name, 'data.npz'), allow_pickle=True)['arr_0'].item()
@@ -56,15 +52,17 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
     # edge_points = edge_points + np.random.normal(0, 1e-3, size=(edge_points.shape[0], 1, 1))
 
     if is_optimize_geom:
-        face_points, edge_points, edge_face_connectivity, face_edge_adj = optimize_geom(face_points, edge_points,
-                                                                                        edge_face_connectivity, face_edge_adj,
-                                                                                        max_iter=0)
+        face_points, edge_points, edge_face_connectivity, face_edge_adj, remove_edge_idx = optimize_geom(face_points, edge_points,
+                                                                                                         edge_face_connectivity,
+                                                                                                         face_edge_adj,
+                                                                                                         max_iter=0)
 
         if isdebug:
             debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
             safe_check_dir(debug_face_save_path)
+            optimized_edge_points = np.delete(edge_points, remove_edge_idx, axis=0)
             export_point_cloud(os.path.join(debug_face_save_path, 'optimized_face.ply'), face_points.reshape(-1, 3))
-            export_point_cloud(os.path.join(debug_face_save_path, 'optimized_edge.ply'), edge_points.reshape(-1, 3))
+            export_point_cloud(os.path.join(debug_face_save_path, 'optimized_edge.ply'), optimized_edge_points.reshape(-1, 3))
 
     # Construct Brep from face_points, edge_points, face_edge_adj
     solid, faces_result = construct_brep(face_points, edge_points, face_edge_adj,
@@ -122,15 +120,17 @@ construct_brep_from_datanpz_batch_ray = ray.remote(max_retries=2)(construct_brep
 
 
 def test_construct_brep(v_data_root, v_out_root):
-    debug_folder = "00840100"
-    construct_brep_from_datanpz(v_data_root, v_out_root, debug_folder, is_optimize_geom=True, isdebug=True)
+    # debug_folder = os.listdir(v_out_root)
+    debug_folder = ["00000093"]
+    for folder in debug_folder:
+        construct_brep_from_datanpz(v_data_root, v_out_root, folder, is_optimize_geom=True, isdebug=True)
     exit(0)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Construct Brep From Data')
     parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test")
-    parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test_out")
+    parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test_out_failed")
     parser.add_argument('--is_cover', type=bool, default=True)
     parser.add_argument('--is_use_ray', type=bool, default=True)
     args = parser.parse_args()
@@ -142,12 +142,17 @@ if __name__ == '__main__':
     if not os.path.exists(v_data_root):
         raise ValueError(f"Data root path {v_data_root} does not exist.")
 
-    # test_construct_brep(v_data_root, v_out_root)
+    test_construct_brep(v_data_root, v_out_root)
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
     # all_folders = os.listdir(r"E:\data\img2brep\0916_context_test_out1_seg\else")
     # check_dir(v_out_root)
+
+    print(f"Total {len(all_folders)} folders")
     if not is_cover:
+        print(f"Skip existing folders")
         all_folders = [folder for folder in all_folders if not os.path.exists(os.path.join(v_out_root, folder))]
+        print(f"Total {len(all_folders)} folders to process")
+
     all_folders.sort()
 
     # all_folders = all_folders[:100]

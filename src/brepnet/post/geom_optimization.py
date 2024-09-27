@@ -32,7 +32,7 @@ def apply_transform(tensor, transform):
     src_shape = tensor.shape
     if len(src_shape) > 2:
         tensor = tensor.reshape(-1, 3)
-    scale, offset = transform[0], transform[1:]
+    scale, offset = transform[0:1], transform[1:]
     center = torch.mean(tensor, dim=0)
     scaled_tensor = (tensor - center) * scale + center + offset
     if len(src_shape) > 2:
@@ -44,7 +44,7 @@ def apply_transform_batch(tensor, transform):
     src_shape = tensor.shape
     if len(src_shape) > 3:
         tensor = tensor.reshape(tensor.shape[0], -1, 3)
-    scales = transform[:, 0].view(-1, 1, 1)
+    scales = transform[:, 1].view(-1, 1, 1)
     offsets = transform[:, 1:].view(-1, 1, 3)
     centers = tensor.mean(dim=1, keepdim=True)
     scaled_tensor = (tensor - centers) * scales + centers + offsets
@@ -57,18 +57,136 @@ def get_wire_length(face_edge):
     return torch.norm(face_edge[:, 1::, :] - face_edge[:, 0:-1, :], dim=-1).sum()
 
 
-def check_edge_validity(edge_point, face_point1, face_point2):
+def interpolate_edge_points(edge_points, num_interpolations):
+    interpolated_points = []
+    for i in range(len(edge_points) - 1):
+        start_point = edge_points[i]
+        end_point = edge_points[i + 1]
+        for t in np.linspace(0, 1, num_interpolations + 2):  # +2 to include endpoints
+            interpolated_point = (1 - t) * start_point + t * end_point
+            interpolated_points.append(interpolated_point)
+    return np.array(interpolated_points)
+
+
+def check_edge_validity(edge_point, face_point1, face_point2, tol=1e-2):
+    edge_point = interpolate_edge_points(edge_point, 10)
+
     computer = ChamferDistance()
     edge_point = torch.from_numpy(edge_point)
     face_point1 = torch.from_numpy(face_point1)
     face_point2 = torch.from_numpy(face_point2)
-    dst1 = computer(edge_point.reshape(1, -1, 3), face_point1.reshape(1, -1, 3))
-    dst2 = computer(edge_point.reshape(1, -1, 3), face_point2.reshape(1, -1, 3))
-    if dst1 < 5e-3 and dst2 < 5e-3:
-        return True
+    dst1 = computer(edge_point.reshape(1, -1, 3), face_point1.reshape(1, -1, 3), point_reduction='mean')
+    dst2 = computer(edge_point.reshape(1, -1, 3), face_point2.reshape(1, -1, 3), point_reduction='mean')
+    dis = (dst1 + dst2) / 2
+
+    if dst1 < tol and dst2 < tol:
+        return True, dis
     else:
-        return False
+        return False, dis
+
     # return (abs(dst1 - dst2) / torch.min(dst1, dst2)) < 0.25
+
+
+def fix_init_estimation(recon_face, recon_edge, edge_face_connectivity, face_edge_adj):
+    # 1. Check and init fix the connectivity of the edge and face
+    cache_dict = {}
+    for conec in edge_face_connectivity:
+        if (conec[1], conec[2]) in cache_dict:
+            cache_dict[(conec[1], conec[2])].append(conec[0])
+        elif (conec[2], conec[1]) in cache_dict:
+            cache_dict[(conec[2], conec[1])].append(conec[0])
+        else:
+            cache_dict[(conec[1], conec[2])] = [conec[0]]
+
+    # Duplicate or delete edges if it appears once
+    new_dict = {}
+    del_key = []
+    for key, value in cache_dict.items():
+        if len(value) == 1:
+            is_egde_valid, dis = check_edge_validity(recon_edge[value[0]], recon_face[key[0]], recon_face[key[1]])
+            if is_egde_valid:
+                # should fix the missing edge
+                new_edge = recon_edge[value[0]][::-1][None, :]
+                edge_face_connectivity = np.concatenate([
+                    edge_face_connectivity,
+                    np.array((recon_edge.shape[0], key[1], key[0]))[None, :]
+                ], axis=0)
+                new_dict[key] = recon_edge.shape[0]
+                face_edge_adj[key[1]].append(recon_edge.shape[0])
+                recon_edge = np.concatenate([recon_edge, new_edge], axis=0)
+            else:
+                # remove the invalid edge
+                edge_face_connectivity = edge_face_connectivity[edge_face_connectivity[:, 0] != value[0]]
+                if value[0] in face_edge_adj[key[0]]:
+                    face_edge_adj[key[0]].remove(value[0])
+                elif value[0] in face_edge_adj[key[1]]:
+                    face_edge_adj[key[1]].remove(value[0])
+                del_key.append(key)
+
+    for key, value in new_dict.items():
+        cache_dict[key].append(value)
+    for key in del_key:
+        del cache_dict[key]
+
+    # 2. Check which half edge is better and replace the bad one
+    computer = ChamferDistance()
+    for (id_face1, id_face2), id_edges in cache_dict.items():
+        face1 = torch.from_numpy(recon_face[id_face1])
+        face2 = torch.from_numpy(recon_face[id_face2])
+        edge1 = torch.from_numpy(recon_edge[id_edges[0]])
+        edge2 = torch.from_numpy(recon_edge[id_edges[1]])
+        dist1 = (computer(edge1.reshape(1, -1, 3), face1.reshape(1, -1, 3)) +
+                 computer(edge1.reshape(1, -1, 3), face2.reshape(1, -1, 3)))
+        dist2 = (computer(edge2.reshape(1, -1, 3), face1.reshape(1, -1, 3)) +
+                 computer(edge2.reshape(1, -1, 3), face2.reshape(1, -1, 3)))
+        if dist1 > dist2:
+            recon_edge[id_edges[0]] = recon_edge[id_edges[1]][::-1]
+        elif dist1 < dist2:
+            recon_edge[id_edges[1]] = recon_edge[id_edges[0]][::-1]
+    return recon_face, recon_edge, edge_face_connectivity, face_edge_adj
+
+
+def fix_final_estimation(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, tol=1e-2):
+    # check and remove the invalid edge
+    remove_edge_idx = []
+    for edge_idx, face_idx1, face_idx2 in edge_face_connectivity:
+        is_egde_valid, dis = check_edge_validity(recon_edge[edge_idx], recon_face[face_idx1], recon_face[face_idx2], tol=tol)
+        if not is_egde_valid:
+            edge_face_connectivity = edge_face_connectivity[edge_face_connectivity[:, 0] == edge_idx]
+            if edge_idx in face_edge_adj[face_idx1]:
+                face_edge_adj[face_idx1].remove(edge_idx)
+            elif edge_idx in face_edge_adj[face_idx2]:
+                face_edge_adj[face_idx2].remove(edge_idx)
+            remove_edge_idx.append(edge_idx)
+    return recon_face, recon_edge, edge_face_connectivity, face_edge_adj, remove_edge_idx
+
+
+def merge_edge_endpoints(edge_wcs, tol):
+    points = edge_wcs[:, [0, -1]].reshape(-1, 3)  # N*2
+
+    merged_points = []
+    visited = np.zeros(len(points), dtype=bool)
+    for i, point in enumerate(points):
+        if visited[i]:
+            continue
+        distances = np.linalg.norm(points - point, axis=1)
+        close_points = points[distances <= tol]
+        merged_point = close_points.mean(axis=0)
+        merged_points.append(merged_point)
+        visited[distances <= tol] = True
+    merged_points = np.array(merged_points)
+
+    num_point = edge_wcs.shape[1]
+    for i in range(len(edge_wcs)):
+        edge_wcs[i][0] = merged_points[np.argmin(np.linalg.norm(merged_points - edge_wcs[i][0], axis=1))]
+        edge_wcs[i][-1] = merged_points[np.argmin(np.linalg.norm(merged_points - edge_wcs[i][-1], axis=1))]
+        # start_vec = merged_points[np.argmin(np.linalg.norm(merged_points - edge_wcs[i][0], axis=1))] - edge_wcs[i][0]
+        # end_vec = merged_points[np.argmin(np.linalg.norm(merged_points - edge_wcs[i][-1], axis=1))] - edge_wcs[i][-1]
+        # weight = np.tile((np.arange(num_point) / (num_point - 1))[:, np.newaxis], (1, 3))
+        # weighted_vec = np.tile(start_vec[np.newaxis, :], (num_point, 1)) * (1 - weight) + np.tile(end_vec, (num_point, 1)) * weight
+        # edge_wcs[i] += weighted_vec
+
+    return edge_wcs
 
 
 class STModel(nn.Module):
@@ -79,10 +197,10 @@ class STModel(nn.Module):
 
 
 class Geom_Optimization():
-    def __init__(self, recon_face, recon_edge, edge_face_connectivity, face_edge_adj, vertex_tolerance=1e-1, max_iter=100):
+    def __init__(self, recon_face, recon_edge, edge_face_connectivity, face_edge_adj, min_vertex_tolerance=5e-3, max_vertex_tolerance=0.25,
+                 max_iter=100):
         self.edge_face_connectivity = edge_face_connectivity
         self.face_edge_adj = face_edge_adj
-        recon_face, recon_edge = self.get_init_estimation(recon_face, recon_edge)
 
         self.device = torch.device("cpu")
 
@@ -92,96 +210,19 @@ class Geom_Optimization():
         self.transformed_recon_face = torch.FloatTensor(recon_face).to(self.device).requires_grad_(False)
         self.transformed_recon_edge = torch.FloatTensor(recon_edge).to(self.device).requires_grad_(False)
 
-        self.edge_face_connectivity = edge_face_connectivity
-        self.face_edge_adj = face_edge_adj
-
-        # self.face_idx_pair_to_edge_idx = {}
-        # for edge_idx, face_idx1, face_idx2 in self.edge_face_connectivity:
-        #     face_idx_pair = frozenset([face_idx1, face_idx2])
-        #     if face_idx_pair not in self.face_idx_pair_to_edge_idx:
-        #         self.face_idx_pair_to_edge_idx[face_idx_pair] = []
-        #     self.face_idx_pair_to_edge_idx[face_idx_pair].append(edge_idx)
-        # self.coincident_edge_idx = list(self.face_idx_pair_to_edge_idx.values())
-        # self.coincident_edge_idx = torch.tensor(self.coincident_edge_idx)
-
-        self.vertex_tol = vertex_tolerance
         vertexes = self.recon_edge[:, [0, -1], :].reshape(-1, 3)
         dist_matrix = torch.sqrt(torch.clamp(torch.sum((vertexes.unsqueeze(1) - vertexes.unsqueeze(0)) ** 2, dim=-1), min=1e-6))
         self.penalized_vertex = torch.stack(
-                torch.where(torch.logical_and(self.vertex_tol * 0.01 < dist_matrix, dist_matrix < self.vertex_tol)), dim=1)
+                torch.where(torch.logical_and(min_vertex_tolerance < dist_matrix, dist_matrix < max_vertex_tolerance)), dim=1)
 
         # init_surf_st, init_edge_st = self.get_init_st()
         self.model = STModel(self.recon_face.shape[0], self.recon_edge.shape[0])
 
-        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=1e-3, betas=(0.95, 0.999), weight_decay=1e-6, eps=1e-08, )
-        self.scheduler = StepLR(self.optimizer, step_size=100, gamma=0.1)
-
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=8e-4, betas=(0.95, 0.999), weight_decay=1e-6, eps=1e-08, )
         self.model = self.model.to(self.device).train()
 
         self.chamfer_dist = ChamferDistance()
         self.max_iter = max_iter
-
-    def get_init_estimation(self, recon_face, recon_edge):
-        edge_face_connectivity = self.edge_face_connectivity
-        face_edge_adj = self.face_edge_adj
-        cache_dict = {}
-        for conec in edge_face_connectivity:
-            if (conec[1], conec[2]) in cache_dict:
-                cache_dict[(conec[1], conec[2])].append(conec[0])
-            elif (conec[2], conec[1]) in cache_dict:
-                cache_dict[(conec[2], conec[1])].append(conec[0])
-            else:
-                cache_dict[(conec[1], conec[2])] = [conec[0]]
-
-        # Duplicate edges if it appears once
-        new_dict = {}
-        del_key = []
-        for key, value in cache_dict.items():
-            if len(value) == 1:
-                is_egde_valid = check_edge_validity(recon_edge[value[0]], recon_face[key[0]], recon_face[key[1]])
-                if is_egde_valid:
-                    # should fix the missing edge
-                    new_edge = recon_edge[value[0]][::-1][None, :]
-                    edge_face_connectivity = np.concatenate([
-                        edge_face_connectivity,
-                        np.array((recon_edge.shape[0], key[1], key[0]))[None, :]
-                    ], axis=0)
-                    new_dict[key] = recon_edge.shape[0]
-                    face_edge_adj[key[1]].append(recon_edge.shape[0])
-                    recon_edge = np.concatenate([recon_edge, new_edge], axis=0)
-                else:
-                    # remove the invalid edge
-                    edge_face_connectivity = edge_face_connectivity[edge_face_connectivity[:, 0] != value[0]]
-                    if value[0] in face_edge_adj[key[0]]:
-                        face_edge_adj[key[0]].remove(value[0])
-                    elif value[0] in face_edge_adj[key[1]]:
-                        face_edge_adj[key[1]].remove(value[0])
-                    del_key.append(key)
-            # else:
-            #     is_egde_valid = check_edge_validity(recon_edge[value[0]], recon_face[key[0]], recon_face[key[1]])
-            #     assert is_egde_valid
-
-        for key, value in new_dict.items():
-            cache_dict[key].append(value)
-        for key in del_key:
-            del cache_dict[key]
-
-        # Check which half edge is better
-        computer = ChamferDistance()
-        for (id_face1, id_face2), id_edges in cache_dict.items():
-            face1 = torch.from_numpy(recon_face[id_face1])
-            face2 = torch.from_numpy(recon_face[id_face2])
-            edge1 = torch.from_numpy(recon_edge[id_edges[0]])
-            edge2 = torch.from_numpy(recon_edge[id_edges[1]])
-            dist1 = (computer(edge1.reshape(1, -1, 3), face1.reshape(1, -1, 3)) +
-                     computer(edge1.reshape(1, -1, 3), face2.reshape(1, -1, 3)))
-            dist2 = (computer(edge2.reshape(1, -1, 3), face1.reshape(1, -1, 3)) +
-                     computer(edge2.reshape(1, -1, 3), face2.reshape(1, -1, 3)))
-            if dist1 > dist2:
-                recon_edge[id_edges[0]] = recon_edge[id_edges[1]][::-1]
-            elif dist1 < dist2:
-                recon_edge[id_edges[1]] = recon_edge[id_edges[0]][::-1]
-        return recon_face, recon_edge
 
     def apply_all_transform(self):
         # for face_idx in range(self.recon_face.shape[0]):
@@ -200,19 +241,14 @@ class Geom_Optimization():
     def dist(self, pc1, pc2, point_reduction='mean'):
         return self.chamfer_dist(pc1.reshape(1, -1, 3), pc2.reshape(1, -1, 3), point_reduction=point_reduction)
 
-    def option_loss(self):
-        size_consistency_loss = 0
-        wire_distance_loss = 0
-        # wire_length_loss = 0
-        for face_idx, face_edge_idx in enumerate(self.face_edge_adj):
-            face_sc = get_size_and_center(self.transformed_recon_face[face_idx].reshape(1, -1, 3))[0]
-            wire_sc = get_size_and_center(self.transformed_recon_edge[face_edge_idx].reshape(1, -1, 3))[0]
-            size_consistency_loss += (face_sc[0] - wire_sc[0]) ** 2
-            wire_distance_loss += self.dist(self.transformed_recon_edge[face_edge_idx], self.transformed_recon_face[face_idx])
-            # wire_length_loss += get_wire_length(self.transformed_recon_edge[face_edge_idx])
-
-        coin_edge_loss = self.chamfer_dist(self.transformed_recon_edge[self.coincident_edge_idx][:, 0, :, :],
-                                           self.transformed_recon_edge[self.coincident_edge_idx][:, 1, :, :], batch_reduction='sum')
+    def get_optimized_mask(self, tol=5e-3):
+        need_optimized = []
+        for edge_idx, face_idx1, face_idx2 in self.edge_face_connectivity:
+            edge_to_face1 = self.dist(self.transformed_recon_edge[edge_idx], self.transformed_recon_face[face_idx1])
+            edge_to_face2 = self.dist(self.transformed_recon_edge[edge_idx], self.transformed_recon_face[face_idx2])
+            adj_distance_loss_c = (edge_to_face1 + edge_to_face2) / 2
+            if adj_distance_loss_c > tol:
+                need_optimized.append(edge_idx)
 
     def loss(self):
         adj_distance_loss = 0
@@ -220,7 +256,7 @@ class Geom_Optimization():
             edge_to_face1 = self.dist(self.transformed_recon_edge[edge_idx], self.transformed_recon_face[face_idx1])
             edge_to_face2 = self.dist(self.transformed_recon_edge[edge_idx], self.transformed_recon_face[face_idx2])
             adj_distance_loss_c = (edge_to_face1 + edge_to_face2) / 2
-            if adj_distance_loss_c > 0.01:
+            if adj_distance_loss_c > 5e-3:
                 adj_distance_loss += adj_distance_loss_c
 
         if self.penalized_vertex.shape[0] != 0:
@@ -238,12 +274,11 @@ class Geom_Optimization():
                 self.apply_all_transform()
                 loss = self.loss()
                 self.optimizer.zero_grad()
-                if loss < 0.003:
+                if loss < 0.001:
                     print(f'Early stop at iter {iter}')
                     break
                 loss.backward()
                 self.optimizer.step()
-                self.scheduler.step()
                 pbar.set_postfix(loss=loss.item())
                 pbar.update(1)
         print('Optimization finished!')
@@ -260,9 +295,25 @@ class Geom_Optimization():
 
 
 def optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, max_iter=100):
+    # 1. Check and init fix the connectivity of the edge and face
+    # 2. Check which half edge is better and replace the bad one
+    recon_face, recon_edge, edge_face_connectivity, face_edge_adj = fix_init_estimation(recon_face, recon_edge,
+                                                                                        edge_face_connectivity,
+                                                                                        face_edge_adj)
+    # 3. Optimize the geometry to enclose the adjacent face and edge
     geom_opt = Geom_Optimization(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, max_iter=max_iter)
     geom_opt.run()
-    return geom_opt.get_transformed_data()
+    recon_face, recon_edge, edge_face_connectivity, face_edge_adj = geom_opt.get_transformed_data()
+
+    # 4. Force to merge the edge endpoints
+    recon_edge = merge_edge_endpoints(recon_edge, 1e-4)
+
+    # 5. Check and remove the invalid edge
+    recon_face, recon_edge, edge_face_connectivity, face_edge_adj, remove_edge_idx = fix_final_estimation(recon_face, recon_edge,
+                                                                                                          edge_face_connectivity,
+                                                                                                          face_edge_adj)
+
+    return recon_face, recon_edge, edge_face_connectivity, face_edge_adj, remove_edge_idx
 
 
 def test_optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, debug_face_save_path):

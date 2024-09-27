@@ -73,19 +73,34 @@ from OCC.Core.Geom import Geom_BSplineCurve
 # FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 10e-2]
 
 EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
-FACE_FITTING_TOLERANCE = [2e-2, 5e-2, 8e-2]
+FACE_FITTING_TOLERANCE = [5e-2, 5e-2, 8e-2]
 
-FIX_TOLERANCE = 0.025
-FIX_PRECISION = 0.025
-CONNECT_TOLERANCE = 0.025
-TRIM_FIX_TOLERANCE = 0.025
-SEWING_TOLERANCE = 2e-2
+FIX_TOLERANCE = 1e-2
+FIX_PRECISION = 1e-2
+CONNECT_TOLERANCE = 8e-2
+SEWING_TOLERANCE = 8e-2
 TRANSFER_PRECISION = 1e-3
 MAX_DISTANCE_THRESHOLD = 1e-1
 USE_VARIATIONAL_SMOOTHING = False
 weight_CurveLength, weight_Curvature, weight_Torsion = 0.4, 0.4, 0.2
 IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, True
 CONTINUITY = GeomAbs_C2
+
+
+# EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
+# FACE_FITTING_TOLERANCE = [2e-2, 5e-2, 8e-2]
+#
+# FIX_TOLERANCE = 1e-2
+# FIX_PRECISION = 1e-2
+# CONNECT_TOLERANCE = 0.025
+# TRIM_FIX_TOLERANCE = 0.025
+# SEWING_TOLERANCE = 2e-2
+# TRANSFER_PRECISION = 1e-3
+# MAX_DISTANCE_THRESHOLD = 1e-1
+# USE_VARIATIONAL_SMOOTHING = False
+# weight_CurveLength, weight_Curvature, weight_Torsion = 0.4, 0.4, 0.2
+# IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, True
+# CONTINUITY = GeomAbs_C2
 
 
 def get_edge_vertexes(edge):
@@ -477,8 +492,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
             os.makedirs(os.path.join(folder_path, 'recon_face'), exist_ok=True)
             try:
                 write_step_file(trimmed_face, os.path.join(folder_path, 'recon_face', f'{idx}.step'))
-                write_stl_file(trimmed_face, os.path.join(folder_path, 'recon_face', f'{idx}.stl'), linear_deflection=0.1,
-                               angular_deflection=0.5)
+                write_stl_file(trimmed_face, os.path.join(folder_path, 'recon_face', f'{idx}.stl'))
             except:
                 print(f"Error writing step or stl file for face {idx}")
 

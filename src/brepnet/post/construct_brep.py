@@ -121,7 +121,7 @@ construct_brep_from_datanpz_batch_ray = ray.remote(max_retries=2)(construct_brep
 
 def test_construct_brep(v_data_root, v_out_root):
     # debug_folder = os.listdir(v_out_root)
-    debug_folder = ["00986248"]
+    debug_folder = ["00120885"]
     for folder in debug_folder:
         construct_brep_from_datanpz(v_data_root, v_out_root, folder, is_optimize_geom=True, isdebug=True)
     exit(0)
@@ -130,9 +130,9 @@ def test_construct_brep(v_data_root, v_out_root):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Construct Brep From Data')
     parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test")
-    parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test_out_failed")
+    parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test_out")
     parser.add_argument('--is_cover', type=bool, default=True)
-    parser.add_argument('--is_use_ray', type=bool, default=True)
+    parser.add_argument('--is_use_ray', type=bool, default=False)
     args = parser.parse_args()
     v_data_root = args.data_root
     v_out_root = args.out_root

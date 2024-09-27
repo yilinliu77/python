@@ -1,18 +1,21 @@
 dataset:
-  dataset_name: "AutoEncoder_dataset"
+  name: "Diffusion_dataset"
 
-  train_dataset: D:/img2brep/deepcad_whole_test_v3
-  val_dataset: D:/img2brep/deepcad_whole_test_v3
+  face_z: /root/repo/python/outputs_brepnet/0925_pure_face_z
+  train_dataset: D:/img2brep/deepcad_whole_test_v5
+  val_dataset: D:/img2brep/deepcad_whole_test_v5
   test_dataset: /mnt/d/img2brep/0825_test
+
+  scale_factor: 1000
 
 trainer:
   gpu: 1
   num_worker: 0
-  batch_size: 4
+  batch_size: 32
   learning_rate: 1e-4
   check_val_every_n_epoch: 1
-#  accelerator: "16-mixed"
-  accelerator: "32-true"
+  accelerator: "16-mixed"
+#  accelerator: "32-true"
 
   # Evaluation
   evaluate: false
@@ -22,18 +25,22 @@ trainer:
   max_epochs: 10000000
   spawn: false
   output: .
-  exp_name:
+  exp_name: test
 
 model:
-  name: AutoEncoder_featuredv2
+  name: Diffusion_base
+  train_decoder: false
+  stored_z: false
+
+  autoencoder: AutoEncoder_0925
   dim_latent: 8
-  dim_shape: 256
+  dim_shape: 768
+  gaussian_weights: 0
   norm: "layer"
-  autoencoder: AutoEncoder_graph_flattened_plus
-  autoencoder_weights: outputs_brepnet/2024_08_31_04_55_03/0830_dl8_ds256_4gpu/version_0/checkpoints/last.ckpt
+  autoencoder_weights: 
 
 hydra:
   run:
-    dir: ./outputs_brepnet/${now:%Y_%m_%d_%H_%M_%S}
+    dir: ./outputs_brepnet_diffusion
   job:
     chdir: False

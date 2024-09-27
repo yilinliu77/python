@@ -1,4 +1,5 @@
 import importlib
+from datetime import datetime
 from pathlib import Path
 import sys
 from einops import rearrange
@@ -43,22 +44,21 @@ class TrainDiffusion(pl.LightningModule):
         if not os.path.exists(self.log_root):
             os.makedirs(self.log_root)
 
-        self.dataset_mod = Diffusion_dataset
+        dataset_mod = importlib.import_module("src.brepnet.dataset")
+        self.dataset_mod = getattr(dataset_mod, self.hydra_conf["dataset"]["name"])
 
         model_mod = importlib.import_module("src.brepnet.diffusion_model")
         model_mod = getattr(model_mod, self.hydra_conf["model"]["name"])
-        # self.model = AutoEncoder_base(self.hydra_conf["model"])
         self.model = model_mod(self.hydra_conf["model"])
-        # self.model = torch.compile(self.model)
 
-        model_mod = importlib.import_module("src.brepnet.model")
-        model_mod = getattr(model_mod, self.hydra_conf["model"]["autoencoder"])
-        self.autoencoder = model_mod(hparams["model"])
-        weights = torch.load(self.hydra_conf["model"]["autoencoder_weights"])["state_dict"]
-        weights = {k.replace("model.", ""): v for k, v in weights.items()}
-        self.autoencoder.load_state_dict(weights)
-        for param in self.autoencoder.parameters():
-            param.requires_grad = False
+        # model_mod = importlib.import_module("src.brepnet.model")
+        # model_mod = getattr(model_mod, self.hydra_conf["model"]["autoencoder"])
+        # self.autoencoder = model_mod(hparams["model"])
+        # weights = torch.load(self.hydra_conf["model"]["autoencoder_weights"])["state_dict"]
+        # weights = {k.replace("model.", ""): v for k, v in weights.items()}
+        # self.autoencoder.load_state_dict(weights)
+        # for param in self.autoencoder.parameters():
+        #     param.requires_grad = False
         self.viz = {}
 
     def train_dataloader(self):
@@ -108,7 +108,7 @@ class TrainDiffusion(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         data = batch
-        bs = data["face_features"].shape[0]
+        # bs = data["face_features"].shape[0]
         loss = self.model(data, v_test=True)
         total_loss = loss["total_loss"]
         for key in loss:
@@ -119,32 +119,23 @@ class TrainDiffusion(pl.LightningModule):
         self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
 
-        if batch_idx == 0:
-            result = self.inference()
+        if batch_idx == 0 and self.global_rank == 0:
+            result = self.model.inference(1, self.device)[0]
             self.viz = {}
-            self.viz["recon_faces"] = result["recon_faces"]
-            self.viz["recon_mask"] = result["recon_mask"]
-            self.viz["gt_mask"] = torch.logical_not((data["face_features"]==0).all(dim=-1).all(dim=-1).all(dim=-1))
-            gt_feature = rearrange(data["face_features"], "b n c h w -> (b n) c h w")
-            result = rearrange(self.autoencoder.decode(gt_feature), "(b n) h w c-> b n h w c", b=bs)
-            self.viz["gt_faces"] = result
+            self.viz["recon_faces"] = result["pred_face"]
 
         return total_loss
 
     def on_validation_epoch_end(self):
         # if self.trainer.sanity_checking:
         #     return
+        if self.global_rank != 0:
+            return
 
         if "recon_faces" in self.viz:
             recon_faces = self.viz["recon_faces"].cpu().numpy()
-            recon_masks = self.viz["recon_mask"].cpu().numpy()
-            gt_faces = self.viz["gt_faces"].cpu().numpy()
-            gt_mask = self.viz["gt_mask"].cpu().numpy()
-            for i in range(self.batch_size):
-                local_face = recon_faces[i][recon_masks[i]]
-                trimesh.PointCloud(local_face.reshape(-1,3)).export(str(self.log_root / "{}_{}_recon_faces.ply".format(self.current_epoch,i)))
-                local_face = gt_faces[i][gt_mask[i]]
-                trimesh.PointCloud(local_face.reshape(-1,3)).export(str(self.log_root / "{}_{}_gt_faces.ply".format(self.current_epoch,i)))
+            local_face = recon_faces
+            trimesh.PointCloud(local_face.reshape(-1,3)).export(str(self.log_root / "{}_faces.ply".format(self.current_epoch)))
         self.viz={}
         return
 
@@ -219,9 +210,10 @@ def main(v_cfg: DictConfig):
     torch.set_float32_matmul_precision("medium")
     print(OmegaConf.to_yaml(v_cfg))
 
+    exp_name = v_cfg["trainer"]["exp_name"]
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
-    log_dir = hydra_cfg['runtime']['output_dir']
-    v_cfg["trainer"]["output"] = os.path.join(log_dir, v_cfg["trainer"]["output"])
+    log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name + "/" + str(datetime.now().strftime("%y-%m-%d-%H-%M-%S"))
+    v_cfg["trainer"]["output"] = log_dir
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
 
@@ -229,10 +221,8 @@ def main(v_cfg: DictConfig):
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
     model = TrainDiffusion(v_cfg)
-    exp_name = v_cfg["trainer"]["exp_name"]
     logger = TensorBoardLogger(
-        log_dir,
-        name="diffusion" if exp_name is None else exp_name)
+        log_dir)
 
     trainer = Trainer(
         default_root_dir=log_dir,
@@ -240,13 +230,16 @@ def main(v_cfg: DictConfig):
         accelerator='gpu',
         strategy="ddp_find_unused_parameters_true" if v_cfg["trainer"].gpu > 1 else "auto",
         devices=v_cfg["trainer"].gpu,
-        enable_model_summary=False,
+        enable_model_summary=True,
         callbacks=[mc, lr_monitor],
         max_epochs=int(v_cfg["trainer"]["max_epochs"]),
         # max_epochs=2,
         num_sanity_val_steps=2,
         check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
         precision=v_cfg["trainer"]["accelerator"],
+
+        gradient_clip_algorithm="norm",
+        gradient_clip_val=0.5,
     )
 
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":

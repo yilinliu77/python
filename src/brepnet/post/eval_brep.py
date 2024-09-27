@@ -284,7 +284,7 @@ def eval_batch(eval_root, gt_root, folder_name_list, SAMPLE_NUM=100000):
                 print(f"An error occurred on line {last_traceback.lineno} in {last_traceback.name}\n\n")
 
 
-eval_batch_remote = ray.remote(max_retries=3)(eval_batch)
+eval_batch_remote = ray.remote(num_gpus=0.1, max_retries=3)(eval_batch)
 
 
 def compute_statistics(eval_root):

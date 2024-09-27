@@ -247,14 +247,17 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         super(Diffusion_dataset, self).__init__()
         self.mode = v_training_mode
         self.conf = v_conf
+        scale_factor = int(v_conf["scale_factor"])
         self.max_intersection = 500
         self.face_z_dataset = v_conf['face_z']
         if v_training_mode == "testing":
             self.dataset_path = Path(v_conf['test_dataset'])
+            scale_factor = 1
         elif v_training_mode == "training":
             self.dataset_path = Path(v_conf['train_dataset'])
         elif v_training_mode == "validation":
             self.dataset_path = Path(v_conf['val_dataset'])
+            scale_factor = 1
         else:
             raise
         filelist1 = os.listdir(self.dataset_path)
@@ -263,8 +266,9 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         filelist.sort()
 
         self.max_faces = 64
-        if v_conf["scale_factor"] != 1: # Overfitting mode
-            self.data_folders = filelist[:100] * int(v_conf["scale_factor"])
+        if True: # Overfitting mode
+            self.data_folders = filelist[:100] * scale_factor
+            return
         self.data_folders = filelist
         return
 

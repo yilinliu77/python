@@ -75,12 +75,13 @@ from OCC.Core.Geom import Geom_BSplineCurve
 # FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 10e-2]
 
 EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
-FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 8e-2]
+FACE_FITTING_TOLERANCE = [2e-2, 5e-2, 8e-2]
 
-FIX_TOLERANCE = 1e-2
-FIX_PRECISION = 1e-2
-CONNECT_TOLERANCE = 8e-2
-SEWING_TOLERANCE = 8e-2
+FIX_TOLERANCE = 0.025
+FIX_PRECISION = 0.025
+CONNECT_TOLERANCE = 0.025
+TRIM_FIX_TOLERANCE = 0.025
+SEWING_TOLERANCE = 2e-2
 TRANSFER_PRECISION = 1e-3
 MAX_DISTANCE_THRESHOLD = 1e-1
 USE_VARIATIONAL_SMOOTHING = False
@@ -464,7 +465,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
         # is_face_success = check_edges_in_face(trimmed_face, face_edges)
         is_face_success_list.append(is_valid)
 
-        if False and isdebug and not is_valid:
+        if isdebug and not is_valid:
             print(f"{Colors.RED}Folder_path: {folder_path}, Face {idx} is not valid{Colors.RESET}")
             display, start_display, add_menu, add_function_to_menu = init_display()
             display.DisplayShape(trimmed_face, update=True)

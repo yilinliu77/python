@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeEdge
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Sewing, BRepBuilderAPI_MakeSolid
+from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 
 from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface, GeomAPI_PointsToBSpline
 from OCC.Core.GeomAbs import GeomAbs_C0, GeomAbs_C1, GeomAbs_C2, GeomAbs_Cylinder, GeomAbs_Plane
@@ -21,7 +22,8 @@ from OCC.Core.ShapeFix import ShapeFix_Face, ShapeFix_Wire, ShapeFix_Edge, Shape
     ShapeFix_ComposeShell
 from OCC.Core.TColgp import TColgp_Array1OfPnt
 from OCC.Core.TColgp import TColgp_Array2OfPnt
-from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_FORWARD, TopAbs_REVERSED
+from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_FORWARD, TopAbs_REVERSED, TopAbs_FACE
+from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.gp import gp_Pnt, gp_XYZ, gp_Vec
 from OCC.Display.SimpleGui import init_display
 from OCC.Extend.TopologyUtils import TopologyExplorer, WireExplorer
@@ -526,3 +528,61 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, folder_path, isdebug=False, 
 
     print(f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
     return fixed_solid, is_face_success_list
+
+def triangulate_shape(v_shape):
+    exp = TopExp_Explorer(v_shape, TopAbs_FACE)
+    points = []
+    faces = []
+    num_points = 0
+    while exp.More():
+        face = topods.Face(exp.Current())
+
+        loc = TopLoc_Location()
+        triangulation = BRep_Tool.Triangulation(face, loc)
+
+        if triangulation is None:
+            # Mesh
+            mesh = BRepMesh_IncrementalMesh(face, 0.01)
+            triangulation = BRep_Tool.Triangulation(face, loc)
+            if triangulation is None:
+                exp.Next()
+                continue
+
+        v_points = np.zeros((triangulation.NbNodes(), 3), dtype=np.float32)
+        f_faces = np.zeros((triangulation.NbTriangles(), 3), dtype=np.int64)
+        for i in range(0, triangulation.NbNodes()):
+            pnt = triangulation.Node(i + 1)
+            v_points[i, 0] = pnt.X()
+            v_points[i, 1] = pnt.Y()
+            v_points[i, 2] = pnt.Z()
+        for i in range(0, triangulation.NbTriangles()):
+            tri = triangulation.Triangles().Value(i + 1)
+            f_faces[i, 0] = tri.Get()[0] + num_points - 1
+            f_faces[i, 1] = tri.Get()[1] + num_points - 1
+            f_faces[i, 2] = tri.Get()[2] + num_points - 1
+        points.append(v_points)
+        faces.append(f_faces)
+        num_points += v_points.shape[0]
+        exp.Next()
+    if len(points) == 0:
+        return np.zeros((0, 3)), np.zeros((0, 3))
+    points = np.concatenate(points, axis=0, dtype=np.float32)
+    faces = np.concatenate(faces, axis=0, dtype=np.int64)
+    return points, faces
+
+
+"""
+l_v: (num_edges, num_points(16), 3)
+"""
+def export_edges(l_v, v_file):
+    with open(v_file, "w") as f:
+        line_str = ""
+        num_points = 0
+        for edge in l_v:
+            line_str += f"l"
+            for v in edge:
+                f.write(f"v {v[0]} {v[1]} {v[2]}\n")
+            for i in range(edge.shape[0] - 1):
+                line_str += f"l {i + num_points + 1} {i + num_points + 2}\n"
+            num_points += edge.shape[0]
+        f.write(line_str)

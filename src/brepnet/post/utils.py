@@ -80,13 +80,13 @@ FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 1.5e-1]
 FIX_TOLERANCE = 1e-2
 FIX_PRECISION = 1e-2
 # CONNECT_TOLERANCE = 2e-2
-CONNECT_TOLERANCE = [8e-2, 5e-2, 2e-2,]
+CONNECT_TOLERANCE = [8e-2, 5e-2, 2e-2, ]
 SEWING_TOLERANCE = 8e-2
 TRANSFER_PRECISION = 1e-3
 MAX_DISTANCE_THRESHOLD = 1e-1
 USE_VARIATIONAL_SMOOTHING = False
 weight_CurveLength, weight_Curvature, weight_Torsion = 0.4, 0.4, 0.2
-IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, True
+IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, False
 CONTINUITY = GeomAbs_C1
 
 
@@ -128,14 +128,17 @@ def explore_edges(shape):
 
 def check_edges_similarity(edge1, edge2, dis_threshold=1e-1):
     def sample_edge(edge, sample_num=16):
-        curve = BRepAdaptor_Curve(edge).Curve()
-        first, last = curve.FirstParameter(), curve.LastParameter()
-        points = []
-        for i in range(sample_num):
-            param = first + (last - first) * i / (sample_num - 1)
-            point = curve.Value(param)
-            points.append(point)
-        return points
+        curve_data = BRep_Tool.Curve(edge)
+        if curve_data and len(curve_data) == 3:
+            curve_handle, first, last = curve_data
+            points = []
+            for i in range(sample_num):
+                param = first + (last - first) * i / (sample_num - 1)
+                point = curve_handle.Value(param)
+                points.append(point)
+            return points
+        else:
+            return None
 
     edge1_sample_points = sample_edge(edge1)
     edge2_sample_points = sample_edge(edge2)
@@ -488,14 +491,16 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_
             print(f"{Colors.RED}Folder_path: {folder_path}, Face {idx} is not valid{Colors.RESET}")
             display, start_display, add_menu, add_function_to_menu = init_display()
             display.DisplayShape(trimmed_face, update=True)
-            for edge in face_edges:
-                display.DisplayShape(edge, update=True)
+            for wire in wire_list:
+                display.DisplayShape(wire, update=True, color=Colors.random_color())
+            # for edge in face_edges:
+            #     display.DisplayShape(edge, update=True, color=Colors.random_color())
             display.FitAll()
             start_display()
 
         # save the face as step file and stl file
-        is_save_face=False
-        if is_save_face and is_valid:
+        is_save_face = True
+        if is_save_face:
             os.makedirs(os.path.join(folder_path, 'recon_face'), exist_ok=True)
             try:
                 write_step_file(trimmed_face, os.path.join(folder_path, 'recon_face', f'{idx}_{1 if is_valid else 0}.step'))
@@ -551,6 +556,7 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_
         print(f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
     return fixed_solid, is_face_success_list
 
+
 def triangulate_shape(v_shape):
     exp = TopExp_Explorer(v_shape, TopAbs_FACE)
     points = []
@@ -596,6 +602,8 @@ def triangulate_shape(v_shape):
 """
 l_v: (num_edges, num_points(16), 3)
 """
+
+
 def export_edges(l_v, v_file):
     with open(v_file, "w") as f:
         line_str = ""

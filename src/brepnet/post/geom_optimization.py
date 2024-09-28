@@ -218,7 +218,7 @@ class Geom_Optimization():
         res = self.recon_face.shape[1]
         densities = (torch.linalg.norm(
             self.recon_face[:,0,0] - self.recon_face[:,res//2,res//2], dim=-1) * 10).to(torch.long)
-        densities = torch.clamp(densities, min=1, max=50)
+        densities = torch.clamp(densities, min=1, max=200)
         densities = densities * res
         self.face_points_candidates = []
         for face,density in zip(self.recon_face, densities):

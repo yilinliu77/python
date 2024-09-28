@@ -14,7 +14,7 @@ import ray
 import argparse
 import trimesh
 
-@ray.remote(num_gpus=0.1)
+@ray.remote(num_gpus=0.05)
 def optimize_geom_ray(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, is_log=False, max_iter=100):
     return optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, max_iter, is_log=is_log)
 

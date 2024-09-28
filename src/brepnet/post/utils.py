@@ -418,8 +418,10 @@ def try_create_trimmed_face(geom_face, topo_face, face_edges, connected_toleranc
 
 
 # Fit parametric surfaces / curves and trim into B-rep
-def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_path, isdebug=False, is_save_face=True, debug_face_idx=[]):
-    print(f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
+def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_path,
+                   isdebug=False, is_save_face=True, debug_face_idx=[]):
+    if isdebug:
+        print(f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
     recon_geom_faces = [create_surface(points) for points in surf_wcs]
     recon_topo_faces = [BRepBuilderAPI_MakeFace(geom_face, 1e-3).Face() for geom_face in recon_geom_faces]
     recon_curves = [create_edge(points) for points in edge_wcs]
@@ -436,7 +438,8 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_
     #         #                angular_deflection=0.5)
     #         viz_shapes([topo_face_from_geom], transparency=0.5)
 
-    print(f"{Colors.GREEN}################################ 2. Trim Face ######################################{Colors.RESET}")
+    if isdebug:
+        print(f"{Colors.GREEN}################################ 2. Trim Face ######################################{Colors.RESET}")
     # Cut surface by wire
     is_face_success_list = []
     trimmed_faces = []
@@ -503,7 +506,8 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_
         if is_valid:
             trimmed_faces.append(trimmed_face)
 
-    print(f"{Colors.GREEN}################################ 3. Sew solid ################################{Colors.RESET}")
+    if isdebug:
+        print(f"{Colors.GREEN}################################ 3. Sew solid ################################{Colors.RESET}")
     if len(trimmed_faces) < 2:
         return None, is_face_success_list
 
@@ -543,7 +547,8 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_
     fix_solid.Perform()
     fixed_solid = fix_solid.Solid()
 
-    print(f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
+    if isdebug:
+        print(f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
     return fixed_solid, is_face_success_list
 
 def triangulate_shape(v_shape):

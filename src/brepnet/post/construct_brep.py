@@ -1,6 +1,9 @@
 import copy
 import os, sys, shutil, traceback, tqdm
 
+from OCC.Core import Message
+from OCC.Core.Message import Message_PrinterOStream, Message_Alarm
+
 from shared.common_utils import safe_check_dir, check_dir
 from shared.common_utils import export_point_cloud
 
@@ -11,9 +14,16 @@ import ray
 import argparse
 import trimesh
 
+@ray.remote(num_gpus=0.1)
+def optimize_geom_ray(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, is_log=False, max_iter=100):
+    return optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, max_iter, is_log=is_log)
 
-def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_geom=True, isdebug=False):
-    print(f"{Colors.GREEN}############################# Processing {folder_name} #############################{Colors.RESET}")
+def construct_brep_from_datanpz(data_root, out_root, folder_name,
+                                is_ray=False, is_log=True,
+                                is_optimize_geom=True, isdebug=False, use_cuda=False):
+    if is_log:
+        print(f"{Colors.GREEN}############################# "
+              f"Processing {folder_name} #############################{Colors.RESET}")
     check_dir(os.path.join(out_root, folder_name))
 
     # specify the key to get the face points, edge points and edge_face_connectivity in data.npz
@@ -56,10 +66,23 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
     # edge_points = edge_points + np.random.normal(0, 1e-3, size=(edge_points.shape[0], 1, 1))
 
     if is_optimize_geom:
-        face_points, edge_points, edge_face_connectivity, face_edge_adj, remove_edge_idx = optimize_geom(face_points, edge_points,
-                                                                                                         edge_face_connectivity,
-                                                                                                         face_edge_adj,
-                                                                                                         max_iter=100)
+        if is_ray:
+            task = optimize_geom_ray.remote(
+                face_points, edge_points,
+                edge_face_connectivity,
+                face_edge_adj,
+                is_use_cuda=use_cuda,
+                is_log=False,
+                max_iter=100)
+            face_points, edge_points, edge_face_connectivity, face_edge_adj, remove_edge_idx = ray.get(task)
+        else:
+            face_points, edge_points, edge_face_connectivity, face_edge_adj, remove_edge_idx = optimize_geom(
+                face_points, edge_points,
+                edge_face_connectivity,
+                face_edge_adj,
+                is_use_cuda=use_cuda,
+                max_iter=100)
+
         if isdebug:
             debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
             safe_check_dir(debug_face_save_path)
@@ -70,6 +93,9 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
     # Construct Brep from face_points, edge_points, face_edge_adj
     connected_tolerances = copy.deepcopy(CONNECT_TOLERANCE)
     solid = None
+    printers = Message.message.DefaultMessenger().Printers()
+    for idx in range(printers.Length()):
+        printers.Value(idx + 1).SetTraceLevel(Message_Alarm)
     while len(connected_tolerances) > 0:
         connected_tolerance = connected_tolerances.pop()
         solid, faces_result = construct_brep(face_points, edge_points, face_edge_adj, connected_tolerance,
@@ -86,7 +112,11 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
             continue
 
         # Valid Solid
+        # Message.message.DefaultMessenger().RemovePrinters(STANDARD_TYPE(Message_PrinterOStream))
+        # filePrinter = Message_PrinterOStream("export.log", False)
+        # Message.message.DefaultMessenger().AddPrinter(filePrinter)
         write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
+        # Message.message.DefaultMessenger().RemovePrinter(filePrinter)
         # try:
         #     write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01, angular_deflection=0.5)
         # except Exception as e:
@@ -100,9 +130,9 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
     if solid.ShapeType() == TopAbs_COMPOUND:
         print(f"solid is TopAbs_COMPOUND {folder_name}")
         # write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_compound.stl'))
-        recon_face_dir = os.path.join(out_root, folder_name, 'recon_face')
-        gen_mesh = trimesh.util.concatenate(
-            [trimesh.load(os.path.join(recon_face_dir, f)) for f in os.listdir(recon_face_dir) if f.endswith('.stl')])
+        # recon_face_dir = os.path.join(out_root, folder_name, 'recon_face')
+        # gen_mesh = trimesh.util.concatenate(
+        #     [trimesh.load(os.path.join(recon_face_dir, f)) for f in os.listdir(recon_face_dir) if f.endswith('.stl')])
         # gen_mesh.export(os.path.join(out_root, folder_name, 'recon_brep_compound.stl'))
         return
 
@@ -125,10 +155,15 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_ge
     #     write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'))
 
 
-def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list, is_optimize_geom=True, isdebug=False):
+def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list,
+                                      use_cuda=False,
+                                      is_optimize_geom=True):
     for folder_name in folder_name_list:
         try:
-            construct_brep_from_datanpz(data_root, out_root, folder_name, is_optimize_geom, isdebug)
+            construct_brep_from_datanpz(data_root, out_root, folder_name,
+                                        is_log=False,
+                                        is_ray=True, is_optimize_geom=is_optimize_geom,
+                                        isdebug=False, use_cuda=use_cuda)
         except Exception as e:
             with open(os.path.join(out_root, "error.txt"), "a") as f:
                 tb_list = traceback.extract_tb(sys.exc_info()[2])
@@ -144,11 +179,12 @@ def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list, is_
 construct_brep_from_datanpz_batch_ray = ray.remote(max_retries=2)(construct_brep_from_datanpz_batch)
 
 
-def test_construct_brep(v_data_root, v_out_root, v_prefix):
+def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda):
     # debug_folder = os.listdir(v_out_root)
     debug_folder = [v_prefix]
     for folder in debug_folder:
-        construct_brep_from_datanpz(v_data_root, v_out_root, folder, is_optimize_geom=True, isdebug=True)
+        construct_brep_from_datanpz(v_data_root, v_out_root, folder,
+                                    use_cuda=use_cuda, is_optimize_geom=True, isdebug=True)
     exit(0)
 
 
@@ -157,19 +193,21 @@ if __name__ == '__main__':
     parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test")
     parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test_out")
     parser.add_argument('--is_cover', type=bool, default=True)
-    parser.add_argument('--is_use_ray', action='store_true')
+    parser.add_argument('--use_ray', action='store_true')
     parser.add_argument('--prefix', type=str, default="")
+    parser.add_argument('--use_cuda', action='store_true')
     args = parser.parse_args()
     v_data_root = args.data_root
     v_out_root = args.out_root
     is_cover = args.is_cover
-    is_use_ray = args.is_use_ray
+    is_use_ray = args.use_ray
+    use_cuda = args.use_cuda
     safe_check_dir(v_out_root)
     if not os.path.exists(v_data_root):
         raise ValueError(f"Data root path {v_data_root} does not exist.")
 
     if args.prefix != "":
-        test_construct_brep(v_data_root, v_out_root, args.prefix)
+        test_construct_brep(v_data_root, v_out_root, args.prefix, use_cuda)
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
     # all_folders = os.listdir(r"E:\data\img2brep\0916_context_test_out1_seg\else")
     # check_dir(v_out_root)
@@ -182,24 +220,24 @@ if __name__ == '__main__':
 
     all_folders.sort()
 
-    # all_folders = all_folders[:100]
-
     if not is_use_ray:
         # random.shuffle(all_folders)
         for i in tqdm.tqdm(range(len(all_folders))):
-            construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i])
+            construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i], use_cuda=use_cuda)
     else:
         ray.init(
-                dashboard_host="0.0.0.0",
-                dashboard_port=8080,
-                # num_cpus=1,
-                # local_mode=True
+            dashboard_host="0.0.0.0",
+            dashboard_port=8080,
+            # num_cpus=1,
+            # local_mode=True
         )
         batch_size = 1
         num_batches = len(all_folders) // batch_size + 1
         tasks = []
         for i in range(num_batches):
-            tasks.append(construct_brep_from_datanpz_batch_ray.remote(v_data_root, v_out_root,
-                                                                      all_folders[i * batch_size:(i + 1) * batch_size]))
+            tasks.append(construct_brep_from_datanpz_batch_ray.remote(
+                v_data_root, v_out_root,
+                all_folders[i * batch_size:(i + 1) * batch_size],
+                use_cuda=use_cuda))
         ray.get(tasks)
     print("Done")

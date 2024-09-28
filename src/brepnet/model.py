@@ -2487,7 +2487,7 @@ class AutoEncoder_context_KL(AutoEncoder_context):
             pre_edge_coords,
             gt_edge_points
         )
-        loss["edge_coords_ori"] = nn.functional.l1_loss(
+        loss["edge_coords1"] = nn.functional.l1_loss(
             pre_edge_coords1,
             v_data["edge_points"]
         )
@@ -2529,17 +2529,17 @@ class AutoEncoder_context_KL(AutoEncoder_context):
             pred_edge_face_connectivity = torch.cat((torch.arange(pre_edge_coords.shape[0], device=device)[:,None], indexes[pred]), dim=1)
 
             data.update({
-                "gt_face_adj": face_adj.cpu().numpy(),
+                "gt_face_adj": face_adj,
                 "gt_edge_face_connectivity": v_data["edge_face_connectivity"].cpu().numpy(),
                 "gt_edge": v_data["edge_points"].cpu().numpy(),
                 "gt_face": v_data["face_points"].cpu().numpy(),
 
-                "pred_face_adj": pred.reshape(num_faces, num_faces).cpu().numpy(),
-                "pred_edge_face_connectivity": pred_edge_face_connectivity.cpu().numpy(),
-                "pred_edge": pre_edge_coords.cpu().numpy(),
-                "pred_face": pre_face_coords.cpu().numpy(),
+                "pred_face_adj": pred.reshape(num_faces, num_faces),
+                "pred_edge_face_connectivity": pred_edge_face_connectivity,
+                "pred_edge": pre_edge_coords,
+                "pred_face": pre_face_coords,
 
-                "face_features": fused_face_features.cpu().numpy()
+                "face_features": fused_face_features
             })
             data["edge_loss"] = loss["edge_coords"].cpu().numpy()
             data["face_loss"] = loss["face_coords"].cpu().numpy()
@@ -3417,7 +3417,7 @@ class AutoEncoder_0921(nn.Module):
             conn = v_data["edge_face_connectivity"]
             face_adj[conn[:, 1], conn[:, 2]] = True
             
-            data["face_features"] = face_z.detach().cpu().numpy()
+            data["face_features"] = face_z
             data["gt_face_adj"] = face_adj.reshape(-1)
             data["gt_face"] = v_data["face_points"].detach().cpu().numpy()
             data["gt_edge"] = v_data["edge_points"].detach().cpu().numpy()

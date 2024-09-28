@@ -1,7 +1,7 @@
 import math
 import time
 import torch
-from torch import nn, Tensor, einsum
+from torch import isnan, nn, Tensor, einsum
 from torch.nn import Module, ModuleList
 import torch.nn.functional as F
 
@@ -429,6 +429,8 @@ class Diffusion_base(nn.Module):
             pred_face_z = pred_x0[encoding_result["mask"]]
             encoding_result["face_z"] = pred_face_z
             loss, recon_data = self.ae_model.loss(v_data, encoding_result)
-            loss["padding"] = (pred_x0[torch.logical_not(encoding_result["mask"])] ** 2).mean()
-            loss["total_loss"] += loss["padding"]
+            loss["l2"] = F.l1_loss(pred_x0, face_z)
+            loss["total_loss"] += loss["l2"]
+        if torch.isnan(loss["total_loss"]).any():
+            print("NaN detected in loss")
         return loss

@@ -58,8 +58,8 @@ class TrainAutoEncoder(pl.LightningModule):
         }
         self.pr_computer = MetricCollection(pr_computer)
 
-        # if hparams["trainer"]["compile"]:
-            # self.model = torch.compile(self.model, dynamic=True)
+        if "compile" in hparams["trainer"] and hparams["trainer"]["compile"]:
+            self.model = torch.compile(self.model, dynamic=True)
 
     def train_dataloader(self):
         self.train_dataset = self.dataset_mod("training", self.hydra_conf["dataset"], )
@@ -188,6 +188,8 @@ class TrainAutoEncoder(pl.LightningModule):
                           )
 
     def test_step(self, batch, batch_idx):
+        log_root = Path(self.hydra_conf["trainer"]["test_output_dir"])
+        log_root.mkdir(exist_ok=True, parents=True)
         data = batch
         loss, recon_data = self.model(data, v_test=True)
         total_loss = loss["total_loss"]
@@ -201,8 +203,7 @@ class TrainAutoEncoder(pl.LightningModule):
 
         self.pr_computer.update(recon_data["pred_face_adj"].reshape(-1), recon_data["gt_face_adj"].reshape(-1))
         if True:
-            os.makedirs(self.log_root / "test", exist_ok=True)
-            np.savez_compressed(str(self.log_root / "test" / f"{data['v_prefix'][0]}.npz"), 
+            np.savez_compressed(str(log_root / f"{data['v_prefix'][0]}.npz"),
                                 pred_face_adj=recon_data["pred_face_adj"].cpu().numpy(),
                                 pred_face=recon_data["pred_face"].cpu().numpy(),
                                 pred_edge=recon_data["pred_edge"].cpu().numpy(),
@@ -217,7 +218,7 @@ class TrainAutoEncoder(pl.LightningModule):
                                 edge_loss=loss["edge_coords"].cpu().item(),
                                 edge_loss_ori=loss["edge_coords1"].cpu().item(),
                                 )
-            np.savez_compressed(str(self.log_root / "test" / f"{data['v_prefix'][0]}_feature.npz"), 
+            np.savez_compressed(str(log_root / f"{data['v_prefix'][0]}_feature.npz"),
                                 face_features=recon_data["face_features"].cpu().numpy(),
                                 )
 

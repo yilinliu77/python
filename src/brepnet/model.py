@@ -2546,6 +2546,37 @@ class AutoEncoder_context_KL(AutoEncoder_context):
 
         return loss, data
 
+    def inference(self, v_face_features):
+        device = v_face_features.device
+        num_faces = v_face_features.shape[0]
+        indexes = torch.stack(torch.meshgrid(torch.arange(num_faces), torch.arange(num_faces), indexing="ij"), dim=2)
+
+        indexes = indexes.reshape(-1,2).to(device)
+        feature_pair = v_face_features[indexes]
+
+        gf = self.global_feature.repeat(feature_pair.shape[0],1).unsqueeze(-1)
+
+        features = feature_pair + self.face_pos_embedding2[None, :]
+        features = rearrange(features, 'b c n -> b (c n) 1')
+        features = torch.cat((features, gf), dim=1)
+        features = self.edge_feature_proj(features)
+        pred = self.classifier(features)[:,0]
+        pred_labels = torch.sigmoid(pred) > 0.5
+        
+        fused_face_features = rearrange(v_face_features, 'b (n h w) -> b n h w', h=2, w=2)
+        pred_face_points = self.face_coords_decoder(fused_face_features)
+        pred_edge_points = self.edge_coords_decoder(features[pred_labels])
+
+        pred_edge_face_connectivity = torch.cat((torch.arange(pred_edge_points.shape[0], device=device)[:,None], indexes[pred_labels]), dim=1)
+        return {
+            "face_features": v_face_features,
+            "pred_face_adj": pred_labels.reshape(-1),
+            "pred_edge_face_connectivity": pred_edge_face_connectivity,
+            "pred_face": pred_face_points,
+            "pred_edge": pred_edge_points,
+        }
+
+
 class AutoEncoder_context_fsq(AutoEncoder_context):
     def __init__(self, v_conf):
         super().__init__(v_conf)

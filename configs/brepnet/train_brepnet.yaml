@@ -29,6 +29,7 @@ model:
   name: AutoEncoder_featuredv2
   dim_latent: 8
   dim_shape: 256
+  sigmoid: false
   norm: "layer"
   gaussian_weights: 1e-6
 

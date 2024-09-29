@@ -86,7 +86,7 @@ TRANSFER_PRECISION = 1e-3
 MAX_DISTANCE_THRESHOLD = 1e-1
 USE_VARIATIONAL_SMOOTHING = False
 weight_CurveLength, weight_Curvature, weight_Torsion = 0.4, 0.4, 0.2
-IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, False
+IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, True
 CONTINUITY = GeomAbs_C1
 
 
@@ -489,14 +489,9 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_
 
         if isdebug and not is_valid:
             print(f"{Colors.RED}Folder_path: {folder_path}, Face {idx} is not valid{Colors.RESET}")
-            display, start_display, add_menu, add_function_to_menu = init_display()
-            display.DisplayShape(trimmed_face, update=True)
-            for wire in wire_list:
-                display.DisplayShape(wire, update=True, color=Colors.random_color())
-            # for edge in face_edges:
-            #     display.DisplayShape(edge, update=True, color=Colors.random_color())
-            display.FitAll()
-            start_display()
+            # viz_shapes(face_edges)
+            # viz_shapes(wire_list)
+            # viz_shapes([topo_face])
 
         # save the face as step file and stl file
         is_save_face = True
@@ -530,27 +525,33 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_
         return sewn_shell, is_face_success_list
 
     # fix the shell
-    fix_shell = ShapeFix_Shell(sewn_shell)
-    fix_shell.SetPrecision(FIX_PRECISION)
-    fix_shell.SetMaxTolerance(FIX_TOLERANCE)
-    fix_shell.SetFixFaceMode(True)
-    fix_shell.SetFixOrientationMode(True)
-    fix_shell.Perform()
-    sewn_shell = fix_shell.Shell()
+    try:
+        fix_shell = ShapeFix_Shell(sewn_shell)
+        fix_shell.SetPrecision(FIX_PRECISION)
+        fix_shell.SetMaxTolerance(FIX_TOLERANCE)
+        fix_shell.SetFixFaceMode(True)
+        fix_shell.SetFixOrientationMode(True)
+        fix_shell.Perform()
+        sewn_shell = fix_shell.Shell()
+    except:
+        pass
 
     maker = BRepBuilderAPI_MakeSolid()
     maker.Add(sewn_shell)
     maker.Build()
     solid = maker.Solid()
 
-    fix_solid = ShapeFix_Solid(solid)
-    fix_solid.SetPrecision(FIX_TOLERANCE)
-    fix_solid.SetMaxTolerance(FIX_TOLERANCE)
-    fix_solid.SetFixShellMode(True)
-    fix_solid.SetFixShellOrientationMode(True)
-    fix_solid.SetCreateOpenSolidMode(False)
-    fix_solid.Perform()
-    fixed_solid = fix_solid.Solid()
+    try:
+        fix_solid = ShapeFix_Solid(solid)
+        fix_solid.SetPrecision(FIX_TOLERANCE)
+        fix_solid.SetMaxTolerance(FIX_TOLERANCE)
+        fix_solid.SetFixShellMode(True)
+        fix_solid.SetFixShellOrientationMode(True)
+        fix_solid.SetCreateOpenSolidMode(False)
+        fix_solid.Perform()
+        fixed_solid = fix_solid.Solid()
+    except:
+        fixed_solid = solid
 
     if isdebug:
         print(f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
@@ -609,10 +610,10 @@ def export_edges(l_v, v_file):
         line_str = ""
         num_points = 0
         for edge in l_v:
-            line_str += f"l"
+            # line_str += f"l\n"
             for v in edge:
                 f.write(f"v {v[0]} {v[1]} {v[2]}\n")
-            for i in range(edge.shape[0] - 1):
+            for i in range(0, edge.shape[0] - 1):
                 line_str += f"l {i + num_points + 1} {i + num_points + 2}\n"
             num_points += edge.shape[0]
         f.write(line_str)

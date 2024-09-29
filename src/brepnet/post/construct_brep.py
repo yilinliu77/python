@@ -1,6 +1,7 @@
 import copy
 import os, sys, shutil, traceback, tqdm
 
+import numpy as np
 from OCC.Core import Message
 from OCC.Core.Message import Message_PrinterOStream, Message_Alarm
 
@@ -57,10 +58,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     if isdebug:
         debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
         safe_check_dir(debug_face_save_path)
-        export_edges(edge_points,
-                     os.path.join(debug_face_save_path, 'before_optimized_edge.obj'))
         export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), face_points.reshape(-1, 3))
-        export_point_cloud(os.path.join(debug_face_save_path, 'edge.ply'), edge_points.reshape(-1, 3))
+        export_edges(edge_points, os.path.join(debug_face_save_path, 'edge.obj'))
         for face_idx in range(len(face_edge_adj)):
             export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}.ply"),
                                face_points[face_idx].reshape(-1, 3))
@@ -94,9 +93,16 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         if isdebug:
             debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
             safe_check_dir(debug_face_save_path)
-            optimized_edge_points = np.delete(edge_points, remove_edge_idx, axis=0)
             export_point_cloud(os.path.join(debug_face_save_path, 'optimized_face.ply'), face_points.reshape(-1, 3))
-            export_edges(optimized_edge_points, os.path.join(debug_face_save_path, 'optimized_edge.obj'))
+            export_edges(np.delete(edge_points, remove_edge_idx, axis=0), os.path.join(debug_face_save_path, 'optimized_edge.obj'))
+            for face_idx in range(len(face_edge_adj)):
+                export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}.ply"),
+                                   face_points[face_idx].reshape(-1, 3))
+                for idx, edge_idx in enumerate(face_edge_adj[face_idx]):
+                    adj_face = edge_face_connectivity[edge_face_connectivity[:, 0] == edge_idx][0, 1:]
+                    export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}_optim_edge_idx{edge_idx}_face{adj_face}.ply"),
+                                       edge_points[edge_idx].reshape(-1, 3),
+                                       np.linspace([1, 0, 0], [0, 1, 0], edge_points[edge_idx].shape[0]))
 
     # Construct Brep from face_points, edge_points, face_edge_adj
     connected_tolerances = copy.deepcopy(CONNECT_TOLERANCE)
@@ -217,7 +223,7 @@ if __name__ == '__main__':
     if args.prefix != "":
         test_construct_brep(v_data_root, v_out_root, args.prefix, use_cuda)
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
-    # all_folders = os.listdir(r"E:\data\img2brep\.43\2024_09_22_21_57_44_0921_pure_out2_failed")
+    all_folders = os.listdir(r"E:\data\img2brep\.43\2024_09_22_21_57_44_0921_pure_out3_failed")
     # check_dir(v_out_root)
 
     print(f"Total {len(all_folders)} folders")

@@ -480,9 +480,9 @@ def test_eval_one(eval_root, gt_root):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Evaluate The Generated Brep')
-    parser.add_argument('--eval_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test_out")
+    parser.add_argument('--eval_root', type=str, default=r"E:\data\img2brep\.43\2024_09_22_21_57_44_0921_pure_out2")
     parser.add_argument('--gt_root', type=str, default=r"E:\data\img2brep\deepcad_whole_v5\deepcad_whole_test_v5")
-    parser.add_argument('--is_use_ray', type=bool, default=True)
+    parser.add_argument('--is_use_ray', type=bool, default=False)
     parser.add_argument('--is_cover', type=bool, default=True)
     parser.add_argument('--num_cpus', type=int, default=32)
     args = parser.parse_args()

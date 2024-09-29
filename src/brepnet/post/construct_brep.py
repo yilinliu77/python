@@ -54,7 +54,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         assert edge not in face_edge_adj[face1]
         face_edge_adj[face1].append(edge)
 
-    if True:
+    if isdebug:
         debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
         safe_check_dir(debug_face_save_path)
         export_edges(edge_points,

@@ -266,7 +266,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         filelist.sort()
 
         self.max_faces = 64
-        if True: # Overfitting mode
+        if False: # Overfitting mode
             self.data_folders = filelist[:100] * scale_factor
             return
         self.data_folders = filelist

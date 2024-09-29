@@ -1,3 +1,4 @@
+import importlib
 import math
 import time
 import torch
@@ -312,7 +313,10 @@ class Diffusion_base(nn.Module):
         self.dim_latent = 768
         self.time_statics = [0 for _ in range(10)]
 
-        self.ae_model = AutoEncoder_0925(v_conf)
+        # self.ae_model = AutoEncoder_0925(v_conf)
+        model_mod = importlib.import_module("src.brepnet.model")
+        model_mod = getattr(model_mod, v_conf["autoencoder"])
+        self.ae_model = model_mod(v_conf)
 
         self.p_embed = nn.Sequential(
             nn.Linear(self.dim_input, self.dim_latent),
@@ -382,7 +386,9 @@ class Diffusion_base(nn.Module):
         data = {}
         if self.is_stored_z:
             face_features = v_data["face_features"]
-            data["padded_face_z"] = face_features
+            bs = face_features.shape[0]
+            num_face = face_features.shape[1]
+            data["padded_face_z"] = face_features.reshape(bs,num_face, -1)
         else:
             encoding_result = self.ae_model.encode(v_data, v_test)
             data.update(encoding_result)

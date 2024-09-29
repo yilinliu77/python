@@ -117,9 +117,50 @@ def check_invalid(data_root):
     print(f"Average validity percentage: {sum(exception_folder_validity_percentage) / len(exception_folder_validity_percentage)}")
 
 
+def seg_by_face_num(data_root):
+    seg_root = data_root.rstrip('\\') + '_seg_by_face_num'
+    if os.path.exists(seg_root):
+        shutil.rmtree(seg_root)
+    os.makedirs(seg_root, exist_ok=False)
+    seg_save_root = [os.path.join(seg_root, 'face_30'),
+                     os.path.join(seg_root, 'face_20'),
+                     os.path.join(seg_root, 'face_10'),
+                     os.path.join(seg_root, 'face_0'),
+                     os.path.join(seg_root, 'else')]
+    for each in seg_save_root:
+        os.makedirs(each, exist_ok=True)
+
+    all_folders = [folder for folder in os.listdir(data_root) if os.path.isdir(os.path.join(data_root, folder))]
+    for filename in tqdm(all_folders):
+        if os.path.exists(os.path.join(data_root, filename, "recon_brep.step")):
+            try:
+                gen_shape = read_step_file(os.path.join(data_root, filename, "recon_brep.step"), verbosity=False)
+                # get the face num
+                explorer = TopExp_Explorer(gen_shape, TopAbs_FACE)
+                face_num = 0
+                while explorer.More():
+                    face_num += 1
+                    explorer.Next()
+                if face_num > 30:
+                    shutil.copytree(os.path.join(data_root, filename), os.path.join(seg_save_root[0], filename))
+                elif face_num > 20:
+                    shutil.copytree(os.path.join(data_root, filename), os.path.join(seg_save_root[1], filename))
+                elif face_num > 10:
+                    shutil.copytree(os.path.join(data_root, filename), os.path.join(seg_save_root[2], filename))
+                else:
+                    shutil.copytree(os.path.join(data_root, filename), os.path.join(seg_save_root[3], filename))
+            except:
+                print(f"Error in {filename}")
+                continue
+
+    print(f"Seg by face num, saved in : {seg_root}")
+
+
 if __name__ == '__main__':
     if sys.argv[1] == "move":
         move(sys.argv[2])
+    elif sys.argv[1] == "seg":
+        seg_by_face_num(sys.argv[2])
     else:
         check_invalid(sys.argv[2])
     # count_success(data_root)

@@ -14,9 +14,11 @@ import ray
 import argparse
 import trimesh
 
+
 @ray.remote(num_gpus=0.05)
 def optimize_geom_ray(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, is_log=False, max_iter=100):
     return optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, max_iter, is_log=is_log)
+
 
 def construct_brep_from_datanpz(data_root, out_root, folder_name,
                                 is_ray=False, is_log=True,
@@ -24,7 +26,10 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     if is_log:
         print(f"{Colors.GREEN}############################# "
               f"Processing {folder_name} #############################{Colors.RESET}")
-    check_dir(os.path.join(out_root, folder_name))
+    if isdebug:
+        safe_check_dir(os.path.join(out_root, folder_name))
+    else:
+        check_dir(os.path.join(out_root, folder_name))
 
     # specify the key to get the face points, edge points and edge_face_connectivity in data.npz
     # data_npz = np.load(os.path.join(data_root, folder_name, 'data.npz'), allow_pickle=True)['arr_0'].item()
@@ -49,7 +54,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         assert edge not in face_edge_adj[face1]
         face_edge_adj[face1].append(edge)
 
-    if isdebug:
+    if True:
         debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
         safe_check_dir(debug_face_save_path)
         export_edges(edge_points,
@@ -57,8 +62,11 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), face_points.reshape(-1, 3))
         export_point_cloud(os.path.join(debug_face_save_path, 'edge.ply'), edge_points.reshape(-1, 3))
         for face_idx in range(len(face_edge_adj)):
+            export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}.ply"),
+                               face_points[face_idx].reshape(-1, 3))
             for idx, edge_idx in enumerate(face_edge_adj[face_idx]):
-                export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}_edge{idx}_{edge_idx}.ply"),
+                adj_face = edge_face_connectivity[edge_idx][1:]
+                export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}_edge_idx{edge_idx}_face{adj_face}.ply"),
                                    edge_points[edge_idx].reshape(-1, 3),
                                    np.linspace([1, 0, 0], [0, 1, 0], edge_points[edge_idx].shape[0]))
 
@@ -68,20 +76,20 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     if is_optimize_geom:
         if is_ray:
             task = optimize_geom_ray.remote(
-                face_points, edge_points,
-                edge_face_connectivity,
-                face_edge_adj,
-                is_use_cuda=use_cuda,
-                is_log=False,
-                max_iter=100)
+                    face_points, edge_points,
+                    edge_face_connectivity,
+                    face_edge_adj,
+                    is_use_cuda=use_cuda,
+                    is_log=False,
+                    max_iter=100)
             face_points, edge_points, edge_face_connectivity, face_edge_adj, remove_edge_idx = ray.get(task)
         else:
             face_points, edge_points, edge_face_connectivity, face_edge_adj, remove_edge_idx = optimize_geom(
-                face_points, edge_points,
-                edge_face_connectivity,
-                face_edge_adj,
-                is_use_cuda=use_cuda,
-                max_iter=100)
+                    face_points, edge_points,
+                    edge_face_connectivity,
+                    face_edge_adj,
+                    is_use_cuda=use_cuda,
+                    max_iter=100)
 
         if isdebug:
             debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
@@ -139,7 +147,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     analyzer = BRepCheck_Analyzer(solid)
     if not analyzer.IsValid():
         print(f"solid is invalid {folder_name}")
-        write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.stl'))
+        # write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.stl'))
         write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.step'))
         # recon_face_dir = os.path.join(out_root, folder_name, 'recon_face')
         # gen_mesh = trimesh.util.concatenate(
@@ -209,7 +217,7 @@ if __name__ == '__main__':
     if args.prefix != "":
         test_construct_brep(v_data_root, v_out_root, args.prefix, use_cuda)
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
-    # all_folders = os.listdir(r"E:\data\img2brep\0916_context_test_out1_seg\else")
+    # all_folders = os.listdir(r"E:\data\img2brep\.43\2024_09_22_21_57_44_0921_pure_out2_failed")
     # check_dir(v_out_root)
 
     print(f"Total {len(all_folders)} folders")
@@ -226,18 +234,18 @@ if __name__ == '__main__':
             construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i], use_cuda=use_cuda)
     else:
         ray.init(
-            dashboard_host="0.0.0.0",
-            dashboard_port=8080,
-            # num_cpus=1,
-            # local_mode=True
+                dashboard_host="0.0.0.0",
+                dashboard_port=8080,
+                # num_cpus=1,
+                # local_mode=True
         )
         batch_size = 1
         num_batches = len(all_folders) // batch_size + 1
         tasks = []
         for i in range(num_batches):
             tasks.append(construct_brep_from_datanpz_batch_ray.remote(
-                v_data_root, v_out_root,
-                all_folders[i * batch_size:(i + 1) * batch_size],
-                use_cuda=use_cuda))
+                    v_data_root, v_out_root,
+                    all_folders[i * batch_size:(i + 1) * batch_size],
+                    use_cuda=use_cuda))
         ray.get(tasks)
     print("Done")

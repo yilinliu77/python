@@ -4416,7 +4416,6 @@ class AutoEncoder_context_KL(nn.Module):
         # Global
         gf = self.global_feature.repeat((v_data["num_face_record"], 1))
 
-        self.features.append(fused_face_features)
         fused_face_features = rearrange(fused_face_features, 'b (n h w) -> b n h w', h=2, w=2)
 
         pre_face_coords = self.face_coords_decoder(fused_face_features)

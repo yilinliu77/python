@@ -213,6 +213,11 @@ def flatten_to_batch(v_data, v_mask):
     
     pass
 
+def profile_time(time_dict, key, v_timer):
+    torch.cuda.synchronize()
+    cur = time.time()
+    time_dict[key] += cur - v_timer
+    return cur
 
 # Full continuous VAE
 class AutoEncoder_base(nn.Module):
@@ -4648,6 +4653,13 @@ class AutoEncoder_0929(nn.Module):
             self.gaussian_proj = nn.Linear(self.df, self.df)
         self.with_sigmoid = v_conf["sigmoid"]
 
+        self.times = {
+            "Encoder": 0,
+            "Fuse": 0,
+            "Intersection": 0,
+            "Decoder": 0,
+            "Loss": 0,
+        }
 
     def intersection(self, v_edge_face_connectivity, v_zero_positions, v_face_feature):
         true_intersection_embedding = v_face_feature[v_edge_face_connectivity[:, 1:]]
@@ -4672,18 +4684,27 @@ class AutoEncoder_0929(nn.Module):
         return loss_edge, features[:id_false_start]
 
     def forward(self, v_data, v_test=False):
+        # torch.cuda.synchronize()
+        # timer = time.time()
         # Encoder
-        face_features = self.face_conv1(v_data["face_points"])
+        num_faces = v_data["face_points"].shape[0]
+        face_points = v_data["face_points"][:num_faces]
+        gt_face_points_local = v_data["face_points_norm"]
+        num_edges = v_data["edge_points"].shape[0]
+        edge_points = v_data["edge_points"]
+        gt_edge_points_local = v_data["edge_points_norm"]
+
+        face_features = self.face_conv1(face_points)
         face_features = face_features + self.face_pos_embedding
         face_features = self.face_coords(face_features)
 
-        edge_features = self.edge_conv1(v_data["edge_points"])
+        edge_features = self.edge_conv1(edge_points)
         edge_features = edge_features + self.edge_pos_embedding
         edge_features = self.edge_coords(edge_features)
-
-        edge_face_connectivity = v_data["edge_face_connectivity"]
+        # timer = profile_time(self.times, "Encoder", timer)
 
         # Face graph
+        edge_face_connectivity = v_data["edge_face_connectivity"]
         x = face_features.reshape(-1, 2 * 2 * self.dim_latent)
         edge_index = edge_face_connectivity[:, 1:].permute(1, 0)
         edge_attr = edge_features[edge_face_connectivity[:, 0]]
@@ -4715,6 +4736,7 @@ class AutoEncoder_0929(nn.Module):
                 fused_face_features = fused_face_features_gau
 
         # Global
+        # timer = profile_time(self.times, "Fuse", timer)
         fused_face_features = rearrange(fused_face_features, 'b (n h w) -> b n h w', h=2, w=2)
 
         # Intersection
@@ -4723,6 +4745,7 @@ class AutoEncoder_0929(nn.Module):
             v_data["zero_positions"],
             fused_face_features
         )
+        # timer = profile_time(self.times, "Intersection", timer)
 
         face_points_local = self.face_coords_decoder(fused_face_features)
         face_center_scale = self.face_center_scale_decoder(fused_face_features.reshape(-1, self.df))
@@ -4738,13 +4761,14 @@ class AutoEncoder_0929(nn.Module):
         edge_center_scale1 = self.edge_center_scale_decoder(edge_features)
         edge_center1 = edge_center_scale1[..., 0]
         edge_scale1 = edge_center_scale1[..., 1]
+        # timer = profile_time(self.times, "Decoder", timer)
 
         # Loss
         loss = {}
         loss["edge_classification"] = loss_edge_classification * 0.1
         loss["face_coords_norm"] = nn.functional.l1_loss(
             face_points_local,
-            v_data["face_points_norm"]
+            gt_face_points_local
         )
         loss["face_center"] = nn.functional.l1_loss(
             face_center,
@@ -4757,7 +4781,7 @@ class AutoEncoder_0929(nn.Module):
 
         loss["edge_coords_norm1"] = nn.functional.l1_loss(
             edge_points_local1,
-            v_data["edge_points_norm"]
+            gt_edge_points_local
         )
         loss["edge_center1"] = nn.functional.l1_loss(
             edge_center1,
@@ -4770,7 +4794,7 @@ class AutoEncoder_0929(nn.Module):
 
         loss["edge_coords_norm"] = nn.functional.l1_loss(
             edge_points_local,
-            v_data["edge_points_norm"][edge_face_connectivity[:, 0]]
+            gt_edge_points_local[edge_face_connectivity[:, 0]]
         )
         loss["edge_center"] = nn.functional.l1_loss(
             edge_center,
@@ -4787,6 +4811,7 @@ class AutoEncoder_0929(nn.Module):
         if self.gaussian_weights > 0:
             loss["kl_loss"] = kl_loss
         loss["total_loss"] = sum(loss.values())
+        # timer = profile_time(self.times, "Loss", timer)
 
         data = {}
 
@@ -4796,7 +4821,6 @@ class AutoEncoder_0929(nn.Module):
             recon_data = self.inference(fused_face_features)
 
             device = v_data["face_points"].device
-            num_faces = v_data["face_points"].shape[0]
             face_adj = torch.zeros((num_faces, num_faces), dtype=bool, device=device)
             conn = v_data["edge_face_connectivity"]
             face_adj[conn[:, 1], conn[:, 2]] = True
@@ -4804,8 +4828,8 @@ class AutoEncoder_0929(nn.Module):
             data.update({
                 "gt_face_adj": face_adj.reshape(-1),
                 "gt_edge_face_connectivity": v_data["edge_face_connectivity"].cpu().numpy(),
-                "gt_edge": v_data["edge_points"].cpu().numpy(),
-                "gt_face": v_data["face_points"].cpu().numpy(),
+                "gt_edge": edge_points.cpu().numpy(),
+                "gt_face": face_points.cpu().numpy(),
 
                 "pred_face_adj": recon_data["pred_face_adj"],
                 "pred_edge_face_connectivity": recon_data["pred_edge_face_connectivity"],
@@ -4817,15 +4841,15 @@ class AutoEncoder_0929(nn.Module):
 
             loss["face_coords"] = nn.functional.l1_loss(
                 data["pred_face"],
-                v_data["face_points"]
+                face_points
             )
             loss["edge_coords"] = nn.functional.l1_loss(
                 denormalize_coord(edge_points_local, edge_center, edge_scale),
-                v_data["edge_points"][v_data["edge_face_connectivity"][:, 0]]
+                edge_points[v_data["edge_face_connectivity"][:, 0]]
             )
             loss["edge_coords1"] = nn.functional.l1_loss(
                 denormalize_coord(edge_points_local1, edge_center1, edge_scale1),
-                v_data["edge_points"]
+                edge_points
             )
 
             data["edge_loss"] = loss["edge_coords"].cpu().numpy()

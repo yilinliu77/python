@@ -284,7 +284,7 @@ def main(v_cfg: DictConfig):
     else:
         trainer.fit(model)
     
-    # print(model.model.times)
+    print(model.model.times)
 
 
 if __name__ == '__main__':

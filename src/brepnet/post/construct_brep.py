@@ -80,7 +80,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
                     face_edge_adj,
                     is_use_cuda=use_cuda,
                     is_log=False,
-                    max_iter=100)
+                    max_iter=200)
             face_points, edge_points, edge_face_connectivity, face_edge_adj, remove_edge_idx = ray.get(task)
         else:
             face_points, edge_points, edge_face_connectivity, face_edge_adj, remove_edge_idx = optimize_geom(
@@ -88,7 +88,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
                     edge_face_connectivity,
                     face_edge_adj,
                     is_use_cuda=use_cuda,
-                    max_iter=100)
+                    max_iter=200)
 
         if isdebug:
             debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
@@ -105,7 +105,11 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
                                        np.linspace([1, 0, 0], [0, 1, 0], edge_points[edge_idx].shape[0]))
 
     # Construct Brep from face_points, edge_points, face_edge_adj
-    connected_tolerances = copy.deepcopy(CONNECT_TOLERANCE)
+    if isdebug:
+        connected_tolerances = copy.deepcopy(CONNECT_TOLERANCE[0:1])
+        connected_tolerances = [2e-2]
+    else:
+        connected_tolerances = copy.deepcopy(CONNECT_TOLERANCE)
     solid = None
     printers = Message.message.DefaultMessenger().Printers()
     for idx in range(printers.Length()):
@@ -144,10 +148,10 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     if solid.ShapeType() == TopAbs_COMPOUND:
         print(f"solid is TopAbs_COMPOUND {folder_name}")
         # write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_compound.stl'))
-        # recon_face_dir = os.path.join(out_root, folder_name, 'recon_face')
-        # gen_mesh = trimesh.util.concatenate(
-        #     [trimesh.load(os.path.join(recon_face_dir, f)) for f in os.listdir(recon_face_dir) if f.endswith('.stl')])
-        # gen_mesh.export(os.path.join(out_root, folder_name, 'recon_brep_compound.stl'))
+        recon_face_dir = os.path.join(out_root, folder_name, 'recon_face')
+        gen_mesh = trimesh.util.concatenate(
+                [trimesh.load(os.path.join(recon_face_dir, f)) for f in os.listdir(recon_face_dir) if f.endswith('.stl')])
+        gen_mesh.export(os.path.join(out_root, folder_name, 'recon_brep_compound.stl'))
         return
 
     analyzer = BRepCheck_Analyzer(solid)
@@ -223,7 +227,7 @@ if __name__ == '__main__':
     if args.prefix != "":
         test_construct_brep(v_data_root, v_out_root, args.prefix, use_cuda)
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
-    all_folders = os.listdir(r"E:\data\img2brep\.43\2024_09_22_21_57_44_0921_pure_out3_failed")
+    all_folders = os.listdir(r"E:\data\img2brep\2024_09_22_21_57_44_0921_pure_out2_failed")
     # check_dir(v_out_root)
 
     print(f"Total {len(all_folders)} folders")

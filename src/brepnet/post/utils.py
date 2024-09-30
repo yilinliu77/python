@@ -401,21 +401,21 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
     if len(fixed_wire_list) == 0:
         return None
 
-    face_fixer.SetAutoCorrectPrecisionMode(False)
-    face_fixer.SetPrecision(FIX_PRECISION)
-    face_fixer.SetMaxTolerance(connected_tolerance)
-    face_fixer.SetFixOrientationMode(True)
-    face_fixer.SetFixMissingSeamMode(True)
-    face_fixer.SetFixSplitFaceMode(True)
-    face_fixer.SetFixWireMode(True)
-    face_fixer.SetFixLoopWiresMode(True)
-    face_fixer.SetFixIntersectingWiresMode(True)
-    face_fixer.SetFixPeriodicDegeneratedMode(True)
-    face_fixer.SetFixSmallAreaWireMode(True)
-    face_fixer.SetRemoveSmallAreaFaceMode(True)
-    face_fixer.Perform()
-
     try:
+        face_fixer.SetAutoCorrectPrecisionMode(False)
+        face_fixer.SetPrecision(FIX_PRECISION)
+        face_fixer.SetMaxTolerance(connected_tolerance)
+        face_fixer.SetFixOrientationMode(True)
+        face_fixer.SetFixMissingSeamMode(True)
+        face_fixer.SetFixSplitFaceMode(True)
+        face_fixer.SetFixWireMode(True)
+        face_fixer.SetFixLoopWiresMode(True)
+        face_fixer.SetFixIntersectingWiresMode(True)
+        face_fixer.SetFixPeriodicDegeneratedMode(True)
+        face_fixer.SetFixSmallAreaWireMode(True)
+        face_fixer.SetRemoveSmallAreaFaceMode(True)
+        face_fixer.Perform()
+
         face_fixer.FixAddNaturalBound()
         face_fixer.FixOrientation()
         face_fixer.FixMissingSeam()
@@ -425,6 +425,7 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         face_fixer.FixOrientation()
     except Exception as e:
         print(f"Error fixing face {e}")
+        return None
 
     face_occ = face_fixer.Face()
 

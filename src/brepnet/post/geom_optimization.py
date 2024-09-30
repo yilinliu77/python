@@ -441,17 +441,19 @@ class Geom_Optimization():
         return sum_loss, adj_distance_loss.detach(), endpoints_loss.detach()
 
     def run(self):
+        prev_loss = float('inf')
         if self.is_log:
             pbar = tqdm(total=self.max_iter, desc='Geom Optimization', unit='iter')
         for iter in range(self.max_iter):
             self.apply_all_transform()
             loss, adj_distance_loss, endpoints_loss = self.loss()
             self.optimizer.zero_grad()
-            if loss < 0.001:
+            if abs(prev_loss - loss.item()) < 1e-3:
                 print(f'Early stop at iter {iter}')
                 break
             loss.backward()
             self.optimizer.step()
+            prev_loss = loss.item()
             if self.is_log:
                 pbar.set_postfix(
                         loss=loss.item(), adj=adj_distance_loss.cpu().item(), end=endpoints_loss.cpu().item())
@@ -557,17 +559,20 @@ def optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj,
     # create np bool
     is_edge_in_pair = np.zeros(recon_edge.shape[0], dtype=bool)
     pair_edge_idx = np.unique(np.concatenate([pair1.flatten(), pair2.flatten()]))
-    is_edge_in_pair[pair_edge_idx] = True
-    is_edge_isolate = np.logical_and(~is_edge_in_pair, ~is_edge_closed)
-
-    for iso_edge_idx in np.where(is_edge_isolate)[0]:
-        face_idx1, face_idx2 = edge_face_connectivity[edge_face_connectivity[:, 0] == iso_edge_idx, 1:][0]
-        if iso_edge_idx in face_edge_adj[face_idx1]:
-            face_edge_adj[face_idx1].remove(iso_edge_idx)
-        elif iso_edge_idx in face_edge_adj[face_idx2]:
-            face_edge_adj[face_idx2].remove(iso_edge_idx)
-        edge_face_connectivity = edge_face_connectivity[edge_face_connectivity[:, 0] != iso_edge_idx]
-        remove_edge_idx.append(iso_edge_idx)
+    if len(pair_edge_idx) > 0:
+        is_edge_in_pair[pair_edge_idx] = True
+        is_edge_isolate = np.logical_and(~is_edge_in_pair, ~is_edge_closed)
+        for iso_edge_idx in np.where(is_edge_isolate)[0]:
+            edge_face1_face2 = edge_face_connectivity[edge_face_connectivity[:, 0] == iso_edge_idx, 1:]
+            if edge_face1_face2.shape[0] == 0:
+                continue
+            face_idx1, face_idx2 = edge_face1_face2[0]
+            if iso_edge_idx in face_edge_adj[face_idx1]:
+                face_edge_adj[face_idx1].remove(iso_edge_idx)
+            elif iso_edge_idx in face_edge_adj[face_idx2]:
+                face_edge_adj[face_idx2].remove(iso_edge_idx)
+            edge_face_connectivity = edge_face_connectivity[edge_face_connectivity[:, 0] != iso_edge_idx]
+            remove_edge_idx.append(iso_edge_idx)
 
     return recon_face, recon_edge, edge_face_connectivity, face_edge_adj, remove_edge_idx
 

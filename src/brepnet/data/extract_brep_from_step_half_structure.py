@@ -38,6 +38,7 @@ from OCC.Extend.DataExchange import read_step_file, write_step_file
 import traceback, sys
 
 from PIL import Image
+import open3d as o3d
 
 from shared.occ_utils import normalize_shape, get_triangulations, get_primitives, get_ordered_edges
 
@@ -97,7 +98,11 @@ def get_brep(v_root, output_root, v_folders):
             write_step_file(shape, str(output_root / v_folder / "normalized_shape.step"))
 
             v, f = get_triangulations(shape, 0.001)
-            trimesh.Trimesh(vertices=np.array(v), faces=np.array(f)).export(output_root / v_folder / "mesh.ply")
+            mesh = trimesh.Trimesh(vertices=np.array(v), faces=np.array(f))
+            mesh.export(output_root / v_folder / "mesh.ply")
+            mesh = o3d.geometry.TriangleMesh(vertices=o3d.utility.Vector3dVector(v), triangles=o3d.utility.Vector3iVector(f))
+            pc = mesh.sample_points_poisson_disk(4096)
+            o3d.io.write_point_cloud(str(output_root / v_folder / "pc.ply"), pc)
 
             # Explore and list faces, edges, and vertices
             face_dict = {}
@@ -323,6 +328,7 @@ def get_brep(v_root, output_root, v_folders):
                         face_sample_points.astype(np.float32),
                         edge_sample_points.astype(np.float32),
                         face_edge_adj,
+                        8e-2,
                         ".",
                         # debug_face_idx=[4]
                 )

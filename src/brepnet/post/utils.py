@@ -478,7 +478,7 @@ def try_create_trimmed_face(geom_face, topo_face, face_edges, connected_toleranc
 
 # Fit parametric surfaces / curves and trim into B-rep
 def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_path,
-                   isdebug=False, is_save_face=True, debug_face_idx=[9]):
+                   isdebug=False, is_save_face=True, debug_face_idx=[]):
     if isdebug:
         print(f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
     recon_geom_faces = [create_surface(points) for points in surf_wcs]

@@ -17,7 +17,9 @@ from OCC.Core.GeomAPI import GeomAPI_PointsToBSpline
 from OCC.Core.GeomAdaptor import GeomAdaptor_Curve
 from OCC.Core.GeomConvert import GeomConvert_CompCurveToBSplineCurve
 from OCC.Core.GeomLProp import GeomLProp_SLProps, GeomLProp_CLProps
-from OCC.Core.Graphic3d import Graphic3d_MaterialAspect, Graphic3d_NameOfMaterial_Silver
+from OCC.Core.Graphic3d import Graphic3d_MaterialAspect, Graphic3d_NameOfMaterial_Silver, Graphic3d_TypeOfShadingModel, \
+    Graphic3d_NameOfMaterial_Brass, Graphic3d_TypeOfReflection
+from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_FreeBounds
 from OCC.Core.ShapeExtend import ShapeExtend_WireData
 from OCC.Core.TColgp import TColgp_Array1OfPnt
@@ -44,15 +46,16 @@ from shared.occ_utils import normalize_shape, get_triangulations, get_primitives
 
 # from src.brepnet.post.utils import construct_solid
 
+debug_id = None
+# debug_id = "00000003"
+
 render_img = True
-img_root = Path(r"d://Datasets/test/imgs")
 write_debug_data = False
 check_post_processing = True
-# debug_id = None
-debug_id = "00000003"
-data_root = Path(r"d://Datasets/")
+data_root = Path(r"D:/Datasets/data_step")
 output_root = Path(r"d://Datasets/test/")
-data_split = r"src/brepnet/data/deepcad_train_whole.txt"
+img_root = Path(r"d://Datasets/test/imgs")
+data_split = r"src/brepnet/data/deepcad_test_whole.txt"
 
 exception_files = [
     r"src/brepnet/data/abc_multiple_component_or_few_faces_ids_.txt",
@@ -290,9 +293,15 @@ def get_brep(v_root, output_root, v_folders):
                 )
                 display.camera.SetProjectionType(1)
                 display.View.TriedronErase()
+                # Erase light
+                display.View.SetBgGradientColors(Quantity_Color(1, 1, 1, Quantity_TOC_RGB), Quantity_Color(1, 1, 1, Quantity_TOC_RGB), 2)
+                display.View.SetShadingModel(4)
 
                 ais_shape = AIS_Shape(shape)
-                ais_shape.SetMaterial(Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_Silver))
+                mat = Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_Silver)
+                mat.SetReflectionModeOff(Graphic3d_TypeOfReflection.Graphic3d_TOR_SPECULAR)
+                ais_shape.SetMaterial(mat)
+                # ais_shape.SetColor(Quantity_Color(.6, .6, .6, Quantity_TOC_RGB))
                 display.Context.Display(ais_shape, True)
                 start_display()
                 display.View.Dump(str(img_root / v_folder / f"view_.png"))
@@ -389,8 +398,8 @@ if __name__ == '__main__':
         ray.init(
                 dashboard_host="0.0.0.0",
                 dashboard_port=15000,
-                num_cpus=1,
-                local_mode=True
+                # num_cpus=1,
+                # local_mode=True
         )
         batch_size = 100
         num_batches = len(total_ids) // batch_size + 1

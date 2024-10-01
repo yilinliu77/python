@@ -588,10 +588,10 @@ class Diffusion_condition(Diffusion_base):
         return data
 
     def diffuse(self, v_feature, v_timesteps, v_condition=None):
-        v_condition = v_feature if v_condition is None else v_condition
         time_embeds = self.time_embed(sincos_embedding(v_timesteps, self.dim_latent)).unsqueeze(1)
         noise_features = self.p_embed(v_feature)
         noise_features = noise_features + time_embeds
+        v_condition = noise_features if v_condition is None else v_condition
         pred_x0 = self.net(tgt=noise_features, memory=v_condition)
         pred_x0 = self.fc_out(pred_x0)
         return pred_x0
@@ -599,12 +599,16 @@ class Diffusion_condition(Diffusion_base):
     def extract_condition(self, v_data):
         condition = None
         if self.with_img:
-            imgs = v_data["conditions"]["imgs"]
+            if "img_features" in v_data["conditions"]:
+                img_feature = v_data["conditions"]["img_features"]
+                num_imgs = img_feature.shape[1]
+            else:
+                imgs = v_data["conditions"]["imgs"]
+                num_imgs = imgs.shape[1]
+                imgs = imgs.reshape(-1, 3, 224, 224)
+                img_feature = self.img_model(imgs)
             img_idx = v_data["conditions"]["img_id"]
-            num_imgs = imgs.shape[1]
             camera_embedding = self.camera_embedding(img_idx)
-            imgs = imgs.reshape(-1, 3, 224, 224)
-            img_feature = self.img_model(imgs)
             img_feature = (img_feature.reshape(-1, num_imgs, 1024) + camera_embedding).mean(dim=1)
             img_feature = self.img_fc(img_feature)
             condition = img_feature[:, None]

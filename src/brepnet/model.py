@@ -3641,6 +3641,7 @@ class AutoEncoder_0925(nn.Module):
         return {
             "face_features": v_face_features,
             "pred_face_adj": pred_labels.reshape(-1),
+            "pred_face_adj_prob": torch.sigmoid(pred).reshape(-1),
             "pred_edge_face_connectivity": pred_edge_face_connectivity,
             "pred_face": pred_face_points,
             "pred_edge": pred_edge_points,
@@ -4482,6 +4483,7 @@ class AutoEncoder_context_KL(nn.Module):
 
                 "pred_face_adj": recon_data["pred_face_adj"],
                 "pred_edge_face_connectivity": recon_data["pred_edge_face_connectivity"],
+                "pred_face_adj_prob": recon_data["pred_face_adj_prob"],
                 "pred_edge": recon_data["pred_edge"],
                 "pred_face": recon_data["pred_face"],
 
@@ -4518,6 +4520,7 @@ class AutoEncoder_context_KL(nn.Module):
         return {
             "face_features": v_face_features,
             "pred_face_adj": pred_labels.reshape(-1),
+            "pred_face_adj_prob": torch.sigmoid(pred).reshape(-1),
             "pred_edge_face_connectivity": pred_edge_face_connectivity,
             "pred_face": pred_face_points,
             "pred_edge": pred_edge_points,
@@ -4891,6 +4894,7 @@ class AutoEncoder_0929(nn.Module):
         return {
             "face_features": v_face_features,
             "pred_face_adj": pred_labels.reshape(-1),
+            "pred_face_adj_prob": torch.sigmoid(pred).reshape(-1),
             "pred_edge_face_connectivity": pred_edge_face_connectivity,
             "pred_face": pred_face_points,
             "pred_edge": pred_edge_points,

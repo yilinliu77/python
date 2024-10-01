@@ -315,25 +315,29 @@ class Diffusion_dataset(torch.utils.data.Dataset):
 
         }
         if self.condition == "single_img" or self.condition == "multi_img":
-            ori_data = np.load(self.dataset_path / folder_path / "data.npz")["imgs"]
+            cache_data = True
             if self.condition == "single_img":
                 idx = np.random.randint(0, 23, 1)
             else:
                 idx = np.random.randint(0, 23, 4)
-            imgs = ori_data[idx]
-
-            transformed_imgs = []
-            for id in range(imgs.shape[0]):
-                transformed_imgs.append(self.transform(imgs[id]))
-            transformed_imgs = torch.stack(transformed_imgs, dim=0)
-            condition["imgs"] = transformed_imgs
+            if cache_data:
+                ori_data = np.load(self.dataset_path / folder_path / "img_feature_dinov2.npy")
+                img_features = torch.from_numpy(ori_data[idx]).float()
+                condition["img_features"] = img_features
+            else:
+                ori_data = np.load(self.dataset_path / folder_path / "data.npz")["imgs"]
+                imgs = ori_data[idx]
+                transformed_imgs = []
+                for id in range(imgs.shape[0]):
+                    transformed_imgs.append(self.transform(imgs[id]))
+                transformed_imgs = torch.stack(transformed_imgs, dim=0)
+                condition["imgs"] = transformed_imgs
             condition["img_id"] = torch.from_numpy(idx)
         elif self.condition == "pc":
             pc = o3d.io.read_point_cloud(str(self.dataset_path / folder_path / "pc.ply"))
             points = np.asarray(pc.points)
             normals = np.asarray(pc.normals)
             condition["points"] = torch.from_numpy(np.concatenate((points,normals),axis=-1)).float()[None,]
-
         return (
             folder_path,
             padded_face_features,

@@ -204,6 +204,7 @@ class TrainAutoEncoder(pl.LightningModule):
         self.pr_computer.update(recon_data["pred_face_adj"].reshape(-1), recon_data["gt_face_adj"].reshape(-1))
         if True:
             np.savez_compressed(str(log_root / f"{data['v_prefix'][0]}.npz"),
+                                pred_face_adj_prob=recon_data["pred_face_adj_prob"].cpu().numpy(),
                                 pred_face_adj=recon_data["pred_face_adj"].cpu().numpy(),
                                 pred_face=recon_data["pred_face"].cpu().numpy(),
                                 pred_edge=recon_data["pred_edge"].cpu().numpy(),
@@ -218,8 +219,8 @@ class TrainAutoEncoder(pl.LightningModule):
                                 edge_loss=loss["edge_coords"].cpu().item(),
                                 edge_loss_ori=loss["edge_coords1"].cpu().item(),
                                 )
-            np.savez_compressed(str(log_root / f"{data['v_prefix'][0]}_feature.npz"),
-                                face_features=recon_data["face_features"].cpu().numpy(),
+            np.save(str(log_root / f"{data['v_prefix'][0]}_feature"),
+                                recon_data["face_features"].cpu().numpy(),
                                 )
 
     def on_test_epoch_end(self):
@@ -284,8 +285,6 @@ def main(v_cfg: DictConfig):
     else:
         trainer.fit(model)
     
-    print(model.model.times)
-
 
 if __name__ == '__main__':
     main()

@@ -441,17 +441,19 @@ class Geom_Optimization():
         return sum_loss, adj_distance_loss.detach(), endpoints_loss.detach()
 
     def run(self):
+        prev_loss = float('inf')
         if self.is_log:
             pbar = tqdm(total=self.max_iter, desc='Geom Optimization', unit='iter')
         for iter in range(self.max_iter):
             self.apply_all_transform()
             loss, adj_distance_loss, endpoints_loss = self.loss()
             self.optimizer.zero_grad()
-            if loss < 0.001:
+            if abs(prev_loss - loss.item()) < 1e-3:
                 print(f'Early stop at iter {iter}')
                 break
             loss.backward()
             self.optimizer.step()
+            prev_loss = loss.item()
             if self.is_log:
                 pbar.set_postfix(
                         loss=loss.item(), adj=adj_distance_loss.cpu().item(), end=endpoints_loss.cpu().item())
@@ -471,13 +473,13 @@ class Geom_Optimization():
             for idx in range(pair.shape[0]):
                 edge_idx0, edge_idx1, edge_idx2 = pair[idx]
                 endpoints_dis01, endpoints_dis02, endpoints_dis12 = endpoints_dis01_all[0], endpoints_dis02_all[1], endpoints_dis12_all[2]
-                if endpoints_dis01 < endpoints_dis02 and endpoints_dis01 < endpoints_dis12:
+                if endpoints_dis01 < endpoints_dis02 and endpoints_dis01 < endpoints_dis12 and False:
                     new_endpoints = (self.transformed_recon_edge[edge_idx0, endpoint_idx] +
                                      self.transformed_recon_edge[edge_idx1, endpoint_idx]) / 2
-                elif endpoints_dis02 < endpoints_dis01 and endpoints_dis02 < endpoints_dis12:
+                elif endpoints_dis02 < endpoints_dis01 and endpoints_dis02 < endpoints_dis12 and False:
                     new_endpoints = (self.transformed_recon_edge[edge_idx0, endpoint_idx] +
                                      self.transformed_recon_edge[edge_idx2, endpoint_idx]) / 2
-                elif endpoints_dis12 < endpoints_dis01 and endpoints_dis12 < endpoints_dis02:
+                elif endpoints_dis12 < endpoints_dis01 and endpoints_dis12 < endpoints_dis02 and False:
                     new_endpoints = (self.transformed_recon_edge[edge_idx1, endpoint_idx] +
                                      self.transformed_recon_edge[edge_idx2, endpoint_idx]) / 2
                 else:
@@ -516,6 +518,9 @@ class Geom_Optimization():
     def get_transform(self):
         return self.model.surf_st.detach().cpu().numpy(), self.model.edge_st.detach().cpu().numpy()
 
+    def get_optim_edge_pair(self):
+        return self.pair1, self.pair2
+
 
 def optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, max_iter=100, is_log=True):
     recon_face = np.copy(recon_face)
@@ -531,22 +536,43 @@ def optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj,
     geom_opt = Geom_Optimization(recon_face, recon_edge, edge_face_connectivity, face_edge_adj,
                                  max_iter=max_iter, is_use_cuda=is_use_cuda, is_log=is_log)
     geom_opt.run()
-    geom_opt.force_fix_outlier_endpoints()
+    # geom_opt.force_fix_outlier_endpoints()
     recon_face, recon_edge, edge_face_connectivity, face_edge_adj = geom_opt.get_transformed_data()
 
     dirs = (recon_edge[:, [0, -1]] - np.mean(recon_edge, axis=1, keepdims=True))
     cos_dir = (dirs[:, 0] * dirs[:, 1]).sum(axis=1) / np.linalg.norm(dirs[:, 0], axis=1) / np.linalg.norm(dirs[:, 1], axis=1)
-    flag = cos_dir > 0.98
+    is_edge_closed = cos_dir > 0.98
 
     delta = recon_edge[:, [0, -1]].mean(axis=1)
-    recon_edge[flag, 0] = delta[flag]
-    recon_edge[flag, -1] = delta[flag]
+    recon_edge[is_edge_closed, 0] = delta[is_edge_closed]
+    recon_edge[is_edge_closed, -1] = delta[is_edge_closed]
 
     # 4. Force to merge the edge endpoints
     # recon_edge = merge_edge_endpoints(recon_edge, 0.03)
 
     # 5. Check and remove the invalid edge
     # in here we can pass the failed sample
+
+    # 6. Using the connectivity to fix the isolate edge
+    pair1, pair2 = geom_opt.get_optim_edge_pair()
+    # non_isolate_edge_idx
+    # create np bool
+    is_edge_in_pair = np.zeros(recon_edge.shape[0], dtype=bool)
+    pair_edge_idx = np.unique(np.concatenate([pair1.flatten(), pair2.flatten()]))
+    if len(pair_edge_idx) > 0:
+        is_edge_in_pair[pair_edge_idx] = True
+        is_edge_isolate = np.logical_and(~is_edge_in_pair, ~is_edge_closed)
+        for iso_edge_idx in np.where(is_edge_isolate)[0]:
+            edge_face1_face2 = edge_face_connectivity[edge_face_connectivity[:, 0] == iso_edge_idx, 1:]
+            if edge_face1_face2.shape[0] == 0:
+                continue
+            face_idx1, face_idx2 = edge_face1_face2[0]
+            if iso_edge_idx in face_edge_adj[face_idx1]:
+                face_edge_adj[face_idx1].remove(iso_edge_idx)
+            elif iso_edge_idx in face_edge_adj[face_idx2]:
+                face_edge_adj[face_idx2].remove(iso_edge_idx)
+            edge_face_connectivity = edge_face_connectivity[edge_face_connectivity[:, 0] != iso_edge_idx]
+            remove_edge_idx.append(iso_edge_idx)
 
     return recon_face, recon_edge, edge_face_connectivity, face_edge_adj, remove_edge_idx
 

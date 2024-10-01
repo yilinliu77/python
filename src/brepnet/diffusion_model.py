@@ -326,7 +326,7 @@ class Diffusion_base(nn.Module):
         )
 
         layer = nn.TransformerEncoderLayer(
-            d_model=self.dim_latent, nhead=12, norm_first=True, dim_feedforward=1024, dropout=0.1, batch_first=True)
+            d_model=self.dim_latent, nhead=12, dim_feedforward=1024, norm_first=True, dropout=0.1, batch_first=True)
         self.net = nn.TransformerEncoder(layer, 24, nn.LayerNorm(self.dim_latent))
 
         self.time_embed = nn.Sequential(

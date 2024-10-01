@@ -8,6 +8,7 @@ import h5py
 import numpy as np
 import plyfile
 import torch
+import trimesh
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import open3d as o3d
@@ -16,7 +17,7 @@ from shared.common_utils import export_point_cloud, check_dir
 
 from typing import Final
 from einops import rearrange
-
+import torchvision.transforms as T
 import networkx as nx
 
 from torch.nn.utils.rnn import pad_sequence
@@ -241,7 +242,6 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
             # "edge_scale_discrete": flat_edge_scale_discrete,
         }
 
-
 class Diffusion_dataset(torch.utils.data.Dataset):
     def __init__(self, v_training_mode, v_conf):
         super(Diffusion_dataset, self).__init__()
@@ -265,6 +265,13 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         filelist = list(set(filelist1) & set(filelist2))
         filelist.sort()
 
+        self.condition = v_conf["condition"]
+        self.transform = T.Compose([
+                T.ToPILImage(),
+                T.Resize((224, 224)),
+                T.ToTensor(),
+                T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+            ])
         self.max_faces = 64
         if False: # Overfitting mode
             self.data_folders = filelist[:100] * scale_factor
@@ -303,19 +310,55 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         face_features = torch.from_numpy(data_npz['face_features'])
         padded_face_features = torch.zeros((self.max_faces, *face_features.shape[1:]), dtype=torch.float32)
         padded_face_features[:face_features.shape[0]] = face_features
+
+        condition = {
+
+        }
+        if self.condition == "single_img" or self.condition == "multi_img":
+            ori_data = np.load(self.dataset_path / folder_path / "data.npz")["imgs"]
+            if self.condition == "single_img":
+                idx = np.random.randint(0, 23, 1)
+            else:
+                idx = np.random.randint(0, 23, 4)
+            imgs = ori_data[idx]
+
+            transformed_imgs = []
+            for id in range(imgs.shape[0]):
+                transformed_imgs.append(self.transform(imgs[id]))
+            transformed_imgs = torch.stack(transformed_imgs, dim=0)
+            condition["imgs"] = transformed_imgs
+            condition["img_id"] = torch.from_numpy(idx)
+        elif self.condition == "pc":
+            pc = o3d.io.read_point_cloud(str(self.dataset_path / folder_path / "pc.ply"))
+            points = np.asarray(pc.points)
+            normals = np.asarray(pc.normals)
+            condition["points"] = torch.from_numpy(np.concatenate((points,normals),axis=-1)).float()[None,]
+
         return (
             folder_path,
-            padded_face_features
+            padded_face_features,
+            condition
         )
 
     @staticmethod
     def collate_fn(batch):
         (
-            v_prefix, v_face_features
+            v_prefix, v_face_features, conditions
         ) = zip(*batch)
 
         face_features = torch.stack(v_face_features, dim=0)
+
+        keys = conditions[0].keys()
+        condition_out = {key:[] for key in keys}
+        for idx in range(len(conditions)):
+            for key in keys:
+                condition_out[key].append(conditions[idx][key])
+
+        for key in keys:
+            condition_out[key] = torch.stack(condition_out[key], dim=0)
+
         return {
             "v_prefix": v_prefix,
             "face_features": face_features,
+            "conditions": condition_out
         }

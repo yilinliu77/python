@@ -6,6 +6,7 @@ from pathlib import Path
 import ray, trimesh
 import numpy as np
 from OCC.Core import TopoDS, TopExp, BRepBndLib
+from OCC.Core.AIS import AIS_Shape
 from OCC.Core.Approx import Approx_Curve3d
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform, BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeEdge
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
@@ -15,6 +16,10 @@ from OCC.Core.Geom import Geom_BoundedCurve
 from OCC.Core.GeomAPI import GeomAPI_PointsToBSpline
 from OCC.Core.GeomAdaptor import GeomAdaptor_Curve
 from OCC.Core.GeomConvert import GeomConvert_CompCurveToBSplineCurve
+from OCC.Core.GeomLProp import GeomLProp_SLProps, GeomLProp_CLProps
+from OCC.Core.Graphic3d import Graphic3d_MaterialAspect, Graphic3d_NameOfMaterial_Silver, Graphic3d_TypeOfShadingModel, \
+    Graphic3d_NameOfMaterial_Brass, Graphic3d_TypeOfReflection
+from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_FreeBounds
 from OCC.Core.ShapeExtend import ShapeExtend_WireData
 from OCC.Core.TColgp import TColgp_Array1OfPnt
@@ -29,21 +34,28 @@ from OCC.Core.GeomAbs import (GeomAbs_Circle, GeomAbs_Line, GeomAbs_BSplineCurve
                               GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BSplineSurface, GeomAbs_C1, GeomAbs_C2)
 from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core._TopAbs import TopAbs_REVERSED
-from OCC.Core.gp import gp_Trsf, gp_Vec, gp_Pnt
+from OCC.Core.gp import gp_Trsf, gp_Vec, gp_Pnt, gp_Dir
+from OCC.Display.OCCViewer import OffscreenRenderer, Viewer3d
+from OCC.Display.SimpleGui import init_display
 from OCC.Extend.DataExchange import read_step_file, write_step_file
 import traceback, sys
+
+from PIL import Image
 
 from shared.occ_utils import normalize_shape, get_triangulations, get_primitives, get_ordered_edges
 
 # from src.brepnet.post.utils import construct_solid
 
+debug_id = None
+# debug_id = "00000003"
+
+render_img = True
 write_debug_data = False
 check_post_processing = True
-debug_id = None
-# debug_id = "00005083"
-data_root = Path(r"/mnt/e/data/")
-output_root = Path(r"/mnt/d/img2brep/deepcad_whole_train_v5")
-data_split = r"src/brepnet/data/deepcad_train_whole.txt"
+data_root = Path(r"D:/Datasets/data_step")
+output_root = Path(r"d://Datasets/test/")
+img_root = Path(r"d://Datasets/test/imgs")
+data_split = r"src/brepnet/data/deepcad_test_whole.txt"
 
 exception_files = [
     r"src/brepnet/data/abc_multiple_component_or_few_faces_ids_.txt",
@@ -64,6 +76,21 @@ def check_dir(v_path):
 def safe_check_dir(v_path):
     if not os.path.exists(v_path):
         os.makedirs(v_path)
+
+class MyOffscreenRenderer(Viewer3d):
+    """The offscreen renderer is inherited from Viewer3d.
+    The DisplayShape method is overridden to export to image
+    each time it is called.
+    """
+
+    def __init__(self, screen_size=(224, 224)):
+        super().__init__()
+        # create the renderer
+        self.Create()
+        self.SetSize(screen_size[0], screen_size[1])
+        self.SetModeShaded()
+        self.set_bg_gradient_color([255, 255, 255], [255, 255, 255])
+        self.capture_number = 0
 
 
 # @ray.remote(num_cpus=1)
@@ -89,7 +116,12 @@ def get_brep(v_root, output_root, v_folders):
             write_step_file(shape, str(output_root / v_folder / "normalized_shape.step"))
 
             v, f = get_triangulations(shape, 0.001)
-            trimesh.Trimesh(vertices=np.array(v), faces=np.array(f)).export(output_root / v_folder / "mesh.ply")
+            mesh = trimesh.Trimesh(vertices=np.array(v), faces=np.array(f))
+            mesh.export(output_root / v_folder / "mesh.ply")
+            import open3d as o3d
+            mesh = o3d.geometry.TriangleMesh(vertices=o3d.utility.Vector3dVector(v), triangles=o3d.utility.Vector3iVector(f))
+            pc = mesh.sample_points_poisson_disk(4096, use_triangle_normal=True)
+            o3d.io.write_point_cloud(str(output_root / v_folder / "pc.ply"), pc)
 
             # Explore and list faces, edges, and vertices
             face_dict = {}
@@ -189,8 +221,10 @@ def get_brep(v_root, output_root, v_folders):
                 for i in range(u.shape[0]):
                     for j in range(u.shape[1]):
                         pnt = surface.Value(u[i, j], v[i, j])
-                        points.append(np.array([pnt.X(), pnt.Y(), pnt.Z()], dtype=np.float32))
-                face_sample_points.append(np.stack(points, axis=0).reshape(sample_resolution, sample_resolution, 3))
+                        props = GeomLProp_SLProps(surface.Surface().Surface(), u[i, j], v[i, j], 1, 0.01)
+                        dir = props.Normal()
+                        points.append(np.array([pnt.X(), pnt.Y(), pnt.Z(), dir.X(), dir.Y(), dir.Z()], dtype=np.float32))
+                face_sample_points.append(np.stack(points, axis=0).reshape(sample_resolution, sample_resolution, -1))
             face_sample_points = np.stack(face_sample_points, axis=0)
             assert len(face_dict) == num_faces == face_sample_points.shape[0]
 
@@ -211,7 +245,10 @@ def get_brep(v_root, output_root, v_folders):
                 sample_points = []
                 for u in sample_u:
                     pnt = curve.Value(u)
-                    sample_points.append(np.array([pnt.X(), pnt.Y(), pnt.Z()], dtype=np.float32))
+                    v1 = gp_Vec()
+                    curve.D1(u, pnt, v1)
+                    v1 = v1.Normalized()
+                    sample_points.append(np.array([pnt.X(), pnt.Y(), pnt.Z(), v1.X(), v1.Y(), v1.Z()], dtype=np.float32))
                 edge_sample_points.append(np.stack(sample_points, axis=0))
             edge_sample_points = np.stack(edge_sample_points, axis=0)
             edge_face_connectivity = np.asarray(edge_face_connectivity, dtype=np.int32)
@@ -233,6 +270,57 @@ def get_brep(v_root, output_root, v_folders):
                 "zero_positions"        : zero_positions,
             }
 
+            # Render imgs
+            (img_root / v_folder).mkdir(parents=True, exist_ok=True)
+            if render_img:
+                views = [
+                    gp_Pnt(-2, -2, -2),
+                    gp_Pnt(-2, -2, 0),
+                    gp_Pnt(-2, -2, 2),
+                    gp_Pnt(-2, 0, -2),
+                    gp_Pnt(-2, 0, 0),
+                    gp_Pnt(-2, 0, 2),
+                    gp_Pnt(-2, 2, -2),
+                    gp_Pnt(-2, 2, 0),
+                    gp_Pnt(-2, 2, 2),
+
+                    gp_Pnt(0, -2, -2),
+                    gp_Pnt(0, -2, 0),
+                    gp_Pnt(0, -2, 2),
+                    gp_Pnt(0, 2, -2),
+                    gp_Pnt(0, 2, 0),
+                    gp_Pnt(0, 2, 2),
+
+                    gp_Pnt(2, -2, -2),
+                    gp_Pnt(2, -2, 0),
+                    gp_Pnt(2, -2, 2),
+                    gp_Pnt(2, 0, -2),
+                    gp_Pnt(2, 0, 0),
+                    gp_Pnt(2, 0, 2),
+                    gp_Pnt(2, 2, -2),
+                    gp_Pnt(2, 2, 0),
+                    gp_Pnt(2, 2, 2),
+                ]
+                display = MyOffscreenRenderer()
+                # display.View.TriedronErase()
+                mat = Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_Silver)
+                mat.SetReflectionModeOff(Graphic3d_TypeOfReflection.Graphic3d_TOR_SPECULAR)
+                display.DisplayShape(shape, material=mat, update=True)
+                display.View.Dump(str(img_root / v_folder / f"view_.png"))
+                imgs = []
+                for i, view in enumerate(views):
+                    display.camera.SetEyeAndCenter(gp_Pnt(view.X(), view.Y(), view.Z()), gp_Pnt(0., 0., 0.))
+                    display.camera.SetDistance(4)
+                    display.camera.SetUp(gp_Dir(0, 0, 1))
+                    display.camera.SetAspect(1)
+                    display.camera.SetFOVy(45)
+                    filename = str(img_root / v_folder / f"view_{i}.png")
+                    display.View.Dump(filename)
+                    img = Image.open(filename)
+                    imgs.append(np.asarray(img))
+                imgs = np.stack(imgs, axis=0)
+                data_dict["imgs"] = imgs
+
             np.savez_compressed(output_root / v_folder / "data.npz", **data_dict)
             # continue
 
@@ -251,6 +339,7 @@ def get_brep(v_root, output_root, v_folders):
                         face_sample_points.astype(np.float32),
                         edge_sample_points.astype(np.float32),
                         face_edge_adj,
+                        8e-2,
                         ".",
                         # debug_face_idx=[4]
                 )
@@ -301,6 +390,7 @@ if __name__ == '__main__':
     total_ids.sort()
     print("Total ids: {} -> {}".format(num_original, len(total_ids)))
     check_dir(output_root)
+    safe_check_dir(img_root)
 
     # single process
     if debug_id is not None:

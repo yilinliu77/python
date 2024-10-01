@@ -31,3 +31,6 @@
 [submodule "thirdparty/triposr"]
 	path = thirdparty/triposr
 	url = https://github.com/VAST-AI-Research/TripoSR
+[submodule "thirdparty/PointTransformerV3"]
+	path = thirdparty/PointTransformerV3
+	url = https://github.com/Pointcept/PointTransformerV3

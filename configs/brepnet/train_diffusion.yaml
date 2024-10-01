@@ -7,6 +7,7 @@ dataset:
   test_dataset: /mnt/d/img2brep/0825_test
 
   scale_factor: 1000
+  condition:
 
 trainer:
   gpu: 1
@@ -30,7 +31,8 @@ trainer:
 model:
   name: Diffusion_base
   train_decoder: false
-  stored_z: false
+  stored_z: True
+  condition:
 
   autoencoder: AutoEncoder_0925
   dim_latent: 8

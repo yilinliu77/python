@@ -405,7 +405,7 @@ class Diffusion_base(nn.Module):
             data["mask"] = mask
         return data
 
-    def diffuse(self, v_feature, v_timesteps):
+    def diffuse(self, v_feature, v_timesteps, v_condition=None):
         time_embeds = self.time_embed(sincos_embedding(v_timesteps, self.dim_latent)).unsqueeze(1)
         noise_features = self.p_embed(v_feature)
         noise_features = noise_features + time_embeds
@@ -426,6 +426,138 @@ class Diffusion_base(nn.Module):
 
         # Model
         pred_x0 = self.diffuse(noise_input, timesteps)
+
+        # Loss (predict x0)
+        loss = {}
+        if not self.is_train_decoder:
+            loss["total_loss"] = nn.functional.l1_loss(pred_x0, face_z)
+        else:
+            pred_face_z = pred_x0[encoding_result["mask"]]
+            encoding_result["face_z"] = pred_face_z
+            loss, recon_data = self.ae_model.loss(v_data, encoding_result)
+            loss["l2"] = F.l1_loss(pred_x0, face_z)
+            loss["total_loss"] += loss["l2"]
+        if torch.isnan(loss["total_loss"]).any():
+            print("NaN detected in loss")
+        return loss
+
+
+class Diffusion_condition(Diffusion_base):
+    def __init__(self,
+                 v_conf,
+                 ):
+        super().__init__(v_conf)
+        self.dim_input = 8 * 2 * 2
+        self.dim_latent = 768
+        self.time_statics = [0 for _ in range(10)]
+
+        layer = nn.TransformerDecoderLayer(
+            d_model=self.dim_latent, nhead=12, norm_first=True, dim_feedforward=1024, dropout=0.1, batch_first=True)
+        self.net = nn.TransformerDecoder(layer, 24, nn.LayerNorm(self.dim_latent))
+
+        self.with_img = False
+        if v_conf["condition"] == "single_img" or v_conf["condition"] == "multi_img":
+            self.with_img = True
+            self.img_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
+            for param in self.img_model.parameters():
+                param.requires_grad = False
+            self.img_model.eval()
+
+            self.img_fc = nn.Sequential(
+                nn.Linear(1024, 1024),
+                nn.LayerNorm(1024),
+                nn.SiLU(),
+                nn.Linear(1024, self.dim_latent),
+            )
+            self.camera_embedding = nn.Sequential(
+                nn.Embedding(24, 256),
+                nn.Linear(256, 256),
+                nn.LayerNorm(256),
+                nn.SiLU(),
+                nn.Linear(256, 1024),
+            )
+
+    def inference(self, bs, device, v_data=None, **kwargs):
+        face_features = torch.randn((bs, self.num_max_faces, 32)).to(device)
+        condition = None
+        if self.with_img:
+            condition = self.extract_condition(v_data)[:bs]
+
+        for t in tqdm(self.noise_scheduler.timesteps):
+            timesteps = t.reshape(-1).to(device)
+            pred_x0 = self.diffuse(face_features, timesteps, v_condition = condition)
+            face_features = self.noise_scheduler.step(pred_x0, t, face_features).prev_sample
+
+        face_z = face_features
+        recon_data = []
+        for i in range(bs):
+            mask = (face_z[i:i + 1] > 1e-2).any(dim=-1)
+            face_z_item = face_z[i:i + 1][mask]
+            data_item = self.ae_model.inference(face_z_item)
+            recon_data.append(data_item)
+        return recon_data
+
+    def get_z(self, v_data, v_test):
+        data = {}
+        if self.is_stored_z:
+            face_features = v_data["face_features"]
+            bs = face_features.shape[0]
+            num_face = face_features.shape[1]
+            data["padded_face_z"] = face_features.reshape(bs,num_face, -1)
+        else:
+            encoding_result = self.ae_model.encode(v_data, v_test)
+            data.update(encoding_result)
+            face_features = encoding_result["face_z"]
+            dim_latent = face_features.shape[-1]
+            num_faces = v_data["num_face_record"]
+            bs = num_faces.shape[0]
+            padded_face_z = torch.zeros(
+                (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
+            # Fill the face_z to the padded_face_z without forloop
+            mask = num_faces[:, None] > torch.arange(self.num_max_faces, device=num_faces.device)
+            padded_face_z[mask] = face_features
+            data["padded_face_z"] = padded_face_z
+            data["mask"] = mask
+        return data
+
+    def diffuse(self, v_feature, v_timesteps, v_condition=None):
+        v_condition = v_feature if v_condition is None else v_condition
+        time_embeds = self.time_embed(sincos_embedding(v_timesteps, self.dim_latent)).unsqueeze(1)
+        noise_features = self.p_embed(v_feature)
+        noise_features = noise_features + time_embeds
+        pred_x0 = self.net(tgt=noise_features, memory=v_condition)
+        pred_x0 = self.fc_out(pred_x0)
+        return pred_x0
+
+    def extract_condition(self, v_data):
+        condition = None
+        if self.with_img:
+            imgs = v_data["conditions"]["imgs"]
+            img_idx = v_data["conditions"]["img_id"]
+            num_imgs = imgs.shape[1]
+            camera_embedding = self.camera_embedding(img_idx)
+            imgs = imgs.reshape(-1, 3, 224, 224)
+            img_feature = self.img_model(imgs)
+            img_feature = (img_feature.reshape(-1, num_imgs, 1024) + camera_embedding).mean(dim=1)
+            img_feature = self.img_fc(img_feature)
+            condition = img_feature[:, None]
+        return condition
+
+    def forward(self, v_data, v_test=False, **kwargs):
+        encoding_result = self.get_z(v_data, v_test)
+        face_z = encoding_result["padded_face_z"]
+        device = face_z.device
+        bs = face_z.size(0)
+        timesteps = torch.randint(
+            0, self.noise_scheduler.config.num_train_timesteps, (bs,), device=device).long()
+
+        condition = self.extract_condition(v_data)
+
+        noise = torch.randn(face_z.shape, device=device)
+        noise_input = self.noise_scheduler.add_noise(face_z, noise, timesteps)
+
+        # Model
+        pred_x0 = self.diffuse(noise_input, timesteps, condition)
 
         # Loss (predict x0)
         loss = {}

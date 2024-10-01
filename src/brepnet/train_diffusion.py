@@ -120,7 +120,7 @@ class TrainDiffusion(pl.LightningModule):
                  sync_dist=True, batch_size=self.batch_size)
 
         if batch_idx == 0 and self.global_rank == 0:
-            result = self.model.inference(1, self.device)[0]
+            result = self.model.inference(1, self.device, data)[0]
             self.viz = {}
             self.viz["recon_faces"] = result["pred_face"]
 

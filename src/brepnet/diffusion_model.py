@@ -14,6 +14,11 @@ from diffusers import DDPMScheduler
 from tqdm import tqdm
 
 from src.brepnet.model import AutoEncoder_0925
+from thirdparty.Pointnet2_PyTorch.pointnet2_ops_lib.pointnet2_ops.pointnet2_modules import PointnetSAModuleMSG, \
+    PointnetFPModule
+
+
+# from thirdparty.PointTransformerV3.model import *
 
 
 def add_timer(time_statics, v_attr, timer):
@@ -456,6 +461,7 @@ class Diffusion_condition(Diffusion_base):
         self.net = nn.TransformerDecoder(layer, 24, nn.LayerNorm(self.dim_latent))
 
         self.with_img = False
+        self.with_pc = False
         if v_conf["condition"] == "single_img" or v_conf["condition"] == "multi_img":
             self.with_img = True
             self.img_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
@@ -476,11 +482,72 @@ class Diffusion_condition(Diffusion_base):
                 nn.SiLU(),
                 nn.Linear(256, 1024),
             )
+        elif v_conf["condition"] == "pc":
+            self.with_pc = True
+            self.SA_modules = nn.ModuleList()
+            # PointNet2
+            c_in = 6
+            with_bn=False
+            self.SA_modules.append(
+                PointnetSAModuleMSG(
+                    npoint=1024,
+                    radii=[0.05, 0.1],
+                    nsamples=[16, 32],
+                    mlps=[[c_in, 32], [c_in, 64]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            c_out_0 = 32 + 64
+
+            c_in = c_out_0
+            self.SA_modules.append(
+                PointnetSAModuleMSG(
+                    npoint=256,
+                    radii=[0.1, 0.2],
+                    nsamples=[16, 32],
+                    mlps=[[c_in, 64], [c_in, 128]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            c_out_1 = 64 + 128
+            c_in = c_out_1
+            self.SA_modules.append(
+                PointnetSAModuleMSG(
+                    npoint=64,
+                    radii=[0.2, 0.4],
+                    nsamples=[16, 32],
+                    mlps=[[c_in, 128], [c_in, 256]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            c_out_2 = 128 + 256
+
+            c_in = c_out_2
+            self.SA_modules.append(
+                PointnetSAModuleMSG(
+                    npoint=16,
+                    radii=[0.4, 0.8],
+                    nsamples=[16, 32],
+                    mlps=[[c_in, 512], [c_in, 512]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            self.fc_lyaer = nn.Sequential(
+                nn.Linear(1024, 1024),
+                nn.LayerNorm(1024),
+                nn.SiLU(),
+                nn.Linear(1024, self.dim_latent),
+            )
+
 
     def inference(self, bs, device, v_data=None, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, 32)).to(device)
         condition = None
-        if self.with_img:
+        if self.with_img or self.with_pc:
             condition = self.extract_condition(v_data)[:bs]
 
         for t in tqdm(self.noise_scheduler.timesteps):
@@ -541,6 +608,18 @@ class Diffusion_condition(Diffusion_base):
             img_feature = (img_feature.reshape(-1, num_imgs, 1024) + camera_embedding).mean(dim=1)
             img_feature = self.img_fc(img_feature)
             condition = img_feature[:, None]
+        elif self.with_pc:
+            pc = v_data["conditions"]["points"]
+            l_xyz, l_features = [pc[:, 0, :, :3].contiguous()], [pc[:, 0,].permute(0, 2, 1).contiguous()]
+
+            with torch.autocast(device_type=pc.device.type, dtype=torch.float32):
+                for i in range(len(self.SA_modules)):
+                    li_xyz, li_features = self.SA_modules[i](l_xyz[i], l_features[i])
+                    l_xyz.append(li_xyz)
+                    l_features.append(li_features)
+                features = self.fc_lyaer(l_features[-1].mean(dim=-1))
+                condition = features[:, None]
+
         return condition
 
     def forward(self, v_data, v_test=False, **kwargs):

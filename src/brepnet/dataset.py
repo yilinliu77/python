@@ -329,8 +329,10 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             condition["imgs"] = transformed_imgs
             condition["img_id"] = torch.from_numpy(idx)
         elif self.condition == "pc":
-            pc = np.asarray(trimesh.load(self.dataset_path / folder_path / "pc.ply").vertices)
-            condition["points"] = torch.from_numpy(pc).float()[None,]
+            pc = o3d.io.read_point_cloud(str(self.dataset_path / folder_path / "pc.ply"))
+            points = np.asarray(pc.points)
+            normals = np.asarray(pc.normals)
+            condition["points"] = torch.from_numpy(np.concatenate((points,normals),axis=-1)).float()[None,]
 
         return (
             folder_path,

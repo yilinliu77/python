@@ -46,8 +46,8 @@ from shared.occ_utils import normalize_shape, get_triangulations, get_primitives
 
 # from src.brepnet.post.utils import construct_solid
 
-# debug_id = None
-debug_id = "00000003"
+debug_id = None
+# debug_id = "00000003"
 
 render_img = True
 write_debug_data = False
@@ -120,7 +120,7 @@ def get_brep(v_root, output_root, v_folders):
             mesh.export(output_root / v_folder / "mesh.ply")
             import open3d as o3d
             mesh = o3d.geometry.TriangleMesh(vertices=o3d.utility.Vector3dVector(v), triangles=o3d.utility.Vector3iVector(f))
-            pc = mesh.sample_points_poisson_disk(4096)
+            pc = mesh.sample_points_poisson_disk(4096, use_triangle_normal=True)
             o3d.io.write_point_cloud(str(output_root / v_folder / "pc.ply"), pc)
 
             # Explore and list faces, edges, and vertices

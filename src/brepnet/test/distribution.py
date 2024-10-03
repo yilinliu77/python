@@ -33,5 +33,7 @@ if __name__ == '__main__':
     # plt.hist(bins2[0], bins=32, range=(-10, 10), color='blue', label='0925')
     # plt.hist(bins3[0], bins=32, range=(-10, 10), color='green', label='0925_gaussian')
     plt.legend()
+    # Set the DPI
+    plt.savefig("D:/brepnet/feature_distribution.png", dpi=300)
     plt.show()
 

@@ -456,9 +456,13 @@ class Diffusion_condition(Diffusion_base):
         self.dim_latent = 768
         self.time_statics = [0 for _ in range(10)]
 
-        layer = nn.TransformerDecoderLayer(
+        layer1 = nn.TransformerEncoderLayer(
             d_model=self.dim_latent, nhead=12, norm_first=True, dim_feedforward=1024, dropout=0.1, batch_first=True)
-        self.net = nn.TransformerDecoder(layer, 24, nn.LayerNorm(self.dim_latent))
+        self.net1 = nn.TransformerEncoder(layer1, 24, nn.LayerNorm(self.dim_latent))
+
+        layer2 = nn.TransformerDecoderLayer(
+            d_model=self.dim_latent, nhead=12, norm_first=True, dim_feedforward=1024, dropout=0.1, batch_first=True)
+        self.net2 = nn.TransformerDecoder(layer2, 24, nn.LayerNorm(self.dim_latent))
 
         self.with_img = False
         self.with_pc = False
@@ -592,7 +596,11 @@ class Diffusion_condition(Diffusion_base):
         noise_features = self.p_embed(v_feature)
         noise_features = noise_features + time_embeds
         v_condition = noise_features if v_condition is None else v_condition
-        pred_x0 = self.net(tgt=noise_features, memory=v_condition)
+
+        pred_x0 = self.net2(tgt=noise_features, memory=v_condition)
+        pred_x0 = pred_x0 + v_condition
+        pred_x0 = self.net1(pred_x0)
+
         pred_x0 = self.fc_out(pred_x0)
         return pred_x0
 

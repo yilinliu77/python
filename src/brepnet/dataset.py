@@ -133,8 +133,8 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
         data_npz = np.load(os.path.join(folder_path, "data.npz"))
 
         # Face sample points (num_faces*32*32*3)
-        face_points = torch.from_numpy(data_npz['sample_points_faces'])
-        line_points = torch.from_numpy(data_npz['sample_points_lines'])
+        face_points = torch.from_numpy(data_npz['sample_points_faces'])[...,:-3]
+        line_points = torch.from_numpy(data_npz['sample_points_lines'])[...,:-3]
 
         face_points_norm, face_center, face_scale = normalize_coord(face_points)
         edge_points_norm, edge_center, edge_scale = normalize_coord(line_points)

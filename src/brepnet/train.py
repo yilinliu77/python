@@ -203,7 +203,9 @@ class TrainAutoEncoder(pl.LightningModule):
 
         self.pr_computer.update(recon_data["pred_face_adj"].reshape(-1), recon_data["gt_face_adj"].reshape(-1))
         if True:
-            np.savez_compressed(str(log_root / f"{data['v_prefix'][0]}.npz"),
+            local_root = log_root / f"{data['v_prefix'][0]}"
+            local_root.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(str(local_root / f"data.npz"),
                                 pred_face_adj_prob=recon_data["pred_face_adj_prob"].cpu().numpy(),
                                 pred_face_adj=recon_data["pred_face_adj"].cpu().numpy(),
                                 pred_face=recon_data["pred_face"].cpu().numpy(),

@@ -1,14 +1,16 @@
 import os
 from pathlib import Path
+import shutil
 
 import numpy as np
 import torch
 from tqdm import tqdm
 import torchvision.transforms as T
 
-root = Path(r"D:/brepnet/deepcad_test_v6")
+root = Path(r"/mnt/d/deepcad_train_v6")
 
 if __name__ == '__main__':
+    torch.set_float32_matmul_precision("medium")
     img_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
     img_model.eval()
     img_model.cuda()
@@ -24,6 +26,9 @@ if __name__ == '__main__':
     with torch.no_grad():
         for prefix in tqdm(os.listdir(root)):
             if not os.path.isdir(root / prefix):
+                continue
+            if not os.path.exists(root / prefix / "data.npz"):
+                shutil.rmtree(root / prefix)
                 continue
             data = np.load(root / prefix / "data.npz")["imgs"]
             transformed_imgs = [transform(item) for item in data]

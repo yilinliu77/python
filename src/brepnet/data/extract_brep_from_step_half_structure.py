@@ -52,10 +52,10 @@ debug_id = None
 render_img = True
 write_debug_data = False
 check_post_processing = True
-data_root = Path(r"D:/Datasets/data_step")
-output_root = Path(r"d://Datasets/test/")
-img_root = Path(r"d://Datasets/test/imgs")
-data_split = r"src/brepnet/data/deepcad_test_whole.txt"
+data_root = Path(r"/mnt/d/data_step")
+output_root = Path(r"/mnt/d/deepcad_train_v6/")
+img_root = Path(r"/mnt/d/imgs_v6")
+data_split = r"src/brepnet/data/deepcad_train_whole.txt"
 
 exception_files = [
     r"src/brepnet/data/abc_multiple_component_or_few_faces_ids_.txt",

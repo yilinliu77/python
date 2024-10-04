@@ -261,7 +261,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         else:
             raise
         filelist1 = os.listdir(self.dataset_path)
-        filelist2 = [item[:8] for item in os.listdir(self.face_z_dataset) if item.endswith("feature.npz")]
+        filelist2 = [item[:8] for item in os.listdir(self.face_z_dataset) if os.path.exists(os.path.join(self.face_z_dataset, item+"/feature.npy"))]
         filelist = list(set(filelist1) & set(filelist2))
         filelist.sort()
 
@@ -305,9 +305,12 @@ class Diffusion_dataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         # idx = 0
         folder_path = self.data_folders[idx]
-        data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "_feature.npz"))
+        try:
+            data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "_feature.npz"))['face_features']
+        except:
+            data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "/feature.npy"))
+        face_features = torch.from_numpy(data_npz)
 
-        face_features = torch.from_numpy(data_npz['face_features'])
         padded_face_features = torch.zeros((self.max_faces, *face_features.shape[1:]), dtype=torch.float32)
         padded_face_features[:face_features.shape[0]] = face_features
 

@@ -598,7 +598,7 @@ class Diffusion_condition(Diffusion_base):
         v_condition = noise_features if v_condition is None else v_condition
 
         pred_x0 = self.net2(tgt=noise_features, memory=v_condition)
-        pred_x0 = pred_x0 + v_condition
+        pred_x0 = pred_x0 + noise_features
         pred_x0 = self.net1(pred_x0)
 
         pred_x0 = self.fc_out(pred_x0)

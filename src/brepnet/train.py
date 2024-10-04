@@ -142,7 +142,7 @@ class TrainAutoEncoder(pl.LightningModule):
             return
 
         if "recon_faces" in self.viz:
-            gt_faces = self.viz["face_points"]
+            gt_faces = self.viz["face_points"][..., :-3]
             recon_faces = self.viz["recon_faces"]
             gt_faces = gt_faces[(gt_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)]
             recon_faces = recon_faces[(recon_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)]
@@ -161,7 +161,7 @@ class TrainAutoEncoder(pl.LightningModule):
 
         if "recon_edges" in self.viz and self.viz["recon_edges"].shape[0]>0:
             recon_edges = self.viz["recon_edges"]
-            gt_edges = self.viz["edge_points"]
+            gt_edges = self.viz["edge_points"][..., :-3]
 
             gt_edges = gt_edges[(gt_edges != -1).all(axis=-1).all(axis=-1)]
             recon_edges = recon_edges[(recon_edges != -1).all(axis=-1).all(axis=-1)]

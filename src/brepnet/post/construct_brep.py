@@ -2,6 +2,7 @@ import copy
 import os, sys, shutil, traceback, tqdm
 
 import numpy as np
+import torch
 from OCC.Core import Message
 from OCC.Core.Message import Message_PrinterOStream, Message_Alarm
 
@@ -19,6 +20,77 @@ import trimesh
 @ray.remote(num_gpus=0.05)
 def optimize_geom_ray(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, is_log=False, max_iter=100):
     return optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, max_iter, is_log=is_log)
+
+
+def construct_brep_item(face_points, edge_points, edge_face_connectivity, ):
+    # face_edge_adj store the edge idx list of each face
+    face_edge_adj = [[] for _ in range(face_points.shape[0])]
+    for edge_face1_face2 in edge_face_connectivity:
+        edge, face1, face2 = edge_face1_face2
+        assert edge not in face_edge_adj[face1]
+        face_edge_adj[face1].append(edge)
+
+    if False:
+        with torch.set_grad_enabled(True):
+            face_points, edge_points, edge_face_connectivity, face_edge_adj, remove_edge_idx = optimize_geom(
+                face_points, edge_points,
+                edge_face_connectivity,
+                face_edge_adj,
+                is_use_cuda=True,
+                max_iter=150)
+
+    connected_tolerances = copy.deepcopy(CONNECT_TOLERANCE)
+    solid = None
+    printers = Message.message.DefaultMessenger().Printers()
+    for idx in range(printers.Length()):
+        printers.Value(idx + 1).SetTraceLevel(Message_Alarm)
+    while len(connected_tolerances) > 0:
+        connected_tolerance = connected_tolerances.pop()
+        solid, faces_result = construct_brep(face_points, edge_points, face_edge_adj, connected_tolerance,
+                                             isdebug=False, is_save_face=False,
+                                             folder_path="1")
+        if solid is None:
+            continue
+
+        if solid.ShapeType() == TopAbs_COMPOUND:
+            continue
+
+        analyzer = BRepCheck_Analyzer(solid)
+        if not analyzer.IsValid():
+            continue
+
+        # Valid Solid
+        write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
+        write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'))
+        break
+
+    if solid is None:
+        print(f"solid is None {folder_name}")
+        return
+
+    if solid.ShapeType() == TopAbs_COMPOUND:
+        print(f"solid is TopAbs_COMPOUND {folder_name}")
+        # write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_compound.stl'))
+        # recon_face_dir = os.path.join(out_root, folder_name, 'recon_face')
+        # gen_mesh = trimesh.util.concatenate(
+        #         [trimesh.load(os.path.join(recon_face_dir, f)) for f in os.listdir(recon_face_dir) if f.endswith('.stl')])
+        # gen_mesh.export(os.path.join(out_root, folder_name, 'recon_brep_compound.stl'))
+        return
+
+    analyzer = BRepCheck_Analyzer(solid)
+    if not analyzer.IsValid():
+        print(f"solid is invalid {folder_name}")
+        # write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.stl'))
+        write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.step'))
+        # recon_face_dir = os.path.join(out_root, folder_name, 'recon_face')
+        # gen_mesh = trimesh.util.concatenate(
+        #         [trimesh.load(os.path.join(recon_face_dir, f)) for f in os.listdir(recon_face_dir) if f.endswith('.stl')])
+        # gen_mesh.export(os.path.join(out_root, folder_name, 'recon_brep_invalid.stl'))
+        return
+
+    # Valid Solid
+    write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
+    write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'))
 
 
 def construct_brep_from_datanpz(data_root, out_root, folder_name,
@@ -133,6 +205,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         # filePrinter = Message_PrinterOStream("export.log", False)
         # Message.message.DefaultMessenger().AddPrinter(filePrinter)
         write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
+        write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'))
         # Message.message.DefaultMessenger().RemovePrinter(filePrinter)
         # try:
         #     write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01, angular_deflection=0.5)
@@ -226,7 +299,7 @@ if __name__ == '__main__':
     if args.prefix != "":
         test_construct_brep(v_data_root, v_out_root, args.prefix, use_cuda)
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
-    all_folders = os.listdir(r"E:\data\img2brep\.43\2024_09_22_21_57_44_0921_pure_out3_failed")
+    # all_folders = os.listdir(r"E:\data\img2brep\.43\2024_09_22_21_57_44_0921_pure_out3_failed")
     # check_dir(v_out_root)
 
     print(f"Total {len(all_folders)} folders")

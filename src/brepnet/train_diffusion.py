@@ -7,6 +7,7 @@ import numpy as np
 import open3d as o3d
 
 from src.brepnet.dataset import Diffusion_dataset
+from src.brepnet.post.construct_brep import construct_brep_item
 
 sys.path.append('../../../')
 import os.path
@@ -132,7 +133,7 @@ class TrainDiffusion(pl.LightningModule):
     def test_dataloader(self):
         self.test_dataset = self.dataset_mod("testing", self.hydra_conf["dataset"], )
 
-        return DataLoader(self.test_dataset, batch_size=1,
+        return DataLoader(self.test_dataset, batch_size=self.batch_size,
                           collate_fn=self.dataset_mod.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
@@ -157,7 +158,21 @@ class TrainDiffusion(pl.LightningModule):
         self.log("Test_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
         
-        # result = self.model.inference(1, self.device)[0]
+        results = self.model.inference(self.batch_size, self.device)
+        log_root = Path(self.hydra_conf["trainer"]["test_output_dir"])
+        for idx in range(self.batch_size):
+            global_id = batch_idx * self.batch_size + idx
+            item_root = (log_root / "{:08d}".format(global_id))
+            item_root.mkdir(parents=True, exist_ok=True)
+            recon_data = results[idx]
+
+            np.savez_compressed(str(item_root / f"data.npz"),
+                                pred_face_adj_prob=recon_data["pred_face_adj_prob"].cpu().numpy(),
+                                pred_face_adj=recon_data["pred_face_adj"].cpu().numpy(),
+                                pred_face=recon_data["pred_face"].cpu().numpy(),
+                                pred_edge=recon_data["pred_edge"].cpu().numpy(),
+                                pred_edge_face_connectivity=recon_data["pred_edge_face_connectivity"].cpu().numpy(),
+                                )
 
     def on_test_epoch_end(self):
         for loss in self.trainer.callback_metrics:
@@ -212,11 +227,11 @@ def main(v_cfg: DictConfig):
     else:
         if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
             print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
-            model = TrainDiffusion.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint)
-            model.hydra_conf = v_cfg
-            # weights = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
+            # model = TrainDiffusion.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint)
+            # model.hydra_conf = v_cfg
+            weights = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
             # weights = {k.replace("model.", ""): v for k, v in weights.items()}
-            # model.model.load_state_dict(weights)
+            model.load_state_dict(weights)
         trainer.fit(model)
 
 

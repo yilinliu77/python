@@ -27,6 +27,7 @@ trainer:
 
 model:
   name: AutoEncoder_featuredv2
+  in_channels: 3
   dim_latent: 8
   dim_shape: 256
   sigmoid: false

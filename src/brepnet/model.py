@@ -4592,7 +4592,7 @@ class AutoEncoder_Test(nn.Module):
 
         self.edge_conv1 = nn.Sequential(
             Rearrange('b w n -> b n w'),
-            nn.Conv1d(3, ds, kernel_size=3, stride=1, padding=1),
+            nn.Conv1d(in_channels, ds, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
         )
         self.edge_coords = nn.Sequential(
@@ -4632,6 +4632,14 @@ class AutoEncoder_Test(nn.Module):
             Rearrange('... (c n) w -> ... (w c) n', c=3, n=2),
         )
 
+        bd = 1024
+        self.attn_in = nn.Linear(df, bd)
+        self.attn_out = nn.Linear(bd, df)
+        layer = nn.TransformerEncoderLayer(
+            bd, 8, dim_feedforward=2048, dropout=0.1,
+            batch_first=True, norm_first=True)
+        self.face_attn = nn.TransformerEncoder(layer, 8, nn.LayerNorm(1024))
+
         bd = 1024  # bottlenek_dim
         self.edge_feature_proj = nn.Sequential(
             nn.Conv1d(df * 2, bd, kernel_size=1, stride=1, padding=0),
@@ -4662,12 +4670,10 @@ class AutoEncoder_Test(nn.Module):
         id_false_start = true_intersection_embedding.shape[0]
         intersection_embedding = rearrange(
             intersection_embedding,
-            'b c n h w -> b c (n h w)', c=2
+            'b n c -> b (n c) 1'
         )
 
-        features = intersection_embedding + self.face_pos_embedding2[None, :]
-        features = rearrange(features, 'b c n -> b (c n) 1')
-        features = self.edge_feature_proj(features)
+        features = self.edge_feature_proj(intersection_embedding)
         pred = self.classifier(features)
 
         gt_labels = torch.ones_like(pred)
@@ -4694,9 +4700,14 @@ class AutoEncoder_Test(nn.Module):
         edge_features = self.edge_coords(edge_features)
         # timer = profile_time(self.times, "Encoder", timer)
 
+        face_features = rearrange(face_features, 'b n h w -> b (n h w)', h=2, w=2)
+        face_features = self.attn_in(face_features)
+        fused_face_features = self.face_attn(face_features, v_data["attn_mask"])
+        fused_face_features = self.attn_out(fused_face_features)
+
         # Global
         # timer = profile_time(self.times, "Fuse", timer)
-        fused_face_features = torch.sigmoid(face_features)
+        fused_face_features = torch.sigmoid(fused_face_features) * 2 - 1
 
         # Intersection
         edge_face_connectivity = v_data["edge_face_connectivity"]
@@ -4707,8 +4718,8 @@ class AutoEncoder_Test(nn.Module):
         )
         # timer = profile_time(self.times, "Intersection", timer)
 
-        face_points_local = self.face_coords_decoder(fused_face_features)
-        face_center_scale = self.face_center_scale_decoder(fused_face_features.reshape(-1, self.df))
+        face_points_local = self.face_coords_decoder(rearrange(fused_face_features, 'b (n h w) -> b n h w', h=2, w=2))
+        face_center_scale = self.face_center_scale_decoder(fused_face_features)
         face_center = face_center_scale[..., 0]
         face_scale = face_center_scale[..., 1]
 
@@ -4775,7 +4786,6 @@ class AutoEncoder_Test(nn.Module):
 
         if v_test:
             data = {}
-            fused_face_features = rearrange(fused_face_features, 'b n h w -> b (n h w)', h=2, w=2)
             recon_data = self.inference(fused_face_features)
 
             device = v_data["face_points"].device
@@ -4799,15 +4809,15 @@ class AutoEncoder_Test(nn.Module):
 
             loss["face_coords"] = nn.functional.l1_loss(
                 data["pred_face"],
-                face_points
+                face_points[..., :-3]
             )
             loss["edge_coords"] = nn.functional.l1_loss(
                 denormalize_coord(edge_points_local, edge_center, edge_scale),
-                edge_points[v_data["edge_face_connectivity"][:, 0]]
+                edge_points[v_data["edge_face_connectivity"][:, 0]][..., :-3]
             )
             loss["edge_coords1"] = nn.functional.l1_loss(
                 denormalize_coord(edge_points_local1, edge_center1, edge_scale1),
-                edge_points
+                edge_points[..., :-3]
             )
 
             data["edge_loss"] = loss["edge_coords"].cpu().numpy()
@@ -4823,8 +4833,7 @@ class AutoEncoder_Test(nn.Module):
         indexes = indexes.reshape(-1, 2).to(device)
         feature_pair = v_face_features[indexes]
 
-        features = feature_pair + self.face_pos_embedding2[None, :]
-        features = rearrange(features, 'b c n -> b (c n) 1')
+        features = rearrange(feature_pair, 'b c n -> b (c n) 1')
         features = self.edge_feature_proj(features)
         pred = self.classifier(features)[:, 0]
         pred_labels = torch.sigmoid(pred) > 0.5

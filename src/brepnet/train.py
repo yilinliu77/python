@@ -221,7 +221,7 @@ class TrainAutoEncoder(pl.LightningModule):
                                 edge_loss=loss["edge_coords"].cpu().item(),
                                 edge_loss_ori=loss["edge_coords1"].cpu().item(),
                                 )
-            np.save(str(log_root / f"{data['v_prefix'][0]}_feature"),
+            np.save(str(local_root / "features"),
                                 recon_data["face_features"].cpu().numpy(),
                                 )
 

@@ -4537,3 +4537,330 @@ class AutoEncoder_1003(AutoEncoder_0925):
             "kl_loss": kl_loss,
             "edge_features": edge_features,
         }
+
+
+class AutoEncoder_Test(nn.Module):
+    def __init__(self, v_conf):
+        super().__init__()
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        norm = v_conf["norm"]
+        ds = self.dim_shape
+        dl = self.dim_latent
+        self.df = self.dim_latent * 2 * 2
+        df = self.df
+        in_channels = v_conf["in_channels"]
+        self.face_conv1 = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(in_channels, ds, kernel_size=3, stride=1, padding=1),
+            nn.LeakyReLU(),
+        )
+        self.face_coords = nn.Sequential(
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool2d(kernel_size=2, stride=2),  # 8
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool2d(kernel_size=2, stride=2),  # 4
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool2d(kernel_size=2, stride=2),  # 2
+            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            nn.Conv2d(ds, dl, kernel_size=1, stride=1, padding=0),
+        )  # b c 4 4
+        self.face_coords_decoder = nn.Sequential(
+            nn.Conv2d(dl, ds, kernel_size=1, stride=1, padding=0),
+            nn.LeakyReLU(),
+            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            nn.ConvTranspose2d(ds, ds, kernel_size=2, stride=2),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.ConvTranspose2d(ds, ds, kernel_size=2, stride=2),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.ConvTranspose2d(ds, ds, kernel_size=2, stride=2),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.Conv2d(ds, 3, kernel_size=3, stride=1, padding=1),
+            Rearrange('... n w h -> ... w h n', ),
+        )
+        self.face_center_scale_decoder = nn.Sequential(
+            Rearrange("b n -> b n 1 1"),
+            nn.Conv2d(dl * 2 * 2, ds, kernel_size=1, stride=1, padding=0),
+            nn.LeakyReLU(),
+            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            nn.Conv2d(ds, 3 * 2, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (c n) w h -> ... (w h c) n', c=3, n=2),
+        )
+
+        self.edge_conv1 = nn.Sequential(
+            Rearrange('b w n -> b n w'),
+            nn.Conv1d(in_channels, ds // 2, kernel_size=3, stride=1, padding=1),
+            nn.LeakyReLU(),
+        )
+        self.edge_coords = nn.Sequential(
+            res_block_1D(ds // 2, ds // 2, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool1d(kernel_size=2, stride=2),  # 8
+            res_block_1D(ds // 2, ds // 2, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool1d(kernel_size=2, stride=2),  # 4
+            res_block_1D(ds // 2, ds // 2, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool1d(kernel_size=2, stride=2),  # 2
+            res_block_1D(ds // 2, ds // 2, ks=3, st=1, pa=1, norm=norm),
+            nn.Conv1d(ds // 2, ds // 2, kernel_size=1, stride=1, padding=0),
+            Rearrange("b n w -> b (n w)"),
+        )  # b c 1
+        self.edge_coords_decoder = nn.Sequential(
+            Rearrange("b (n w)-> b n w", n=128, w=2),
+            nn.Conv1d(128, ds, kernel_size=1, stride=1, padding=0),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.ConvTranspose1d(ds, ds, kernel_size=2, stride=2),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.ConvTranspose1d(ds, ds, kernel_size=2, stride=2),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.ConvTranspose1d(ds, ds, kernel_size=2, stride=2),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.Conv1d(ds, 3, kernel_size=1, stride=1, padding=0),
+            Rearrange('... n w -> ... w n', ),
+        )
+        self.edge_center_scale_decoder = nn.Sequential(
+            Rearrange("b n-> b n 1"),
+            nn.Conv1d(256, ds, kernel_size=1, stride=1, padding=0),
+            res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            nn.Conv1d(ds, 3 * 2, kernel_size=1, stride=1, padding=0),
+            Rearrange('... (c n) w -> ... (w c) n', c=3, n=2),
+        )
+
+        bd = 1024
+        self.attn_in = nn.Linear(df, bd)
+        self.attn_out = nn.Linear(bd, df)
+        layer = nn.TransformerEncoderLayer(
+            bd, 8, dim_feedforward=2048, dropout=0.1,
+            batch_first=True, norm_first=True)
+        self.face_attn = nn.TransformerEncoder(layer, 8, nn.LayerNorm(bd))
+
+        bd = 1024  # bottlenek_dim
+        self.edge_feature_proj = nn.Sequential(
+            nn.Conv1d(df * 2, bd, kernel_size=1, stride=1, padding=0),
+            res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+            nn.Conv1d(bd, 256, kernel_size=1, stride=1, padding=0),
+            Rearrange("b n w -> b (n w)"),
+        )
+        self.classifier = nn.Linear(256, 1)
+
+        self.times = {
+            "Encoder": 0,
+            "Fuse": 0,
+            "Intersection": 0,
+            "Decoder": 0,
+            "Loss": 0,
+        }
+
+    def intersection(self, v_edge_face_connectivity, v_zero_positions, v_face_feature):
+        true_intersection_embedding = v_face_feature[v_edge_face_connectivity[:, 1:]]
+        false_intersection_embedding = v_face_feature[v_zero_positions]
+
+        intersection_embedding = torch.cat((true_intersection_embedding, false_intersection_embedding), dim=0)
+        id_false_start = true_intersection_embedding.shape[0]
+        intersection_embedding = rearrange(
+            intersection_embedding,
+            'b n c -> b (n c) 1'
+        )
+
+        features = self.edge_feature_proj(intersection_embedding)
+        pred = self.classifier(features)
+
+        gt_labels = torch.ones_like(pred)
+        gt_labels[id_false_start:] = 0
+        loss_edge = F.binary_cross_entropy_with_logits(pred, gt_labels)
+
+        return loss_edge, features[:id_false_start]
+
+    def forward(self, v_data, v_test=False):
+        # torch.cuda.synchronize()
+        # timer = time.time()
+        # Encoder
+        num_faces = v_data["face_points"].shape[0]
+        face_points = v_data["face_points"][:num_faces]
+        gt_face_points_local = v_data["face_points_norm"]
+        num_edges = v_data["edge_points"].shape[0]
+        edge_points = v_data["edge_points"]
+        gt_edge_points_local = v_data["edge_points_norm"]
+
+        face_features = self.face_conv1(face_points)
+        face_features = self.face_coords(face_features)
+
+        edge_features = self.edge_conv1(edge_points)
+        edge_features = self.edge_coords(edge_features)
+        # timer = profile_time(self.times, "Encoder", timer)
+
+        face_features = rearrange(face_features, 'b n h w -> b (n h w)', h=2, w=2)
+        face_features = self.attn_in(face_features)
+        fused_face_features = self.face_attn(face_features, v_data["attn_mask"])
+        fused_face_features = self.attn_out(fused_face_features)
+        # fused_face_features = face_features
+
+        # Global
+        # timer = profile_time(self.times, "Fuse", timer)
+        fused_face_features = torch.sigmoid(fused_face_features) * 2 - 1
+
+        # Intersection
+        edge_face_connectivity = v_data["edge_face_connectivity"]
+        loss_edge_classification, intersected_edge_feature = self.intersection(
+            edge_face_connectivity,
+            v_data["zero_positions"],
+            fused_face_features
+        )
+        # timer = profile_time(self.times, "Intersection", timer)
+
+        face_points_local = self.face_coords_decoder(rearrange(fused_face_features, 'b (n h w) -> b n h w', h=2, w=2))
+        face_center_scale = self.face_center_scale_decoder(fused_face_features)
+        face_center = face_center_scale[..., 0]
+        face_scale = face_center_scale[..., 1]
+
+        edge_points_local = self.edge_coords_decoder(intersected_edge_feature)
+        edge_center_scale = self.edge_center_scale_decoder(intersected_edge_feature)
+        edge_center = edge_center_scale[..., 0]
+        edge_scale = edge_center_scale[..., 1]
+
+        edge_points_local1 = self.edge_coords_decoder(edge_features)
+        edge_center_scale1 = self.edge_center_scale_decoder(edge_features)
+        edge_center1 = edge_center_scale1[..., 0]
+        edge_scale1 = edge_center_scale1[..., 1]
+        # timer = profile_time(self.times, "Decoder", timer)
+
+        # Loss
+        loss = {}
+        loss["edge_classification"] = loss_edge_classification * 0.1
+        loss["face_coords_norm"] = nn.functional.l1_loss(
+            face_points_local,
+            gt_face_points_local
+        )
+        loss["face_center"] = nn.functional.l1_loss(
+            face_center,
+            v_data["face_center"]
+        )
+        loss["face_scale"] = nn.functional.l1_loss(
+            face_scale,
+            v_data["face_scale"]
+        )
+
+        loss["edge_coords_norm1"] = nn.functional.l1_loss(
+            edge_points_local1,
+            gt_edge_points_local
+        )
+        loss["edge_center1"] = nn.functional.l1_loss(
+            edge_center1,
+            v_data["edge_center"]
+        )
+        loss["edge_scale1"] = nn.functional.l1_loss(
+            edge_scale1,
+            v_data["edge_scale"]
+        )
+
+        loss["edge_coords_norm"] = nn.functional.l1_loss(
+            edge_points_local,
+            gt_edge_points_local[edge_face_connectivity[:, 0]]
+        )
+        loss["edge_center"] = nn.functional.l1_loss(
+            edge_center,
+            v_data["edge_center"][edge_face_connectivity[:, 0]]
+        )
+        loss["edge_scale"] = nn.functional.l1_loss(
+            edge_scale,
+            v_data["edge_scale"][edge_face_connectivity[:, 0]]
+        )
+        loss["edge_feature_loss"] = nn.functional.l1_loss(
+            intersected_edge_feature,
+            edge_features[edge_face_connectivity[:, 0]]
+        )
+        loss["total_loss"] = sum(loss.values())
+        # timer = profile_time(self.times, "Loss", timer)
+
+        data = {}
+
+        if v_test:
+            data = {}
+            recon_data = self.inference(fused_face_features)
+
+            device = v_data["face_points"].device
+            face_adj = torch.zeros((num_faces, num_faces), dtype=bool, device=device)
+            conn = v_data["edge_face_connectivity"]
+            face_adj[conn[:, 1], conn[:, 2]] = True
+
+            data.update({
+                "gt_face_adj": face_adj.reshape(-1),
+                "gt_edge_face_connectivity": v_data["edge_face_connectivity"].cpu().numpy(),
+                "gt_edge": edge_points.cpu().numpy(),
+                "gt_face": face_points.cpu().numpy(),
+
+                "pred_face_adj": recon_data["pred_face_adj"],
+                "pred_edge_face_connectivity": recon_data["pred_edge_face_connectivity"],
+                "pred_edge": recon_data["pred_edge"],
+                "pred_face": recon_data["pred_face"],
+
+                "face_features": recon_data["face_features"]
+            })
+
+            loss["face_coords"] = nn.functional.l1_loss(
+                data["pred_face"],
+                face_points[..., :-3]
+            )
+            loss["edge_coords"] = nn.functional.l1_loss(
+                denormalize_coord(edge_points_local, edge_center, edge_scale),
+                edge_points[v_data["edge_face_connectivity"][:, 0]][..., :-3]
+            )
+            loss["edge_coords1"] = nn.functional.l1_loss(
+                denormalize_coord(edge_points_local1, edge_center1, edge_scale1),
+                edge_points[..., :-3]
+            )
+
+            data["edge_loss"] = loss["edge_coords"].cpu().numpy()
+            data["face_loss"] = loss["face_coords"].cpu().numpy()
+
+        return loss, data
+
+    def inference(self, v_face_features):
+        device = v_face_features.device
+        num_faces = v_face_features.shape[0]
+        indexes = torch.stack(torch.meshgrid(torch.arange(num_faces), torch.arange(num_faces), indexing="ij"), dim=2)
+
+        indexes = indexes.reshape(-1, 2).to(device)
+        feature_pair = v_face_features[indexes]
+
+        features = rearrange(feature_pair, 'b c n -> b (c n) 1')
+        features = self.edge_feature_proj(features)
+        pred = self.classifier(features)[:, 0]
+        pred_labels = torch.sigmoid(pred) > 0.5
+
+        fused_face_features = rearrange(v_face_features, 'b (n h w) -> b n h w', h=2, w=2)
+
+        face_points_local = self.face_coords_decoder(fused_face_features)
+        face_center_scale = self.face_center_scale_decoder(fused_face_features.reshape(-1, self.df))
+        face_center = face_center_scale[..., 0]
+        face_scale = face_center_scale[..., 1]
+
+        edge_points_local = self.edge_coords_decoder(features[pred_labels])
+        edge_center_scale = self.edge_center_scale_decoder(features[pred_labels])
+        edge_center = edge_center_scale[..., 0]
+        edge_scale = edge_center_scale[..., 1]
+
+        pred_face_points = denormalize_coord(face_points_local, face_center, face_scale)
+        pred_edge_points = denormalize_coord(edge_points_local, edge_center, edge_scale)
+
+        pred_edge_face_connectivity = torch.cat(
+            (torch.arange(pred_edge_points.shape[0], device=device)[:, None], indexes[pred_labels]), dim=1)
+        return {
+            "face_features": v_face_features,
+            "pred_face_adj": pred_labels.reshape(-1),
+            "pred_face_adj_prob": torch.sigmoid(pred).reshape(-1),
+            "pred_edge_face_connectivity": pred_edge_face_connectivity,
+            "pred_face": pred_face_points,
+            "pred_edge": pred_edge_points,
+        }

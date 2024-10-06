@@ -72,29 +72,11 @@ def interpolate_edge_points(edge_points, num_interpolations):
     return np.array(interpolated_points)
 
 
-def interpolation_face_points(face, density=None, is_use_cuda=False, density_scale=10):
-    if type(face) is np.ndarray:
-        if is_use_cuda:
-            face = torch.from_numpy(face).cuda()
-        else:
-            face = torch.from_numpy(face)
-    if density is None:
-        res = face.shape[0]
-        density = (torch.linalg.norm(face[0, 0] - face[res // 2, res // 2], dim=-1) * density_scale).to(torch.long)
-        density = torch.clamp(density, min=1, max=200) * res
-
-    x = torch.linspace(-1, 1, density).to(face.device)
-    y = torch.linspace(-1, 1, density).to(face.device)
-    x, y = torch.meshgrid(x, y, indexing='ij')
-    coords = torch.stack([x, y], dim=-1).reshape(1, -1, 1, 2)
-    face = torch.nn.functional.grid_sample(face[None].permute(0, 3, 1, 2), coords, align_corners=True)[0, :, :, 0].permute(1, 0)
-    return face
-
-
 def check_edge_validity(edge_point, face_point1, face_point2, is_use_cuda=False, tol=1e-2):
     def cf_computer(edge_point, face_point):
         chamferdist = ChamferDistance()
-        return torch.sqrt(chamferdist(edge_point.reshape(1, -1, 3), face_point.reshape(1, -1, 3), point_reduction='mean'))
+        return torch.sqrt(
+            chamferdist(edge_point.reshape(1, -1, 3), face_point.reshape(1, -1, 3), point_reduction='mean'))
 
     if is_use_cuda:
         device = torch.device("cuda")
@@ -211,7 +193,8 @@ def fix_invalid_connectivity(recon_face, recon_edge, edge_face_connectivity, fac
     remove_edge_idx = []
     for edge_idx, face_idx1, face_idx2 in edge_face_connectivity:
         # assert not single half edge
-        opposite = edge_face_connectivity[(edge_face_connectivity[:, 1] == face_idx2) & (edge_face_connectivity[:, 2] == face_idx1)]
+        opposite = edge_face_connectivity[
+            (edge_face_connectivity[:, 1] == face_idx2) & (edge_face_connectivity[:, 2] == face_idx1)]
         assert opposite.shape[0] == 1
         op_edge_idx, op_face_idx1, op_face_idx2 = opposite[0]
 
@@ -220,8 +203,10 @@ def fix_invalid_connectivity(recon_face, recon_edge, edge_face_connectivity, fac
                            interpolation_face_points(recon_face[face_idx2])[None, :], point_reduction='mean')
 
         # intersected edge should be closed to two adjacent face
-        is_egde_valid1, dis1 = check_edge_validity(recon_edge[edge_idx], recon_face[face_idx1], recon_face[face_idx2], tol=tol)
-        id_edge_valid2, dis2 = check_edge_validity(recon_edge[op_edge_idx], recon_face[op_face_idx1], recon_face[op_face_idx2], tol=tol)
+        is_egde_valid1, dis1 = check_edge_validity(recon_edge[edge_idx], recon_face[face_idx1], recon_face[face_idx2],
+                                                   tol=tol)
+        id_edge_valid2, dis2 = check_edge_validity(recon_edge[op_edge_idx], recon_face[op_face_idx1],
+                                                   recon_face[op_face_idx2], tol=tol)
 
         is_egde_valid = dis0 < tol and is_egde_valid1 and id_edge_valid2
 
@@ -286,7 +271,8 @@ class Geom_Optimization():
         # Resample on the faces to get the candidate points
         self.recon_face = torch.FloatTensor(recon_face).to(self.device).requires_grad_(False)
         res = self.recon_face.shape[1]
-        densities = (torch.linalg.norm(self.recon_face[:, 0, 0] - self.recon_face[:, res // 2, res // 2], dim=-1) * 10).to(torch.long)
+        densities = (torch.linalg.norm(self.recon_face[:, 0, 0] - self.recon_face[:, res // 2, res // 2],
+                                       dim=-1) * 10).to(torch.long)
         densities = torch.clamp(densities, min=1, max=200)
         densities = densities * res
         self.face_points_candidates = []
@@ -411,13 +397,13 @@ class Geom_Optimization():
     def loss(self):
         adj_distance_loss = 0
         dis_matrix1 = self.chamfer_dist(
-                self.transformed_recon_edge[self.edge_face_connectivity[:, 0]],
-                self.padded_points[self.edge_face_connectivity[:, 1]],
-                batch_reduction=None, point_reduction="mean")
+            self.transformed_recon_edge[self.edge_face_connectivity[:, 0]],
+            self.padded_points[self.edge_face_connectivity[:, 1]],
+            batch_reduction=None, point_reduction="mean")
         dis_matrix2 = self.chamfer_dist(
-                self.transformed_recon_edge[self.edge_face_connectivity[:, 0]],
-                self.padded_points[self.edge_face_connectivity[:, 2]],
-                batch_reduction=None, point_reduction="mean")
+            self.transformed_recon_edge[self.edge_face_connectivity[:, 0]],
+            self.padded_points[self.edge_face_connectivity[:, 2]],
+            batch_reduction=None, point_reduction="mean")
         adj_distance_loss = ((dis_matrix1 + dis_matrix2) / 2).sum()
 
         # For loop version
@@ -436,7 +422,8 @@ class Geom_Optimization():
         endpoints_loss4 = torch.linalg.norm(endpoints[:, 0] - endpoints[:, 1], dim=-1).mean()
         endpoints_loss5 = torch.linalg.norm(endpoints[:, 0] - endpoints[:, 2], dim=-1).mean()
         endpoints_loss6 = torch.linalg.norm(endpoints[:, 1] - endpoints[:, 2], dim=-1).mean()
-        endpoints_loss = (endpoints_loss1 + endpoints_loss2 + endpoints_loss3 + endpoints_loss4 + endpoints_loss5 + endpoints_loss6) / 6
+        endpoints_loss = (
+                                     endpoints_loss1 + endpoints_loss2 + endpoints_loss3 + endpoints_loss4 + endpoints_loss5 + endpoints_loss6) / 6
         sum_loss = adj_distance_loss + endpoints_loss
         return sum_loss, adj_distance_loss.detach(), endpoints_loss.detach()
 
@@ -456,7 +443,7 @@ class Geom_Optimization():
             prev_loss = loss.item()
             if self.is_log:
                 pbar.set_postfix(
-                        loss=loss.item(), adj=adj_distance_loss.cpu().item(), end=endpoints_loss.cpu().item())
+                    loss=loss.item(), adj=adj_distance_loss.cpu().item(), end=endpoints_loss.cpu().item())
                 pbar.update(1)
         if self.is_log:
             print('Optimization finished!')
@@ -472,7 +459,8 @@ class Geom_Optimization():
 
             for idx in range(pair.shape[0]):
                 edge_idx0, edge_idx1, edge_idx2 = pair[idx]
-                endpoints_dis01, endpoints_dis02, endpoints_dis12 = endpoints_dis01_all[0], endpoints_dis02_all[1], endpoints_dis12_all[2]
+                endpoints_dis01, endpoints_dis02, endpoints_dis12 = endpoints_dis01_all[0], endpoints_dis02_all[1], \
+                endpoints_dis12_all[2]
                 if endpoints_dis01 < endpoints_dis02 and endpoints_dis01 < endpoints_dis12 and False:
                     new_endpoints = (self.transformed_recon_edge[edge_idx0, endpoint_idx] +
                                      self.transformed_recon_edge[edge_idx1, endpoint_idx]) / 2
@@ -502,7 +490,7 @@ class Geom_Optimization():
     # Not used
     def dist(self, pc1, pc2, point_reduction='mean'):
         return self.chamfer_dist(
-                pc1.reshape(1, -1, 3), pc2.reshape(1, -1, 3), batch_reduction="mean", point_reduction=point_reduction)
+            pc1.reshape(1, -1, 3), pc2.reshape(1, -1, 3), batch_reduction="mean", point_reduction=point_reduction)
 
     # Not used
     def get_optimized_mask(self, tol=5e-3):
@@ -522,25 +510,45 @@ class Geom_Optimization():
         return self.pair1, self.pair2
 
 
-def optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, max_iter=100, is_log=True):
+def check_closeness(recon_edge):
+    dirs = (recon_edge[:, [0, -1]] - np.mean(recon_edge, axis=1, keepdims=True))
+    cos_dir = (dirs[:, 0] * dirs[:, 1]).sum(axis=1) / np.linalg.norm(dirs[:, 0], axis=1) / np.linalg.norm(dirs[:, 1],
+                                                                                                          axis=1)
+    is_edge_closed = cos_dir > 0.75
+
+    delta = recon_edge[:, [0, -1]].mean(axis=1)
+    recon_edge[is_edge_closed, 0] = delta[is_edge_closed]
+    recon_edge[is_edge_closed, -1] = delta[is_edge_closed]
+    return recon_edge
+
+
+def optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, max_iter=100,
+                  is_log=True):
     recon_face = np.copy(recon_face)
     recon_edge = np.copy(recon_edge)
     edge_face_connectivity = np.copy(edge_face_connectivity)
+
+    recon_edge = check_closeness(recon_edge)
+
     # 1. Check and init fix the connectivity of the edge and face
     # 2. Check which half edge is better and replace the bad one
-    recon_face, recon_edge, edge_face_connectivity, face_edge_adj, remove_edge_idx = fix_init_estimation(recon_face, recon_edge,
+    recon_face, recon_edge, edge_face_connectivity, face_edge_adj, remove_edge_idx = fix_init_estimation(recon_face,
+                                                                                                         recon_edge,
                                                                                                          edge_face_connectivity,
                                                                                                          face_edge_adj,
                                                                                                          is_use_cuda=is_use_cuda)
+
     # 3. Optimize the geometry to enclose the adjacent face and edge
     geom_opt = Geom_Optimization(recon_face, recon_edge, edge_face_connectivity, face_edge_adj,
                                  max_iter=max_iter, is_use_cuda=is_use_cuda, is_log=is_log)
     geom_opt.run()
     # geom_opt.force_fix_outlier_endpoints()
     recon_face, recon_edge, edge_face_connectivity, face_edge_adj = geom_opt.get_transformed_data()
+    return recon_face, recon_edge, edge_face_connectivity, face_edge_adj, remove_edge_idx
 
     dirs = (recon_edge[:, [0, -1]] - np.mean(recon_edge, axis=1, keepdims=True))
-    cos_dir = (dirs[:, 0] * dirs[:, 1]).sum(axis=1) / np.linalg.norm(dirs[:, 0], axis=1) / np.linalg.norm(dirs[:, 1], axis=1)
+    cos_dir = (dirs[:, 0] * dirs[:, 1]).sum(axis=1) / np.linalg.norm(dirs[:, 0], axis=1) / np.linalg.norm(dirs[:, 1],
+                                                                                                          axis=1)
     is_edge_closed = cos_dir > 0.98
 
     delta = recon_edge[:, [0, -1]].mean(axis=1)
@@ -592,7 +600,8 @@ def test_optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge
     export_point_cloud(os.path.join(debug_face_save_path, 'noised_face.ply'), noised_face.reshape(-1, 3))
     export_point_cloud(os.path.join(debug_face_save_path, 'noised_edge.ply'), noised_edge.reshape(-1, 3))
 
-    optimized_recon_faces, optimized_recon_edges, _, _ = optimize_geom(noised_face, noised_edge, edge_face_connectivity, face_edge_adj)
+    optimized_recon_faces, optimized_recon_edges, _, _ = optimize_geom(noised_face, noised_edge, edge_face_connectivity,
+                                                                       face_edge_adj)
 
     export_point_cloud(os.path.join(debug_face_save_path, 'optimized_face.ply'), optimized_recon_faces.reshape(-1, 3))
     export_point_cloud(os.path.join(debug_face_save_path, 'optimized_edge.ply'), optimized_recon_edges.reshape(-1, 3))

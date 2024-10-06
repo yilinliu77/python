@@ -18,8 +18,10 @@ import trimesh
 
 
 @ray.remote(num_gpus=0.05)
-def optimize_geom_ray(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, is_log=False, max_iter=100):
-    return optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, max_iter, is_log=is_log)
+def optimize_geom_ray(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, is_log=False,
+                      max_iter=100):
+    return optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, max_iter,
+                         is_log=is_log)
 
 
 def construct_brep_item(face_points, edge_points, edge_face_connectivity, ):
@@ -93,20 +95,10 @@ def construct_brep_item(face_points, edge_points, edge_face_connectivity, ):
     write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'))
 
 
-def construct_brep_from_datanpz(data_root, out_root, folder_name,
-                                is_ray=False, is_log=True,
-                                is_optimize_geom=True, isdebug=False, use_cuda=False):
-    if is_log:
-        print(f"{Colors.GREEN}############################# "
-              f"Processing {folder_name} #############################{Colors.RESET}")
-    if isdebug:
-        safe_check_dir(os.path.join(out_root, folder_name))
-    else:
-        check_dir(os.path.join(out_root, folder_name))
-
+def get_data(v_filename, v_is_cuda=True):
     # specify the key to get the face points, edge points and edge_face_connectivity in data.npz
     # data_npz = np.load(os.path.join(data_root, folder_name, 'data.npz'), allow_pickle=True)['arr_0'].item()
-    data_npz = np.load(os.path.join(data_root, folder_name, 'data.npz'), allow_pickle=True)
+    data_npz = np.load(v_filename, allow_pickle=True)
     if 'sample_points_faces' in data_npz:
         face_points = data_npz['sample_points_faces']  # Face sample points (num_faces*20*20*3)
         edge_points = data_npz['sample_points_lines']  # Edge sample points (num_lines*20*3)
@@ -116,83 +108,87 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         edge_points = data_npz['pred_edge']
         edge_face_connectivity = data_npz['pred_edge_face_connectivity']
     else:
-        raise ValueError(f"Unknown data npz format {folder_name}")
+        raise ValueError(f"Unknown data npz format {v_filename}")
 
-    # face_edge_adj store the edge idx list of each face
-    face_edge_adj = [[] for _ in range(face_points.shape[0])]
-    for edge_face1_face2 in edge_face_connectivity:
-        edge, face1, face2 = edge_face1_face2
-        if face1 == face2:
-            raise ValueError(f"face1 == face2 {folder_name}")
-        assert edge not in face_edge_adj[face1]
-        face_edge_adj[face1].append(edge)
+    shape = Shape(face_points, edge_points, edge_face_connectivity, v_is_cuda)
+    return shape
 
-    if isdebug:
-        debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
-        safe_check_dir(debug_face_save_path)
-        export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), face_points.reshape(-1, 3))
-        export_edges(edge_points, os.path.join(debug_face_save_path, 'edge.obj'))
-        for face_idx in range(len(face_edge_adj)):
-            export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}.ply"),
-                               face_points[face_idx].reshape(-1, 3))
-            for idx, edge_idx in enumerate(face_edge_adj[face_idx]):
-                adj_face = edge_face_connectivity[edge_idx][1:]
-                export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}_edge_idx{edge_idx}_face{adj_face}.ply"),
-                                   edge_points[edge_idx].reshape(-1, 3),
-                                   np.linspace([1, 0, 0], [0, 1, 0], edge_points[edge_idx].shape[0]))
 
-    # face_points = face_points + np.random.normal(0, 1e-3, size=(face_points.shape[0], 1, 1, 1))
-    # edge_points = edge_points + np.random.normal(0, 1e-3, size=(edge_points.shape[0], 1, 1))
-
-    if is_optimize_geom:
-        if is_ray:
-            task = optimize_geom_ray.remote(
-                    face_points, edge_points,
-                    edge_face_connectivity,
-                    face_edge_adj,
-                    is_use_cuda=use_cuda,
-                    is_log=False,
-                    max_iter=150)
-            face_points, edge_points, edge_face_connectivity, face_edge_adj, remove_edge_idx = ray.get(task)
-        else:
-            face_points, edge_points, edge_face_connectivity, face_edge_adj, remove_edge_idx = optimize_geom(
-                    face_points, edge_points,
-                    edge_face_connectivity,
-                    face_edge_adj,
-                    is_use_cuda=use_cuda,
-                    max_iter=150)
-
-        if isdebug:
-            debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
-            safe_check_dir(debug_face_save_path)
-            export_point_cloud(os.path.join(debug_face_save_path, 'optimized_face.ply'), face_points.reshape(-1, 3))
-            export_edges(np.delete(edge_points, remove_edge_idx, axis=0), os.path.join(debug_face_save_path, 'optimized_edge.obj'))
-            for face_idx in range(len(face_edge_adj)):
-                export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}.ply"),
-                                   face_points[face_idx].reshape(-1, 3))
-                for idx, edge_idx in enumerate(face_edge_adj[face_idx]):
-                    adj_face = edge_face_connectivity[edge_face_connectivity[:, 0] == edge_idx][0, 1:]
-                    export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}_optim_edge_idx{edge_idx}_face{adj_face}.ply"),
-                                       edge_points[edge_idx].reshape(-1, 3),
-                                       np.linspace([1, 0, 0], [0, 1, 0], edge_points[edge_idx].shape[0]))
-
-    # Construct Brep from face_points, edge_points, face_edge_adj
-    if isdebug:
-        connected_tolerances = copy.deepcopy(CONNECT_TOLERANCE)
-    else:
-        connected_tolerances = copy.deepcopy(CONNECT_TOLERANCE)
-    solid = None
+def construct_brep_from_datanpz(data_root, out_root, folder_name,
+                                is_ray=False, is_log=True,
+                                is_optimize_geom=True, isdebug=False, use_cuda=False):
     printers = Message.message.DefaultMessenger().Printers()
     for idx in range(printers.Length()):
         printers.Value(idx + 1).SetTraceLevel(Message_Alarm)
-    while len(connected_tolerances) > 0:
-        connected_tolerance = connected_tolerances.pop()
-        solid, faces_result = construct_brep(face_points, edge_points, face_edge_adj, connected_tolerance,
-                                             isdebug=isdebug, is_save_face=True,
-                                             folder_path=os.path.join(out_root, folder_name))
-        if solid is None:
-            continue
+    if is_log:
+        print(f"{Colors.GREEN}############################# "
+              f"Processing {folder_name} #############################{Colors.RESET}")
 
+    debug_face_save_path = None
+    if isdebug:
+        debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
+        safe_check_dir(os.path.join(out_root, folder_name))
+        safe_check_dir(debug_face_save_path)
+    else:
+        check_dir(os.path.join(out_root, folder_name))
+
+    shape = get_data(os.path.join(data_root, folder_name, 'data.npz'), v_is_cuda=use_cuda)
+    shape.remove_half_edges()
+    shape.check_openness()
+    shape.build_fe()
+    shape.build_vertices()
+
+    if isdebug:
+        export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), shape.recon_face_points.reshape(-1, 3))
+        export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge.obj'))
+        for face_idx in range(len(shape.face_edge_adj)):
+            export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}.ply"),
+                               shape.recon_face_points[face_idx].reshape(-1, 3))
+            for idx, edge_idx in enumerate(shape.face_edge_adj[face_idx]):
+                adj_face = shape.edge_face_connectivity[edge_idx][1:]
+                export_point_cloud(
+                    os.path.join(debug_face_save_path, f"face{face_idx}_edge_idx{edge_idx}_face{adj_face}.ply"),
+                    shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                    np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+        for edge_idx in range(len(shape.recon_edge_points)):
+            export_point_cloud(os.path.join(
+                debug_face_save_path, f'edge{edge_idx}.ply'), shape.recon_edge_points[edge_idx].reshape(-1, 3))
+
+    if is_optimize_geom:
+        interpolation_face = []
+        for item in shape.interpolation_face:
+            interpolation_face.append(item.cpu().numpy())
+
+        if not is_ray:
+            shape.recon_edge_points = optimize(
+                interpolation_face, shape.recon_edge_points,
+                shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
+                v_islog=isdebug, v_max_iter=200)
+        else:
+            task = optimize_ray.remote(
+                interpolation_face, shape.recon_edge_points,
+                shape.edge_face_connectivity, shape.is_end_point, shape.pair1, v_max_iter=200)
+            shape.recon_edge_points = ray.get(task)
+
+        if isdebug:
+            export_edges(shape.recon_edge_points,
+                         os.path.join(debug_face_save_path, 'optimized_edge.obj'))
+
+    # Construct Brep from face_points, edge_points, face_edge_adj
+    solid = None
+    mesh = None
+    is_successful = False
+    for i in range(len(CONNECT_TOLERANCE)):
+        connected_tolerance = CONNECT_TOLERANCE[i]
+        # solid, faces_result = construct_brep(shape, connected_tolerance,
+        #                                      isdebug=isdebug, is_save_face=True,
+        #                                      folder_path=os.path.join(out_root, folder_name))
+        is_face_success_list, mesh, solid = construct_brep_yl(shape, connected_tolerance,
+                                                              isdebug=isdebug)
+
+        # Check
+        if mesh is None or solid is None:
+            continue
         if solid.ShapeType() == TopAbs_COMPOUND:
             continue
 
@@ -200,49 +196,15 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         if not analyzer.IsValid():
             continue
 
-        # Valid Solid
-        # Message.message.DefaultMessenger().RemovePrinters(STANDARD_TYPE(Message_PrinterOStream))
-        # filePrinter = Message_PrinterOStream("export.log", False)
-        # Message.message.DefaultMessenger().AddPrinter(filePrinter)
-        write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
-        write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'))
-        # Message.message.DefaultMessenger().RemovePrinter(filePrinter)
-        # try:
-        #     write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01, angular_deflection=0.5)
-        # except Exception as e:
-        #     write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'))
+        is_successful = True
         break
 
-    if solid is None:
-        print(f"solid is None {folder_name}")
-        return
-
-    if solid.ShapeType() == TopAbs_COMPOUND:
-        print(f"solid is TopAbs_COMPOUND {folder_name}")
-        # write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_compound.stl'))
-        # recon_face_dir = os.path.join(out_root, folder_name, 'recon_face')
-        # gen_mesh = trimesh.util.concatenate(
-        #         [trimesh.load(os.path.join(recon_face_dir, f)) for f in os.listdir(recon_face_dir) if f.endswith('.stl')])
-        # gen_mesh.export(os.path.join(out_root, folder_name, 'recon_brep_compound.stl'))
-        return
-
-    analyzer = BRepCheck_Analyzer(solid)
-    if not analyzer.IsValid():
-        print(f"solid is invalid {folder_name}")
-        # write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.stl'))
-        write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.step'))
-        # recon_face_dir = os.path.join(out_root, folder_name, 'recon_face')
-        # gen_mesh = trimesh.util.concatenate(
-        #         [trimesh.load(os.path.join(recon_face_dir, f)) for f in os.listdir(recon_face_dir) if f.endswith('.stl')])
-        # gen_mesh.export(os.path.join(out_root, folder_name, 'recon_brep_invalid.stl'))
-        return
-
-    # Valid Solid
-    write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
-    # try:
-    #     write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01, angular_deflection=0.5)
-    # except Exception as e:
-    #     write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'))
+    if solid is not None:
+        write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
+    if mesh is not None:
+        mesh.export(os.path.join(out_root, folder_name, 'recon_brep.ply'))
+    if is_successful:
+        open(os.path.join(out_root, folder_name, 'success.txt'), 'w').close()
 
 
 def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list,
@@ -316,18 +278,18 @@ if __name__ == '__main__':
             construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i], use_cuda=use_cuda)
     else:
         ray.init(
-                dashboard_host="0.0.0.0",
-                dashboard_port=8080,
-                # num_cpus=1,
-                # local_mode=True
+            dashboard_host="0.0.0.0",
+            dashboard_port=8080,
+            # num_cpus=1,
+            # local_mode=True
         )
-        batch_size = 1
+        batch_size = 50
         num_batches = len(all_folders) // batch_size + 1
         tasks = []
         for i in range(num_batches):
             tasks.append(construct_brep_from_datanpz_batch_ray.remote(
-                    v_data_root, v_out_root,
-                    all_folders[i * batch_size:(i + 1) * batch_size],
-                    use_cuda=use_cuda))
+                v_data_root, v_out_root,
+                all_folders[i * batch_size:(i + 1) * batch_size],
+                use_cuda=use_cuda))
         ray.get(tasks)
     print("Done")

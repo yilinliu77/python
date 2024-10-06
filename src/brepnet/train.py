@@ -121,11 +121,11 @@ class TrainAutoEncoder(pl.LightningModule):
 
         if batch_idx == 0:
             if "pred_face" in recon_data:
-                self.viz["face_points"] = data["face_points"].cpu().numpy()
-                self.viz["recon_faces"] = recon_data["pred_face"].cpu().numpy()
+                self.viz["face_points"] = data["face_points"].cpu().float().numpy()
+                self.viz["recon_faces"] = recon_data["pred_face"].cpu().float().numpy()
             if "pred_edge" in recon_data:
-                self.viz["edge_points"] = data["edge_points"].cpu().numpy()
-                self.viz["recon_edges"] = recon_data["pred_edge"].cpu().numpy()
+                self.viz["edge_points"] = data["edge_points"].cpu().float().numpy()
+                self.viz["recon_edges"] = recon_data["pred_edge"].cpu().float().numpy()
         if "gt_face_adj" in recon_data:
             self.pr_computer.update(recon_data["pred_face_adj"], recon_data["gt_face_adj"])
         return total_loss

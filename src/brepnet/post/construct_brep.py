@@ -95,7 +95,7 @@ def construct_brep_item(face_points, edge_points, edge_face_connectivity, ):
     write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'))
 
 
-def get_data(v_filename, v_is_cuda=True):
+def get_data(v_filename):
     # specify the key to get the face points, edge points and edge_face_connectivity in data.npz
     # data_npz = np.load(os.path.join(data_root, folder_name, 'data.npz'), allow_pickle=True)['arr_0'].item()
     data_npz = np.load(v_filename, allow_pickle=True)
@@ -110,7 +110,7 @@ def get_data(v_filename, v_is_cuda=True):
     else:
         raise ValueError(f"Unknown data npz format {v_filename}")
 
-    shape = Shape(face_points, edge_points, edge_face_connectivity, v_is_cuda)
+    shape = Shape(face_points, edge_points, edge_face_connectivity, False)
     return shape
 
 
@@ -132,7 +132,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     else:
         check_dir(os.path.join(out_root, folder_name))
 
-    shape = get_data(os.path.join(data_root, folder_name, 'data.npz'), v_is_cuda=use_cuda)
+    shape = get_data(os.path.join(data_root, folder_name, 'data.npz'))
     shape.remove_half_edges(2e-1)
     shape.check_openness()
     shape.build_fe()
@@ -243,8 +243,10 @@ def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Construct Brep From Data')
     parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test")
+    parser.add_argument('--list_file', type=str, default="")
     parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test_out")
     parser.add_argument('--is_cover', type=bool, default=False)
+    parser.add_argument('--num_cpus', type=int, default=12)
     parser.add_argument('--use_ray', action='store_true')
     parser.add_argument('--prefix', type=str, default="")
     parser.add_argument('--use_cuda', action='store_true')
@@ -252,7 +254,9 @@ if __name__ == '__main__':
     v_data_root = args.data_root
     v_out_root = args.out_root
     is_cover = args.is_cover
+    list_file = args.list_file
     is_use_ray = args.use_ray
+    num_cpus = args.num_cpus
     use_cuda = args.use_cuda
     safe_check_dir(v_out_root)
     if not os.path.exists(v_data_root):
@@ -261,6 +265,10 @@ if __name__ == '__main__':
     if args.prefix != "":
         test_construct_brep(v_data_root, v_out_root, args.prefix, use_cuda)
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
+    if list_file != "":
+        valid_prefies = [item.strip() for item in open(list_file).readlines()]
+        all_folders = list(set(all_folders) & set(valid_prefies))
+        all_folders.sort()
     # all_folders = os.listdir(r"E:\data\img2brep\.43\2024_09_22_21_57_44_0921_pure_out3_failed")
     # check_dir(v_out_root)
 
@@ -281,6 +289,7 @@ if __name__ == '__main__':
             dashboard_host="0.0.0.0",
             dashboard_port=8080,
             # num_cpus=1,
+            num_cpus=num_cpus,
             # local_mode=True
         )
         batch_size = 50

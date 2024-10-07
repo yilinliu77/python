@@ -4553,7 +4553,7 @@ class AutoEncoder_Test(nn.Module):
         self.face_conv1 = nn.Sequential(
             Rearrange('b h w n -> b n h w'),
             nn.Conv2d(in_channels, ds, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
+            nn.LeakyReLU(),
         )
         self.face_coords = nn.Sequential(
             res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
@@ -4567,7 +4567,7 @@ class AutoEncoder_Test(nn.Module):
         )  # b c 4 4
         self.face_coords_decoder = nn.Sequential(
             nn.Conv2d(dl, ds, kernel_size=1, stride=1, padding=0),
-            nn.ReLU(),
+            nn.LeakyReLU(),
             res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
             nn.ConvTranspose2d(ds, ds, kernel_size=2, stride=2),
             res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
@@ -4592,23 +4592,23 @@ class AutoEncoder_Test(nn.Module):
 
         self.edge_conv1 = nn.Sequential(
             Rearrange('b w n -> b n w'),
-            nn.Conv1d(in_channels, ds, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
+            nn.Conv1d(in_channels, ds // 2, kernel_size=3, stride=1, padding=1),
+            nn.LeakyReLU(),
         )
         self.edge_coords = nn.Sequential(
-            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds // 2, ds // 2, ks=3, st=1, pa=1, norm=norm),
             nn.MaxPool1d(kernel_size=2, stride=2),  # 8
-            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds // 2, ds // 2, ks=3, st=1, pa=1, norm=norm),
             nn.MaxPool1d(kernel_size=2, stride=2),  # 4
-            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds // 2, ds // 2, ks=3, st=1, pa=1, norm=norm),
             nn.MaxPool1d(kernel_size=2, stride=2),  # 2
-            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
-            nn.Conv1d(ds, ds, kernel_size=1, stride=1, padding=0),
+            res_block_1D(ds // 2, ds // 2, ks=3, st=1, pa=1, norm=norm),
+            nn.Conv1d(ds // 2, ds // 2, kernel_size=1, stride=1, padding=0),
             Rearrange("b n w -> b (n w)"),
         )  # b c 1
         self.edge_coords_decoder = nn.Sequential(
-            Rearrange("b (n w)-> b n w", n=ds, w=2),
-            nn.Conv1d(ds, ds, kernel_size=1, stride=1, padding=0),
+            Rearrange("b (n w)-> b n w", n=128, w=2),
+            nn.Conv1d(128, ds, kernel_size=1, stride=1, padding=0),
             res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
             nn.ConvTranspose1d(ds, ds, kernel_size=2, stride=2),
             res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
@@ -4621,7 +4621,7 @@ class AutoEncoder_Test(nn.Module):
         )
         self.edge_center_scale_decoder = nn.Sequential(
             Rearrange("b n-> b n 1"),
-            nn.Conv1d(ds * 2, ds, kernel_size=1, stride=1, padding=0),
+            nn.Conv1d(256, ds, kernel_size=1, stride=1, padding=0),
             res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
             res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
             res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
@@ -4638,7 +4638,7 @@ class AutoEncoder_Test(nn.Module):
         layer = nn.TransformerEncoderLayer(
             bd, 8, dim_feedforward=2048, dropout=0.1,
             batch_first=True, norm_first=True)
-        self.face_attn = nn.TransformerEncoder(layer, 8, nn.LayerNorm(1024))
+        self.face_attn = nn.TransformerEncoder(layer, 8, nn.LayerNorm(bd))
 
         bd = 1024  # bottlenek_dim
         self.edge_feature_proj = nn.Sequential(
@@ -4649,10 +4649,10 @@ class AutoEncoder_Test(nn.Module):
             res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
             res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
             res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
-            nn.Conv1d(bd, ds * 2, kernel_size=1, stride=1, padding=0),
+            nn.Conv1d(bd, 256, kernel_size=1, stride=1, padding=0),
             Rearrange("b n w -> b (n w)"),
         )
-        self.classifier = nn.Linear(ds * 2, 1)
+        self.classifier = nn.Linear(256, 1)
 
         self.times = {
             "Encoder": 0,
@@ -4704,6 +4704,7 @@ class AutoEncoder_Test(nn.Module):
         face_features = self.attn_in(face_features)
         fused_face_features = self.face_attn(face_features, v_data["attn_mask"])
         fused_face_features = self.attn_out(fused_face_features)
+        # fused_face_features = face_features
 
         # Global
         # timer = profile_time(self.times, "Fuse", timer)

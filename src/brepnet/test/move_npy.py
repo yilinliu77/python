@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from src.brepnet.test.viz_data_test import prefix
 
-v_root = Path("D:/brepnet/Test_AutoEncoder_context")
+v_root = Path("/mnt/d/v6/Test_AutoEncoder_0925")
 
 
 @ray.remote

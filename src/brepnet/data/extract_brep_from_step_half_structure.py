@@ -17,7 +17,9 @@ from OCC.Core.GeomAPI import GeomAPI_PointsToBSpline
 from OCC.Core.GeomAdaptor import GeomAdaptor_Curve
 from OCC.Core.GeomConvert import GeomConvert_CompCurveToBSplineCurve
 from OCC.Core.GeomLProp import GeomLProp_SLProps, GeomLProp_CLProps
-from OCC.Core.Graphic3d import Graphic3d_MaterialAspect, Graphic3d_NameOfMaterial_Silver
+from OCC.Core.Graphic3d import Graphic3d_MaterialAspect, Graphic3d_NameOfMaterial_Silver, Graphic3d_TypeOfShadingModel, \
+    Graphic3d_NameOfMaterial_Brass, Graphic3d_TypeOfReflection
+from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_FreeBounds
 from OCC.Core.ShapeExtend import ShapeExtend_WireData
 from OCC.Core.TColgp import TColgp_Array1OfPnt
@@ -33,25 +35,26 @@ from OCC.Core.GeomAbs import (GeomAbs_Circle, GeomAbs_Line, GeomAbs_BSplineCurve
 from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core._TopAbs import TopAbs_REVERSED
 from OCC.Core.gp import gp_Trsf, gp_Vec, gp_Pnt, gp_Dir
+from OCC.Display.OCCViewer import OffscreenRenderer, Viewer3d
 from OCC.Display.SimpleGui import init_display
 from OCC.Extend.DataExchange import read_step_file, write_step_file
 import traceback, sys
 
 from PIL import Image
-import open3d as o3d
 
 from shared.occ_utils import normalize_shape, get_triangulations, get_primitives, get_ordered_edges
 
 # from src.brepnet.post.utils import construct_solid
 
+debug_id = None
+# debug_id = "00000003"
+
 render_img = True
-img_root = Path(r"d://Datasets/test/imgs")
 write_debug_data = False
 check_post_processing = True
-# debug_id = None
-debug_id = "00000003"
-data_root = Path(r"d://Datasets/")
-output_root = Path(r"d://Datasets/test/")
+data_root = Path(r"/mnt/d/data_step")
+output_root = Path(r"/mnt/d/deepcad_train_v6/")
+img_root = Path(r"/mnt/d/imgs_v6")
 data_split = r"src/brepnet/data/deepcad_train_whole.txt"
 
 exception_files = [
@@ -73,6 +76,21 @@ def check_dir(v_path):
 def safe_check_dir(v_path):
     if not os.path.exists(v_path):
         os.makedirs(v_path)
+
+class MyOffscreenRenderer(Viewer3d):
+    """The offscreen renderer is inherited from Viewer3d.
+    The DisplayShape method is overridden to export to image
+    each time it is called.
+    """
+
+    def __init__(self, screen_size=(224, 224)):
+        super().__init__()
+        # create the renderer
+        self.Create()
+        self.SetSize(screen_size[0], screen_size[1])
+        self.SetModeShaded()
+        self.set_bg_gradient_color([255, 255, 255], [255, 255, 255])
+        self.capture_number = 0
 
 
 # @ray.remote(num_cpus=1)
@@ -100,8 +118,9 @@ def get_brep(v_root, output_root, v_folders):
             v, f = get_triangulations(shape, 0.001)
             mesh = trimesh.Trimesh(vertices=np.array(v), faces=np.array(f))
             mesh.export(output_root / v_folder / "mesh.ply")
+            import open3d as o3d
             mesh = o3d.geometry.TriangleMesh(vertices=o3d.utility.Vector3dVector(v), triangles=o3d.utility.Vector3iVector(f))
-            pc = mesh.sample_points_poisson_disk(4096)
+            pc = mesh.sample_points_poisson_disk(4096, use_triangle_normal=True)
             o3d.io.write_point_cloud(str(output_root / v_folder / "pc.ply"), pc)
 
             # Explore and list faces, edges, and vertices
@@ -282,19 +301,11 @@ def get_brep(v_root, output_root, v_folders):
                     gp_Pnt(2, 2, 0),
                     gp_Pnt(2, 2, 2),
                 ]
-                display, start_display, add_menu, add_function_to_menu = init_display(
-                    size=(256, 256),
-                    display_triedron=False,
-                    background_gradient_color1=[255, 255, 255],
-                    background_gradient_color2=[255, 255, 255],
-                )
-                display.camera.SetProjectionType(1)
-                display.View.TriedronErase()
-
-                ais_shape = AIS_Shape(shape)
-                ais_shape.SetMaterial(Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_Silver))
-                display.Context.Display(ais_shape, True)
-                start_display()
+                display = MyOffscreenRenderer()
+                # display.View.TriedronErase()
+                mat = Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_Silver)
+                mat.SetReflectionModeOff(Graphic3d_TypeOfReflection.Graphic3d_TOR_SPECULAR)
+                display.DisplayShape(shape, material=mat, update=True)
                 display.View.Dump(str(img_root / v_folder / f"view_.png"))
                 imgs = []
                 for i, view in enumerate(views):
@@ -389,8 +400,8 @@ if __name__ == '__main__':
         ray.init(
                 dashboard_host="0.0.0.0",
                 dashboard_port=15000,
-                num_cpus=1,
-                local_mode=True
+                # num_cpus=1,
+                # local_mode=True
         )
         batch_size = 100
         num_batches = len(total_ids) // batch_size + 1

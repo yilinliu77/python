@@ -8,11 +8,14 @@ import string
 from typing import List, Optional, Tuple, Union
 
 import numpy as np
+import ray
 import torch
 import torch.nn as nn
-from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeVertex
+from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeEdge, \
+    BRepBuilderAPI_MakeVertex
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Sewing, BRepBuilderAPI_MakeSolid
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
+from OCC.Core.BRepTools import breptools
 
 from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface, GeomAPI_PointsToBSpline
 from OCC.Core.GeomAbs import GeomAbs_C0, GeomAbs_C1, GeomAbs_C2, GeomAbs_Cylinder, GeomAbs_Plane
@@ -31,7 +34,7 @@ from OCC.Extend.TopologyUtils import TopologyExplorer, WireExplorer
 from OCC.Extend.DataExchange import write_stl_file, write_step_file
 
 # xdt
-from OCC.Core.TopoDS import topods
+from OCC.Core.TopoDS import topods, TopoDS_Shell, TopoDS_Builder
 from OCC.Core.TopExp import TopExp_Explorer, topexp
 from OCC.Core.TopAbs import TopAbs_EDGE, TopAbs_VERTEX
 from OCC.Core.BRep import BRep_Tool
@@ -50,7 +53,7 @@ from OCC.Core.BRepAlgo import BRepAlgo_Loop
 
 from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
 from random import randint
-from OCC.Core.TopoDS import TopoDS_Compound
+from OCC.Core.TopoDS import TopoDS_Compound, TopoDS_Shell
 from OCC.Core.BRep import BRep_Builder
 from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Section
 from OCC.Core.BRepCheck import BRepCheck_Analyzer
@@ -69,6 +72,10 @@ from OCC.Core.Geom import Geom_BSplineCurve
 
 from OCC.Core import Message
 from OCC.Core.Message import Message_PrinterOStream, Message_Alarm
+from chamferdist import ChamferDistance
+from torch.nn.utils.rnn import pad_sequence
+from tqdm import tqdm
+import trimesh
 
 # FIX_TOLERANCE = 1e-6
 # CONNECT_TOLERANCE = 1e-3
@@ -109,6 +116,328 @@ CONTINUITY = GeomAbs_C1
 # weight_CurveLength, weight_Curvature, weight_Torsion = 0.4, 0.4, 0.2
 # IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, True
 # CONTINUITY = GeomAbs_C2
+
+def interpolation_face_points(face, density=None, is_use_cuda=False, density_scale=10):
+    if type(face) is np.ndarray:
+        if is_use_cuda:
+            face = torch.from_numpy(face).cuda()
+        else:
+            face = torch.from_numpy(face)
+    if density is None:
+        res = face.shape[0]
+        density = (torch.linalg.norm(face[0, 0] - face[res // 2, res // 2], dim=-1) * density_scale).to(torch.long)
+        density = torch.clamp(density, min=1, max=200) * res
+
+    x = torch.linspace(-1., 1., density).to(face.device)
+    y = torch.linspace(-1, 1, density).to(face.device)
+    x, y = torch.meshgrid(x, y, indexing='ij')
+    coords = torch.stack([x, y], dim=-1).reshape(1, -1, 1, 2)
+    face = torch.nn.functional.grid_sample(face[None].permute(0, 3, 1, 2), coords, align_corners=True)[0, :, :,
+           0].permute(1, 0)
+    return face
+
+
+class Shape:
+    def __init__(self, v_face_point, v_edge_points, v_connectivity, is_use_cuda=True):
+        self.recon_face_points = v_face_point
+        self.recon_edge_points = v_edge_points
+        self.edge_face_connectivity = v_connectivity
+
+        # Build denser points
+        self.interpolation_face = []
+        for face in self.recon_face_points:
+            self.interpolation_face.append(interpolation_face_points(face, is_use_cuda=is_use_cuda))
+
+        self.chamferdist = ChamferDistance()
+        self.device = torch.device('cuda') if is_use_cuda else torch.device('cpu')
+
+        pass
+
+    def remove_half_edges(self, v_threshold=1e-1):
+        edge_face_connectivity = self.edge_face_connectivity
+        cache_dict = {}
+        for conec in edge_face_connectivity:
+            if (conec[1], conec[2]) in cache_dict:
+                cache_dict[(conec[1], conec[2])].append(conec[0])
+            elif (conec[2], conec[1]) in cache_dict:
+                cache_dict[(conec[2], conec[1])].append(conec[0])
+            else:
+                cache_dict[(conec[1], conec[2])] = [conec[0]]
+
+        edges = []
+        edge_face_connectivity = []
+
+        # Duplicate or delete edges if it appears once
+        new_dict = {}
+        remove_edge_idx = []
+        for key, value in cache_dict.items():
+            # Check validity
+            face_id1 = key[0]
+            face_id2 = key[1]
+
+            edge1 = torch.from_numpy(self.recon_edge_points[value[0]]).to(self.device)
+            distance11 = torch.sqrt(self.chamferdist(
+                edge1[None],
+                self.interpolation_face[face_id1][None]))
+            distance12 = torch.sqrt(self.chamferdist(
+                edge1[None],
+                self.interpolation_face[face_id2][None]))
+
+            distance1 = (distance11 + distance12) / 2
+
+            if len(value) == 2:
+                edge2 = torch.from_numpy(self.recon_edge_points[value[1]]).to(self.device)
+
+                distance21 = torch.sqrt(self.chamferdist(
+                    edge2[None],
+                    self.interpolation_face[face_id1][None]))
+                distance22 = torch.sqrt(self.chamferdist(
+                    edge2[None],
+                    self.interpolation_face[face_id2][None]))
+
+                distance2 = (distance21 + distance22) / 2
+                if distance1 > v_threshold and distance2 > v_threshold:
+                    for item in value:
+                        remove_edge_idx.append(item)
+                    continue
+                elif distance1 < v_threshold:
+                    edges.append(self.recon_edge_points[value[0]])
+                    edge_face_connectivity.append([len(edges) - 1, face_id1, face_id2])
+                else:
+                    edges.append(self.recon_edge_points[value[1]])
+                    edge_face_connectivity.append([len(edges) - 1, face_id1, face_id2])
+
+            elif len(value) == 1:
+                if distance1 > v_threshold:
+                    remove_edge_idx.append(value[0])
+                    continue
+                edges.append(self.recon_edge_points[value[0]])
+                edge_face_connectivity.append([len(edges) - 1, face_id1, face_id2])
+
+        self.recon_edge_points = np.stack(edges, axis=0)
+        self.edge_face_connectivity = np.stack(edge_face_connectivity, axis=0)
+        pass
+
+    def check_openness(self, v_threshold=0.75):
+        recon_edge = self.recon_edge_points
+        dirs = (recon_edge[:, [0, -1]] - np.mean(recon_edge, axis=1, keepdims=True))
+        cos_dir = ((dirs[:, 0] * dirs[:, 1]).sum(axis=1) /
+                   np.linalg.norm(dirs[:, 0], axis=1) / np.linalg.norm(dirs[:, 1], axis=1))
+        self.openness = cos_dir > v_threshold
+
+        delta = recon_edge[:, [0, -1]].mean(axis=1)
+        recon_edge[self.openness, 0] = delta[self.openness]
+        recon_edge[self.openness, -1] = delta[self.openness]
+
+    def build_fe(self):
+        # face_edge_adj store the edge idx list of each face
+        self.face_edge_adj = [[] for _ in range(self.recon_face_points.shape[0])]
+        for edge_face1_face2 in self.edge_face_connectivity:
+            edge, face1, face2 = edge_face1_face2
+            if face1 == face2:
+                raise ValueError("Face1 and Face2 should be different")
+            assert edge not in self.face_edge_adj[face1]
+            self.face_edge_adj[face1].append(edge)
+            self.face_edge_adj[face2].append(edge)
+
+    def build_vertices(self, v_threshold=1e-1):
+        num_faces = self.recon_face_points.shape[0]
+        edges = self.recon_edge_points
+
+        inv_edge_face_connectivity = {}
+        for edge_idx, face_idx1, face_idx2 in self.edge_face_connectivity:
+            inv_edge_face_connectivity[(face_idx1, face_idx2)] = edge_idx
+            inv_edge_face_connectivity[(face_idx2, face_idx1)] = edge_idx
+
+        pair1 = []
+        is_end_point = []
+        face_adj = np.zeros((num_faces, num_faces), dtype=bool)
+        face_adj[self.edge_face_connectivity[:, 1], self.edge_face_connectivity[:, 2]] = True
+        # Set the diagonal to False
+        np.fill_diagonal(face_adj, False)
+        face_adj = np.logical_or(face_adj, face_adj.T)
+
+        # Find the 3-node ring of the face
+        def dis(a, b):
+            return np.linalg.norm(a - b)
+
+        for face1 in range(num_faces):
+            for face2 in range(num_faces):
+                if not face_adj[face1, face2]:
+                    continue
+                e12 = inv_edge_face_connectivity[(face1, face2)]
+                for face3 in range(num_faces):
+                    if not face_adj[face1, face3] or not face_adj[face2, face3]:
+                        continue
+                    e13 = inv_edge_face_connectivity[(face1, face3)]
+                    e23 = inv_edge_face_connectivity[(face2, face3)]
+
+                    def closest_endpoints(edge1, edge2):
+                        dis1 = dis(edges[edge1, 0], edges[edge2, 0])
+                        dis2 = dis(edges[edge1, 0], edges[edge2, -1])
+                        dis3 = dis(edges[edge1, -1], edges[edge2, 0])
+                        dis4 = dis(edges[edge1, -1], edges[edge2, -1])
+                        dises = [dis1, dis2, dis3, dis4]
+                        return np.argmin(dises), np.min(dises)
+
+                    i12 = closest_endpoints(e12, e13)
+                    i23 = closest_endpoints(e13, e23)
+
+                    # Start point of e12 and start point of e13 and start point of e23
+                    if i12[0] == 0 and i23[0] == 0:
+                        pair1.append([e12, e13, e23])
+                        is_end_point.append([False, False, False])
+                    # Start point of e12 and start point of e13 and end point of e23
+                    elif i12[0] == 0 and i23[0] == 1:
+                        pair1.append([e12, e13, e23])
+                        is_end_point.append([False, False, True])
+                    # Start point of e12 and end point of e13 and start point of e23
+                    elif i12[0] == 1 and i23[0] == 2:
+                        pair1.append([e12, e13, e23])
+                        is_end_point.append([False, True, False])
+                    # Start point of e12 and end point of e13 and end point of e23
+                    elif i12[0] == 1 and i23[0] == 3:
+                        pair1.append([e12, e13, e23])
+                        is_end_point.append([False, True, True])
+                    # End point of e12 and start point of e13 and start point of e23
+                    elif i12[0] == 2 and i23[0] == 0:
+                        pair1.append([e12, e13, e23])
+                        is_end_point.append([True, False, False])
+                    # End point of e12 and start point of e13 and end point of e23
+                    elif i12[0] == 2 and i23[0] == 1:
+                        pair1.append([e12, e13, e23])
+                        is_end_point.append([True, False, True])
+                    # End point of e12 and end point of e13 and start point of e23
+                    elif i12[0] == 3 and i23[0] == 2:
+                        pair1.append([e12, e13, e23])
+                        is_end_point.append([True, True, False])
+                    # End point of e12 and end point of e13 and end point of e23
+                    elif i12[0] == 3 and i23[0] == 3:
+                        pair1.append([e12, e13, e23])
+                        is_end_point.append([True, True, True])
+                    else:
+                        pass
+
+        if len(pair1) == 0:
+            self.pair1 = None
+            self.is_end_point = None
+            return
+        self.pair1 = np.asarray(pair1).astype(np.int64)
+        self.is_end_point = np.asarray(is_end_point).astype(bool)
+        idx = np.zeros_like(self.is_end_point).astype(np.int64)
+        idx[self.is_end_point] = 15
+        vertex_clusters = edges[self.pair1, idx]
+
+        mean_dis = np.linalg.norm(vertex_clusters[:, 0] - vertex_clusters[:, 1], axis=1) + \
+                   np.linalg.norm(vertex_clusters[:, 1] - vertex_clusters[:, 2], axis=1) + \
+                   np.linalg.norm(vertex_clusters[:, 2] - vertex_clusters[:, 0], axis=1)
+        mean_dis /= 3
+
+        flag = np.ones_like(self.is_end_point[:, 0])
+        flag[mean_dis > v_threshold] = 0
+        self.pair1 = self.pair1[flag]
+        self.is_end_point = self.is_end_point[flag]
+        pass
+
+    def build_geom(self):
+        self.recon_geom_faces = [create_surface(points) for points in self.recon_face_points]
+        self.recon_topo_faces = [BRepBuilderAPI_MakeFace(geom_face, 1e-3).Face() for geom_face in self.recon_geom_faces]
+        self.recon_curves = [create_edge(points) for points in self.recon_edge_points]
+        self.recon_edge = [BRepBuilderAPI_MakeEdge(curve).Edge() for curve in self.recon_curves]
+
+
+def apply_transform_batch(tensor, transform):
+    src_shape = tensor.shape
+    if len(src_shape) > 3:
+        tensor = tensor.reshape(tensor.shape[0], -1, 3)
+    scales = transform[:, 0].view(-1, 1, 1)
+    offsets = transform[:, 1:].view(-1, 1, 3)
+    centers = tensor.mean(dim=1, keepdim=True)
+    scaled_tensor = (tensor - centers) * scales + centers + offsets
+    if len(src_shape) > 3:
+        scaled_tensor = scaled_tensor.reshape(*src_shape)
+    return scaled_tensor
+
+
+def optimize(
+        v_interpolation_face, recon_edge_points,
+        edge_face_connectivity, is_end_point, pair1,
+        v_islog=True, v_max_iter=1000):
+    device = torch.device('cuda')
+    interpolation_face = []
+    for item in v_interpolation_face:
+        interpolation_face.append(torch.from_numpy(item.copy()).to(device))
+    padded_points = pad_sequence(interpolation_face, batch_first=True, padding_value=10)
+    edge_points = torch.from_numpy(recon_edge_points.copy()).to(device)
+    edge_face_connectivity = torch.from_numpy(edge_face_connectivity.copy()).to(device)
+    if pair1 is not None:
+        pair1 = torch.from_numpy(pair1.copy()).to(device)
+    idx = np.zeros_like(is_end_point).astype(np.int64)
+    idx[is_end_point] = 15
+    idx = torch.from_numpy(idx).to(device)
+
+    edge_st = nn.Parameter(torch.FloatTensor([1, 0, 0, 0]).unsqueeze(0).repeat(edge_points.shape[0], 1).to(device))
+    edge_st.requires_grad = True
+    optimizer = torch.optim.Adam([edge_st], lr=1e-2)
+
+    prev_loss = float('inf')
+    if v_islog:
+        pbar = tqdm(total=v_max_iter, desc='Geom Optimization', unit='iter')
+    chamferdist = ChamferDistance()
+    for iter in range(v_max_iter):
+        transformed_edges = apply_transform_batch(edge_points, edge_st)
+        dis_matrix1 = chamferdist(
+            transformed_edges[edge_face_connectivity[:, 0]],
+            padded_points[edge_face_connectivity[:, 1]],
+            batch_reduction=None, point_reduction="mean")
+        dis_matrix2 = chamferdist(
+            transformed_edges[edge_face_connectivity[:, 0]],
+            padded_points[edge_face_connectivity[:, 2]],
+            batch_reduction=None, point_reduction="mean")
+        adj_distance_loss = ((dis_matrix1 + dis_matrix2) / 2).sum()
+
+        # For loop version
+        # for edge_idx, face_idx1, face_idx2 in self.edge_face_connectivity:
+        #     edge_to_face1 = self.dist(self.transformed_recon_edge[edge_idx], self.face_points_candidates[face_idx1])
+        #     edge_to_face2 = self.dist(self.transformed_recon_edge[edge_idx], self.face_points_candidates[face_idx2])
+        #
+        #     adj_distance_loss_c = (edge_to_face1 + edge_to_face2) / 2
+        #     adj_distance_loss += adj_distance_loss_c
+
+        if pair1 is None:
+            endpoints_loss = torch.zeros_like(adj_distance_loss)
+        else:
+            endpoints = transformed_edges[pair1, idx]
+            endpoints_loss = torch.linalg.norm(endpoints[:, 0] - endpoints[:, 1], dim=-1) + \
+                             torch.linalg.norm(endpoints[:, 1] - endpoints[:, 2], dim=-1) + \
+                             torch.linalg.norm(endpoints[:, 0] - endpoints[:, 2], dim=-1)
+            endpoints_loss = (endpoints_loss / 3).mean()
+        loss = adj_distance_loss + endpoints_loss
+
+        optimizer.zero_grad()
+        if abs(prev_loss - loss.item()) < 1e-5 and False:
+            if v_islog:
+                print(f'Early stop at iter {iter}')
+            break
+        loss.backward()
+        optimizer.step()
+        prev_loss = loss.item()
+        if v_islog:
+            pbar.set_postfix(
+                loss=loss.item(), adj=adj_distance_loss.cpu().item(), end=endpoints_loss.cpu().item())
+            pbar.update(1)
+    if v_islog:
+        print('Optimization finished!')
+        pbar.close()
+
+    transformed_edges = apply_transform_batch(edge_points, edge_st).detach().cpu().numpy()
+    return transformed_edges
+
+@ray.remote(num_gpus=0.05)
+def optimize_ray(interpolation_face, recon_edge_points,
+        edge_face_connectivity, is_end_point, pair1, v_max_iter=1000):
+    return optimize(interpolation_face, recon_edge_points,
+        edge_face_connectivity, is_end_point, pair1, v_islog=False, v_max_iter=v_max_iter)
 
 
 def get_edge_vertexes(edge):
@@ -217,7 +546,8 @@ def create_surface(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
         deg_min, deg_max = 3, 8
         if use_variational_smoothing:
             # weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
-            return GeomAPI_PointsToBSplineSurface(uv_points_array, weight_CurveLength, weight_Curvature, weight_Torsion, deg_max,
+            return GeomAPI_PointsToBSplineSurface(uv_points_array, weight_CurveLength, weight_Curvature, weight_Torsion,
+                                                  deg_max,
                                                   CONTINUITY, precision).Surface()
         else:
             return GeomAPI_PointsToBSplineSurface(uv_points_array, deg_min, deg_max, CONTINUITY, precision).Surface()
@@ -285,7 +615,8 @@ def create_edge(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
         deg_min, deg_max = 0, 8
         if use_variational_smoothing:
             # weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
-            return GeomAPI_PointsToBSpline(u_points_array, weight_CurveLength, weight_Curvature, weight_Torsion, deg_max,
+            return GeomAPI_PointsToBSpline(u_points_array, weight_CurveLength, weight_Curvature, weight_Torsion,
+                                           deg_max,
                                            CONTINUITY, precision).Curve()
         else:
             return GeomAPI_PointsToBSpline(u_points_array, deg_min, deg_max, CONTINUITY, precision).Curve()
@@ -470,7 +801,8 @@ def try_create_trimmed_face(geom_face, topo_face, face_edges, connected_toleranc
     if trimmed_face1 is None:
         return wire_list1, trimmed_face1, False
 
-    wire_list2, trimmed_face2, is_face_valid2 = create_trimmed_face2(geom_face, topo_face, face_edges, connected_tolerance)
+    wire_list2, trimmed_face2, is_face_valid2 = create_trimmed_face2(geom_face, topo_face, face_edges,
+                                                                     connected_tolerance)
     if is_face_valid2:
         return wire_list2, trimmed_face2, True
 
@@ -478,14 +810,17 @@ def try_create_trimmed_face(geom_face, topo_face, face_edges, connected_toleranc
 
 
 # Fit parametric surfaces / curves and trim into B-rep
-def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_path,
+def construct_brep(v_shape, connected_tolerance, folder_path,
                    isdebug=False, is_save_face=True, debug_face_idx=[]):
     if isdebug:
-        print(f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
-    recon_geom_faces = [create_surface(points) for points in surf_wcs]
-    recon_topo_faces = [BRepBuilderAPI_MakeFace(geom_face, 1e-3).Face() for geom_face in recon_geom_faces]
-    recon_curves = [create_edge(points) for points in edge_wcs]
-    recon_edge = [BRepBuilderAPI_MakeEdge(curve).Edge() for curve in recon_curves]
+        print(
+            f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
+    v_shape.build_geom()
+    recon_geom_faces = v_shape.recon_geom_faces
+    recon_topo_faces = v_shape.recon_topo_faces
+    recon_curves = v_shape.recon_curves
+    recon_edge = v_shape.recon_edge
+    FaceEdgeAdj = v_shape.face_edge_adj
 
     # if isdebug:
     #     viz_shapes(recon_geom_faces, transparency=0.5)
@@ -497,7 +832,8 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_
     #         viz_shapes([topo_face_from_geom], transparency=0.5)
 
     if isdebug:
-        print(f"{Colors.GREEN}################################ 2. Trim Face ######################################{Colors.RESET}")
+        print(
+            f"{Colors.GREEN}################################ 2. Trim Face ######################################{Colors.RESET}")
     # Cut surface by wire
     is_face_success_list = []
     trimmed_faces = []
@@ -511,7 +847,8 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_
             is_viz_wire, is_viz_face, is_viz_shell = False, False, False
 
         # 3. Construct face using geom surface and wires
-        wire_list, trimmed_face, is_valid = try_create_trimmed_face(geom_face, topo_face, face_edges, connected_tolerance)
+        wire_list, trimmed_face, is_valid = try_create_trimmed_face(geom_face, topo_face, face_edges,
+                                                                    connected_tolerance)
 
         is_face_success_list.append(is_valid)
 
@@ -531,7 +868,6 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_
             display.FitAll()
             start_display()
             # viz_shapes(wire_list)
-
         if is_viz_face:
             shapes = [trimmed_face]
             display, start_display, add_menu, add_function_to_menu = init_display()
@@ -557,8 +893,10 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_
         if is_save_face:
             os.makedirs(os.path.join(folder_path, 'recon_face'), exist_ok=True)
             try:
-                write_step_file(trimmed_face, os.path.join(folder_path, 'recon_face', f'{idx}_{1 if is_valid else 0}.step'))
-                write_stl_file(trimmed_face, os.path.join(folder_path, 'recon_face', f'{idx}_{1 if is_valid else 0}.stl'))
+                write_step_file(trimmed_face,
+                                os.path.join(folder_path, 'recon_face', f'{idx}_{1 if is_valid else 0}.step'))
+                write_stl_file(trimmed_face,
+                               os.path.join(folder_path, 'recon_face', f'{idx}_{1 if is_valid else 0}.stl'))
             except:
                 print(f"Error writing step or stl file for face {idx}")
 
@@ -566,7 +904,8 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_
             trimmed_faces.append(trimmed_face)
 
     if isdebug:
-        print(f"{Colors.GREEN}################################ 3. Sew solid ################################{Colors.RESET}")
+        print(
+            f"{Colors.GREEN}################################ 3. Sew solid ################################{Colors.RESET}")
     if len(trimmed_faces) < 2:
         return None, is_face_success_list
 
@@ -613,8 +952,128 @@ def construct_brep(surf_wcs, edge_wcs, FaceEdgeAdj, connected_tolerance, folder_
         fixed_solid = solid
 
     if isdebug:
-        print(f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
+        print(
+            f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
     return fixed_solid, is_face_success_list
+
+
+def get_separated_surface(trimmed_faces, v_precision1=1e-2, v_precision2=1e-1):
+    points = []
+    faces = []
+    num_points = 0
+    for face in trimmed_faces:
+        loc = TopLoc_Location()
+        mesh = BRepMesh_IncrementalMesh(face, v_precision1, False, v_precision2)
+        triangulation = BRep_Tool.Triangulation(face, loc)
+        if triangulation is None:
+            continue
+
+        v_points = np.zeros((triangulation.NbNodes(), 3), dtype=np.float32)
+        f_faces = np.zeros((triangulation.NbTriangles(), 3), dtype=np.int64)
+        for i in range(0, triangulation.NbNodes()):
+            pnt = triangulation.Node(i + 1)
+            v_points[i, 0] = pnt.X()
+            v_points[i, 1] = pnt.Y()
+            v_points[i, 2] = pnt.Z()
+        for i in range(0, triangulation.NbTriangles()):
+            tri = triangulation.Triangles().Value(i + 1)
+            f_faces[i, 0] = tri.Get()[0] + num_points - 1
+            f_faces[i, 1] = tri.Get()[1] + num_points - 1
+            f_faces[i, 2] = tri.Get()[2] + num_points - 1
+        points.append(v_points)
+        faces.append(f_faces)
+        num_points += v_points.shape[0]
+    if len(points) == 0:
+        return np.zeros((0, 3)), np.zeros((0, 3))
+    points = np.concatenate(points, axis=0, dtype=np.float32)
+    faces = np.concatenate(faces, axis=0, dtype=np.int64)
+    return points, faces
+
+
+def get_solid(trimmed_faces):
+    try:
+        sewing = BRepBuilderAPI_Sewing()
+        sewing.SetTolerance(SEWING_TOLERANCE)
+        for face in trimmed_faces:
+            sewing.Add(face)
+        sewing.Perform()
+        sewn_shell = sewing.SewedShape()
+
+        fix_shell = ShapeFix_Shell(sewn_shell)
+        fix_shell.SetPrecision(FIX_PRECISION)
+        fix_shell.SetMaxTolerance(FIX_TOLERANCE)
+        fix_shell.SetFixFaceMode(True)
+        fix_shell.SetFixOrientationMode(True)
+        fix_shell.Perform()
+        sewn_shell = fix_shell.Shell()
+
+        maker = BRepBuilderAPI_MakeSolid()
+        maker.Add(sewn_shell)
+        maker.Build()
+        solid = maker.Solid()
+
+        fix_solid = ShapeFix_Solid(solid)
+        fix_solid.SetPrecision(FIX_TOLERANCE)
+        fix_solid.SetMaxTolerance(FIX_TOLERANCE)
+        fix_solid.SetFixShellMode(True)
+        fix_solid.SetFixShellOrientationMode(True)
+        fix_solid.SetCreateOpenSolidMode(False)
+        fix_solid.Perform()
+        fixed_solid = fix_solid.Solid()
+        return fixed_solid
+
+    except:
+        return None
+
+
+def construct_brep_yl(v_shape, connected_tolerance, isdebug=False):
+    debug_idx = []
+    if isdebug:
+        print(
+            f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
+    v_shape.build_geom()
+    recon_geom_faces = v_shape.recon_geom_faces
+    recon_topo_faces = v_shape.recon_topo_faces
+    recon_curves = v_shape.recon_curves
+    recon_edge = v_shape.recon_edge
+    FaceEdgeAdj = v_shape.face_edge_adj
+
+    if False:
+        viz_shapes(recon_geom_faces, transparency=0.5)
+
+    if isdebug:
+        print(
+            f"{Colors.GREEN}################################ 2. Trim Face ######################################{Colors.RESET}")
+    # Cut surface by wire
+    is_face_success_list = []
+    trimmed_faces = []
+    for idx, (geom_face, topo_face, face_edge_idx) in enumerate(zip(recon_geom_faces, recon_topo_faces, FaceEdgeAdj)):
+        face_edges = [recon_edge[edge_idx] for edge_idx in face_edge_idx]
+        wire_list, trimmed_face, is_valid = try_create_trimmed_face(geom_face, topo_face, face_edges,
+                                                                    connected_tolerance)
+        is_valid = False if trimmed_face is None else is_valid
+
+        if idx in debug_idx:
+            viz_shapes([geom_face, wire_list])
+
+        if isdebug and not is_valid:
+            print(f"Face {idx} is not valid{Colors.RESET}")
+
+        is_face_success_list.append(is_valid)
+        if is_valid:
+            trimmed_faces.append(trimmed_face)
+
+    result = [is_face_success_list, None, None]
+    if len(trimmed_faces) > 2:
+        v, f = get_separated_surface(trimmed_faces)
+        separated_surface = trimesh.Trimesh(vertices=v, faces=f)
+        result[1] = separated_surface
+        result[2] = get_solid(trimmed_faces)
+
+    if isdebug:
+        print(
+            f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
+    return result
 
 
 def triangulate_shape(v_shape):

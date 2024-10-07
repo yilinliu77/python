@@ -6,7 +6,8 @@ dataset:
   val_dataset: D:/img2brep/deepcad_whole_test_v5
   test_dataset: /mnt/d/img2brep/0825_test
 
-  scale_factor: 1000
+  scale_factor: 1
+  condition:
 
 trainer:
   gpu: 1
@@ -14,8 +15,8 @@ trainer:
   batch_size: 32
   learning_rate: 1e-4
   check_val_every_n_epoch: 1
-  accelerator: "16-mixed"
-#  accelerator: "32-true"
+  # accelerator: "16-mixed"
+  accelerator: "32-true"
 
   # Evaluation
   evaluate: false
@@ -30,7 +31,8 @@ trainer:
 model:
   name: Diffusion_base
   train_decoder: false
-  stored_z: false
+  stored_z: True
+  condition:
 
   autoencoder: AutoEncoder_0925
   dim_latent: 8

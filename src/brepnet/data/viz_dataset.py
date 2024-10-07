@@ -13,6 +13,8 @@ from OCC.Extend.DataExchange import read_step_file
 
 from shared.occ_utils import normalize_shape
 
+import gurobipy as gp
+
 radius = 4
 views = [
         gp_Pnt(-2, -2, -2),
@@ -44,6 +46,7 @@ views = [
     ]
 
 if __name__ == '__main__':
+    gp.Model()
     shape = read_step_file(r"D:/Datasets/00000003/00000003_1ffb81a71e5b402e966b9341_step_002.step", verbosity=False)
 
     shape = normalize_shape(shape, 0.9)

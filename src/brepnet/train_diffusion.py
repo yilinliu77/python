@@ -7,6 +7,7 @@ import numpy as np
 import open3d as o3d
 
 from src.brepnet.dataset import Diffusion_dataset
+from src.brepnet.post.construct_brep import construct_brep_item
 
 sys.path.append('../../../')
 import os.path
@@ -51,14 +52,6 @@ class TrainDiffusion(pl.LightningModule):
         model_mod = getattr(model_mod, self.hydra_conf["model"]["name"])
         self.model = model_mod(self.hydra_conf["model"])
 
-        # model_mod = importlib.import_module("src.brepnet.model")
-        # model_mod = getattr(model_mod, self.hydra_conf["model"]["autoencoder"])
-        # self.autoencoder = model_mod(hparams["model"])
-        # weights = torch.load(self.hydra_conf["model"]["autoencoder_weights"])["state_dict"]
-        # weights = {k.replace("model.", ""): v for k, v in weights.items()}
-        # self.autoencoder.load_state_dict(weights)
-        # for param in self.autoencoder.parameters():
-        #     param.requires_grad = False
         self.viz = {}
 
     def train_dataloader(self):
@@ -102,8 +95,6 @@ class TrainDiffusion(pl.LightningModule):
                      sync_dist=True, batch_size=self.batch_size)
         self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
-        if torch.isnan(total_loss).any():
-            print("NAN Loss")
         return total_loss
 
     def validation_step(self, batch, batch_idx):
@@ -120,7 +111,7 @@ class TrainDiffusion(pl.LightningModule):
                  sync_dist=True, batch_size=self.batch_size)
 
         if batch_idx == 0 and self.global_rank == 0:
-            result = self.model.inference(1, self.device)[0]
+            result = self.model.inference(1, self.device, data)[0]
             self.viz = {}
             self.viz["recon_faces"] = result["pred_face"]
 
@@ -133,7 +124,7 @@ class TrainDiffusion(pl.LightningModule):
             return
 
         if "recon_faces" in self.viz:
-            recon_faces = self.viz["recon_faces"].cpu().numpy()
+            recon_faces = self.viz["recon_faces"].cpu().to(torch.float32).numpy()
             local_face = recon_faces
             trimesh.PointCloud(local_face.reshape(-1,3)).export(str(self.log_root / "{}_faces.ply".format(self.current_epoch)))
         self.viz={}
@@ -142,7 +133,7 @@ class TrainDiffusion(pl.LightningModule):
     def test_dataloader(self):
         self.test_dataset = self.dataset_mod("testing", self.hydra_conf["dataset"], )
 
-        return DataLoader(self.test_dataset, batch_size=1,
+        return DataLoader(self.test_dataset, batch_size=self.batch_size,
                           collate_fn=self.dataset_mod.collate_fn,
                           num_workers=self.hydra_conf["trainer"]["num_worker"],
                           pin_memory=True,
@@ -161,47 +152,31 @@ class TrainDiffusion(pl.LightningModule):
         return data
 
     def test_step(self, batch, batch_idx):
-        inference_result = self.inference()
-
         data = batch
-        loss, recon_data = self.model(data, v_test=True)
+        loss = self.model(data, v_test=True)
         total_loss = loss["total_loss"]
-        for key in loss:
-            if key == "total_loss":
-                continue
-            self.log(f"Test_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                     sync_dist=True, batch_size=self.batch_size)
         self.log("Test_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
+        
+        results = self.model.inference(self.batch_size, self.device)
+        log_root = Path(self.hydra_conf["trainer"]["test_output_dir"])
+        for idx in range(self.batch_size):
+            global_id = batch_idx * self.batch_size + idx
+            item_root = (log_root / "{:08d}".format(global_id))
+            item_root.mkdir(parents=True, exist_ok=True)
+            recon_data = results[idx]
 
-        self.pr_computer.update(recon_data["pred"], recon_data["gt"])
-        if True:
-            os.makedirs(self.log_root / "test", exist_ok=True)
-            recon_faces = recon_data["recon_faces"].cpu().numpy()
-            recon_edges = recon_data["recon_edges"].cpu().numpy()
-            np.savez_compressed(str(self.log_root / "test" / f"{data['v_prefix'][0]}.npz"), 
-                                recon_faces=recon_faces,
-                                recon_edges=recon_edges,
-                                pred=recon_data["pred"].cpu().numpy(),
-                                gt=recon_data["gt"].cpu().numpy(),
-                                face_features=recon_data["face_features"],
-                                edge_loss=recon_data["edge_loss"],
-                                face_loss=recon_data["face_loss"],
-                                )
-            np.savez_compressed(str(self.log_root / "test" / f"{data['v_prefix'][0]}_feature.npz"), 
-                                face_features=recon_data["face_features"],
+            np.savez_compressed(str(item_root / f"data.npz"),
+                                pred_face_adj_prob=recon_data["pred_face_adj_prob"].cpu().numpy(),
+                                pred_face_adj=recon_data["pred_face_adj"].cpu().numpy(),
+                                pred_face=recon_data["pred_face"].cpu().numpy(),
+                                pred_edge=recon_data["pred_edge"].cpu().numpy(),
+                                pred_edge_face_connectivity=recon_data["pred_edge_face_connectivity"].cpu().numpy(),
                                 )
 
     def on_test_epoch_end(self):
-        self.log_dict(self.pr_computer.compute(), prog_bar=False, logger=True, on_step=False, on_epoch=True,
-                      sync_dist=True)
-        metrics = self.pr_computer.compute()
-        for key in metrics:
-            print("{:3}: {:.3f}".format(key, metrics[key].cpu().item()))
-
         for loss in self.trainer.callback_metrics:
             print("{}: {:.3f}".format(loss, self.trainer.callback_metrics[loss].cpu().item()))
-        self.pr_computer.reset()
         return
 
 @hydra.main(config_name="train_diffusion.yaml", config_path="../../configs/brepnet/", version_base="1.1")
@@ -242,18 +217,21 @@ def main(v_cfg: DictConfig):
         gradient_clip_val=0.5,
     )
 
-    if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
-        print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
-        model = TrainDiffusion.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint)
-        model.hydra_conf = v_cfg
-
-        # weights = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
-        # weights = {k.replace("model.", ""): v for k, v in weights.items()}
-        # model.model.load_state_dict(weights)
-    # model = torch.compile(model)
     if v_cfg["trainer"].evaluate:
+        print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
+        weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, weights_only=False)["state_dict"]
+        # weights = {k.replace("model.", ""): v for k, v in weights.items()}
+        model.load_state_dict(weights)
         trainer.test(model)
+
     else:
+        if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
+            print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
+            # model = TrainDiffusion.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint)
+            # model.hydra_conf = v_cfg
+            weights = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
+            # weights = {k.replace("model.", ""): v for k, v in weights.items()}
+            model.load_state_dict(weights)
         trainer.fit(model)
 
 

@@ -78,7 +78,7 @@ from OCC.Core.Message import Message_PrinterOStream, Message_Alarm
 # FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 10e-2]
 
 EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
-FACE_FITTING_TOLERANCE = [1e-2, 2e-2, 5e-2]
+FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 1e-1]
 
 FIX_TOLERANCE = 1e-2
 FIX_PRECISION = 1e-2

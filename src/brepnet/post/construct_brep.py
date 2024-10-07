@@ -133,7 +133,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         check_dir(os.path.join(out_root, folder_name))
 
     shape = get_data(os.path.join(data_root, folder_name, 'data.npz'), v_is_cuda=use_cuda)
-    shape.remove_half_edges()
+    shape.remove_half_edges(2e-1)
     shape.check_openness()
     shape.build_fe()
     shape.build_vertices()

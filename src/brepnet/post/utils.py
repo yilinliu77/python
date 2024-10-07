@@ -957,13 +957,13 @@ def construct_brep(v_shape, connected_tolerance, folder_path,
     return fixed_solid, is_face_success_list
 
 
-def get_separated_surface(trimmed_faces, v_precision=1e-2):
+def get_separated_surface(trimmed_faces, v_precision1=1e-2, v_precision2=1e-1):
     points = []
     faces = []
     num_points = 0
     for face in trimmed_faces:
         loc = TopLoc_Location()
-        mesh = BRepMesh_IncrementalMesh(face, 0.01)
+        mesh = BRepMesh_IncrementalMesh(face, v_precision1, False, v_precision2)
         triangulation = BRep_Tool.Triangulation(face, loc)
         if triangulation is None:
             continue

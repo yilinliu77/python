@@ -84,8 +84,8 @@ import trimesh
 # EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
 # FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 10e-2]
 
-EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
-FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 1e-1]
+EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2, 1e-1]
+FACE_FITTING_TOLERANCE = [2e-2, 5e-2, 8e-2, 1e-1]
 
 FIX_TOLERANCE = 1e-2
 FIX_PRECISION = 1e-2
@@ -177,11 +177,11 @@ class Shape:
 
             edge1 = torch.from_numpy(self.recon_edge_points[value[0]]).to(self.device)
             distance11 = torch.sqrt(self.chamferdist(
-                edge1[None],
-                self.interpolation_face[face_id1][None]))
+                    edge1[None],
+                    self.interpolation_face[face_id1][None]))
             distance12 = torch.sqrt(self.chamferdist(
-                edge1[None],
-                self.interpolation_face[face_id2][None]))
+                    edge1[None],
+                    self.interpolation_face[face_id2][None]))
 
             distance1 = (distance11 + distance12) / 2
 
@@ -189,11 +189,11 @@ class Shape:
                 edge2 = torch.from_numpy(self.recon_edge_points[value[1]]).to(self.device)
 
                 distance21 = torch.sqrt(self.chamferdist(
-                    edge2[None],
-                    self.interpolation_face[face_id1][None]))
+                        edge2[None],
+                        self.interpolation_face[face_id1][None]))
                 distance22 = torch.sqrt(self.chamferdist(
-                    edge2[None],
-                    self.interpolation_face[face_id2][None]))
+                        edge2[None],
+                        self.interpolation_face[face_id2][None]))
 
                 distance2 = (distance21 + distance22) / 2
                 if distance1 > v_threshold and distance2 > v_threshold:
@@ -387,13 +387,13 @@ def optimize(
     for iter in range(v_max_iter):
         transformed_edges = apply_transform_batch(edge_points, edge_st)
         dis_matrix1 = chamferdist(
-            transformed_edges[edge_face_connectivity[:, 0]],
-            padded_points[edge_face_connectivity[:, 1]],
-            batch_reduction=None, point_reduction="mean")
+                transformed_edges[edge_face_connectivity[:, 0]],
+                padded_points[edge_face_connectivity[:, 1]],
+                batch_reduction=None, point_reduction="mean")
         dis_matrix2 = chamferdist(
-            transformed_edges[edge_face_connectivity[:, 0]],
-            padded_points[edge_face_connectivity[:, 2]],
-            batch_reduction=None, point_reduction="mean")
+                transformed_edges[edge_face_connectivity[:, 0]],
+                padded_points[edge_face_connectivity[:, 2]],
+                batch_reduction=None, point_reduction="mean")
         adj_distance_loss = ((dis_matrix1 + dis_matrix2) / 2).sum()
 
         # For loop version
@@ -424,7 +424,7 @@ def optimize(
         prev_loss = loss.item()
         if v_islog:
             pbar.set_postfix(
-                loss=loss.item(), adj=adj_distance_loss.cpu().item(), end=endpoints_loss.cpu().item())
+                    loss=loss.item(), adj=adj_distance_loss.cpu().item(), end=endpoints_loss.cpu().item())
             pbar.update(1)
     if v_islog:
         print('Optimization finished!')
@@ -433,11 +433,12 @@ def optimize(
     transformed_edges = apply_transform_batch(edge_points, edge_st).detach().cpu().numpy()
     return transformed_edges
 
+
 @ray.remote(num_gpus=0.05)
 def optimize_ray(interpolation_face, recon_edge_points,
-        edge_face_connectivity, is_end_point, pair1, v_max_iter=1000):
+                 edge_face_connectivity, is_end_point, pair1, v_max_iter=1000):
     return optimize(interpolation_face, recon_edge_points,
-        edge_face_connectivity, is_end_point, pair1, v_islog=False, v_max_iter=v_max_iter)
+                    edge_face_connectivity, is_end_point, pair1, v_islog=False, v_max_iter=v_max_iter)
 
 
 def get_edge_vertexes(edge):
@@ -602,8 +603,10 @@ def create_surface(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
         except Exception as e:
             continue
 
-    assert len(approx_face_list) > 0
-    approx_face = approx_face_list[np.argmin(error_list)]
+    if len(approx_face_list) > 0:
+        approx_face = approx_face_list[np.argmin(error_list)]
+    else:
+        approx_face = fit_face(uv_points_array, FACE_FITTING_TOLERANCE[-1], use_variational_smoothing=False)
 
     approx_face = set_face_uv_periodic(approx_face, points)
 
@@ -653,8 +656,10 @@ def create_edge(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
         except Exception as e:
             continue
 
-    assert len(approx_edge_list) > 0
-    approx_edge = approx_edge_list[np.argmin(error_list)]
+    if len(approx_edge_list) > 0:
+        approx_edge = approx_edge_list[np.argmin(error_list)]
+    else:
+        approx_edge = fit_edge(u_points_array, EDGE_FITTING_TOLERANCE[-1], use_variational_smoothing=False)
 
     return approx_edge
 
@@ -814,7 +819,7 @@ def construct_brep(v_shape, connected_tolerance, folder_path,
                    isdebug=False, is_save_face=True, debug_face_idx=[]):
     if isdebug:
         print(
-            f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
+                f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
     v_shape.build_geom()
     recon_geom_faces = v_shape.recon_geom_faces
     recon_topo_faces = v_shape.recon_topo_faces
@@ -833,7 +838,7 @@ def construct_brep(v_shape, connected_tolerance, folder_path,
 
     if isdebug:
         print(
-            f"{Colors.GREEN}################################ 2. Trim Face ######################################{Colors.RESET}")
+                f"{Colors.GREEN}################################ 2. Trim Face ######################################{Colors.RESET}")
     # Cut surface by wire
     is_face_success_list = []
     trimmed_faces = []
@@ -905,7 +910,7 @@ def construct_brep(v_shape, connected_tolerance, folder_path,
 
     if isdebug:
         print(
-            f"{Colors.GREEN}################################ 3. Sew solid ################################{Colors.RESET}")
+                f"{Colors.GREEN}################################ 3. Sew solid ################################{Colors.RESET}")
     if len(trimmed_faces) < 2:
         return None, is_face_success_list
 
@@ -953,7 +958,7 @@ def construct_brep(v_shape, connected_tolerance, folder_path,
 
     if isdebug:
         print(
-            f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
+                f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
     return fixed_solid, is_face_success_list
 
 
@@ -1030,7 +1035,7 @@ def construct_brep_yl(v_shape, connected_tolerance, isdebug=False):
     debug_idx = []
     if isdebug:
         print(
-            f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
+                f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
     v_shape.build_geom()
     recon_geom_faces = v_shape.recon_geom_faces
     recon_topo_faces = v_shape.recon_topo_faces
@@ -1043,7 +1048,7 @@ def construct_brep_yl(v_shape, connected_tolerance, isdebug=False):
 
     if isdebug:
         print(
-            f"{Colors.GREEN}################################ 2. Trim Face ######################################{Colors.RESET}")
+                f"{Colors.GREEN}################################ 2. Trim Face ######################################{Colors.RESET}")
     # Cut surface by wire
     is_face_success_list = []
     trimmed_faces = []
@@ -1072,7 +1077,7 @@ def construct_brep_yl(v_shape, connected_tolerance, isdebug=False):
 
     if isdebug:
         print(
-            f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
+                f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
     return result
 
 

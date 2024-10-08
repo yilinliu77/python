@@ -1,5 +1,5 @@
 import copy
-import os, sys, shutil, traceback, tqdm
+import os, sys, shutil, traceback
 
 import numpy as np
 import torch
@@ -35,11 +35,11 @@ def construct_brep_item(face_points, edge_points, edge_face_connectivity, ):
     if False:
         with torch.set_grad_enabled(True):
             face_points, edge_points, edge_face_connectivity, face_edge_adj, remove_edge_idx = optimize_geom(
-                face_points, edge_points,
-                edge_face_connectivity,
-                face_edge_adj,
-                is_use_cuda=True,
-                max_iter=150)
+                    face_points, edge_points,
+                    edge_face_connectivity,
+                    face_edge_adj,
+                    is_use_cuda=True,
+                    max_iter=150)
 
     connected_tolerances = copy.deepcopy(CONNECT_TOLERANCE)
     solid = None
@@ -139,7 +139,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     shape.remove_half_edges(2e-1)
     shape.check_openness()
     shape.build_fe()
-    shape.build_vertices()
+    shape.build_vertices(2e-1)
 
     if isdebug:
         export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), shape.recon_face_points.reshape(-1, 3))
@@ -150,12 +150,12 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             for idx, edge_idx in enumerate(shape.face_edge_adj[face_idx]):
                 adj_face = shape.edge_face_connectivity[edge_idx][1:]
                 export_point_cloud(
-                    os.path.join(debug_face_save_path, f"face{face_idx}_edge_idx{edge_idx}_face{adj_face}.ply"),
-                    shape.recon_edge_points[edge_idx].reshape(-1, 3),
-                    np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+                        os.path.join(debug_face_save_path, f"face{face_idx}_edge_idx{edge_idx}_face{adj_face}.ply"),
+                        shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                        np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
         for edge_idx in range(len(shape.recon_edge_points)):
             export_point_cloud(os.path.join(
-                debug_face_save_path, f'edge{edge_idx}.ply'), shape.recon_edge_points[edge_idx].reshape(-1, 3))
+                    debug_face_save_path, f'edge{edge_idx}.ply'), shape.recon_edge_points[edge_idx].reshape(-1, 3))
 
     if is_optimize_geom:
         interpolation_face = []
@@ -164,13 +164,13 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
 
         if not is_ray:
             shape.recon_edge_points = optimize(
-                interpolation_face, shape.recon_edge_points,
-                shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                v_islog=isdebug, v_max_iter=200)
+                    interpolation_face, shape.recon_edge_points,
+                    shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
+                    v_islog=isdebug, v_max_iter=200)
         else:
             task = optimize_ray.remote(
-                interpolation_face, shape.recon_edge_points,
-                shape.edge_face_connectivity, shape.is_end_point, shape.pair1, v_max_iter=200)
+                    interpolation_face, shape.recon_edge_points,
+                    shape.edge_face_connectivity, shape.is_end_point, shape.pair1, v_max_iter=200)
             shape.recon_edge_points = ray.get(task)
 
         if isdebug:
@@ -281,31 +281,31 @@ if __name__ == '__main__':
 
     # print(f"Total {len(all_folders)} folders")
     # if not is_cover:
-        # print(f"Skip existing folders")
-        # all_folders = [folder for folder in all_folders if not os.path.exists(os.path.join(v_out_root, folder))]
-        # print(f"Total {len(all_folders)} folders to process")
+    # print(f"Skip existing folders")
+    # all_folders = [folder for folder in all_folders if not os.path.exists(os.path.join(v_out_root, folder))]
+    # print(f"Total {len(all_folders)} folders to process")
 
     all_folders.sort()
 
     if not is_use_ray:
         # random.shuffle(all_folders)
-        for i in tqdm.tqdm(range(len(all_folders))):
+        for i in tqdm(range(len(all_folders))):
             construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i], use_cuda=use_cuda, from_scratch=from_scratch)
     else:
         ray.init(
-            dashboard_host="0.0.0.0",
-            dashboard_port=8080,
-            # num_cpus=1,
-            num_cpus=num_cpus,
-            # local_mode=True
+                dashboard_host="0.0.0.0",
+                dashboard_port=8080,
+                # num_cpus=1,
+                num_cpus=num_cpus,
+                # local_mode=True
         )
         batch_size = 1
         num_batches = len(all_folders) // batch_size + 1
         tasks = []
         for i in range(num_batches):
             tasks.append(construct_brep_from_datanpz_batch_ray.remote(
-                v_data_root, v_out_root,
-                all_folders[i * batch_size:(i + 1) * batch_size],
-                use_cuda=use_cuda,from_scratch=from_scratch))
+                    v_data_root, v_out_root,
+                    all_folders[i * batch_size:(i + 1) * batch_size],
+                    use_cuda=use_cuda, from_scratch=from_scratch))
         ray.get(tasks)
     print("Done")

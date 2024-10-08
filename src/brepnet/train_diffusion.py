@@ -158,7 +158,7 @@ class TrainDiffusion(pl.LightningModule):
         self.log("Test_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
         
-        results = self.model.inference(self.batch_size, self.device)
+        results = self.model.inference(self.batch_size, self.device, v_data=data)
         log_root = Path(self.hydra_conf["trainer"]["test_output_dir"])
         for idx in range(self.batch_size):
             global_id = batch_idx * self.batch_size + idx
@@ -219,9 +219,9 @@ def main(v_cfg: DictConfig):
 
     if v_cfg["trainer"].evaluate:
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
-        weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, weights_only=False)["state_dict"]
-        # weights = {k.replace("model.", ""): v for k, v in weights.items()}
-        model.load_state_dict(weights)
+        # weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, weights_only=False)["state_dict"]
+        # # weights = {k.replace("model.", ""): v for k, v in weights.items()}
+        # model.load_state_dict(weights)
         trainer.test(model)
 
     else:

@@ -3341,6 +3341,7 @@ class AutoEncoder_0925(nn.Module):
         self.df = self.dim_latent * 2 * 2
         df = self.df
 
+        # in_channels = 3
         in_channels = v_conf["in_channels"]
 
         self.face_conv1 = nn.Sequential(

@@ -76,7 +76,7 @@ def check_edge_validity(edge_point, face_point1, face_point2, is_use_cuda=False,
     def cf_computer(edge_point, face_point):
         chamferdist = ChamferDistance()
         return torch.sqrt(
-            chamferdist(edge_point.reshape(1, -1, 3), face_point.reshape(1, -1, 3), point_reduction='mean'))
+                chamferdist(edge_point.reshape(1, -1, 3), face_point.reshape(1, -1, 3), point_reduction='mean'))
 
     if is_use_cuda:
         device = torch.device("cuda")
@@ -397,13 +397,13 @@ class Geom_Optimization():
     def loss(self):
         adj_distance_loss = 0
         dis_matrix1 = self.chamfer_dist(
-            self.transformed_recon_edge[self.edge_face_connectivity[:, 0]],
-            self.padded_points[self.edge_face_connectivity[:, 1]],
-            batch_reduction=None, point_reduction="mean")
+                self.transformed_recon_edge[self.edge_face_connectivity[:, 0]],
+                self.padded_points[self.edge_face_connectivity[:, 1]],
+                batch_reduction=None, point_reduction="mean")
         dis_matrix2 = self.chamfer_dist(
-            self.transformed_recon_edge[self.edge_face_connectivity[:, 0]],
-            self.padded_points[self.edge_face_connectivity[:, 2]],
-            batch_reduction=None, point_reduction="mean")
+                self.transformed_recon_edge[self.edge_face_connectivity[:, 0]],
+                self.padded_points[self.edge_face_connectivity[:, 2]],
+                batch_reduction=None, point_reduction="mean")
         adj_distance_loss = ((dis_matrix1 + dis_matrix2) / 2).sum()
 
         # For loop version
@@ -423,7 +423,8 @@ class Geom_Optimization():
         endpoints_loss5 = torch.linalg.norm(endpoints[:, 0] - endpoints[:, 2], dim=-1).mean()
         endpoints_loss6 = torch.linalg.norm(endpoints[:, 1] - endpoints[:, 2], dim=-1).mean()
         endpoints_loss = (
-                                     endpoints_loss1 + endpoints_loss2 + endpoints_loss3 + endpoints_loss4 + endpoints_loss5 + endpoints_loss6) / 6
+                                 endpoints_loss1 + endpoints_loss2 + endpoints_loss3 + endpoints_loss4 + endpoints_loss5 +
+                                 endpoints_loss6) / 6
         sum_loss = adj_distance_loss + endpoints_loss
         return sum_loss, adj_distance_loss.detach(), endpoints_loss.detach()
 
@@ -443,7 +444,7 @@ class Geom_Optimization():
             prev_loss = loss.item()
             if self.is_log:
                 pbar.set_postfix(
-                    loss=loss.item(), adj=adj_distance_loss.cpu().item(), end=endpoints_loss.cpu().item())
+                        loss=loss.item(), adj=adj_distance_loss.cpu().item(), end=endpoints_loss.cpu().item())
                 pbar.update(1)
         if self.is_log:
             print('Optimization finished!')
@@ -460,7 +461,7 @@ class Geom_Optimization():
             for idx in range(pair.shape[0]):
                 edge_idx0, edge_idx1, edge_idx2 = pair[idx]
                 endpoints_dis01, endpoints_dis02, endpoints_dis12 = endpoints_dis01_all[0], endpoints_dis02_all[1], \
-                endpoints_dis12_all[2]
+                    endpoints_dis12_all[2]
                 if endpoints_dis01 < endpoints_dis02 and endpoints_dis01 < endpoints_dis12 and False:
                     new_endpoints = (self.transformed_recon_edge[edge_idx0, endpoint_idx] +
                                      self.transformed_recon_edge[edge_idx1, endpoint_idx]) / 2
@@ -490,7 +491,7 @@ class Geom_Optimization():
     # Not used
     def dist(self, pc1, pc2, point_reduction='mean'):
         return self.chamfer_dist(
-            pc1.reshape(1, -1, 3), pc2.reshape(1, -1, 3), batch_reduction="mean", point_reduction=point_reduction)
+                pc1.reshape(1, -1, 3), pc2.reshape(1, -1, 3), batch_reduction="mean", point_reduction=point_reduction)
 
     # Not used
     def get_optimized_mask(self, tol=5e-3):
@@ -528,7 +529,7 @@ def optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj,
     recon_edge = np.copy(recon_edge)
     edge_face_connectivity = np.copy(edge_face_connectivity)
 
-    recon_edge = check_closeness(recon_edge)
+    # recon_edge = check_closeness(recon_edge)
 
     # 1. Check and init fix the connectivity of the edge and face
     # 2. Check which half edge is better and replace the bad one

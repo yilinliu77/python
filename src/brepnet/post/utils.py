@@ -203,7 +203,7 @@ class Shape:
                     for item in value:
                         remove_edge_idx.append(item)
                     continue
-                elif distance1 < v_threshold:
+                elif distance1 < v_threshold and distance1 < distance2:
                     edges.append(self.recon_edge_points[value[0]])
                     edge_face_connectivity.append([len(edges) - 1, face_id1, face_id2])
                 else:

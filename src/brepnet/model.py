@@ -3341,11 +3341,12 @@ class AutoEncoder_0925(nn.Module):
         self.df = self.dim_latent * 2 * 2
         df = self.df
 
-        in_channels = v_conf["in_channels"]
+        self.in_channels = 3
+        # self.in_channels = v_conf["in_channels"]
 
         self.face_conv1 = nn.Sequential(
             Rearrange('b h w n -> b n h w'),
-            nn.Conv2d(in_channels, ds // 8, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(3, ds // 8, kernel_size=3, stride=1, padding=1),
             nn.LeakyReLU(),
             nn.Conv2d(ds // 8, ds // 8, kernel_size=3, stride=1, padding=1),
         )
@@ -3373,7 +3374,7 @@ class AutoEncoder_0925(nn.Module):
 
         self.edge_conv1 = nn.Sequential(
             Rearrange('b w n -> b n w'),
-            nn.Conv1d(in_channels, ds // 8, kernel_size=3, stride=1, padding=1),
+            nn.Conv1d(3, ds // 8, kernel_size=3, stride=1, padding=1),
             nn.LeakyReLU(),
             nn.Conv1d(ds // 8, ds // 8, kernel_size=3, stride=1, padding=1),
         )
@@ -3600,15 +3601,15 @@ class AutoEncoder_0925(nn.Module):
 
             loss["face_coords"] = nn.functional.l1_loss(
                 data["pred_face"],
-                v_data["face_points"][..., :-3]
+                v_data["face_points"][..., :self.in_channels]
             )
             loss["edge_coords"] = nn.functional.l1_loss(
                 denormalize_coord(recon_data["edge_points_local"], recon_data["edge_center"], recon_data["edge_scale"]),
-                v_data["edge_points"][..., :-3][v_data["edge_face_connectivity"][:, 0]]
+                v_data["edge_points"][..., :self.in_channels][v_data["edge_face_connectivity"][:, 0]]
             )
             loss["edge_coords1"] = nn.functional.l1_loss(
                 denormalize_coord(recon_data["edge_points_local1"], recon_data["edge_center1"], recon_data["edge_scale1"]),
-                v_data["edge_points"][..., :-3]
+                v_data["edge_points"][..., :self.in_channels]
             )
 
         return loss, data
@@ -3653,11 +3654,11 @@ class AutoEncoder_0925(nn.Module):
         # torch.cuda.synchronize()
         # Encoder
         # timer = time.time()
-        face_features = self.face_conv1(v_data["face_points"])
+        face_features = self.face_conv1(v_data["face_points"][...,:self.in_channels])
         face_features = face_features + self.face_pos_embedding
         face_features = self.face_coords(face_features)
 
-        edge_features = self.edge_conv1(v_data["edge_points"])
+        edge_features = self.edge_conv1(v_data["edge_points"][...,:self.in_channels])
         edge_features = edge_features + self.edge_pos_embedding
         edge_features = self.edge_coords(edge_features)
         # timer = self.profile_time(timer, "Encoder")
@@ -4075,9 +4076,13 @@ class AutoEncoder_0929(nn.Module):
         dl = self.dim_latent
         self.df = self.dim_latent * 2 * 2
         df = self.df
+
+        self.in_channels = 3
+        # self.in_channels = v_conf["in_channels"]
+
         self.face_conv1 = nn.Sequential(
             Rearrange('b h w n -> b n h w'),
-            nn.Conv2d(3, ds, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(self.in_channels, ds, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
         )
         self.face_coords = nn.Sequential(
@@ -4119,7 +4124,7 @@ class AutoEncoder_0929(nn.Module):
 
         self.edge_conv1 = nn.Sequential(
             Rearrange('b w n -> b n w'),
-            nn.Conv1d(3, ds, kernel_size=3, stride=1, padding=1),
+            nn.Conv1d(self.in_channels, ds, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
         )
         self.edge_coords = nn.Sequential(
@@ -4235,11 +4240,11 @@ class AutoEncoder_0929(nn.Module):
         edge_points = v_data["edge_points"]
         gt_edge_points_local = v_data["edge_points_norm"]
 
-        face_features = self.face_conv1(face_points)
+        face_features = self.face_conv1(face_points[...,:self.in_channels])
         face_features = face_features + self.face_pos_embedding
         face_features = self.face_coords(face_features)
 
-        edge_features = self.edge_conv1(edge_points)
+        edge_features = self.edge_conv1(edge_points[...,:self.in_channels])
         edge_features = edge_features + self.edge_pos_embedding
         edge_features = self.edge_coords(edge_features)
         # timer = profile_time(self.times, "Encoder", timer)
@@ -4373,6 +4378,7 @@ class AutoEncoder_0929(nn.Module):
                 "gt_face": face_points.cpu().numpy(),
 
                 "pred_face_adj": recon_data["pred_face_adj"],
+                "pred_face_adj_prob": recon_data["pred_face_adj_prob"],
                 "pred_edge_face_connectivity": recon_data["pred_edge_face_connectivity"],
                 "pred_edge": recon_data["pred_edge"],
                 "pred_face": recon_data["pred_face"],
@@ -4382,15 +4388,15 @@ class AutoEncoder_0929(nn.Module):
 
             loss["face_coords"] = nn.functional.l1_loss(
                 data["pred_face"],
-                face_points
+                face_points[...,:self.in_channels]
             )
             loss["edge_coords"] = nn.functional.l1_loss(
                 denormalize_coord(edge_points_local, edge_center, edge_scale),
-                edge_points[v_data["edge_face_connectivity"][:, 0]]
+                edge_points[v_data["edge_face_connectivity"][:, 0]][...,:self.in_channels]
             )
             loss["edge_coords1"] = nn.functional.l1_loss(
                 denormalize_coord(edge_points_local1, edge_center1, edge_scale1),
-                edge_points
+                edge_points[...,:self.in_channels]
             )
 
             data["edge_loss"] = loss["edge_coords"].cpu().numpy()

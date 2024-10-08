@@ -547,6 +547,22 @@ class Diffusion_condition(Diffusion_base):
                 nn.Linear(1024, self.dim_latent),
             )
 
+        self.classifier = nn.Sequential(
+            nn.Linear(32, self.dim_latent),
+            nn.LayerNorm(self.dim_latent),
+            nn.SiLU(),
+            nn.Linear(self.dim_latent, 1),
+        )
+
+        self.noise_scheduler = DDPMScheduler(
+            num_train_timesteps=1000,
+            beta_schedule='squaredcos_cap_v2',
+            prediction_type='sample',
+            beta_start=0.0001,
+            beta_end=0.02,
+            clip_sample=False,
+        )
+
 
     def inference(self, bs, device, v_data=None, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, 32)).to(device)
@@ -554,15 +570,18 @@ class Diffusion_condition(Diffusion_base):
         if self.with_img or self.with_pc:
             condition = self.extract_condition(v_data)[:bs]
 
+        # error = []
         for t in tqdm(self.noise_scheduler.timesteps):
             timesteps = t.reshape(-1).to(device)
-            pred_x0 = self.diffuse(face_features, timesteps, v_condition = condition)
+            pred_x0 = self.diffuse(face_features, timesteps, v_condition=condition)
             face_features = self.noise_scheduler.step(pred_x0, t, face_features).prev_sample
+            # error.append((v_data["face_features"] - face_features).abs().mean(dim=[1,2]))
 
+        label = torch.sigmoid(self.classifier(face_features))[...,0]
         face_z = face_features
         recon_data = []
         for i in range(bs):
-            mask = (face_z[i:i + 1] > 1e-2).any(dim=-1)
+            mask = label[i:i + 1] > 0.5
             face_z_item = face_z[i:i + 1][mask]
             data_item = self.ae_model.inference(face_z_item)
             recon_data.append(data_item)
@@ -649,17 +668,23 @@ class Diffusion_condition(Diffusion_base):
 
         # Model
         pred_x0 = self.diffuse(noise_input, timesteps, condition)
+        label = self.classifier(pred_x0)
 
         # Loss (predict x0)
         loss = {}
         if not self.is_train_decoder:
-            loss["total_loss"] = nn.functional.l1_loss(pred_x0, face_z)
+            loss["diffusion_loss"] = nn.functional.l1_loss(pred_x0, face_z)
         else:
             pred_face_z = pred_x0[encoding_result["mask"]]
             encoding_result["face_z"] = pred_face_z
             loss, recon_data = self.ae_model.loss(v_data, encoding_result)
             loss["l2"] = F.l1_loss(pred_x0, face_z)
-            loss["total_loss"] += loss["l2"]
+            loss["diffusion_loss"] += loss["l2"]
+
+        mask = torch.logical_not((face_z.abs()<1e-4).all(dim=-1))
+        loss["classification"] = nn.functional.binary_cross_entropy_with_logits(label[...,0], mask.float())
+        loss["total_loss"] = loss["classification"] * 1e-1 + loss["diffusion_loss"]
+
         if torch.isnan(loss["total_loss"]).any():
             print("NaN detected in loss")
         return loss

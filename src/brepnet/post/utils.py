@@ -254,8 +254,6 @@ class Shape:
             edge_face_connectivity = edge_face_connectivity[edge_face_connectivity[:, 0] != iso_edge_idx]
             self.remove_edge_idx.append(iso_edge_idx)
 
-        print(f"{Colors.GREEN}Remove {len(self.remove_edge_idx)} isolate edges{Colors.RESET}")
-
     def build_fe(self):
         # face_edge_adj store the edge idx list of each face
         self.face_edge_adj = [[] for _ in range(self.recon_face_points.shape[0])]

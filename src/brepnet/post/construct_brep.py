@@ -142,6 +142,9 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     shape.build_vertices(0.2)
     shape.check_connectivity()
 
+    if is_log:
+        print(f"{Colors.GREEN}Remove {len(shape.remove_edge_idx)} isolate edges{Colors.RESET}")
+
     if isdebug:
         export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), shape.recon_face_points.reshape(-1, 3))
         updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx, axis=0)

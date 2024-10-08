@@ -116,7 +116,10 @@ def get_data(v_filename):
 
 def construct_brep_from_datanpz(data_root, out_root, folder_name,
                                 is_ray=False, is_log=True,
-                                is_optimize_geom=True, isdebug=False, use_cuda=False):
+                                is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=False):
+    if not from_scratch and os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
+        return
+
     printers = Message.message.DefaultMessenger().Printers()
     for idx in range(printers.Length()):
         printers.Value(idx + 1).SetTraceLevel(Message_Alarm)
@@ -209,13 +212,15 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
 
 def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list,
                                       use_cuda=False,
-                                      is_optimize_geom=True):
+                                      is_optimize_geom=True,
+                                      from_scratch=False,
+                                      ):
     for folder_name in folder_name_list:
         try:
             construct_brep_from_datanpz(data_root, out_root, folder_name,
                                         is_log=False,
                                         is_ray=True, is_optimize_geom=is_optimize_geom,
-                                        isdebug=False, use_cuda=use_cuda)
+                                        isdebug=False, use_cuda=use_cuda, from_scratch=from_scratch)
         except Exception as e:
             with open(os.path.join(out_root, "error.txt"), "a") as f:
                 tb_list = traceback.extract_tb(sys.exc_info()[2])
@@ -250,6 +255,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_ray', action='store_true')
     parser.add_argument('--prefix', type=str, default="")
     parser.add_argument('--use_cuda', action='store_true')
+    parser.add_argument('--from_scratch', action='store_true')
     args = parser.parse_args()
     v_data_root = args.data_root
     v_out_root = args.out_root
@@ -258,6 +264,7 @@ if __name__ == '__main__':
     is_use_ray = args.use_ray
     num_cpus = args.num_cpus
     use_cuda = args.use_cuda
+    from_scratch = args.from_scratch
     safe_check_dir(v_out_root)
     if not os.path.exists(v_data_root):
         raise ValueError(f"Data root path {v_data_root} does not exist.")
@@ -272,18 +279,18 @@ if __name__ == '__main__':
     # all_folders = os.listdir(r"E:\data\img2brep\.43\2024_09_22_21_57_44_0921_pure_out3_failed")
     # check_dir(v_out_root)
 
-    print(f"Total {len(all_folders)} folders")
-    if not is_cover:
-        print(f"Skip existing folders")
-        all_folders = [folder for folder in all_folders if not os.path.exists(os.path.join(v_out_root, folder))]
-        print(f"Total {len(all_folders)} folders to process")
+    # print(f"Total {len(all_folders)} folders")
+    # if not is_cover:
+        # print(f"Skip existing folders")
+        # all_folders = [folder for folder in all_folders if not os.path.exists(os.path.join(v_out_root, folder))]
+        # print(f"Total {len(all_folders)} folders to process")
 
     all_folders.sort()
 
     if not is_use_ray:
         # random.shuffle(all_folders)
         for i in tqdm.tqdm(range(len(all_folders))):
-            construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i], use_cuda=use_cuda)
+            construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i], use_cuda=use_cuda, from_scratch=from_scratch)
     else:
         ray.init(
             dashboard_host="0.0.0.0",
@@ -292,13 +299,13 @@ if __name__ == '__main__':
             num_cpus=num_cpus,
             # local_mode=True
         )
-        batch_size = 50
+        batch_size = 1
         num_batches = len(all_folders) // batch_size + 1
         tasks = []
         for i in range(num_batches):
             tasks.append(construct_brep_from_datanpz_batch_ray.remote(
                 v_data_root, v_out_root,
                 all_folders[i * batch_size:(i + 1) * batch_size],
-                use_cuda=use_cuda))
+                use_cuda=use_cuda,from_scratch=from_scratch))
         ray.get(tasks)
     print("Done")

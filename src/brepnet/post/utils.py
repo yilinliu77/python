@@ -90,7 +90,7 @@ FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 1e-1]
 FIX_TOLERANCE = 1e-2
 FIX_PRECISION = 1e-2
 # CONNECT_TOLERANCE = 2e-2
-CONNECT_TOLERANCE = [8e-2, 5e-2, 2e-2, ]
+CONNECT_TOLERANCE = [2e-2, 5e-2, 8e-2, ]
 SEWING_TOLERANCE = 8e-2
 TRANSFER_PRECISION = 1e-3
 MAX_DISTANCE_THRESHOLD = 1e-1
@@ -750,9 +750,9 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         face_fixer.FixAddNaturalBound()
         face_fixer.FixOrientation()
         face_fixer.FixMissingSeam()
-        face_fixer.FixWiresTwoCoincEdges()
+        # face_fixer.FixWiresTwoCoincEdges()
         face_fixer.FixIntersectingWires()
-        face_fixer.FixPeriodicDegenerated()
+        # face_fixer.FixPeriodicDegenerated()
         face_fixer.FixOrientation()
     except Exception as e:
         print(f"Error fixing face {e}")
@@ -768,7 +768,7 @@ def create_trimmed_face1(geom_face, face_edges, connected_tolerance):
     if wire_list is None:
         return None, None, False
     trimmed_face = create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance)
-    if trimmed_face is None:
+    if trimmed_face is None or trimmed_face.IsNull():
         return wire_list, None, False
     face_analyzer = BRepCheck_Analyzer(trimmed_face, False)
     is_face_valid = face_analyzer.IsValid()

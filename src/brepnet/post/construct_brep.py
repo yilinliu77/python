@@ -147,7 +147,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     # shape.remove_isolated_edges()
     if isdebug:
         export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge_before_drop.obj'))
-    shape.drop_edges()
+    # shape.drop_edges()
     if isdebug:
         export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge_after_drop.obj'))
 

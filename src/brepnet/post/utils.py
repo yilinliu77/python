@@ -388,8 +388,7 @@ class Shape:
             self.remove_edge_idx_new.append(iso_edge_idx)
 
     def drop_edges(self, max_drop_num=1, use_cuda=True, loss_increase_tolerance=1e-5):
-        device = torch.device('cuda') if use_cuda else torch.device('cpu')
-        recon_edge_points = torch.from_numpy(self.recon_edge_points).to(device)
+        recon_edge_points = torch.from_numpy(self.recon_edge_points).to(self.device)
 
         remove_edges_idx = [[] for _ in range(self.recon_face_points.shape[0])]
         for face_idx, face_edge_adj_c in enumerate(self.face_edge_adj):
@@ -399,12 +398,12 @@ class Shape:
             for sampled_face_edge_adj in all_combinations:
                 dropp_edges = list(set(face_edge_adj_c) - set(sampled_face_edge_adj))
                 if len(dropp_edges) != 0 and self.openness[dropp_edges[0]]:
-                    connected_loss.append(torch.tensor(1e6).to(device))
+                    connected_loss.append(torch.tensor(1e6).to(self.device))
                     continue
                 face_edges = recon_edge_points[list(sampled_face_edge_adj)]
                 face_edge_endpoint = torch.cat([face_edges[:, 0], face_edges[:, -1]])
                 dist_matrix = torch.cdist(face_edge_endpoint, face_edge_endpoint)
-                dist_matrix = dist_matrix + torch.eye(dist_matrix.shape[0]).to(device) * 1e6
+                dist_matrix = dist_matrix + torch.eye(dist_matrix.shape[0]).to(self.device) * 1e6
                 connected_loss_c = dist_matrix.min(dim=0)[0].sum()
                 connected_loss.append(connected_loss_c)
             best_combination_idx = torch.argmin(torch.stack(connected_loss[:-1])).item()

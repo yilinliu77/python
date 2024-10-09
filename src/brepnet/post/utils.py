@@ -156,7 +156,7 @@ class Shape:
         self.remove_edge_idx = []
         pass
 
-    def remove_half_edges(self, edge2face_threshold=1e-1, face2face_threshold=0.04):
+    def remove_half_edges(self, edge2face_threshold=1.5e-1, face2face_threshold=0.04):
         edge_face_connectivity = self.edge_face_connectivity
         cache_dict = {}
         for conec in edge_face_connectivity:

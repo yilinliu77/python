@@ -144,7 +144,6 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     shape.check_openness()
     shape.build_fe()
     shape.build_vertices(0.2)
-    shape.check_connectivity()
 
     if is_log:
         print(f"{Colors.GREEN}Remove {len(shape.remove_edge_idx)} isolate edges{Colors.RESET}")

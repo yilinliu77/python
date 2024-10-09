@@ -150,8 +150,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
 
     if isdebug:
         export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), shape.recon_face_points.reshape(-1, 3))
-        updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx, axis=0)
-        export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'edge.obj'))
+        export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge.obj'))
         for face_idx in range(len(shape.face_edge_adj)):
             export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}.ply"),
                                shape.recon_face_points[face_idx].reshape(-1, 3))
@@ -186,8 +185,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             shape.recon_edge_points = ray.get(task)
 
         if isdebug:
-            updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx, axis=0)
-            export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'optimized_edge.obj'))
+            export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'optimized_edge.obj'))
             for face_idx in range(len(shape.face_edge_adj)):
                 for idx, edge_idx in enumerate(shape.face_edge_adj[face_idx]):
                     adj_face = shape.edge_face_connectivity[edge_idx][1:]

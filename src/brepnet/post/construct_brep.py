@@ -143,11 +143,16 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     shape.remove_half_edges(3e-1)
     shape.check_openness()
     shape.build_fe()
-    shape.build_vertices(2e-1)
+    shape.build_vertices(0.2)
+    shape.check_connectivity()
+
+    if is_log:
+        print(f"{Colors.GREEN}Remove {len(shape.remove_edge_idx)} isolate edges{Colors.RESET}")
 
     if isdebug:
         export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), shape.recon_face_points.reshape(-1, 3))
-        export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge.obj'))
+        updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx, axis=0)
+        export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'edge.obj'))
         for face_idx in range(len(shape.face_edge_adj)):
             export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}.ply"),
                                shape.recon_face_points[face_idx].reshape(-1, 3))
@@ -158,8 +163,12 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
                         shape.recon_edge_points[edge_idx].reshape(-1, 3),
                         np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
         for edge_idx in range(len(shape.recon_edge_points)):
+            if edge_idx in shape.remove_edge_idx:
+                continue
             export_point_cloud(os.path.join(
-                    debug_face_save_path, f'edge{edge_idx}.ply'), shape.recon_edge_points[edge_idx].reshape(-1, 3))
+                    debug_face_save_path, f'edge{edge_idx}.ply'),
+                    shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                    np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
 
     if is_optimize_geom:
         interpolation_face = []
@@ -178,8 +187,22 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             shape.recon_edge_points = ray.get(task)
 
         if isdebug:
-            export_edges(shape.recon_edge_points,
-                         os.path.join(debug_face_save_path, 'optimized_edge.obj'))
+            updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx, axis=0)
+            export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'optimized_edge.obj'))
+            for face_idx in range(len(shape.face_edge_adj)):
+                for idx, edge_idx in enumerate(shape.face_edge_adj[face_idx]):
+                    adj_face = shape.edge_face_connectivity[edge_idx][1:]
+                    export_point_cloud(
+                            os.path.join(debug_face_save_path, f"face{face_idx}_optim_edge_idx{edge_idx}_face{adj_face}.ply"),
+                            shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                            np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+            for edge_idx in range(len(shape.recon_edge_points)):
+                if edge_idx in shape.remove_edge_idx:
+                    continue
+                export_point_cloud(os.path.join(
+                        debug_face_save_path, f'optim_edge{edge_idx}.ply'),
+                        shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                        np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
 
     # Construct Brep from face_points, edge_points, face_edge_adj
     solid = None
@@ -245,7 +268,8 @@ def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda, from_scratc
     debug_folder = [v_prefix]
     for folder in debug_folder:
         construct_brep_from_datanpz(v_data_root, v_out_root, folder,
-                                    use_cuda=use_cuda, is_optimize_geom=True, isdebug=True, from_scratch=from_scratch)
+                                    use_cuda=use_cuda, is_optimize_geom=True, isdebug=True,
+                                    from_scratch=from_scratch)
     exit(0)
 
 

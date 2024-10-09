@@ -116,7 +116,7 @@ def get_data(v_filename):
 
 def construct_brep_from_datanpz(data_root, out_root, folder_name,
                                 is_ray=False, is_log=True,
-                                is_optimize_geom=True, isdebug=True, use_cuda=False, from_scratch=False):
+                                is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=False):
     if not from_scratch and os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
         return
 
@@ -130,24 +130,29 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     debug_face_save_path = None
     if isdebug:
         debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
-        safe_check_dir(os.path.join(out_root, folder_name))
         safe_check_dir(debug_face_save_path)
+
+    if from_scratch:
+        safe_check_dir(os.path.join(out_root, folder_name))
     else:
-        check_dir(os.path.join(out_root, folder_name))
+        safe_check_dir(os.path.join(out_root, folder_name))
 
     shape = get_data(os.path.join(data_root, folder_name, 'data.npz'))
-    shape.remove_half_edges()
+    if isdebug:
+        export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge_ori.obj'))
+    shape.remove_half_edges(3e-1)
     shape.check_openness()
     shape.build_fe()
     shape.build_vertices(0.2)
-    shape.remove_isolated_edges()
+    shape.check_connectivity()
 
     if is_log:
         print(f"{Colors.GREEN}Remove {len(shape.remove_edge_idx)} isolate edges{Colors.RESET}")
 
     if isdebug:
         export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), shape.recon_face_points.reshape(-1, 3))
-        export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge.obj'))
+        updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx, axis=0)
+        export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'edge.obj'))
         for face_idx in range(len(shape.face_edge_adj)):
             export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}.ply"),
                                shape.recon_face_points[face_idx].reshape(-1, 3))
@@ -174,15 +179,16 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             shape.recon_edge_points = optimize(
                     interpolation_face, shape.recon_edge_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                    v_islog=isdebug, v_max_iter=100)
+                    v_islog=isdebug, v_max_iter=200)
         else:
             task = optimize_ray.remote(
                     interpolation_face, shape.recon_edge_points,
-                    shape.edge_face_connectivity, shape.is_end_point, shape.pair1, v_max_iter=100)
+                    shape.edge_face_connectivity, shape.is_end_point, shape.pair1, v_max_iter=200)
             shape.recon_edge_points = ray.get(task)
 
         if isdebug:
-            export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'optimized_edge.obj'))
+            updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx, axis=0)
+            export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'optimized_edge.obj'))
             for face_idx in range(len(shape.face_edge_adj)):
                 for idx, edge_idx in enumerate(shape.face_edge_adj[face_idx]):
                     adj_face = shape.edge_face_connectivity[edge_idx][1:]
@@ -257,13 +263,13 @@ def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list,
 construct_brep_from_datanpz_batch_ray = ray.remote(max_retries=2)(construct_brep_from_datanpz_batch)
 
 
-def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda):
+def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda, from_scratch):
     # debug_folder = os.listdir(v_out_root)
     debug_folder = [v_prefix]
     for folder in debug_folder:
         construct_brep_from_datanpz(v_data_root, v_out_root, folder,
-                                    use_cuda=use_cuda, is_optimize_geom=True,
-                                    from_scratch=True, isdebug=True)
+                                    use_cuda=use_cuda, is_optimize_geom=True, isdebug=True,
+                                    from_scratch=from_scratch)
     exit(0)
 
 
@@ -292,7 +298,7 @@ if __name__ == '__main__':
         raise ValueError(f"Data root path {v_data_root} does not exist.")
 
     if args.prefix != "":
-        test_construct_brep(v_data_root, v_out_root, args.prefix, use_cuda)
+        test_construct_brep(v_data_root, v_out_root, args.prefix, use_cuda, from_scratch=from_scratch)
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
     if list_file != "":
         valid_prefies = [item.strip() for item in open(list_file).readlines()]

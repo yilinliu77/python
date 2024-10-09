@@ -21,6 +21,7 @@ trainer:
   # Evaluation
   evaluate: false
   test_output_dir:
+  max_steps: -1
   resume_from_checkpoint:
 
   max_epochs: 10000000

@@ -77,6 +77,8 @@ from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 import trimesh
 
+from itertools import combinations
+
 # FIX_TOLERANCE = 1e-6
 # CONNECT_TOLERANCE = 1e-3
 # SEWING_TOLERANCE = 1e-3
@@ -153,10 +155,11 @@ class Shape:
 
         self.chamferdist = ChamferDistance()
 
-        self.remove_edge_idx = []
+        self.remove_edge_idx_src = []
+        self.remove_edge_idx_new = []
         pass
 
-    def remove_half_edges(self, edge2face_threshold=1.5e-1, face2face_threshold=0.04):
+    def remove_half_edges(self, edge2face_threshold=2e-1, face2face_threshold=0.06):
         edge_face_connectivity = self.edge_face_connectivity
         cache_dict = {}
         for conec in edge_face_connectivity:
@@ -195,7 +198,7 @@ class Shape:
 
             if dis_face_to_face > face2face_threshold:
                 for item in value:
-                    self.remove_edge_idx.append(item)
+                    self.remove_edge_idx_src.append(item)
                 continue
 
             edge1 = torch.from_numpy(self.recon_edge_points[value[0]]).to(self.device)
@@ -220,7 +223,7 @@ class Shape:
                 distance2 = (distance21 + distance22) / 2
                 if distance1 > edge2face_threshold and distance2 > edge2face_threshold:
                     for item in value:
-                        self.remove_edge_idx.append(item)
+                        self.remove_edge_idx_src.append(item)
                     continue
                 elif distance1 < edge2face_threshold and distance1 < distance2:
                     edges.append(self.recon_edge_points[value[0]])
@@ -231,33 +234,13 @@ class Shape:
 
             elif len(value) == 1:
                 if distance1 > edge2face_threshold:
-                    self.remove_edge_idx.append(value[0])
+                    self.remove_edge_idx_src.append(value[0])
                     continue
                 edges.append(self.recon_edge_points[value[0]])
                 edge_face_connectivity.append([len(edges) - 1, face_id1, face_id2])
 
         self.recon_edge_points = np.stack(edges, axis=0)
         self.edge_face_connectivity = np.stack(edge_face_connectivity, axis=0)
-        pass
-
-    def remove_invalid_edge(self, v_threshold=0.04):
-        # use the distance of two adjacent faces to check the validity of the edge
-        invalid_edges_face_connectivity = []
-        for edge_face1_face2 in self.edge_face_connectivity:
-            edge_idx, face1, face2 = edge_face1_face2
-            dis_face1_to_face2 = torch.sqrt(self.chamferdist(
-                    self.interpolation_face[face1][None],
-                    self.interpolation_face[face2][None],
-                    bidirectional=False, batch_reduction=None, point_reduction=None))
-            dis_face1_to_face2 = dis_face1_to_face2.min()
-            # dis_face1_to_face2 = (torch.topk(dis_face1_to_face2, 16, dim=1, largest=False)[0]).mean()
-            if dis_face1_to_face2 > v_threshold:
-                invalid_edges_face_connectivity.append(edge_face1_face2)
-
-        for edge_face1_face2 in invalid_edges_face_connectivity:
-            edge_idx, face1, face2 = edge_face1_face2
-            self.remove_edge_idx.append(edge_idx)
-            np.delete(self.edge_face_connectivity, np.where(self.edge_face_connectivity[:, 0] == edge_idx)[0], axis=0)
         pass
 
     def check_openness(self, v_threshold=0.95):
@@ -270,29 +253,6 @@ class Shape:
         delta = recon_edge[:, [0, -1]].mean(axis=1)
         recon_edge[self.openness, 0] = delta[self.openness]
         recon_edge[self.openness, -1] = delta[self.openness]
-
-    def remove_isolated_edges(self):
-        # Using the pair to fix the isolate edges
-        # If the edge is not in the pair, and it is not closed, then it is isolated edge
-        if self.pair1 is None:
-            return
-        edge_face_connectivity = self.edge_face_connectivity
-        is_edge_in_pair = np.zeros(self.recon_edge_points.shape[0], dtype=bool)
-        pair_edge_idx = np.unique(self.pair1.flatten())
-        is_edge_closed = self.openness
-        is_edge_in_pair[pair_edge_idx] = True
-        is_edge_isolate = np.logical_and(~is_edge_in_pair, ~is_edge_closed)
-        for iso_edge_idx in np.where(is_edge_isolate)[0]:
-            edge_face1_face2 = edge_face_connectivity[edge_face_connectivity[:, 0] == iso_edge_idx, 1:]
-            if edge_face1_face2.shape[0] == 0:
-                continue
-            face_idx1, face_idx2 = edge_face1_face2[0]
-            if iso_edge_idx in self.face_edge_adj[face_idx1]:
-                self.face_edge_adj[face_idx1].remove(iso_edge_idx)
-            elif iso_edge_idx in self.face_edge_adj[face_idx2]:
-                self.face_edge_adj[face_idx2].remove(iso_edge_idx)
-            edge_face_connectivity = edge_face_connectivity[edge_face_connectivity[:, 0] != iso_edge_idx]
-            self.remove_edge_idx.append(iso_edge_idx)
 
     def build_fe(self):
         # face_edge_adj store the edge idx list of each face
@@ -404,6 +364,74 @@ class Shape:
         self.is_end_point = self.is_end_point[flag]
         pass
 
+    def remove_isolated_edges(self):
+        # Using the pair to fix the isolate edges
+        # If the edge is not in the pair, and it is not closed, then it is isolated edge
+        if self.pair1 is None:
+            return
+        edge_face_connectivity = self.edge_face_connectivity
+        is_edge_in_pair = np.zeros(self.recon_edge_points.shape[0], dtype=bool)
+        pair_edge_idx = np.unique(self.pair1.flatten())
+        is_edge_closed = self.openness
+        is_edge_in_pair[pair_edge_idx] = True
+        is_edge_isolate = np.logical_and(~is_edge_in_pair, ~is_edge_closed)
+        for iso_edge_idx in np.where(is_edge_isolate)[0]:
+            edge_face1_face2 = edge_face_connectivity[edge_face_connectivity[:, 0] == iso_edge_idx, 1:]
+            if edge_face1_face2.shape[0] == 0:
+                continue
+            face_idx1, face_idx2 = edge_face1_face2[0]
+            if iso_edge_idx in self.face_edge_adj[face_idx1]:
+                self.face_edge_adj[face_idx1].remove(iso_edge_idx)
+            elif iso_edge_idx in self.face_edge_adj[face_idx2]:
+                self.face_edge_adj[face_idx2].remove(iso_edge_idx)
+            edge_face_connectivity = edge_face_connectivity[edge_face_connectivity[:, 0] != iso_edge_idx]
+            self.remove_edge_idx_new.append(iso_edge_idx)
+
+    def drop_edges(self, max_drop_num=1, use_cuda=True, loss_increase_tolerance=1e-5):
+        device = torch.device('cuda') if use_cuda else torch.device('cpu')
+        recon_edge_points = torch.from_numpy(self.recon_edge_points).to(device)
+
+        remove_edges_idx = [[] for _ in range(self.recon_face_points.shape[0])]
+        for face_idx, face_edge_adj_c in enumerate(self.face_edge_adj):
+            combination_num = min(len(face_edge_adj_c), max_drop_num)
+            all_combinations = list(combinations(face_edge_adj_c, len(face_edge_adj_c) - combination_num)) + [face_edge_adj_c]
+            connected_loss = []
+            for sampled_face_edge_adj in all_combinations:
+                dropp_edges = list(set(face_edge_adj_c) - set(sampled_face_edge_adj))
+                if len(dropp_edges) != 0 and self.openness[dropp_edges[0]]:
+                    connected_loss.append(torch.tensor(1e6).to(device))
+                    continue
+                face_edges = recon_edge_points[list(sampled_face_edge_adj)]
+                face_edge_endpoint = torch.cat([face_edges[:, 0], face_edges[:, -1]])
+                dist_matrix = torch.cdist(face_edge_endpoint, face_edge_endpoint)
+                dist_matrix = dist_matrix + torch.eye(dist_matrix.shape[0]).to(device) * 1e6
+                connected_loss_c = dist_matrix.min(dim=0)[0].sum()
+                connected_loss.append(connected_loss_c)
+            best_combination_idx = torch.argmin(torch.stack(connected_loss[:-1])).item()
+            if connected_loss[best_combination_idx] < connected_loss[-1] + loss_increase_tolerance:
+                for edge_idx in face_edge_adj_c:
+                    if edge_idx not in all_combinations[best_combination_idx]:
+                        if not self.openness[edge_idx]:
+                            remove_edges_idx[face_idx].append(edge_idx)
+
+        remove_edges_idx_real = []
+        for face_idx, edge_idx_list in enumerate(remove_edges_idx):
+            for edge_idx in edge_idx_list:
+                idx = np.where(self.edge_face_connectivity[:, 0] == edge_idx)[0]
+                if len(idx) == 0:
+                    continue
+                face_idx1, face_idx2 = self.edge_face_connectivity[idx[0], 1:]
+                another_face_idx = face_idx1 if face_idx1 != face_idx else face_idx2
+                if edge_idx not in remove_edges_idx[another_face_idx]:
+                    continue
+                remove_edges_idx_real.append(edge_idx)
+                self.edge_face_connectivity = np.delete(self.edge_face_connectivity, idx, axis=0)
+                if edge_idx in self.face_edge_adj[face_idx1]:
+                    self.face_edge_adj[face_idx1].remove(edge_idx)
+                if edge_idx in self.face_edge_adj[face_idx2]:
+                    self.face_edge_adj[face_idx2].remove(edge_idx)
+        self.remove_edge_idx_new.extend(np.unique(remove_edges_idx_real))
+
     def build_geom(self):
         self.recon_geom_faces = [create_surface(points) for points in self.recon_face_points]
         self.recon_topo_faces = [BRepBuilderAPI_MakeFace(geom_face, 1e-3).Face() for geom_face in self.recon_geom_faces]
@@ -427,7 +455,7 @@ def apply_transform_batch(tensor, transform):
 def optimize(
         v_interpolation_face, recon_edge_points,
         edge_face_connectivity, is_end_point, pair1,
-        v_islog=True, v_max_iter=1000):
+        face_edge_adj, v_islog=True, v_max_iter=1000):
     device = torch.device('cuda')
     interpolation_face = []
     for item in v_interpolation_face:
@@ -477,7 +505,18 @@ def optimize(
                              torch.linalg.norm(endpoints[:, 1] - endpoints[:, 2], dim=-1) + \
                              torch.linalg.norm(endpoints[:, 0] - endpoints[:, 2], dim=-1)
             endpoints_loss = (endpoints_loss / 3).mean()
-        loss = adj_distance_loss + endpoints_loss
+
+        wire_connected_loss = []
+        for face_edge_idx in face_edge_adj:
+            face_edge_endpoint = torch.concatenate((transformed_edges[face_edge_idx, 0, :],
+                                                    transformed_edges[face_edge_idx, -1, :]))
+            dist_matrix = torch.cdist(face_edge_endpoint, face_edge_endpoint)
+            dist_matrix = dist_matrix + torch.eye(dist_matrix.shape[0]).to(device) * 1e6
+            connected_loss = dist_matrix.min(dim=0)[0].sum()
+            wire_connected_loss.append(connected_loss)
+        wire_connected_loss = torch.stack(wire_connected_loss).mean()
+
+        loss = adj_distance_loss + endpoints_loss + wire_connected_loss
 
         optimizer.zero_grad()
         if abs(prev_loss - loss.item()) < 1e-5 and False:
@@ -730,10 +769,11 @@ def create_edge(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
 
 
 def create_wire_from_unordered_edges(face_edges, connected_tolerance, max_retry_times=3, is_sort_by_length=True):
+    face_edges_src = face_edges.copy()
     wire_array = None
+
     for _ in range(max_retry_times):
         random.shuffle(face_edges)
-
         edges_seq = TopTools_HSequenceOfShape()
         for edge in face_edges:
             edges_seq.Append(edge)
@@ -864,7 +904,8 @@ def create_trimmed_face2(geom_face, topo_face, face_edges, connected_tolerance):
 
 
 def try_create_trimmed_face(geom_face, topo_face, face_edges, connected_tolerance):
-    wire_list1, trimmed_face1, is_face_valid1 = create_trimmed_face1(geom_face, face_edges, connected_tolerance)
+    wire_list1, trimmed_face1, is_face_valid1 = create_trimmed_face1(geom_face, face_edges,
+                                                                     connected_tolerance)
     if is_face_valid1:
         return wire_list1, trimmed_face1, True
 
@@ -877,154 +918,6 @@ def try_create_trimmed_face(geom_face, topo_face, face_edges, connected_toleranc
         return wire_list2, trimmed_face2, True
 
     return wire_list2, trimmed_face2, False
-
-
-# Fit parametric surfaces / curves and trim into B-rep
-def construct_brep(v_shape, connected_tolerance, folder_path,
-                   isdebug=False, is_save_face=True, debug_face_idx=[]):
-    if isdebug:
-        print(
-                f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
-    v_shape.build_geom()
-    recon_geom_faces = v_shape.recon_geom_faces
-    recon_topo_faces = v_shape.recon_topo_faces
-    recon_curves = v_shape.recon_curves
-    recon_edge = v_shape.recon_edge
-    FaceEdgeAdj = v_shape.face_edge_adj
-
-    # if isdebug:
-    #     viz_shapes(recon_geom_faces, transparency=0.5)
-    #     os.makedirs(os.path.join(folder_path, 'fitting_geom_face'), exist_ok=True)
-    #     for idx, geom_face in enumerate(recon_geom_faces):
-    #         topo_face_from_geom = BRepBuilderAPI_MakeFace(geom_face, 1e-3).Face()
-    #         # write_stl_file(topo_face_from_geom, os.path.join(folder_path, 'fitting_face', f'{idx}.stl'), linear_deflection=0.1,
-    #         #                angular_deflection=0.5)
-    #         viz_shapes([topo_face_from_geom], transparency=0.5)
-
-    if isdebug:
-        print(
-                f"{Colors.GREEN}################################ 2. Trim Face ######################################{Colors.RESET}")
-    # Cut surface by wire
-    is_face_success_list = []
-    trimmed_faces = []
-    for idx, (geom_face, topo_face, face_edge_idx) in enumerate(zip(recon_geom_faces, recon_topo_faces, FaceEdgeAdj)):
-        face_edges = [recon_edge[edge_idx] for edge_idx in face_edge_idx]
-        if idx in debug_face_idx:
-            is_viz_wire, is_viz_face, is_viz_shell = True, True, True
-        else:
-            is_viz_wire, is_viz_face, is_viz_shell = IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL
-        if not isdebug:
-            is_viz_wire, is_viz_face, is_viz_shell = False, False, False
-
-        # 3. Construct face using geom surface and wires
-        wire_list, trimmed_face, is_valid = try_create_trimmed_face(geom_face, topo_face, face_edges,
-                                                                    connected_tolerance)
-
-        is_face_success_list.append(is_valid)
-
-        if trimmed_face is None:
-            print(f"{Colors.RED}Folder_path: {folder_path}, Face {idx} is None{Colors.RESET}")
-            continue
-
-        # visualize the constructed wire
-        if is_viz_wire:
-            shapes = wire_list
-            display, start_display, add_menu, add_function_to_menu = init_display()
-            if len(shapes) == 1:
-                display.DisplayShape(shapes[0], update=True)
-            else:
-                for shape in shapes:
-                    display.DisplayShape(shape, update=True, color=Colors.random_color())
-            display.FitAll()
-            start_display()
-            # viz_shapes(wire_list)
-        if is_viz_face:
-            shapes = [trimmed_face]
-            display, start_display, add_menu, add_function_to_menu = init_display()
-            if len(shapes) == 1:
-                display.DisplayShape(shapes[0], update=True)
-            else:
-                for shape in shapes:
-                    display.DisplayShape(shape, update=True, color=Colors.random_color())
-            display.FitAll()
-            start_display()
-            # viz_shapes([trimmed_face])
-
-        # check if the face contains all edges
-        # is_face_success = check_edges_in_face(trimmed_face, face_edges)
-        if isdebug and not is_valid:
-            print(f"{Colors.RED}Folder_path: {folder_path}, Face {idx} is not valid{Colors.RESET}")
-            # viz_shapes(face_edges,)
-            # viz_shapes(wire_list)
-            # viz_shapes([topo_face])
-
-        # save the face as step file and stl file
-        is_save_face = False
-        if is_save_face:
-            os.makedirs(os.path.join(folder_path, 'recon_face'), exist_ok=True)
-            try:
-                write_step_file(trimmed_face,
-                                os.path.join(folder_path, 'recon_face', f'{idx}_{1 if is_valid else 0}.step'))
-                write_stl_file(trimmed_face,
-                               os.path.join(folder_path, 'recon_face', f'{idx}_{1 if is_valid else 0}.stl'))
-            except:
-                print(f"Error writing step or stl file for face {idx}")
-
-        if is_valid:
-            trimmed_faces.append(trimmed_face)
-
-    if isdebug:
-        print(
-                f"{Colors.GREEN}################################ 3. Sew solid ################################{Colors.RESET}")
-    if len(trimmed_faces) < 2:
-        return None, is_face_success_list
-
-    sewing = BRepBuilderAPI_Sewing()
-    sewing.SetTolerance(SEWING_TOLERANCE)
-    for face in trimmed_faces:
-        sewing.Add(face)
-    sewing.Perform()
-    sewn_shell = sewing.SewedShape()
-
-    if isdebug and is_viz_shell:  # sewn_shell.ShapeType() == TopAbs_COMPOUND:
-        viz_shapes([sewn_shell])
-
-    if sewn_shell.ShapeType() == TopAbs_COMPOUND:
-        return sewn_shell, is_face_success_list
-
-    # fix the shell
-    try:
-        fix_shell = ShapeFix_Shell(sewn_shell)
-        fix_shell.SetPrecision(FIX_PRECISION)
-        fix_shell.SetMaxTolerance(FIX_TOLERANCE)
-        fix_shell.SetFixFaceMode(True)
-        fix_shell.SetFixOrientationMode(True)
-        fix_shell.Perform()
-        sewn_shell = fix_shell.Shell()
-    except:
-        pass
-
-    maker = BRepBuilderAPI_MakeSolid()
-    maker.Add(sewn_shell)
-    maker.Build()
-    solid = maker.Solid()
-
-    try:
-        fix_solid = ShapeFix_Solid(solid)
-        fix_solid.SetPrecision(FIX_TOLERANCE)
-        fix_solid.SetMaxTolerance(FIX_TOLERANCE)
-        fix_solid.SetFixShellMode(True)
-        fix_solid.SetFixShellOrientationMode(True)
-        fix_solid.SetCreateOpenSolidMode(False)
-        fix_solid.Perform()
-        fixed_solid = fix_solid.Solid()
-    except:
-        fixed_solid = solid
-
-    if isdebug:
-        print(
-                f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
-    return fixed_solid, is_face_success_list
 
 
 def get_separated_surface(trimmed_faces, v_precision1=1e-2, v_precision2=1e-1):
@@ -1096,12 +989,13 @@ def get_solid(trimmed_faces):
         return None
 
 
-def construct_brep_yl(v_shape, connected_tolerance, isdebug=False):
+def construct_brep(v_shape, connected_tolerance, isdebug=False):
     debug_idx = []
     if isdebug:
         print(
                 f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
     v_shape.build_geom()
+    recon_edge_points = v_shape.recon_edge_points
     recon_geom_faces = v_shape.recon_geom_faces
     recon_topo_faces = v_shape.recon_topo_faces
     recon_curves = v_shape.recon_curves
@@ -1121,8 +1015,7 @@ def construct_brep_yl(v_shape, connected_tolerance, isdebug=False):
         if isdebug:
             print(f"Process Face {idx}")
         face_edges = [recon_edge[edge_idx] for edge_idx in face_edge_idx]
-        wire_list, trimmed_face, is_valid = try_create_trimmed_face(geom_face, topo_face, face_edges,
-                                                                    connected_tolerance)
+        wire_list, trimmed_face, is_valid = try_create_trimmed_face(geom_face, topo_face, face_edges, connected_tolerance)
         is_valid = False if trimmed_face is None else is_valid
 
         if idx in debug_idx:

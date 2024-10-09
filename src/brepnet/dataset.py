@@ -273,7 +273,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
                 T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
             ])
         self.max_faces = 64
-        if False: # Overfitting mode
+        if v_conf["overfit"]: # Overfitting mode
             self.data_folders = filelist[:100] * scale_factor
         else:
             self.data_folders = filelist * scale_factor

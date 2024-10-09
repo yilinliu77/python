@@ -85,7 +85,7 @@ import trimesh
 # FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 10e-2]
 
 EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2, ]
-FACE_FITTING_TOLERANCE = [1e-3, 2e-2, 5e-2, 8e-2, ]
+FACE_FITTING_TOLERANCE = [2e-2, 5e-2, 8e-2, ]
 ROUGH_FITTING_TOLERANCE = 1e-1
 
 FIX_TOLERANCE = 1e-2
@@ -144,6 +144,7 @@ class Shape:
         self.recon_face_points = v_face_point
         self.recon_edge_points = v_edge_points
         self.edge_face_connectivity = v_connectivity
+        self.device = torch.device('cuda') if is_use_cuda else torch.device('cpu')
 
         # Build denser points
         self.interpolation_face = []
@@ -151,12 +152,11 @@ class Shape:
             self.interpolation_face.append(interpolation_face_points(face, is_use_cuda=is_use_cuda))
 
         self.chamferdist = ChamferDistance()
-        self.device = torch.device('cuda') if is_use_cuda else torch.device('cpu')
 
         self.remove_edge_idx = []
         pass
 
-    def remove_half_edges(self, v_threshold=1e-1):
+    def remove_half_edges(self, edge2face_threshold=1e-1, face2face_threshold=0.04):
         edge_face_connectivity = self.edge_face_connectivity
         cache_dict = {}
         for conec in edge_face_connectivity:
@@ -172,11 +172,31 @@ class Shape:
 
         # Duplicate or delete edges if it appears once
         new_dict = {}
-        remove_edge_idx = []
         for key, value in cache_dict.items():
             # Check validity
             face_id1 = key[0]
             face_id2 = key[1]
+
+            # first check the validity of the connection
+            # distance_face1_to_face2_ = torch.sqrt(self.chamferdist(
+            #         self.interpolation_face[face_id1][None],
+            #         self.interpolation_face[face_id2][None], bidirectional=False, batch_reduction=None, point_reduction=None))
+            # dis_face_to_face_ = distance_face1_to_face2_.min()
+
+            face1 = torch.from_numpy(self.recon_face_points[face_id1]).to(self.device)
+            face2 = torch.from_numpy(self.recon_face_points[face_id2]).to(self.device)
+            dist_face1_to_face2 = torch.sqrt(self.chamferdist(
+                    face1.reshape(1, -1, 3),
+                    self.interpolation_face[face_id2][None], bidirectional=False, batch_reduction=None, point_reduction=None))
+            dist_face2_to_face1 = torch.sqrt(self.chamferdist(
+                    face2.reshape(1, -1, 3),
+                    self.interpolation_face[face_id1][None], bidirectional=False, batch_reduction=None, point_reduction=None))
+            dis_face_to_face = torch.min(dist_face1_to_face2.min(), dist_face2_to_face1.min())
+
+            if dis_face_to_face > face2face_threshold:
+                for item in value:
+                    self.remove_edge_idx.append(item)
+                continue
 
             edge1 = torch.from_numpy(self.recon_edge_points[value[0]]).to(self.device)
             distance11 = torch.sqrt(self.chamferdist(
@@ -190,7 +210,6 @@ class Shape:
 
             if len(value) == 2:
                 edge2 = torch.from_numpy(self.recon_edge_points[value[1]]).to(self.device)
-
                 distance21 = torch.sqrt(self.chamferdist(
                         edge2[None],
                         self.interpolation_face[face_id1][None]))
@@ -199,11 +218,11 @@ class Shape:
                         self.interpolation_face[face_id2][None]))
 
                 distance2 = (distance21 + distance22) / 2
-                if distance1 > v_threshold and distance2 > v_threshold:
+                if distance1 > edge2face_threshold and distance2 > edge2face_threshold:
                     for item in value:
-                        remove_edge_idx.append(item)
+                        self.remove_edge_idx.append(item)
                     continue
-                elif distance1 < v_threshold and distance1 < distance2:
+                elif distance1 < edge2face_threshold and distance1 < distance2:
                     edges.append(self.recon_edge_points[value[0]])
                     edge_face_connectivity.append([len(edges) - 1, face_id1, face_id2])
                 else:
@@ -211,14 +230,34 @@ class Shape:
                     edge_face_connectivity.append([len(edges) - 1, face_id1, face_id2])
 
             elif len(value) == 1:
-                if distance1 > v_threshold:
-                    remove_edge_idx.append(value[0])
+                if distance1 > edge2face_threshold:
+                    self.remove_edge_idx.append(value[0])
                     continue
                 edges.append(self.recon_edge_points[value[0]])
                 edge_face_connectivity.append([len(edges) - 1, face_id1, face_id2])
 
         self.recon_edge_points = np.stack(edges, axis=0)
         self.edge_face_connectivity = np.stack(edge_face_connectivity, axis=0)
+        pass
+
+    def remove_invalid_edge(self, v_threshold=0.04):
+        # use the distance of two adjacent faces to check the validity of the edge
+        invalid_edges_face_connectivity = []
+        for edge_face1_face2 in self.edge_face_connectivity:
+            edge_idx, face1, face2 = edge_face1_face2
+            dis_face1_to_face2 = torch.sqrt(self.chamferdist(
+                    self.interpolation_face[face1][None],
+                    self.interpolation_face[face2][None],
+                    bidirectional=False, batch_reduction=None, point_reduction=None))
+            dis_face1_to_face2 = dis_face1_to_face2.min()
+            # dis_face1_to_face2 = (torch.topk(dis_face1_to_face2, 16, dim=1, largest=False)[0]).mean()
+            if dis_face1_to_face2 > v_threshold:
+                invalid_edges_face_connectivity.append(edge_face1_face2)
+
+        for edge_face1_face2 in invalid_edges_face_connectivity:
+            edge_idx, face1, face2 = edge_face1_face2
+            self.remove_edge_idx.append(edge_idx)
+            np.delete(self.edge_face_connectivity, np.where(self.edge_face_connectivity[:, 0] == edge_idx)[0], axis=0)
         pass
 
     def check_openness(self, v_threshold=0.95):
@@ -232,10 +271,11 @@ class Shape:
         recon_edge[self.openness, 0] = delta[self.openness]
         recon_edge[self.openness, -1] = delta[self.openness]
 
-    def check_connectivity(self):
+    def remove_isolated_edges(self):
+        # Using the pair to fix the isolate edges
+        # If the edge is not in the pair, and it is not closed, then it is isolated edge
         if self.pair1 is None:
             return
-        # Using the connectivity to fix the isolate edges
         edge_face_connectivity = self.edge_face_connectivity
         is_edge_in_pair = np.zeros(self.recon_edge_points.shape[0], dtype=bool)
         pair_edge_idx = np.unique(self.pair1.flatten())

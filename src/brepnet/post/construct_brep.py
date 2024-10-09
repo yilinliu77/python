@@ -116,7 +116,7 @@ def get_data(v_filename):
 
 def construct_brep_from_datanpz(data_root, out_root, folder_name,
                                 is_ray=False, is_log=True,
-                                is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=False):
+                                is_optimize_geom=True, isdebug=True, use_cuda=False, from_scratch=False):
     if not from_scratch and os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
         return
 
@@ -136,19 +136,18 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         check_dir(os.path.join(out_root, folder_name))
 
     shape = get_data(os.path.join(data_root, folder_name, 'data.npz'))
-    shape.remove_half_edges(2e-1)
+    shape.remove_half_edges()
     shape.check_openness()
     shape.build_fe()
     shape.build_vertices(0.2)
-    shape.check_connectivity()
+    shape.remove_isolated_edges()
 
     if is_log:
         print(f"{Colors.GREEN}Remove {len(shape.remove_edge_idx)} isolate edges{Colors.RESET}")
 
     if isdebug:
         export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), shape.recon_face_points.reshape(-1, 3))
-        updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx, axis=0)
-        export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'edge.obj'))
+        export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge.obj'))
         for face_idx in range(len(shape.face_edge_adj)):
             export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}.ply"),
                                shape.recon_face_points[face_idx].reshape(-1, 3))
@@ -175,16 +174,15 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             shape.recon_edge_points = optimize(
                     interpolation_face, shape.recon_edge_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                    v_islog=isdebug, v_max_iter=200)
+                    v_islog=isdebug, v_max_iter=100)
         else:
             task = optimize_ray.remote(
                     interpolation_face, shape.recon_edge_points,
-                    shape.edge_face_connectivity, shape.is_end_point, shape.pair1, v_max_iter=200)
+                    shape.edge_face_connectivity, shape.is_end_point, shape.pair1, v_max_iter=100)
             shape.recon_edge_points = ray.get(task)
 
         if isdebug:
-            updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx, axis=0)
-            export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'optimized_edge.obj'))
+            export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'optimized_edge.obj'))
             for face_idx in range(len(shape.face_edge_adj)):
                 for idx, edge_idx in enumerate(shape.face_edge_adj[face_idx]):
                     adj_face = shape.edge_face_connectivity[edge_idx][1:]

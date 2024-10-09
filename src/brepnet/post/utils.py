@@ -1138,7 +1138,7 @@ def construct_brep_yl(v_shape, connected_tolerance, isdebug=False):
 
     result = [is_face_success_list, None, None]
     if len(trimmed_faces) > 2:
-        v, f = get_separated_surface(trimmed_faces)
+        v, f = get_separated_surface(trimmed_faces, v_precision2=0.2)
         separated_surface = trimesh.Trimesh(vertices=v, faces=f)
         result[1] = separated_surface
         result[2] = get_solid(trimmed_faces)

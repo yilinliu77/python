@@ -177,7 +177,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             shape.recon_edge_points = optimize(
                     interpolation_face, shape.recon_edge_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                    v_islog=isdebug, v_max_iter=200)
+                    v_islog=is_log, v_max_iter=200)
         else:
             task = optimize_ray.remote(
                     interpolation_face, shape.recon_edge_points,

@@ -159,7 +159,7 @@ class Shape:
         self.remove_edge_idx_new = []
         pass
 
-    def remove_half_edges(self, edge2face_threshold=2e-1, is_check_intersection=True, face2face_threshold=0.06):
+    def remove_half_edges(self, edge2face_threshold=2e-1, is_check_intersection=False, face2face_threshold=0.06):
         edge_face_connectivity = self.edge_face_connectivity
         cache_dict = {}
         for conec in edge_face_connectivity:
@@ -390,9 +390,13 @@ class Shape:
 
         remove_edges_idx = [[] for _ in range(self.recon_face_points.shape[0])]
         for face_idx, face_edge_adj_c in enumerate(self.face_edge_adj):
+            if len(face_edge_adj_c) == 0:
+                continue
             max_combination_num = min(len(face_edge_adj_c) - 1, max_drop_num)
             all_combinations = []
             for combinations_num in range(1, max_combination_num + 1):
+                if len(face_edge_adj_c) - combinations_num == 0:
+                    continue
                 all_combinations += list(combinations(face_edge_adj_c, len(face_edge_adj_c) - combinations_num))
             all_combinations += [face_edge_adj_c]
 

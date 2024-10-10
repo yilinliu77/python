@@ -413,6 +413,8 @@ class Shape:
                 dist_matrix = dist_matrix + torch.eye(dist_matrix.shape[0]).to(self.device) * 1e6
                 connected_loss_c = dist_matrix.min(dim=0)[0].sum()
                 connected_loss.append(connected_loss_c)
+            if len(connected_loss) <= 1:
+                continue
             best_combination_idx = torch.argmin(torch.stack(connected_loss[:-1])).item()
             if connected_loss[best_combination_idx] < connected_loss[-1] + loss_increase_tolerance:
                 for edge_idx in face_edge_adj_c:

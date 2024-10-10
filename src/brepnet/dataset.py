@@ -260,9 +260,13 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             scale_factor = 1
         else:
             raise
+        deduplicate_list = []
+        if v_conf["deduplicate_list"] != "":
+            deduplicate_list = [item.strip() for item in open(v_conf["deduplicate_list"]).readlines()]
+
         filelist1 = os.listdir(self.dataset_path)
         filelist2 = [item[:8] for item in os.listdir(self.face_z_dataset) if os.path.exists(os.path.join(self.face_z_dataset, item+"/feature.npy"))]
-        filelist = list(set(filelist1) & set(filelist2))
+        filelist = list(set(filelist1) & set(filelist2) & set(deduplicate_list))
         filelist.sort()
 
         self.condition = v_conf["condition"]
@@ -277,6 +281,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             self.data_folders = filelist[:100] * scale_factor
         else:
             self.data_folders = filelist * scale_factor
+        print("Total data num:", len(self.data_folders))
         return
 
     def __len__(self):
@@ -300,7 +305,6 @@ class Diffusion_dataset(torch.utils.data.Dataset):
                     f.write(item + "\n")
 
         self.data_folders = [item for item in self.data_folders if item.stem not in ignore_ids]
-        print("Final data num:", len(self.data_folders))
 
     def __getitem__(self, idx):
         # idx = 0

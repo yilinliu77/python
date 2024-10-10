@@ -6,6 +6,8 @@ dataset:
   val_dataset: D:/img2brep/deepcad_whole_test_v5
   test_dataset: /mnt/d/img2brep/0825_test
 
+  deduplicate_list:
+
   scale_factor: 1
   condition:
 

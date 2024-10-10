@@ -260,12 +260,16 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             scale_factor = 1
         else:
             raise
-        deduplicate_list = []
-        if v_conf["deduplicate_list"] != "":
-            deduplicate_list = [item.strip() for item in open(v_conf["deduplicate_list"]).readlines()]
 
         filelist1 = os.listdir(self.dataset_path)
-        filelist2 = [item[:8] for item in os.listdir(self.face_z_dataset) if os.path.exists(os.path.join(self.face_z_dataset, item+"/feature.npy"))]
+        filelist2 = [item[:8] for item in os.listdir(self.face_z_dataset) if os.path.exists(os.path.join(self.face_z_dataset, item+"/features.npy"))]
+        
+        deduplicate_list = filelist2
+        if v_conf["deduplicate_list"]:
+            deduplicate_file = "src/brepnet/data/deduplicated_deepcad_{}.txt".format(v_training_mode)
+            print("Use deduplicate list ", deduplicate_file)
+            deduplicate_list = [item.strip() for item in open(deduplicate_file).readlines()]
+
         filelist = list(set(filelist1) & set(filelist2) & set(deduplicate_list))
         filelist.sort()
 
@@ -312,7 +316,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         try:
             data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "_feature.npz"))['face_features']
         except:
-            data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "/feature.npy"))
+            data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "/features.npy"))
         face_features = torch.from_numpy(data_npz)
 
         padded_face_features = torch.zeros((self.max_faces, *face_features.shape[1:]), dtype=torch.float32)

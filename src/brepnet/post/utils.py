@@ -159,7 +159,7 @@ class Shape:
         self.remove_edge_idx_new = []
         pass
 
-    def remove_half_edges(self, edge2face_threshold=2e-1, face2face_threshold=2e-1):
+    def remove_half_edges(self, edge2face_threshold=2e-1, is_check_intersection=True, face2face_threshold=0.06):
         edge_face_connectivity = self.edge_face_connectivity
         cache_dict = {}
         for conec in edge_face_connectivity:
@@ -180,26 +180,22 @@ class Shape:
             face_id1 = key[0]
             face_id2 = key[1]
 
-            # first check the validity of the connection
-            # distance_face1_to_face2_ = torch.sqrt(self.chamferdist(
-            #         self.interpolation_face[face_id1][None],
-            #         self.interpolation_face[face_id2][None], bidirectional=False, batch_reduction=None, point_reduction=None))
-            # dis_face_to_face_ = distance_face1_to_face2_.min()
+            # first check the validity of the intersection
+            if is_check_intersection:
+                face1 = torch.from_numpy(self.recon_face_points[face_id1]).to(self.device)
+                face2 = torch.from_numpy(self.recon_face_points[face_id2]).to(self.device)
+                dist_face1_to_face2 = torch.sqrt(self.chamferdist(
+                        face1.reshape(1, -1, 3),
+                        self.interpolation_face[face_id2][None], bidirectional=False, batch_reduction=None, point_reduction=None))
+                dist_face2_to_face1 = torch.sqrt(self.chamferdist(
+                        face2.reshape(1, -1, 3),
+                        self.interpolation_face[face_id1][None], bidirectional=False, batch_reduction=None, point_reduction=None))
+                dis_face_to_face = torch.min(dist_face1_to_face2.min(), dist_face2_to_face1.min())
 
-            face1 = torch.from_numpy(self.recon_face_points[face_id1]).to(self.device)
-            face2 = torch.from_numpy(self.recon_face_points[face_id2]).to(self.device)
-            dist_face1_to_face2 = torch.sqrt(self.chamferdist(
-                    face1.reshape(1, -1, 3),
-                    self.interpolation_face[face_id2][None], bidirectional=False, batch_reduction=None, point_reduction=None))
-            dist_face2_to_face1 = torch.sqrt(self.chamferdist(
-                    face2.reshape(1, -1, 3),
-                    self.interpolation_face[face_id1][None], bidirectional=False, batch_reduction=None, point_reduction=None))
-            dis_face_to_face = torch.min(dist_face1_to_face2.min(), dist_face2_to_face1.min())
-
-            if dis_face_to_face > face2face_threshold:
-                for item in value:
-                    self.remove_edge_idx_src.append(item)
-                continue
+                if dis_face_to_face > face2face_threshold:
+                    for item in value:
+                        self.remove_edge_idx_src.append(item)
+                    continue
 
             edge1 = torch.from_numpy(self.recon_edge_points[value[0]]).to(self.device)
             distance11 = torch.sqrt(self.chamferdist(
@@ -389,13 +385,17 @@ class Shape:
             edge_face_connectivity = edge_face_connectivity[edge_face_connectivity[:, 0] != iso_edge_idx]
             self.remove_edge_idx_new.append(iso_edge_idx)
 
-    def drop_edges(self, max_drop_num=1, use_cuda=True, loss_increase_tolerance=1e-5):
+    def drop_edges(self, max_drop_num=2, use_cuda=True, loss_increase_tolerance=1e-5):
         recon_edge_points = torch.from_numpy(self.recon_edge_points).to(self.device)
 
         remove_edges_idx = [[] for _ in range(self.recon_face_points.shape[0])]
         for face_idx, face_edge_adj_c in enumerate(self.face_edge_adj):
-            combination_num = min(len(face_edge_adj_c) - 1, max_drop_num)
-            all_combinations = list(combinations(face_edge_adj_c, len(face_edge_adj_c) - combination_num)) + [face_edge_adj_c]
+            max_combination_num = min(len(face_edge_adj_c) - 1, max_drop_num)
+            all_combinations = []
+            for combinations_num in range(1, max_combination_num + 1):
+                all_combinations += list(combinations(face_edge_adj_c, len(face_edge_adj_c) - combinations_num))
+            all_combinations += [face_edge_adj_c]
+
             connected_loss = []
             for sampled_face_edge_adj in all_combinations:
                 # cannot remove the closed edge
@@ -510,13 +510,18 @@ def optimize(
 
         wire_connected_loss = []
         for face_edge_idx in face_edge_adj:
+            if len(face_edge_idx) == 0:
+                continue
             face_edge_endpoint = torch.concatenate((transformed_edges[face_edge_idx, 0, :],
                                                     transformed_edges[face_edge_idx, -1, :]))
             dist_matrix = torch.cdist(face_edge_endpoint, face_edge_endpoint)
             dist_matrix = dist_matrix + torch.eye(dist_matrix.shape[0]).to(device) * 1e6
             connected_loss = dist_matrix.min(dim=0)[0].sum()
             wire_connected_loss.append(connected_loss)
-        wire_connected_loss = torch.stack(wire_connected_loss).mean()
+        if len(wire_connected_loss) == 0:
+            wire_connected_loss = torch.zeros_like(adj_distance_loss)
+        else:
+            wire_connected_loss = torch.stack(wire_connected_loss).mean()
 
         loss = adj_distance_loss + endpoints_loss + wire_connected_loss
 
@@ -1016,6 +1021,11 @@ def construct_brep(v_shape, connected_tolerance, isdebug=False):
     for idx, (geom_face, topo_face, face_edge_idx) in enumerate(zip(recon_geom_faces, recon_topo_faces, FaceEdgeAdj)):
         if isdebug:
             print(f"Process Face {idx}")
+        if len(face_edge_idx) == 0:
+            if isdebug:
+                print(f"Face {idx} has no edge")
+            is_face_success_list.append(False)
+            continue
         face_edges = [recon_edge[edge_idx] for edge_idx in face_edge_idx]
         wire_list, trimmed_face, is_valid = try_create_trimmed_face(geom_face, topo_face, face_edges, connected_tolerance)
         is_valid = False if trimmed_face is None else is_valid

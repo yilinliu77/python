@@ -8,6 +8,7 @@ dataset:
 
   scale_factor: 1
   condition:
+  overfit: false
 
 trainer:
   gpu: 1
@@ -21,6 +22,7 @@ trainer:
   # Evaluation
   evaluate: false
   test_output_dir:
+  max_steps: -1
   resume_from_checkpoint:
 
   max_epochs: 10000000

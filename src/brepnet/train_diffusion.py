@@ -208,6 +208,7 @@ def main(v_cfg: DictConfig):
         enable_model_summary=True,
         callbacks=[mc, lr_monitor],
         max_epochs=int(v_cfg["trainer"]["max_epochs"]),
+        max_steps=int(v_cfg["trainer"]["max_steps"]),
         # max_epochs=2,
         num_sanity_val_steps=2,
         check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
@@ -219,9 +220,9 @@ def main(v_cfg: DictConfig):
 
     if v_cfg["trainer"].evaluate:
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
-        # weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, weights_only=False)["state_dict"]
-        # # weights = {k.replace("model.", ""): v for k, v in weights.items()}
-        # model.load_state_dict(weights)
+        weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, weights_only=False)["state_dict"]
+        # weights = {k.replace("model.", ""): v for k, v in weights.items()}
+        model.load_state_dict(weights)
         trainer.test(model)
 
     else:

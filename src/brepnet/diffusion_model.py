@@ -370,13 +370,15 @@ class Diffusion_base(nn.Module):
                     param.requires_grad = False
                 self.ae_model.eval()
 
-    def inference(self, bs, device, **kwargs):
+    def inference(self, bs, device, v_data=None, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, 32)).to(device)
 
+        errors = []
         for t in tqdm(self.noise_scheduler.timesteps):
             timesteps = t.reshape(-1).to(device)
             pred_x0 = self.diffuse(face_features, timesteps)
             face_features = self.noise_scheduler.step(pred_x0, t, face_features).prev_sample
+            errors.append((v_data["face_features"] - pred_x0).abs().mean(dim=[1,2]))
 
         face_z = face_features
         recon_data = []
@@ -453,16 +455,22 @@ class Diffusion_condition(Diffusion_base):
                  ):
         super().__init__(v_conf)
         self.dim_input = 8 * 2 * 2
-        self.dim_latent = 768
+        self.dim_latent = 512
+        self.dim_condition = 256
+        self.dim_total = self.dim_latent + self.dim_condition
         self.time_statics = [0 for _ in range(10)]
 
-        layer1 = nn.TransformerEncoderLayer(
-            d_model=self.dim_latent, nhead=12, norm_first=True, dim_feedforward=1024, dropout=0.1, batch_first=True)
-        self.net1 = nn.TransformerEncoder(layer1, 24, nn.LayerNorm(self.dim_latent))
+        self.p_embed = nn.Sequential(
+            nn.Linear(self.dim_input, self.dim_latent),
+            nn.LayerNorm(self.dim_latent),
+            nn.SiLU(),
+            nn.Linear(self.dim_latent, self.dim_latent),
+        )
 
-        layer2 = nn.TransformerDecoderLayer(
-            d_model=self.dim_latent, nhead=12, norm_first=True, dim_feedforward=1024, dropout=0.1, batch_first=True)
-        self.net2 = nn.TransformerDecoder(layer2, 24, nn.LayerNorm(self.dim_latent))
+        layer1 = nn.TransformerEncoderLayer(
+            d_model=self.dim_total,
+            nhead=12, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
+        self.net1 = nn.TransformerEncoder(layer1, 12, nn.LayerNorm(self.dim_total))
 
         self.with_img = False
         self.with_pc = False
@@ -477,14 +485,14 @@ class Diffusion_condition(Diffusion_base):
                 nn.Linear(1024, 1024),
                 nn.LayerNorm(1024),
                 nn.SiLU(),
-                nn.Linear(1024, self.dim_latent),
+                nn.Linear(1024, self.dim_condition),
             )
             self.camera_embedding = nn.Sequential(
                 nn.Embedding(24, 256),
                 nn.Linear(256, 256),
                 nn.LayerNorm(256),
                 nn.SiLU(),
-                nn.Linear(256, 1024),
+                nn.Linear(256, self.dim_condition),
             )
         elif v_conf["condition"] == "pc":
             self.with_pc = True
@@ -544,14 +552,14 @@ class Diffusion_condition(Diffusion_base):
                 nn.Linear(1024, 1024),
                 nn.LayerNorm(1024),
                 nn.SiLU(),
-                nn.Linear(1024, self.dim_latent),
+                nn.Linear(1024, self.dim_condition),
             )
 
         self.classifier = nn.Sequential(
-            nn.Linear(32, self.dim_latent),
-            nn.LayerNorm(self.dim_latent),
+            nn.Linear(self.dim_input, self.dim_input),
+            nn.LayerNorm(self.dim_input),
             nn.SiLU(),
-            nn.Linear(self.dim_latent, 1),
+            nn.Linear(self.dim_input, 1),
         )
 
         self.noise_scheduler = DDPMScheduler(
@@ -561,6 +569,13 @@ class Diffusion_condition(Diffusion_base):
             beta_start=0.0001,
             beta_end=0.02,
             clip_sample=False,
+        )
+
+        self.time_embed = nn.Sequential(
+            nn.Linear(self.dim_total, self.dim_total),
+            nn.LayerNorm(self.dim_total),
+            nn.SiLU(),
+            nn.Linear(self.dim_total, self.dim_total),
         )
 
 
@@ -611,15 +626,15 @@ class Diffusion_condition(Diffusion_base):
         return data
 
     def diffuse(self, v_feature, v_timesteps, v_condition=None):
-        time_embeds = self.time_embed(sincos_embedding(v_timesteps, self.dim_latent)).unsqueeze(1)
+        bs = v_feature.size(0)
+        time_embeds = self.time_embed(sincos_embedding(v_timesteps, self.dim_total)).unsqueeze(1)
         noise_features = self.p_embed(v_feature)
+        v_condition = torch.zeros((bs, 1, self.dim_condition)) if v_condition is None else v_condition
+        v_condition = v_condition.repeat(1, self.num_max_faces, 1)
+        noise_features = torch.cat([noise_features, v_condition], dim=-1)
         noise_features = noise_features + time_embeds
-        v_condition = noise_features if v_condition is None else v_condition
 
-        pred_x0 = self.net2(tgt=noise_features, memory=v_condition)
-        pred_x0 = pred_x0 + noise_features
-        pred_x0 = self.net1(pred_x0)
-
+        pred_x0 = self.net1(noise_features)
         pred_x0 = self.fc_out(pred_x0)
         return pred_x0
 
@@ -636,8 +651,8 @@ class Diffusion_condition(Diffusion_base):
                 img_feature = self.img_model(imgs)
             img_idx = v_data["conditions"]["img_id"]
             camera_embedding = self.camera_embedding(img_idx)
-            img_feature = (img_feature.reshape(-1, num_imgs, 1024) + camera_embedding).mean(dim=1)
             img_feature = self.img_fc(img_feature)
+            img_feature = (img_feature.reshape(-1, num_imgs, self.dim_condition) + camera_embedding).mean(dim=1)
             condition = img_feature[:, None]
         elif self.with_pc:
             pc = v_data["conditions"]["points"]
@@ -662,7 +677,6 @@ class Diffusion_condition(Diffusion_base):
             0, self.noise_scheduler.config.num_train_timesteps, (bs,), device=device).long()
 
         condition = self.extract_condition(v_data)
-
         noise = torch.randn(face_z.shape, device=device)
         noise_input = self.noise_scheduler.add_noise(face_z, noise, timesteps)
 

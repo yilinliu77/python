@@ -542,9 +542,9 @@ def optimize(
 
 @ray.remote(num_gpus=0.05)
 def optimize_ray(interpolation_face, recon_edge_points,
-                 edge_face_connectivity, is_end_point, pair1, v_max_iter=1000):
+                 edge_face_connectivity, is_end_point, pair1, face_edge_adj, v_max_iter=1000):
     return optimize(interpolation_face, recon_edge_points,
-                    edge_face_connectivity, is_end_point, pair1, v_islog=False, v_max_iter=v_max_iter)
+                    edge_face_connectivity, is_end_point, pair1, face_edge_adj, v_islog=False, v_max_iter=v_max_iter)
 
 
 def get_edge_vertexes(edge):

@@ -529,7 +529,8 @@ def optimize(
         loss = adj_distance_loss + endpoints_loss + wire_connected_loss
 
         optimizer.zero_grad()
-        if abs(prev_loss - loss.item()) < 1e-5 and False:
+        # if abs(prev_loss - loss.item()) < 1e-4 and False:
+        if loss.item() < 1e-3:
             if v_islog:
                 print(f'Early stop at iter {iter}')
             break

@@ -159,7 +159,7 @@ class Shape:
         self.remove_edge_idx_new = []
         pass
 
-    def remove_half_edges(self, edge2face_threshold=2e-1, face2face_threshold=0.06):
+    def remove_half_edges(self, edge2face_threshold=2e-1, face2face_threshold=2e-1):
         edge_face_connectivity = self.edge_face_connectivity
         cache_dict = {}
         for conec in edge_face_connectivity:
@@ -264,6 +264,8 @@ class Shape:
             assert edge not in self.face_edge_adj[face1]
             self.face_edge_adj[face1].append(edge)
             self.face_edge_adj[face2].append(edge)
+        for face_edge_adj_c in self.face_edge_adj:
+            assert len(face_edge_adj_c) > 0
 
     def build_vertices(self, v_threshold=1e-1):
         num_faces = self.recon_face_points.shape[0]
@@ -392,10 +394,11 @@ class Shape:
 
         remove_edges_idx = [[] for _ in range(self.recon_face_points.shape[0])]
         for face_idx, face_edge_adj_c in enumerate(self.face_edge_adj):
-            combination_num = min(len(face_edge_adj_c), max_drop_num)
+            combination_num = min(len(face_edge_adj_c) - 1, max_drop_num)
             all_combinations = list(combinations(face_edge_adj_c, len(face_edge_adj_c) - combination_num)) + [face_edge_adj_c]
             connected_loss = []
             for sampled_face_edge_adj in all_combinations:
+                # cannot remove the closed edge
                 dropp_edges = list(set(face_edge_adj_c) - set(sampled_face_edge_adj))
                 if len(dropp_edges) != 0 and self.openness[dropp_edges[0]]:
                     connected_loss.append(torch.tensor(1e6).to(self.device))

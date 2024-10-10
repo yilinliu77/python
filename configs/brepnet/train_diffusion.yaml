@@ -10,6 +10,7 @@ dataset:
 
   scale_factor: 1
   condition:
+  overfit: false
 
 trainer:
   gpu: 1

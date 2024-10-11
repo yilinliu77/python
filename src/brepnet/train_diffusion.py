@@ -139,17 +139,6 @@ class TrainDiffusion(pl.LightningModule):
                           pin_memory=True,
                           )
 
-    def inference(self):
-        bs = self.batch_size
-        face_feature = self.model.inference(bs, self.device)
-        result = rearrange(face_feature, "b n (c h w) -> (b n) c h w", c=8, h=2, w=2)
-        decoded_faces = self.autoencoder.decode(result)
-        result = rearrange(decoded_faces, "(b n) h w c-> b n h w c", b=bs)
-        data = {
-            "recon_faces": result,
-            "recon_mask": (face_feature.abs()>1e-4).all(dim=-1)
-        }
-        return data
 
     def test_step(self, batch, batch_idx):
         data = batch
@@ -173,6 +162,14 @@ class TrainDiffusion(pl.LightningModule):
                                 pred_edge=recon_data["pred_edge"].cpu().numpy(),
                                 pred_edge_face_connectivity=recon_data["pred_edge_face_connectivity"].cpu().numpy(),
                                 )
+
+            if "ori_imgs" in data["conditions"]:
+                imgs = data["conditions"]["ori_imgs"][idx].cpu().numpy().astype(np.uint8)
+                o3d.io.write_image(str(item_root / "img0.png"), o3d.geometry.Image(imgs[0]))
+                o3d.io.write_image(str(item_root / "img1.png"), o3d.geometry.Image(imgs[1]))
+                o3d.io.write_image(str(item_root / "img2.png"), o3d.geometry.Image(imgs[2]))
+                o3d.io.write_image(str(item_root / "img3.png"), o3d.geometry.Image(imgs[3]))
+
 
     def on_test_epoch_end(self):
         for loss in self.trainer.callback_metrics:

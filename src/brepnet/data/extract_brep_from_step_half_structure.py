@@ -412,8 +412,8 @@ if __name__ == '__main__':
         ray.init(
                 dashboard_host="0.0.0.0",
                 dashboard_port=15000,
-                num_cpus=1,
-                local_mode=True
+                #num_cpus=1,
+                #local_mode=True
         )
         batch_size = 100
         num_batches = len(total_ids) // batch_size + 1

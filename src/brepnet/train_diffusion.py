@@ -2,12 +2,19 @@ import importlib
 from datetime import datetime
 from pathlib import Path
 import sys
+
+from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface
+from OCC.Core.GeomAbs import GeomAbs_C0
+from OCC.Core.TColgp import TColgp_Array2OfPnt
+from OCC.Core.gp import gp_Pnt
 from einops import rearrange
 import numpy as np
 import open3d as o3d
 
 from src.brepnet.dataset import Diffusion_dataset
 from src.brepnet.post.construct_brep import construct_brep_item
+from src.brepnet.post.utils import triangulate_shape, triangulate_face, export_edges
 
 sys.path.append('../../../')
 import os.path
@@ -30,6 +37,26 @@ from torchmetrics.classification import BinaryPrecision, BinaryRecall, BinaryAve
 from torchmetrics import MetricCollection
 
 import trimesh
+
+def to_mesh(face_points):
+    num_u_points, num_v_points = face_points.shape[1], face_points.shape[2]
+    mesh_total = trimesh.Trimesh()
+    for idx in range(face_points.shape[0]):
+        uv_points_array = TColgp_Array2OfPnt(1, num_u_points, 1, num_v_points)
+        for u_index in range(1, num_u_points + 1):
+            for v_index in range(1, num_v_points + 1):
+                pt = face_points[idx][u_index - 1, v_index - 1]
+                point_3d = gp_Pnt(float(pt[0]), float(pt[1]), float(pt[2]))
+                uv_points_array.SetValue(u_index, v_index, point_3d)
+
+        approx_face = GeomAPI_PointsToBSplineSurface(
+            uv_points_array, 3, 8,
+            GeomAbs_C0, 5e-2).Surface()
+
+        v,f = triangulate_shape(BRepBuilderAPI_MakeFace(approx_face, 5e-2).Face())
+        mesh_item = trimesh.Trimesh(vertices=v, faces=f)
+        mesh_total += mesh_item
+    return mesh_total
 
 class TrainDiffusion(pl.LightningModule):
     def __init__(self, hparams):
@@ -139,7 +166,6 @@ class TrainDiffusion(pl.LightningModule):
                           pin_memory=True,
                           )
 
-
     def test_step(self, batch, batch_idx):
         data = batch
         loss = self.model(data, v_test=True)
@@ -154,6 +180,10 @@ class TrainDiffusion(pl.LightningModule):
             item_root = (log_root / "{:08d}".format(global_id))
             item_root.mkdir(parents=True, exist_ok=True)
             recon_data = results[idx]
+
+            mesh = to_mesh(recon_data["pred_face"].cpu().numpy())
+            mesh.export(str(item_root / "face.ply"))
+            export_edges(recon_data["pred_edge"].cpu().numpy(), str(item_root / "edge.obj"))
 
             np.savez_compressed(str(item_root / f"data.npz"),
                                 pred_face_adj_prob=recon_data["pred_face_adj_prob"].cpu().numpy(),

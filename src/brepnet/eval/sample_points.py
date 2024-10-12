@@ -7,7 +7,8 @@ from trimesh.sample import sample_surface
 
 @ray.remote
 def sample(prefix, root, output_root):
-    file = root / prefix / "recon_brep.ply"
+    file = root / prefix / "face.ply"
+    # file = root / prefix / "recon_brep.ply"
     if not file.exists():
         return
     mesh = trimesh.load(str(file), force="mesh")
@@ -23,8 +24,8 @@ if __name__ == '__main__':
         # local_mode=True,
     )
 
-    root = Path("C:/Users/yilin/Desktop/test_output_post1")
-    output_root = Path("C:/Users/yilin/Desktop/test_output_points1")
+    root = Path("C:/Users/yilin/Desktop/uncond_gaussian_200k")
+    output_root = Path("C:/Users/yilin/Desktop/uncond_gaussian_200k_points")
     output_root.mkdir(exist_ok=True, parents=True)
 
     tasks = []

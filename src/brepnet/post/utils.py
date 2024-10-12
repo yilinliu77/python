@@ -1109,6 +1109,30 @@ def construct_brep(v_shape, connected_tolerance, isdebug=False):
         print(f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
     return result
 
+def triangulate_face(v_face):
+    loc = TopLoc_Location()
+    triangulation = BRep_Tool.Triangulation(v_face, loc)
+
+    if triangulation is None:
+        # Mesh
+        mesh = BRepMesh_IncrementalMesh(v_face, 0.01)
+        triangulation = BRep_Tool.Triangulation(v_face, loc)
+        if triangulation is None:
+            return np.zeros((0, 3)), np.zeros((0, 3))
+
+    v_points = np.zeros((triangulation.NbNodes(), 3), dtype=np.float32)
+    f_faces = np.zeros((triangulation.NbTriangles(), 3), dtype=np.int64)
+    for i in range(0, triangulation.NbNodes()):
+        pnt = triangulation.Node(i + 1)
+        v_points[i, 0] = pnt.X()
+        v_points[i, 1] = pnt.Y()
+        v_points[i, 2] = pnt.Z()
+    for i in range(0, triangulation.NbTriangles()):
+        tri = triangulation.Triangles().Value(i + 1)
+        f_faces[i, 0] = tri.Get()[0] - 1
+        f_faces[i, 1] = tri.Get()[1] - 1
+        f_faces[i, 2] = tri.Get()[2] - 1
+    return v_points, f_faces
 
 def triangulate_shape(v_shape):
     exp = TopExp_Explorer(v_shape, TopAbs_FACE)

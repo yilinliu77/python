@@ -10,7 +10,7 @@ from sklearn.neighbors import NearestNeighbors
 from plyfile import PlyData
 from pathlib import Path
 import multiprocessing
-from chamferdist import ChamferDistance
+from chamfer_distance import ChamferDistance
 
 N_POINTS = 2000
 
@@ -65,10 +65,8 @@ def _pairwise_CD(sample_pcs, ref_pcs, batch_size):
             sample_batch_exp = sample_batch.view(1, -1, 3).expand(batch_size_ref, -1, -1)
             sample_batch_exp = sample_batch_exp.contiguous()
 
-            # dl, dr, idx1, idx2 = chamfer_dist(sample_batch_exp, ref_batch)
-            # cd_lst.append((dl.mean(dim=1) + dr.mean(dim=1)).view(1, -1))
-            cd_lst.append(chamfer_dist(
-                sample_batch_exp, ref_batch, bidirectional=True, batch_reduction=None, point_reduction="mean").view(1, -1))
+            dl, dr, idx1, idx2 = chamfer_dist(sample_batch_exp, ref_batch)
+            cd_lst.append((dl.mean(dim=1) + dr.mean(dim=1)).view(1, -1))
 
         cd_lst = torch.cat(cd_lst, dim=1)
         all_cd.append(cd_lst)

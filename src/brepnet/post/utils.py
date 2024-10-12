@@ -883,7 +883,7 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
     return face_occ
 
 
-def drop_edges(face_edges_np, is_edge_closed, drop_edge_num=0, accepted_connected_loss=0.05):
+def drop_edges(face_edges_np, is_edge_closed, drop_edge_num=0, accepted_connected_loss=0.2):
     saved_edge_idx = list(combinations(range(face_edges_np.shape[0]), face_edges_np.shape[0] - drop_edge_num))
     saved_edge_idx += [list(range(face_edges_np.shape[0]))]
     connected_loss = []
@@ -1109,6 +1109,7 @@ def construct_brep(v_shape, connected_tolerance, isdebug=False):
         print(f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")
     return result
 
+
 def triangulate_face(v_face):
     loc = TopLoc_Location()
     triangulation = BRep_Tool.Triangulation(v_face, loc)
@@ -1133,6 +1134,7 @@ def triangulate_face(v_face):
         f_faces[i, 1] = tri.Get()[1] - 1
         f_faces[i, 2] = tri.Get()[2] - 1
     return v_points, f_faces
+
 
 def triangulate_shape(v_shape):
     exp = TopExp_Explorer(v_shape, TopAbs_FACE)

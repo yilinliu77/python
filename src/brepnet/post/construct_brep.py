@@ -144,12 +144,12 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     shape.check_openness()
     shape.build_fe()
     shape.build_vertices(0.2)
-    shape.remove_isolated_edges()
-    if isdebug:
-        export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge_before_drop.obj'))
-    shape.drop_edges(max_drop_num=2)
-    if isdebug:
-        export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge_after_drop1.obj'))
+    # shape.remove_isolated_edges()
+    # if isdebug:
+    #     export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge_before_drop.obj'))
+    # shape.drop_edges(max_drop_num=2)
+    # if isdebug:
+    #     export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge_after_drop1.obj'))
 
     if isdebug:
         print(f"{Colors.GREEN}Remove {len(shape.remove_edge_idx_src) + len(shape.remove_edge_idx_new)} edges{Colors.RESET}")
@@ -185,12 +185,12 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             shape.recon_edge_points = optimize(
                     interpolation_face, shape.recon_edge_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                    shape.face_edge_adj, v_islog=isdebug, v_max_iter=100)
+                    shape.face_edge_adj, v_islog=isdebug, v_max_iter=200)
         else:
             task = optimize_ray.remote(
                     interpolation_face, shape.recon_edge_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                    shape.face_edge_adj, v_max_iter=100)
+                    shape.face_edge_adj, v_max_iter=200)
             shape.recon_edge_points = ray.get(task)
 
         if isdebug:

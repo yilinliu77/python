@@ -79,28 +79,21 @@ import trimesh
 
 from itertools import combinations
 
-# FIX_TOLERANCE = 1e-6
-# CONNECT_TOLERANCE = 1e-3
-# SEWING_TOLERANCE = 1e-3
-
-# EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
-# FACE_FITTING_TOLERANCE = [5e-2, 8e-2, 10e-2]
-
-EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2, ]
-FACE_FITTING_TOLERANCE = [2e-2, 5e-2, 8e-2, ]
+EDGE_FITTING_TOLERANCE = [1e-5, 1e-4, 1e-3, 5e-3, 8e-3, 5e-2, ]
+FACE_FITTING_TOLERANCE = [1e-4, 1e-3, 1e-2, 2e-2, 5e-2, 8e-2, ]
 ROUGH_FITTING_TOLERANCE = 1e-1
 
 FIX_TOLERANCE = 1e-2
 FIX_PRECISION = 1e-2
 # CONNECT_TOLERANCE = 2e-2
-CONNECT_TOLERANCE = [2e-2, 5e-2, 8e-2, ]
+CONNECT_TOLERANCE = [2e-2, 5e-2, 8e-2]
 SEWING_TOLERANCE = 8e-2
 REMOVE_EDGE_TOLERANCE = 1e-2
-TRANSFER_PRECISION = 1e-3
+TRANSFER_PRECISION = 1e-2
 MAX_DISTANCE_THRESHOLD = 1e-1
 USE_VARIATIONAL_SMOOTHING = True
 FIX_CLOSE_TOLERANCE = 1
-FIX_GAP_TOLERANCE = 2e-2
+FIX_GAP_TOLERANCE = 1e-1
 weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
 IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, False
 CONTINUITY = GeomAbs_C1
@@ -239,7 +232,7 @@ class Shape:
         self.edge_face_connectivity = np.stack(edge_face_connectivity, axis=0)
         pass
 
-    def check_openness(self, v_threshold=0.95):
+    def check_openness(self, v_threshold=0.9):
         recon_edge = self.recon_edge_points
         dirs = (recon_edge[:, [0, -1]] - np.mean(recon_edge, axis=1, keepdims=True))
         cos_dir = ((dirs[:, 0] * dirs[:, 1]).sum(axis=1) /
@@ -476,7 +469,7 @@ def optimize(
 
     edge_st = nn.Parameter(torch.FloatTensor([1, 0, 0, 0]).unsqueeze(0).repeat(edge_points.shape[0], 1).to(device))
     edge_st.requires_grad = True
-    optimizer = torch.optim.Adam([edge_st], lr=1e-2)
+    optimizer = torch.optim.Adam([edge_st], lr=5e-3)
 
     prev_loss = float('inf')
     if v_islog:
@@ -492,7 +485,7 @@ def optimize(
                 transformed_edges[edge_face_connectivity[:, 0]],
                 padded_points[edge_face_connectivity[:, 2]],
                 batch_reduction=None, point_reduction="mean")
-        adj_distance_loss = ((dis_matrix1 + dis_matrix2) / 2).sum()
+        adj_distance_loss = ((dis_matrix1 + dis_matrix2) / 2).sum() + (dis_matrix1 - dis_matrix2).abs().sum()
 
         # For loop version
         # for edge_idx, face_idx1, face_idx2 in self.edge_face_connectivity:
@@ -530,7 +523,7 @@ def optimize(
 
         optimizer.zero_grad()
         # if abs(prev_loss - loss.item()) < 1e-4 and False:
-        if loss.item() < 1e-3:
+        if loss.item() < 5e-4:
             if v_islog:
                 print(f'Early stop at iter {iter}')
             break
@@ -829,8 +822,9 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         wire_fixer.SetModifyTopologyMode(True)
         wire_fixer.SetModifyGeometryMode(True)
         wire_fixer.FixSmall(False, REMOVE_EDGE_TOLERANCE)
-        wire_fixer.SetMaxTolerance(FIX_GAP_TOLERANCE)
+        wire_fixer.SetMaxTolerance(connected_tolerance)
         wire_fixer.FixGaps3d()
+        wire_fixer.FixGaps2d()
 
         # when only one edge, and being gap fixing, but still not closed, skip
         if wire_fixer.Wire().NbChildren() == 1 and not wire_fixer.Wire().Closed():
@@ -854,6 +848,13 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         return None
 
     try:
+        face_fixer.FixWireTool().SetModifyGeometryMode(True)
+        face_fixer.FixWireTool().SetMaxTolerance(FIX_PRECISION)
+        face_fixer.FixWireTool().SetPrecision(connected_tolerance)
+        face_fixer.FixWireTool().SetFixShiftedMode(True)
+        face_fixer.FixWireTool().SetClosedWireMode(True)
+        face_fixer.FixWireTool().Perform()
+
         face_fixer.SetAutoCorrectPrecisionMode(False)
         face_fixer.SetPrecision(FIX_PRECISION)
         face_fixer.SetMaxTolerance(connected_tolerance)
@@ -865,7 +866,7 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         face_fixer.SetFixIntersectingWiresMode(True)
         face_fixer.SetFixPeriodicDegeneratedMode(True)
         face_fixer.SetFixSmallAreaWireMode(True)
-        face_fixer.SetRemoveSmallAreaFaceMode(True)
+        # face_fixer.SetRemoveSmallAreaFaceMode(True)
         face_fixer.Perform()
 
         face_fixer.FixAddNaturalBound()
@@ -1000,7 +1001,7 @@ def get_separated_surface(trimmed_faces, v_precision1=1e-2, v_precision2=1e-1):
     return points, faces
 
 
-def get_solid(trimmed_faces):
+def get_solid(trimmed_faces, connected_tolerance):
     try:
         sewing = BRepBuilderAPI_Sewing()
         sewing.SetTolerance(SEWING_TOLERANCE)
@@ -1010,8 +1011,8 @@ def get_solid(trimmed_faces):
         sewn_shell = sewing.SewedShape()
 
         fix_shell = ShapeFix_Shell(sewn_shell)
-        fix_shell.SetPrecision(FIX_PRECISION)
-        fix_shell.SetMaxTolerance(FIX_TOLERANCE)
+        fix_shell.SetPrecision(connected_tolerance)
+        fix_shell.SetMaxTolerance(connected_tolerance)
         fix_shell.SetFixFaceMode(True)
         fix_shell.SetFixOrientationMode(True)
         fix_shell.Perform()
@@ -1023,14 +1024,14 @@ def get_solid(trimmed_faces):
         solid = maker.Solid()
 
         fix_solid = ShapeFix_Solid(solid)
-        fix_solid.SetPrecision(FIX_TOLERANCE)
-        fix_solid.SetMaxTolerance(FIX_TOLERANCE)
+        fix_solid.SetPrecision(connected_tolerance)
+        fix_solid.SetMaxTolerance(connected_tolerance)
         fix_solid.SetFixShellMode(True)
         fix_solid.SetFixShellOrientationMode(True)
         fix_solid.SetCreateOpenSolidMode(False)
         fix_solid.Perform()
-        fixed_solid = fix_solid.Solid()
-        return fixed_solid
+        solid = fix_solid.Solid()
+        return solid
 
     except:
         return None
@@ -1088,7 +1089,7 @@ def construct_brep(v_shape, connected_tolerance, isdebug=False):
         v, f = get_separated_surface(trimmed_faces, v_precision2=0.2)
         separated_surface = trimesh.Trimesh(vertices=v, faces=f)
         result[1] = separated_surface
-        result[2] = get_solid(trimmed_faces)
+        result[2] = get_solid(trimmed_faces, connected_tolerance)
 
     if isdebug:
         print(f"{Colors.GREEN}################################ Construct Done ################################{Colors.RESET}")

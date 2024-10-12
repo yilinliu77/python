@@ -79,8 +79,8 @@ import trimesh
 
 from itertools import combinations
 
-EDGE_FITTING_TOLERANCE = [1e-5, 1e-4, 1e-3, 5e-3, 8e-3, 5e-2, ]
-FACE_FITTING_TOLERANCE = [1e-4, 1e-3, 1e-2, 2e-2, 5e-2, 8e-2, ]
+EDGE_FITTING_TOLERANCE = [1e-3, 5e-3, 8e-3, 5e-2, ]
+FACE_FITTING_TOLERANCE = [1e-2, 3e-2, 5e-2, 8e-2, ]
 ROUGH_FITTING_TOLERANCE = 1e-1
 
 FIX_TOLERANCE = 1e-2
@@ -773,10 +773,8 @@ def create_edge(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
 
 
 def create_wire_from_unordered_edges(face_edges, connected_tolerance, max_retry_times=3, is_sort_by_length=True):
-    face_edges_src = face_edges.copy()
     wire_array = None
-
-    for _ in range(max_retry_times):
+    for i in range(max_retry_times):
         random.shuffle(face_edges)
         edges_seq = TopTools_HSequenceOfShape()
         for edge in face_edges:
@@ -885,7 +883,7 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
     return face_occ
 
 
-def drop_edges(face_edges_np, is_edge_closed, drop_edge_num=0):
+def drop_edges(face_edges_np, is_edge_closed, drop_edge_num=0, accepted_connected_loss=0.05):
     saved_edge_idx = list(combinations(range(face_edges_np.shape[0]), face_edges_np.shape[0] - drop_edge_num))
     saved_edge_idx += [list(range(face_edges_np.shape[0]))]
     connected_loss = []
@@ -900,32 +898,48 @@ def drop_edges(face_edges_np, is_edge_closed, drop_edge_num=0):
         dist_matrix = dist_matrix + np.eye(dist_matrix.shape[0]) * 1e6
         connected_loss_c = dist_matrix.min(axis=0).sum()
         connected_loss.append(connected_loss_c)
-    best_combination_idx = np.argmin(connected_loss)
-    if best_combination_idx != len(connected_loss) - 1:
-        drop_edge_idx = list(set(range(face_edges_np.shape[0])) - set(saved_edge_idx[best_combination_idx]))
-        return drop_edge_idx
-    else:
+
+    connected_loss = np.array(connected_loss)
+    accepted_combination_idx = list(np.where(connected_loss < accepted_connected_loss)[0])
+    if len(connected_loss) - 1 in accepted_combination_idx:
+        accepted_combination_idx.remove(len(connected_loss) - 1)
+
+    if len(accepted_combination_idx) == 0:
         return None
+
+    optional_drop_edge_idx = []
+    for combinations_idx in accepted_combination_idx:
+        drop_edge_idx = list(set(range(face_edges_np.shape[0])) - set(saved_edge_idx[combinations_idx]))
+        optional_drop_edge_idx.append(drop_edge_idx)
+
+    return optional_drop_edge_idx
 
 
 def create_trimmed_face1(geom_face, face_edges, connected_tolerance, face_edges_numpy=None, is_edge_closed=None, drop_edge_num=0):
     if drop_edge_num > 0 and face_edges_numpy is not None:
         if len(face_edges) - drop_edge_num < 1:
             return None, None, False
-        drop_edge_idx = drop_edges(face_edges_numpy, is_edge_closed, drop_edge_num=drop_edge_num)
-        if drop_edge_idx is None:
+        optional_drop_edge_idx = drop_edges(face_edges_numpy, is_edge_closed, drop_edge_num=drop_edge_num)
+        if optional_drop_edge_idx is None:
             return None, None, False
-        face_edges = [face_edges[i] for i in range(len(face_edges)) if i not in drop_edge_idx]
+        optional_face_edges = []
+        for drop_edge_idx in optional_drop_edge_idx:
+            optional_face_edges.append([face_edges[i] for i in range(len(face_edges)) if i not in drop_edge_idx])
+    else:
+        optional_face_edges = [face_edges]
 
-    wire_list = create_wire_from_unordered_edges(face_edges, connected_tolerance)
-    if wire_list is None:
-        return None, None, False
-    trimmed_face = create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance)
-    if trimmed_face is None or trimmed_face.IsNull():
-        return wire_list, None, False
-    face_analyzer = BRepCheck_Analyzer(trimmed_face, False)
-    is_face_valid = face_analyzer.IsValid()
-    return wire_list, trimmed_face, is_face_valid
+    for face_edges in optional_face_edges:
+        wire_list = create_wire_from_unordered_edges(face_edges, connected_tolerance)
+        if wire_list is None:
+            continue
+        trimmed_face = create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance)
+        if trimmed_face is None or trimmed_face.IsNull():
+            continue
+        face_analyzer = BRepCheck_Analyzer(trimmed_face, False)
+        is_face_valid = face_analyzer.IsValid()
+        if is_face_valid:
+            return wire_list, trimmed_face, is_face_valid
+    return None, None, False
 
 
 def create_trimmed_face2(geom_face, topo_face, face_edges, connected_tolerance):

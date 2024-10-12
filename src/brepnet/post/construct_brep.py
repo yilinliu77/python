@@ -232,6 +232,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
 
         analyzer = BRepCheck_Analyzer(solid)
         if not analyzer.IsValid():
+            result = analyzer.Result(solid)
             continue
 
         is_successful = True

@@ -79,14 +79,17 @@ import trimesh
 
 from itertools import combinations
 
-EDGE_FITTING_TOLERANCE = [1e-3, 5e-3, 8e-3, 5e-2, ]
-FACE_FITTING_TOLERANCE = [1e-2, 3e-2, 5e-2, 8e-2, ]
+# EDGE_FITTING_TOLERANCE = [2e-4, 2e-3, 5e-3, 8e-3, 5e-2, ]
+# FACE_FITTING_TOLERANCE = [2e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]
+
+EDGE_FITTING_TOLERANCE = [1e-5, 1e-4, 1e-3, 5e-3, 8e-3, 5e-2, ]
+FACE_FITTING_TOLERANCE = [1e-4, 1e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]
 ROUGH_FITTING_TOLERANCE = 1e-1
 
 FIX_TOLERANCE = 1e-2
 FIX_PRECISION = 1e-2
 # CONNECT_TOLERANCE = 2e-2
-CONNECT_TOLERANCE = [2e-2, 5e-2, 8e-2]
+CONNECT_TOLERANCE = [2e-3, 2e-2, 5e-2, 8e-2]
 SEWING_TOLERANCE = 8e-2
 REMOVE_EDGE_TOLERANCE = 1e-2
 TRANSFER_PRECISION = 1e-2
@@ -469,7 +472,7 @@ def optimize(
 
     edge_st = nn.Parameter(torch.FloatTensor([1, 0, 0, 0]).unsqueeze(0).repeat(edge_points.shape[0], 1).to(device))
     edge_st.requires_grad = True
-    optimizer = torch.optim.Adam([edge_st], lr=5e-3)
+    optimizer = torch.optim.Adam([edge_st], lr=5e-3, betas=(0.95, 0.999), weight_decay=1e-6, eps=1e-08, )
 
     prev_loss = float('inf')
     if v_islog:
@@ -656,8 +659,7 @@ def create_surface(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
         if use_variational_smoothing:
             # weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
             return GeomAPI_PointsToBSplineSurface(uv_points_array, weight_CurveLength, weight_Curvature, weight_Torsion,
-                                                  deg_max,
-                                                  CONTINUITY, precision).Surface()
+                                                  deg_max, CONTINUITY, precision).Surface()
         else:
             return GeomAPI_PointsToBSplineSurface(uv_points_array, deg_min, deg_max, CONTINUITY, precision).Surface()
 
@@ -727,8 +729,7 @@ def create_edge(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
         if use_variational_smoothing:
             # weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
             return GeomAPI_PointsToBSpline(u_points_array, weight_CurveLength, weight_Curvature, weight_Torsion,
-                                           deg_max,
-                                           CONTINUITY, precision).Curve()
+                                           deg_max, CONTINUITY, precision).Curve()
         else:
             return GeomAPI_PointsToBSpline(u_points_array, deg_min, deg_max, CONTINUITY, precision).Curve()
 
@@ -854,7 +855,7 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         face_fixer.FixWireTool().Perform()
 
         face_fixer.SetAutoCorrectPrecisionMode(False)
-        face_fixer.SetPrecision(FIX_PRECISION)
+        face_fixer.SetPrecision(connected_tolerance)
         face_fixer.SetMaxTolerance(connected_tolerance)
         face_fixer.SetFixOrientationMode(True)
         face_fixer.SetFixMissingSeamMode(True)
@@ -1017,11 +1018,13 @@ def get_separated_surface(trimmed_faces, v_precision1=1e-2, v_precision2=1e-1):
 
 def get_solid(trimmed_faces, connected_tolerance):
     try:
+        random.shuffle(trimmed_faces)
         sewing = BRepBuilderAPI_Sewing()
         sewing.SetTolerance(SEWING_TOLERANCE)
         for face in trimmed_faces:
             sewing.Add(face)
         sewing.Perform()
+        # sewing.Dump()
         sewn_shell = sewing.SewedShape()
 
         fix_shell = ShapeFix_Shell(sewn_shell)

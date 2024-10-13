@@ -6,8 +6,9 @@ from pathlib import Path
 import ray, trimesh
 import numpy as np
 from OCC.Core import TopoDS, TopExp, BRepBndLib
-from OCC.Core.AIS import AIS_Shape
+from OCC.Core.AIS import AIS_Shape, AIS_WireFrame
 from OCC.Core.Approx import Approx_Curve3d
+from OCC.Core.Aspect import Aspect_TypeOfLine
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform, BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeEdge
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 from OCC.Core.BRepTools import BRepTools_WireExplorer
@@ -18,8 +19,9 @@ from OCC.Core.GeomAdaptor import GeomAdaptor_Curve
 from OCC.Core.GeomConvert import GeomConvert_CompCurveToBSplineCurve
 from OCC.Core.GeomLProp import GeomLProp_SLProps, GeomLProp_CLProps
 from OCC.Core.Graphic3d import Graphic3d_MaterialAspect, Graphic3d_NameOfMaterial_Silver, Graphic3d_TypeOfShadingModel, \
-    Graphic3d_NameOfMaterial_Brass, Graphic3d_TypeOfReflection
-from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
+    Graphic3d_NameOfMaterial_Brass, Graphic3d_TypeOfReflection, Graphic3d_AspectLine3d
+from OCC.Core.Prs3d import Prs3d_LineAspect
+from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB, Quantity_NOC_BLACK
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_FreeBounds
 from OCC.Core.ShapeExtend import ShapeExtend_WireData
 from OCC.Core.TColgp import TColgp_Array1OfPnt
@@ -43,6 +45,7 @@ import traceback, sys
 from PIL import Image
 
 from shared.occ_utils import normalize_shape, get_triangulations, get_primitives, get_ordered_edges
+from src.brepnet.post.utils import Shape
 
 # from src.brepnet.post.utils import construct_solid
 
@@ -52,15 +55,15 @@ debug_id = None
 render_img = True
 write_debug_data = False
 check_post_processing = True
-data_root = Path(r"/mnt/d/data_step")
-output_root = Path(r"/mnt/d/deepcad_train_v6/")
-img_root = Path(r"/mnt/d/imgs_v6")
-data_split = r"src/brepnet/data/deepcad_train_whole.txt"
+data_root = Path(r"D:/Datasets/data_step")
+output_root = Path(r"d:/brepnet/deepcad_train_v7/")
+img_root = Path(r"d:/brepnet/imgs_v7")
+data_split = r"src/brepnet/data/list/deduplicated_deepcad_training.txt"
 
 exception_files = [
-    r"src/brepnet/data/abc_multiple_component_or_few_faces_ids_.txt",
-    r"src/brepnet/data/abc_cube_ids.txt",
-    r"src/brepnet/data/abc_with_others_ids.txt",
+    r"src/brepnet/data/list/abc_multiple_component_or_few_faces_ids_.txt",
+    r"src/brepnet/data/list/abc_cube_ids.txt",
+    r"src/brepnet/data/list/abc_with_others_ids.txt",
 ]
 
 num_max_primitives = 100000
@@ -120,7 +123,7 @@ def get_brep(v_root, output_root, v_folders):
             mesh.export(output_root / v_folder / "mesh.ply")
             import open3d as o3d
             mesh = o3d.geometry.TriangleMesh(vertices=o3d.utility.Vector3dVector(v), triangles=o3d.utility.Vector3iVector(f))
-            pc = mesh.sample_points_poisson_disk(4096, use_triangle_normal=True)
+            pc = mesh.sample_points_poisson_disk(10000, use_triangle_normal=True)
             o3d.io.write_point_cloud(str(output_root / v_folder / "pc.ply"), pc)
 
             # Explore and list faces, edges, and vertices
@@ -275,49 +278,63 @@ def get_brep(v_root, output_root, v_folders):
             if render_img:
                 views = [
                     gp_Pnt(-2, -2, -2),
-                    gp_Pnt(-2, -2, 0),
                     gp_Pnt(-2, -2, 2),
-                    gp_Pnt(-2, 0, -2),
-                    gp_Pnt(-2, 0, 0),
-                    gp_Pnt(-2, 0, 2),
                     gp_Pnt(-2, 2, -2),
-                    gp_Pnt(-2, 2, 0),
                     gp_Pnt(-2, 2, 2),
 
-                    gp_Pnt(0, -2, -2),
-                    gp_Pnt(0, -2, 0),
-                    gp_Pnt(0, -2, 2),
-                    gp_Pnt(0, 2, -2),
-                    gp_Pnt(0, 2, 0),
-                    gp_Pnt(0, 2, 2),
-
                     gp_Pnt(2, -2, -2),
-                    gp_Pnt(2, -2, 0),
                     gp_Pnt(2, -2, 2),
-                    gp_Pnt(2, 0, -2),
-                    gp_Pnt(2, 0, 0),
-                    gp_Pnt(2, 0, 2),
                     gp_Pnt(2, 2, -2),
-                    gp_Pnt(2, 2, 0),
                     gp_Pnt(2, 2, 2),
                 ]
                 display = MyOffscreenRenderer()
+
+                # Draw shape
+                imgs = []
                 # display.View.TriedronErase()
                 mat = Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_Silver)
                 mat.SetReflectionModeOff(Graphic3d_TypeOfReflection.Graphic3d_TOR_SPECULAR)
                 display.DisplayShape(shape, material=mat, update=True)
+
                 display.View.Dump(str(img_root / v_folder / f"view_.png"))
-                imgs = []
                 for i, view in enumerate(views):
                     display.camera.SetEyeAndCenter(gp_Pnt(view.X(), view.Y(), view.Z()), gp_Pnt(0., 0., 0.))
                     display.camera.SetDistance(4)
                     display.camera.SetUp(gp_Dir(0, 0, 1))
                     display.camera.SetAspect(1)
                     display.camera.SetFOVy(45)
-                    filename = str(img_root / v_folder / f"view_{i}.png")
+                    filename = str(img_root / v_folder / f"shape_{i}.png")
                     display.View.Dump(filename)
                     img = Image.open(filename)
                     imgs.append(np.asarray(img))
+
+                # Draw wire
+                ais_shape = AIS_Shape(shape)
+                ais_shape.SetColor(Quantity_Color(0, 0, 0, Quantity_TOC_RGB))
+                ais_shape.SetDisplayMode(AIS_WireFrame)
+
+                # ais_shape.Attributes().SetUnFreeBoundaryDraw(False)
+                ais_shape.Attributes().UIsoAspect().SetColor(Quantity_Color(1, 1, 1, Quantity_TOC_RGB))
+                ais_shape.Attributes().VIsoAspect().SetColor(Quantity_Color(1, 1, 1, Quantity_TOC_RGB))
+                ais_shape.Attributes().SetFreeBoundaryDraw(False)
+                ais_shape.Attributes().SetFaceBoundaryDraw(False)
+                ais_shape.Attributes().SetWireDraw(False)
+                display.Context.Display(ais_shape, True)
+                display.FitAll()
+                display.Context.DefaultDrawer().SetUnFreeBoundaryDraw(False)
+
+                display.View.Dump(str(img_root / v_folder / f"view_.png"))
+                for i, view in enumerate(views):
+                    display.camera.SetEyeAndCenter(gp_Pnt(view.X(), view.Y(), view.Z()), gp_Pnt(0., 0., 0.))
+                    display.camera.SetDistance(4)
+                    display.camera.SetUp(gp_Dir(0, 0, 1))
+                    display.camera.SetAspect(1)
+                    display.camera.SetFOVy(45)
+                    filename = str(img_root / v_folder / f"wire_{i}.png")
+                    display.View.Dump(filename)
+                    img = Image.open(filename)
+                    imgs.append(np.asarray(img))
+
                 imgs = np.stack(imgs, axis=0)
                 data_dict["imgs"] = imgs
 
@@ -327,23 +344,18 @@ def get_brep(v_root, output_root, v_folders):
             if check_post_processing:
                 from src.brepnet.post.utils import construct_brep
 
-                face_edge_adj = [[] for _ in range(face_sample_points.shape[0])]
-                for edge_face1_face2 in edge_face_connectivity:
-                    edge, face1, face2 = edge_face1_face2
-                    if face1 == face2:
-                        continue
-                    assert edge not in face_edge_adj[face1]
-                    face_edge_adj[face1].append(edge)
-
-                solid, is_face_success_list = construct_brep(
-                        face_sample_points.astype(np.float32),
-                        edge_sample_points.astype(np.float32),
-                        face_edge_adj,
-                        8e-2,
-                        ".",
+                shape = Shape(face_sample_points[...,:3], edge_sample_points[...,:3], edge_face_connectivity, False)
+                shape.remove_half_edges()  # will filter some invalid intersection edges
+                shape.check_openness()
+                shape.build_fe()
+                shape.build_vertices(0.2)
+                _, mesh, solid = construct_brep(
+                        shape,
+                        2e-2,
+                        False,
                         # debug_face_idx=[4]
                 )
-                if solid.ShapeType() == TopAbs_COMPOUND:
+                if solid is None:
                     raise ValueError("Post processing failed")
                 write_step_file(solid, str(output_root / v_folder / "post_processed_shape.step"))
                 pass
@@ -400,8 +412,8 @@ if __name__ == '__main__':
         ray.init(
                 dashboard_host="0.0.0.0",
                 dashboard_port=15000,
-                # num_cpus=1,
-                # local_mode=True
+                #num_cpus=1,
+                #local_mode=True
         )
         batch_size = 100
         num_batches = len(total_ids) // batch_size + 1

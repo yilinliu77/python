@@ -14,7 +14,7 @@
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/src/brepnet/train_diffusion.py" />
-    <option name="PARAMETERS" value="dataset.face_z=D:/brepnet/v6/Test_AutoEncoder_0925_gaussian dataset.test_dataset=D:/brepnet/deepcad_test_v6 model.name=Diffusion_condition model.gaussian_weights=1e-6 model.dim_shape=768 trainer.evaluate=true trainer.test_output_dir=$USER_HOME$/Desktop/test_output trainer.num_worker=0 trainer.max_steps=8 trainer.batch_size=4 model.condition=multi_img dataset.condition=multi_img trainer.resume_from_checkpoint=$USER_HOME$/Desktop/last.ckpt" />
+    <option name="PARAMETERS" value="dataset.face_z=D:/brepnet/v6/Test_AutoEncoder_0925 dataset.test_dataset=D:/brepnet/deepcad_test_v6 model.name=Diffusion_base model.gaussian_weights=0 model.dim_shape=768 model.autoencoder=AutoEncoder_0925 trainer.evaluate=true trainer.test_output_dir=$USER_HOME$/Desktop/uncond_pure_200k trainer.num_worker=0 trainer.batch_size=256 model.condition=multi_img dataset.condition=multi_img trainer.resume_from_checkpoint=$USER_HOME$/Desktop/uncondition_model/pure_200k.ckpt" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />

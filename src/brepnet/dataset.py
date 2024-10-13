@@ -65,6 +65,22 @@ def denormalize_coord(points, center, scale):
     points = points * scale + center
     return points
 
+def denormalize_coord2(points, bbox):
+    normal = points[...,3:]
+    points = points[...,:3]
+    target_points = points + normal
+    center = bbox[..., :3]
+    scale = bbox[..., 3:]
+    while len(points.shape) > len(center.shape):
+        center = center.unsqueeze(1)
+        scale = scale.unsqueeze(1)
+    points = points * scale + center
+    target_points = target_points * scale + center
+    normal = target_points - points
+    normal = normal / (1e-6 + torch.linalg.norm(normal, dim=-1, keepdim=True))
+    points = torch.cat((points, normal), dim=-1)
+    return points
+
 def discrete_coord(points, center, scale, v_dim):
     points = torch.round((points + 0.5) * v_dim)
     points = torch.clamp(points, 0, v_dim-1).to(torch.long)
@@ -85,7 +101,7 @@ def continuous_coord(points, center, scale, v_dim):
 
 class AutoEncoder_geo_dataset(torch.utils.data.Dataset):
     def __init__(self, v_training_mode, v_conf):
-        super(AutoEncoder_dataset, self).__init__()
+        super(AutoEncoder_geo_dataset, self).__init__()
         self.mode = v_training_mode
         self.conf = v_conf
         self.max_intersection = 500
@@ -97,53 +113,19 @@ class AutoEncoder_geo_dataset(torch.utils.data.Dataset):
             listfile = v_conf['val_dataset']
         else:
             raise
+        
+        self.data_folders = [item.strip() for item in open(listfile).readlines()]
+        self.root = Path(v_conf["data_root"])
 
-        self.root = v_conf["data_root"]
-
-        self.data_folders = [os.path.join(self.dataset_path, folder) for folder in os.listdir(self.dataset_path) if
-                             os.path.isdir(os.path.join(self.dataset_path, folder))]
-        self.data_folders.sort()
-
-        self.data_folders = self.data_folders
-
-        self.src_data_sum = len(self.data_folders)
-
-        self.check_data(self.dataset_path, v_training_mode)
-
-        self.data_sum = len(self.data_folders)
-
-        print("Dataset INFO")
-        print("Src data_folders:", self.src_data_sum)
-        print("After removing:", self.data_sum)
-        print("Remove invalid data.npz folders:", self.src_data_sum - self.data_sum)
+        print(len(self.data_folders))
 
     def __len__(self):
         return len(self.data_folders)
 
-    def check_data(self, v_path, v_training_mode):
-        filepath = os.path.join(v_path, r"id_larger_than_64_faces.txt")
-        ignore_ids=[]
-        if os.path.exists(filepath):
-            ignore_ids = [item.strip() for item in open(filepath).readlines()]
-        else:
-            for folder_path in self.data_folders:
-                if not os.path.exists(os.path.join(folder_path, "data.npz")):
-                    ignore_ids.append(folder_path)
-                    continue
-                data_npz = np.load(os.path.join(folder_path, "data.npz"))
-                if data_npz['sample_points_faces'].shape[0] > 64:
-                    ignore_ids.append(folder_path)
-            with open(filepath, "w") as f:
-                for item in ignore_ids:
-                    f.write(item + "\n")
-
-        for folder_path in ignore_ids:
-            self.data_folders.remove(folder_path)
-
     def __getitem__(self, idx):
         # idx = 0
-        folder_path = self.data_folders[idx]
-        data_npz = np.load(os.path.join(folder_path, "data.npz"))
+        prefix = self.data_folders[idx]
+        data_npz = np.load(str(self.root / prefix / "data.npz"))
 
         # Face sample points (num_faces*32*32*3)
         face_points = torch.from_numpy(data_npz['sample_points_faces'])
@@ -151,43 +133,87 @@ class AutoEncoder_geo_dataset(torch.utils.data.Dataset):
 
         face_points_norm, face_normal_norm, face_center, face_scale = normalize_coord(face_points)
         edge_points_norm, edge_normal_norm, edge_center, edge_scale = normalize_coord(line_points)
-        # face_points_discrete, face_center_discrete, face_scale_discrete = discrete_coord(face_points_norm, face_center, face_scale, 256)
-        # edge_points_discrete, edge_center_discrete, edge_scale_discrete = discrete_coord(edge_points_norm, edge_center, edge_scale, 256)
-        # face_points = continuous_coord(face_points_discrete, face_center, face_scale, 256)
 
-        #  Which of two faces intersect and produce an edge (num_intersection, (id_edge, id_face1, id_face2))
+        face_norm = torch.cat((face_points_norm, face_normal_norm), dim=-1)
+        edge_norm = torch.cat((edge_points_norm, edge_normal_norm), dim=-1)
+
+        return (
+            prefix,
+            face_norm, edge_norm,
+        )
+
+    @staticmethod
+    def collate_fn(batch):
+        (
+            prefix,
+            face_norm, edge_norm,
+        ) = zip(*batch)
+        bs = len(prefix)
+
+        dtype=torch.float32
+
+        return {
+            "v_prefix": prefix,
+            "face_norm": torch.cat(face_norm, dim=0).to(dtype),
+            "edge_norm": torch.cat(edge_norm, dim=0).to(dtype),
+        }
+
+
+
+class AutoEncoder_dataset2(AutoEncoder_geo_dataset):
+    def __init__(self, v_training_mode, v_conf):
+        super(AutoEncoder_dataset2, self).__init__(v_training_mode, v_conf)
+
+    def __len__(self):
+        return len(self.data_folders)
+
+    def __getitem__(self, idx):
+        # idx = 0
+        prefix = self.data_folders[idx]
+        data_npz = np.load(str(self.root / prefix / "data.npz"))
+
+        # Face sample points (num_faces*32*32*3)
+        face_points = torch.from_numpy(data_npz['sample_points_faces'])
+        line_points = torch.from_numpy(data_npz['sample_points_lines'])
+
+        face_points_norm, face_normal_norm, face_center, face_scale = normalize_coord(face_points)
+        edge_points_norm, edge_normal_norm, edge_center, edge_scale = normalize_coord(line_points)
+
+        face_norm = torch.cat((face_points_norm, face_normal_norm), dim=-1)
+        edge_norm = torch.cat((edge_points_norm, edge_normal_norm), dim=-1)
+
+        face_bbox = torch.cat((face_center, face_scale), dim=-1)
+        edge_bbox = torch.cat((edge_center, edge_scale), dim=-1)
+
+        # face_points = denormalize_coord2(face_norm, face_bbox)
+        # edge_points = denormalize_coord2(edge_norm, edge_bbox)
+
         edge_face_connectivity = torch.from_numpy(data_npz['edge_face_connectivity'])
-        # Ignore self intersection
         edge_face_connectivity = edge_face_connectivity[edge_face_connectivity[:, 1] != edge_face_connectivity[:, 2]]
-        #  Which of two edges intersect and produce a vertex (num_intersection, (id_vertex, id_edge1, id_edge2))
-        # vertex_edge_connectivity = torch.from_numpy(data_npz['vertex_edge_connectivity'])
 
         face_adj = torch.from_numpy(data_npz['face_adj'])
         zero_positions = torch.from_numpy(data_npz['zero_positions'])
         if zero_positions.shape[0] > face_adj.shape[0] * 2:
             index = np.random.choice(zero_positions.shape[0], face_adj.shape[0] * 2, replace=False)
             zero_positions = zero_positions[index]
-        # Assume the number of true intersection is less than self.max_intersection
 
         return (
-            Path(folder_path).stem,
-            face_points, line_points,
-            face_adj, zero_positions,
-            face_points_norm, face_center, face_scale,
-            edge_points_norm, edge_center, edge_scale,
-            edge_face_connectivity
+            prefix,
+            face_norm, edge_norm,
+            face_bbox, edge_bbox,
+            edge_face_connectivity, zero_positions, face_adj
         )
 
     @staticmethod
     def collate_fn(batch):
         (
-            v_prefix, face_points, edge_points,
-            face_adj, zero_positions,
-            face_points_norm, face_center, face_scale,
-            edge_points_norm, edge_center, edge_scale,
-            edge_face_connectivity
+            prefix,
+            face_norm, edge_norm,
+            face_bbox, edge_bbox,
+            edge_face_connectivity, zero_positions, face_adj
         ) = zip(*batch)
-        bs = len(v_prefix)
+        bs = len(prefix)
+
         flat_zero_positions = []
         num_face_record = []
         
@@ -199,9 +225,9 @@ class AutoEncoder_geo_dataset(torch.utils.data.Dataset):
             edge_face_connectivity[i][:, 1:] += num_faces
             edge_conn_num.append(edge_face_connectivity[i].shape[0])
             flat_zero_positions.append(zero_positions[i] + num_faces)
-            num_faces+=face_points[i].shape[0]
-            num_edges+=edge_points[i].shape[0]
-            num_face_record.append(face_points[i].shape[0])
+            num_faces+=face_norm[i].shape[0]
+            num_edges+=edge_norm[i].shape[0]
+            num_face_record.append(face_norm[i].shape[0])
         num_face_record = torch.tensor(num_face_record, dtype=torch.long)
         num_sum_edges = sum(edge_conn_num)
         edge_attn_mask = torch.ones((num_sum_edges, num_sum_edges), dtype=bool)
@@ -217,16 +243,20 @@ class AutoEncoder_geo_dataset(torch.utils.data.Dataset):
         attn_mask = torch.ones((num_faces, num_faces), dtype=bool)
         id_cur = 0
         for i in range(bs):
-            attn_mask[id_cur:id_cur+face_points[i].shape[0], id_cur : id_cur+face_points[i].shape[0]] = False
-            id_cur+=face_points[i].shape[0]
+            attn_mask[id_cur:id_cur+face_norm[i].shape[0], id_cur : id_cur+face_norm[i].shape[0]] = False
+            id_cur+=face_norm[i].shape[0]
             
         dtype=torch.float32
         flat_zero_positions = torch.cat(flat_zero_positions, dim=0)
 
+        dtype=torch.float32
+
         return {
-            "v_prefix": v_prefix,
-            "edge_points": torch.cat(edge_points, dim=0),
-            "face_points": torch.cat(face_points, dim=0),
+            "v_prefix": prefix,
+            "face_norm": torch.cat(face_norm, dim=0).to(dtype),
+            "edge_norm": torch.cat(edge_norm, dim=0).to(dtype),
+            "face_bbox": torch.cat(face_bbox, dim=0).to(dtype),
+            "edge_bbox": torch.cat(edge_bbox, dim=0).to(dtype),
 
             "edge_face_connectivity": torch.cat(edge_face_connectivity, dim=0),
             "zero_positions": flat_zero_positions,
@@ -235,13 +265,6 @@ class AutoEncoder_geo_dataset(torch.utils.data.Dataset):
 
             "num_face_record": num_face_record,
             "valid_mask": valid_mask,
-
-            "face_points_norm": torch.cat(face_points_norm, dim=0),
-            "face_center": torch.cat(face_center, dim=0),
-            "face_scale": torch.cat(face_scale, dim=0),
-            "edge_points_norm": torch.cat(edge_points_norm, dim=0),
-            "edge_center": torch.cat(edge_center, dim=0),
-            "edge_scale": torch.cat(edge_scale, dim=0),
         }
 
 

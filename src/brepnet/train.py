@@ -41,7 +41,8 @@ class TrainAutoEncoder(pl.LightningModule):
         if not os.path.exists(self.log_root):
             os.makedirs(self.log_root)
 
-        self.dataset_mod = AutoEncoder_dataset
+        dataset_mod = importlib.import_module("src.brepnet.dataset")
+        self.dataset_mod = getattr(dataset_mod, self.hydra_conf["dataset"]["dataset_name"])
 
         model_mod = importlib.import_module("src.brepnet.model")
         model_mod = getattr(model_mod, self.hydra_conf["model"]["name"])
@@ -121,11 +122,11 @@ class TrainAutoEncoder(pl.LightningModule):
 
         if batch_idx == 0:
             if "pred_face" in recon_data:
-                self.viz["face_points"] = data["face_points"].cpu().float().numpy()
-                self.viz["recon_faces"] = recon_data["pred_face"].cpu().float().numpy()
+                self.viz["gt_face"] = recon_data["gt_face"]
+                self.viz["pred_face"] = recon_data["pred_face"]
             if "pred_edge" in recon_data:
-                self.viz["edge_points"] = data["edge_points"].cpu().float().numpy()
-                self.viz["recon_edges"] = recon_data["pred_edge"].cpu().float().numpy()
+                self.viz["gt_edge"] = recon_data["gt_edge"]
+                self.viz["pred_edge"] = recon_data["pred_edge"]
         if "gt_face_adj" in recon_data:
             self.pr_computer.update(recon_data["pred_face_adj"], recon_data["gt_face_adj"])
         return total_loss
@@ -133,7 +134,7 @@ class TrainAutoEncoder(pl.LightningModule):
     def on_validation_epoch_end(self):
         # if self.trainer.sanity_checking:
         #     return
-        if "recon_faces" in self.viz:
+        if "pred_edge" in self.viz:
             self.log_dict(self.pr_computer.compute(), prog_bar=False, logger=True, on_step=False, on_epoch=True,
                         sync_dist=True)
             self.pr_computer.reset()
@@ -141,9 +142,9 @@ class TrainAutoEncoder(pl.LightningModule):
         if self.global_rank != 0:
             return
 
-        if "recon_faces" in self.viz:
-            gt_faces = self.viz["face_points"][..., :-3]
-            recon_faces = self.viz["recon_faces"]
+        if "pred_face" in self.viz:
+            gt_faces = self.viz["gt_face"][..., :-3]
+            recon_faces = self.viz["pred_face"][..., :-3]
             gt_faces = gt_faces[(gt_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)]
             recon_faces = recon_faces[(recon_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)]
 
@@ -159,9 +160,9 @@ class TrainAutoEncoder(pl.LightningModule):
             o3d.io.write_point_cloud(
                 str(self.log_root / f"{self.trainer.current_epoch:05}_viz_faces.ply"), pc)
 
-        if "recon_edges" in self.viz and self.viz["recon_edges"].shape[0]>0:
-            recon_edges = self.viz["recon_edges"]
-            gt_edges = self.viz["edge_points"][..., :-3]
+        if "pred_edge" in self.viz and self.viz["pred_edge"].shape[0]>0:
+            recon_edges = self.viz["pred_edge"][..., :-3]
+            gt_edges = self.viz["gt_edge"][..., :-3]
 
             gt_edges = gt_edges[(gt_edges != -1).all(axis=-1).all(axis=-1)]
             recon_edges = recon_edges[(recon_edges != -1).all(axis=-1).all(axis=-1)]

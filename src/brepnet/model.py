@@ -5319,6 +5319,17 @@ class EncoderDecoder(nn.Module):
         loss["total_loss"] = sum(loss.values())
 
         data = {}
+        if v_test:
+            pred_face = denormalize_coord2(pred_face, v_data["face_bbox"])
+            pred_edge = denormalize_coord2(pred_edge, v_data["edge_bbox"])
+
+            gt_face = denormalize_coord2(v_data["face_norm"], v_data["face_bbox"])
+            gt_edge = denormalize_coord2(v_data["edge_norm"], v_data["edge_bbox"])
+            data["pred_face"] = pred_face.cpu().numpy()
+            data["pred_edge"] = pred_edge.cpu().numpy()
+            data["gt_face"] = gt_face.cpu().numpy()
+            data["gt_edge"] = gt_edge.cpu().numpy()
+
         return loss, data
 
 
@@ -5334,6 +5345,14 @@ class AutoEncoder_1012(nn.Module):
         df = self.df
 
         self.encoderdecoder = EncoderDecoder(v_conf)
+        if "encoderdecoder_weight" in v_conf and v_conf["encoderdecoder_weight"] is not None:
+            print("Load ae weight from ", v_conf["encoderdecoder_weight"])
+            weights = (torch.load(v_conf["encoderdecoder_weight"])["state_dict"])
+            weights = {k.replace("model.", ""): v for k, v in weights.items()}
+            self.encoderdecoder.load_state_dict(weights)
+            for params in self.encoderdecoder.parameters():
+                params.requires_grad = False
+            self.encoderdecoder.eval()
 
         self.face_in = nn.Linear(self.df + 6, 256)
         self.edge_in = nn.Linear(dl * 2 + 6, 256)

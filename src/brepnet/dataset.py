@@ -136,10 +136,13 @@ class AutoEncoder_geo_dataset(torch.utils.data.Dataset):
 
         face_norm = torch.cat((face_points_norm, face_normal_norm), dim=-1)
         edge_norm = torch.cat((edge_points_norm, edge_normal_norm), dim=-1)
+        face_bbox = torch.cat((face_center, face_scale), dim=-1)
+        edge_bbox = torch.cat((edge_center, edge_scale), dim=-1)
 
         return (
             prefix,
             face_norm, edge_norm,
+            face_bbox, edge_bbox,
         )
 
     @staticmethod
@@ -147,6 +150,7 @@ class AutoEncoder_geo_dataset(torch.utils.data.Dataset):
         (
             prefix,
             face_norm, edge_norm,
+            face_bbox, edge_bbox,
         ) = zip(*batch)
         bs = len(prefix)
 
@@ -155,13 +159,16 @@ class AutoEncoder_geo_dataset(torch.utils.data.Dataset):
         return {
             "v_prefix": prefix,
             "face_norm": torch.cat(face_norm, dim=0).to(dtype),
+            "face_bbox": torch.cat(face_bbox, dim=0).to(dtype),
             "edge_norm": torch.cat(edge_norm, dim=0).to(dtype),
+            "edge_bbox": torch.cat(edge_bbox, dim=0).to(dtype),
         }
 
 
 
 class AutoEncoder_dataset2(AutoEncoder_geo_dataset):
     def __init__(self, v_training_mode, v_conf):
+        self.disable_half = v_conf["disable_half"]
         super(AutoEncoder_dataset2, self).__init__(v_training_mode, v_conf)
 
     def __len__(self):
@@ -175,6 +182,36 @@ class AutoEncoder_dataset2(AutoEncoder_geo_dataset):
         # Face sample points (num_faces*32*32*3)
         face_points = torch.from_numpy(data_npz['sample_points_faces'])
         line_points = torch.from_numpy(data_npz['sample_points_lines'])
+        num_faces = face_points.shape[0]
+        num_edges = line_points.shape[0]
+
+        face_adj = torch.from_numpy(data_npz['face_adj'])
+        edge_face_connectivity = torch.from_numpy(data_npz['edge_face_connectivity'])
+        edge_face_connectivity = edge_face_connectivity[edge_face_connectivity[:, 1] != edge_face_connectivity[:, 2]]
+
+        zero_positions = torch.from_numpy(data_npz['zero_positions'])
+
+        if self.disable_half:
+            cache = set()
+            edge_face_connectivity2 = []
+            for item in edge_face_connectivity:
+                if (item[2].item(), item[1].item()) not in cache:
+                    edge_face_connectivity2.append(item)
+                    cache.add((item[1].item(),item[2].item()))
+
+            edge_face_connectivity = torch.stack(edge_face_connectivity2, dim=0)
+            line_points = line_points[edge_face_connectivity[:, 0]]
+
+            edge_face_connectivity[:, 0] = torch.arange(edge_face_connectivity.shape[0])
+            edge_face_connectivity = torch.cat((edge_face_connectivity, edge_face_connectivity[:,[0,2,1]]), dim=0)
+            face_adj = torch.zeros((num_faces,num_faces), dtype=bool)
+            face_adj[edge_face_connectivity[:,1], edge_face_connectivity[:,2]] = True
+            face_adj[edge_face_connectivity[:,2], edge_face_connectivity[:,1]] = True
+            zero_positions = torch.stack(torch.where(face_adj==False), dim=1)
+
+        if zero_positions.shape[0] > edge_face_connectivity.shape[0]:
+            index = np.random.choice(zero_positions.shape[0], edge_face_connectivity.shape[0], replace=False)
+            zero_positions = zero_positions[index]
 
         face_points_norm, face_normal_norm, face_center, face_scale = normalize_coord(face_points)
         edge_points_norm, edge_normal_norm, edge_center, edge_scale = normalize_coord(line_points)
@@ -188,14 +225,6 @@ class AutoEncoder_dataset2(AutoEncoder_geo_dataset):
         # face_points = denormalize_coord2(face_norm, face_bbox)
         # edge_points = denormalize_coord2(edge_norm, edge_bbox)
 
-        edge_face_connectivity = torch.from_numpy(data_npz['edge_face_connectivity'])
-        edge_face_connectivity = edge_face_connectivity[edge_face_connectivity[:, 1] != edge_face_connectivity[:, 2]]
-
-        face_adj = torch.from_numpy(data_npz['face_adj'])
-        zero_positions = torch.from_numpy(data_npz['zero_positions'])
-        if zero_positions.shape[0] > face_adj.shape[0] * 2:
-            index = np.random.choice(zero_positions.shape[0], face_adj.shape[0] * 2, replace=False)
-            zero_positions = zero_positions[index]
 
         return (
             prefix,
@@ -266,8 +295,6 @@ class AutoEncoder_dataset2(AutoEncoder_geo_dataset):
             "num_face_record": num_face_record,
             "valid_mask": valid_mask,
         }
-
-
 
 
 class AutoEncoder_dataset(torch.utils.data.Dataset):

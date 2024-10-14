@@ -1,9 +1,11 @@
 dataset:
   dataset_name: "AutoEncoder_dataset"
 
-  train_dataset: /mnt/d/deepcad_whole_test_v5
-  val_dataset: /mnt/d/deepcad_whole_test_v5
-  test_dataset: /mnt/d/deepcad_whole_test_v5
+  data_root: /mnt/d/abc_v0
+  train_dataset: src/brepnet/data/list/deduplicated_abc_training_brepnet.txt
+  val_dataset: src/brepnet/data/list/deduplicated_abc_validation_brepnet.txt
+  test_dataset: src/brepnet/data/list/deduplicated_abc_testing_brepnet.txt
+  disable_half: false
 
 trainer:
   gpu: 1
@@ -27,6 +29,7 @@ trainer:
 
 model:
   name: AutoEncoder_featuredv2
+  encoderdecoder_weight: 
   in_channels: 3
   dim_latent: 8
   dim_shape: 256

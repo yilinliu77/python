@@ -153,6 +153,9 @@ class Shape:
 
         self.remove_edge_idx_src = []
         self.remove_edge_idx_new = []
+
+        self.have_data = True
+
         pass
 
     def remove_half_edges(self, edge2face_threshold=2e-1, is_check_intersection=False, face2face_threshold=0.06):
@@ -230,6 +233,10 @@ class Shape:
                     continue
                 edges.append(self.recon_edge_points[value[0]])
                 edge_face_connectivity.append([len(edges) - 1, face_id1, face_id2])
+
+        if len(edges) == 0 or len(edge_face_connectivity) == 0:
+            self.have_data = False
+            return
 
         self.recon_edge_points = np.stack(edges, axis=0)
         self.edge_face_connectivity = np.stack(edge_face_connectivity, axis=0)

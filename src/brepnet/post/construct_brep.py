@@ -138,6 +138,11 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         safe_check_dir(os.path.join(out_root, folder_name))
 
     shape = get_data(os.path.join(data_root, folder_name, 'data.npz'))
+
+    # if shape.recon_face_points.shape[0] < 10:
+    #     shutil.rmtree(os.path.join(out_root, folder_name))
+    #     return
+
     if isdebug:
         export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge_ori.obj'))
     shape.remove_half_edges()
@@ -150,6 +155,12 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     # shape.drop_edges(max_drop_num=2)
     # if isdebug:
     #     export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge_after_drop1.obj'))
+
+    if not shape.have_data:
+        if is_log:
+            print(f"{Colors.RED}No data in {folder_name}{Colors.RESET}")
+        # shutil.rmtree(os.path.join(out_root, folder_name))
+        return
 
     if isdebug:
         print(f"{Colors.GREEN}Remove {len(shape.remove_edge_idx_src) + len(shape.remove_edge_idx_new)} edges{Colors.RESET}")
@@ -244,6 +255,9 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         mesh.export(os.path.join(out_root, folder_name, 'recon_brep.ply'))
     if is_successful:
         open(os.path.join(out_root, folder_name, 'success.txt'), 'w').close()
+
+    # if not is_successful:
+    #     shutil.rmtree(os.path.join(out_root, folder_name))
 
 
 def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list,

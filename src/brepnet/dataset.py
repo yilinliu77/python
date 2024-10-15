@@ -1,6 +1,7 @@
 import math
 import os.path
 from pathlib import Path
+import random
 import sys
 import time
 
@@ -12,7 +13,7 @@ import trimesh
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import open3d as o3d
-
+from scipy.spatial.transform import Rotation
 from shared.common_utils import export_point_cloud, check_dir
 
 from typing import Final
@@ -297,6 +298,41 @@ class AutoEncoder_dataset2(AutoEncoder_geo_dataset):
         }
 
 
+def rotate_matrix(angle_degrees, axis):
+    """
+    Rotate a point cloud around its center by a specified angle in degrees along a specified axis.
+
+    Args:
+    - point_cloud: Numpy array of shape (N, 3) representing the point cloud.
+    - angle_degrees: Angle of rotation in degrees.
+    - axis: Axis of rotation. Can be 'x', 'y', or 'z'.
+
+    Returns:
+    - rotated_point_cloud: Numpy array of shape (N, 3) representing the rotated point cloud.
+    """
+
+    # Convert angle to radians
+    angle_radians = np.radians(angle_degrees)
+
+    # Compute rotation matrix based on the specified axis
+    if axis == 'x':
+        rotation_matrix = np.array([[1, 0, 0],
+                                    [0, np.cos(angle_radians), -np.sin(angle_radians)],
+                                    [0, np.sin(angle_radians), np.cos(angle_radians)]])
+    elif axis == 'y':
+        rotation_matrix = np.array([[np.cos(angle_radians), 0, np.sin(angle_radians)],
+                                    [0, 1, 0],
+                                    [-np.sin(angle_radians), 0, np.cos(angle_radians)]])
+    elif axis == 'z':
+        rotation_matrix = np.array([[np.cos(angle_radians), -np.sin(angle_radians), 0],
+                                    [np.sin(angle_radians), np.cos(angle_radians), 0],
+                                    [0, 0, 1]])
+    else:
+        raise ValueError("Invalid axis. Must be 'x', 'y', or 'z'.")
+
+    return rotation_matrix
+
+
 class AutoEncoder_dataset(torch.utils.data.Dataset):
     def __init__(self, v_training_mode, v_conf):
         super(AutoEncoder_dataset, self).__init__()
@@ -312,11 +348,16 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
         else:
             raise
 
-        self.data_folders = [os.path.join(self.dataset_path, folder) for folder in os.listdir(self.dataset_path) if
-                             os.path.isdir(os.path.join(self.dataset_path, folder))]
+        self.data_folders = [folder for folder in os.listdir(self.dataset_path) if os.path.isdir(os.path.join(self.dataset_path, folder))]
+        if v_conf["deduplicate_list"]:
+            deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}.txt".format(v_training_mode)
+            print("Use deduplicate list ", deduplicate_file)
+            deduplicate_list = [item.strip() for item in open(deduplicate_file).readlines()]
+            self.data_folders = set(self.data_folders) & set(deduplicate_list)
+            self.data_folders = list(self.data_folders)
+        
         self.data_folders.sort()
-
-        self.data_folders = self.data_folders
+        self.data_folders = [os.path.join(self.dataset_path, item) for item in self.data_folders]
 
         self.src_data_sum = len(self.data_folders)
 
@@ -324,6 +365,8 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
 
         self.data_sum = len(self.data_folders)
 
+        self.is_aug = v_conf["is_aug"]
+            
         print("Dataset INFO")
         print("Src data_folders:", self.src_data_sum)
         print("After removing:", self.data_sum)
@@ -350,7 +393,10 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
                     f.write(item + "\n")
 
         for folder_path in ignore_ids:
-            self.data_folders.remove(folder_path)
+            try:
+                self.data_folders.remove(folder_path)
+            except:
+                pass
 
     def __getitem__(self, idx):
         # idx = 0
@@ -360,6 +406,38 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
         # Face sample points (num_faces*32*32*3)
         face_points = torch.from_numpy(data_npz['sample_points_faces'])
         line_points = torch.from_numpy(data_npz['sample_points_lines'])
+
+        if self.is_aug == 0:
+            matrix = np.identity(3)
+        if self.is_aug == 1:
+            matrix = Rotation.from_euler('xyz', np.random.randint(0,3,3) * np.pi / 2).as_matrix()
+        elif self.is_aug == 2:
+            matrix = Rotation.from_euler('xyz', np.random.rand(3) * np.pi * 2).as_matrix()
+        if self.is_aug != 0:
+            matrix = torch.from_numpy(matrix).float()
+            fp = face_points[..., :3].reshape(-1,3)
+            lp = line_points[..., :3].reshape(-1,3)
+            fp1 = (matrix @ fp.T).T
+            lp1 = (matrix @ lp.T).T
+
+            if face_points.shape[1] > 3:
+                fn = face_points[..., 3:].reshape(-1,3)
+                ln = line_points[..., 3:].reshape(-1,3)
+                ft = fp + fn
+                lt = lp + ln
+                ft1 = (matrix @ ft.T).T
+                lt1 = (matrix @ lt.T).T
+
+                fn1 = ft1 - fp1
+                ln1 = lt1 - lp1
+
+                fn1 = fn1 / (1e-6 + torch.linalg.norm(fn, dim=-1, keepdim=True))
+                ln1 = ln1 / (1e-6 + torch.linalg.norm(ln, dim=-1, keepdim=True))
+                face_points[..., 3:] = fn1.reshape(face_points[..., 3:].shape)
+                line_points[..., 3:] = ln1.reshape(line_points[..., 3:].shape)
+
+            face_points[..., :3] = fp1.reshape(face_points[..., :3].shape)
+            line_points[..., :3] = lp1.reshape(line_points[..., :3].shape)
 
         face_points_norm, face_normal_norm, face_center, face_scale = normalize_coord(face_points)
         edge_points_norm, edge_normal_norm, edge_center, edge_scale = normalize_coord(line_points)
@@ -456,6 +534,7 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
             "edge_scale": torch.cat(edge_scale, dim=0),
         }
 
+
 class Diffusion_dataset(torch.utils.data.Dataset):
     def __init__(self, v_training_mode, v_conf):
         super(Diffusion_dataset, self).__init__()
@@ -476,11 +555,11 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             raise
 
         filelist1 = os.listdir(self.dataset_path)
-        filelist2 = [item[:8] for item in os.listdir(self.face_z_dataset) if os.path.exists(os.path.join(self.face_z_dataset, item+"/feature.npy"))]
+        filelist2 = [item[:8] for item in os.listdir(self.face_z_dataset) if os.path.exists(os.path.join(self.face_z_dataset, item+"/features.npy"))]
         
         deduplicate_list = filelist2
         if v_conf["deduplicate_list"]:
-            deduplicate_file = "src/brepnet/data/deduplicated_deepcad_{}.txt".format(v_training_mode)
+            deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}.txt".format(v_training_mode)
             print("Use deduplicate list ", deduplicate_file)
             deduplicate_list = [item.strip() for item in open(deduplicate_file).readlines()]
 
@@ -500,6 +579,9 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         else:
             self.data_folders = filelist * scale_factor
         print("Total data num:", len(self.data_folders))
+
+        self.is_aug = v_conf["is_aug"]
+
         return
 
     def __len__(self):
@@ -530,7 +612,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         try:
             data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "_feature.npz"))['face_features']
         except:
-            data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "/feature.npy"))
+            data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "/features.npy"))
         face_features = torch.from_numpy(data_npz)
 
         padded_face_features = torch.zeros((self.max_faces, *face_features.shape[1:]), dtype=torch.float32)
@@ -539,10 +621,12 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         condition = {
 
         }
-        if self.condition == "single_img" or self.condition == "multi_img":
-            cache_data = False
+        if self.condition == "single_img" or self.condition == "multi_img" or self.condition == "sketch":
+            cache_data = True
             if self.condition == "single_img":
                 idx = np.random.choice(np.arange(24), 1, replace=False)
+            # elif self.condition == "sketch":
+                # idx = np.random.choice(np.arange(24,48), 1, replace=False)
             else:
                 idx = np.random.choice(np.arange(24), 4, replace=False)
             if cache_data:

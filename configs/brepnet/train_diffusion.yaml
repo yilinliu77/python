@@ -11,6 +11,7 @@ dataset:
   scale_factor: 1
   condition:
   overfit: false
+  is_aug: 0
 
 trainer:
   gpu: 1
@@ -38,9 +39,14 @@ model:
   stored_z: True
   condition:
 
+  diffusion_latent: 512
+  loss: l2
+
   autoencoder: AutoEncoder_0925
   dim_latent: 8
   dim_shape: 768
+  sigmoid: false
+  in_channels: 3
   gaussian_weights: 0
   norm: "layer"
   autoencoder_weights: 

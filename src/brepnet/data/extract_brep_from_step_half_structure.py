@@ -54,15 +54,13 @@ debug_id = None
 
 render_img = True
 write_debug_data = False
-check_post_processing = True
-data_root = Path(r"D:/Datasets/data_step")
-output_root = Path(r"d:/brepnet/deepcad_train_v7/")
-img_root = Path(r"d:/brepnet/imgs_v7")
-data_split = r"src/brepnet/data/list/deduplicated_deepcad_training.txt"
+check_post_processing = False
+data_root = Path(r"/mnt/e/yilin/data_step")
+output_root = Path(r"/mnt/d/img2brep/abc_v0/")
+img_root = Path(r"/mnt/d/img2brep/abc_imgs_v0")
+data_split = r"src/brepnet/data/list/deduplicated_abc.txt"
 
 exception_files = [
-    r"src/brepnet/data/list/abc_multiple_component_or_few_faces_ids_.txt",
-    r"src/brepnet/data/list/abc_cube_ids.txt",
     r"src/brepnet/data/list/abc_with_others_ids.txt",
 ]
 
@@ -415,7 +413,7 @@ if __name__ == '__main__':
                 #num_cpus=1,
                 #local_mode=True
         )
-        batch_size = 100
+        batch_size = 1
         num_batches = len(total_ids) // batch_size + 1
         tasks = []
         for i in range(num_batches):

@@ -206,8 +206,8 @@ def sincos_embedding(input, dim, max_period=10000):
     """
     half = dim // 2
     freqs = torch.exp(
-        -math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half
-    ).to(device=input.device)
+        -math.log(max_period) * torch.arange(start=0, end=half, dtype=input.dtype, device=input.device) / half
+    )
     for _ in range(len(input.size())):
         freqs = freqs[None]
     args = input.unsqueeze(-1).float() * freqs
@@ -365,10 +365,10 @@ class Diffusion_base(nn.Module):
             checkpoint = torch.load(v_conf["autoencoder_weights"], weights_only=False)["state_dict"]
             weights = {k.replace("model.", ""): v for k, v in checkpoint.items()}
             self.ae_model.load_state_dict(weights)
-            if not self.is_train_decoder:
-                for param in self.ae_model.parameters():
-                    param.requires_grad = False
-                self.ae_model.eval()
+        if not self.is_train_decoder:
+            for param in self.ae_model.parameters():
+                param.requires_grad = False
+            self.ae_model.eval()
 
     def inference(self, bs, device, v_data=None, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, 32)).to(device)
@@ -450,12 +450,10 @@ class Diffusion_base(nn.Module):
 
 
 class Diffusion_condition(Diffusion_base):
-    def __init__(self,
-                 v_conf,
-                 ):
+    def __init__(self, v_conf, ):
         super().__init__(v_conf)
         self.dim_input = 8 * 2 * 2
-        self.dim_latent = 512
+        self.dim_latent = v_conf["diffusion_latent"]
         self.dim_condition = 256
         self.dim_total = self.dim_latent + self.dim_condition
         self.time_statics = [0 for _ in range(10)]
@@ -470,7 +468,7 @@ class Diffusion_condition(Diffusion_base):
         layer1 = nn.TransformerEncoderLayer(
             d_model=self.dim_total,
             nhead=12, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
-        self.net1 = nn.TransformerEncoder(layer1, 12, nn.LayerNorm(self.dim_total))
+        self.net1 = nn.TransformerEncoder(layer1, 24, nn.LayerNorm(self.dim_total))
 
         self.with_img = False
         self.with_pc = False
@@ -561,7 +559,6 @@ class Diffusion_condition(Diffusion_base):
             nn.SiLU(),
             nn.Linear(self.dim_input, 1),
         )
-
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=1000,
             beta_schedule='squaredcos_cap_v2',
@@ -570,7 +567,6 @@ class Diffusion_condition(Diffusion_base):
             beta_end=0.02,
             clip_sample=False,
         )
-
         self.time_embed = nn.Sequential(
             nn.Linear(self.dim_total, self.dim_total),
             nn.LayerNorm(self.dim_total),
@@ -578,6 +574,7 @@ class Diffusion_condition(Diffusion_base):
             nn.Linear(self.dim_total, self.dim_total),
         )
 
+        self.loss = nn.functional.l1_loss if v_conf["loss"] == "l1" else nn.functional.mse_loss
 
     def inference(self, bs, device, v_data=None, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, 32)).to(device)
@@ -610,7 +607,7 @@ class Diffusion_condition(Diffusion_base):
             num_face = face_features.shape[1]
             data["padded_face_z"] = face_features.reshape(bs,num_face, -1)
         else:
-            encoding_result = self.ae_model.encode(v_data, v_test)
+            encoding_result = self.ae_model.encode(v_data, True)
             data.update(encoding_result)
             face_features = encoding_result["face_z"]
             dim_latent = face_features.shape[-1]
@@ -627,9 +624,11 @@ class Diffusion_condition(Diffusion_base):
 
     def diffuse(self, v_feature, v_timesteps, v_condition=None):
         bs = v_feature.size(0)
+        de = v_feature.device
+        dt = v_feature.dtype
         time_embeds = self.time_embed(sincos_embedding(v_timesteps, self.dim_total)).unsqueeze(1)
         noise_features = self.p_embed(v_feature)
-        v_condition = torch.zeros((bs, 1, self.dim_condition)) if v_condition is None else v_condition
+        v_condition = torch.zeros((bs, 1, self.dim_condition), device=de, dtype=dt) if v_condition is None else v_condition
         v_condition = v_condition.repeat(1, self.num_max_faces, 1)
         noise_features = torch.cat([noise_features, v_condition], dim=-1)
         noise_features = noise_features + time_embeds

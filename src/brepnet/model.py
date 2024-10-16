@@ -15,6 +15,8 @@ from vector_quantize_pytorch import FSQ, ResidualFSQ, ResidualLFQ, ResidualVQ
 
 from src.brepnet.dataset import continuous_coord, denormalize_coord, denormalize_coord2
 
+from chamferdist import ChamferDistance
+
 def add_timer(time_statics, v_attr, timer):
     if v_attr not in time_statics:
         time_statics[v_attr] = 0.
@@ -5427,6 +5429,7 @@ class AutoEncoder_1012(nn.Module):
             "Intersection": 0,
             "Loss": 0,
         }
+        self.cd_computer = ChamferDistance()
 
     def profile_time(self, timer, key):
         torch.cuda.synchronize()
@@ -5563,10 +5566,15 @@ class AutoEncoder_1012(nn.Module):
             v_data["face_bbox"]
         )
         id_edges = v_data["edge_face_connectivity"][:, 0]
-        loss["edge_coords_norm"] = nn.functional.l1_loss(
+        edge_coords_norm1 = nn.functional.l1_loss(
             decoding_result["pred_edge_points"],
             v_data["edge_norm"][id_edges]
         )
+        edge_coords_norm2 = nn.functional.l1_loss(
+           torch.flip(decoding_result["pred_edge_points"], dims=[1]),
+            v_data["edge_norm"][id_edges]
+        )
+        loss["edge_coords_norm"] = edge_coords_norm1 if edge_coords_norm1 < edge_coords_norm2 else edge_coords_norm2
         loss["edge_center"] = nn.functional.l1_loss(
             decoding_result["pred_edge_bbox"],
             v_data["edge_bbox"][id_edges]

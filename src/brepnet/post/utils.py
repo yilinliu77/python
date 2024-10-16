@@ -19,13 +19,13 @@ from OCC.Core.BRepTools import breptools
 
 from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface, GeomAPI_PointsToBSpline
 from OCC.Core.GeomAbs import GeomAbs_C0, GeomAbs_C1, GeomAbs_C2, GeomAbs_Cylinder, GeomAbs_Plane
-from OCC.Core.ShapeAnalysis import ShapeAnalysis_Wire
+from OCC.Core.ShapeAnalysis import ShapeAnalysis_Wire, ShapeAnalysis_Shell
 from OCC.Core.ShapeExtend import ShapeExtend_WireData
 from OCC.Core.ShapeFix import ShapeFix_Face, ShapeFix_Wire, ShapeFix_Edge, ShapeFix_Shell, ShapeFix_Solid, \
     ShapeFix_ComposeShell
 from OCC.Core.TColgp import TColgp_Array1OfPnt
 from OCC.Core.TColgp import TColgp_Array2OfPnt
-from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_FORWARD, TopAbs_REVERSED, TopAbs_FACE
+from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_FORWARD, TopAbs_REVERSED, TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_SHELL
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.gp import gp_Pnt, gp_XYZ, gp_Vec
 from OCC.Display.SimpleGui import init_display
@@ -79,11 +79,11 @@ import trimesh
 
 from itertools import combinations
 
-# EDGE_FITTING_TOLERANCE = [2e-4, 2e-3, 5e-3, 8e-3, 5e-2, ]
-# FACE_FITTING_TOLERANCE = [2e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]
+# EDGE_FITTING_TOLERANCE = [1e-5, 1e-4, 1e-3, 5e-3, 8e-3, 5e-2, ]
+# FACE_FITTING_TOLERANCE = [1e-4, 1e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]
 
-EDGE_FITTING_TOLERANCE = [1e-5, 1e-4, 1e-3, 5e-3, 8e-3, 5e-2, ]
-FACE_FITTING_TOLERANCE = [1e-4, 1e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]
+EDGE_FITTING_TOLERANCE = [1e-3, 5e-3, 8e-3, 5e-2, ]
+FACE_FITTING_TOLERANCE = [1e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]
 ROUGH_FITTING_TOLERANCE = 1e-1
 
 FIX_TOLERANCE = 1e-2
@@ -117,7 +117,7 @@ CONTINUITY = GeomAbs_C1
 # IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, True
 # CONTINUITY = GeomAbs_C2
 
-def interpolation_face_points(face, density=None, is_use_cuda=False, density_scale=10):
+def interpolation_face_points(face, density=None, is_use_cuda=False, density_scale=4):
     if type(face) is np.ndarray:
         if is_use_cuda:
             face = torch.from_numpy(face).cuda()
@@ -831,6 +831,9 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         wire_fixer.SetMaxTolerance(connected_tolerance)
         wire_fixer.FixGaps3d()
         wire_fixer.FixGaps2d()
+        wire_fixer.FixReorder()
+        wire_fixer.FixClosed(0.01)
+        wire_fixer.FixConnected(0.01)
 
         # when only one edge, and being gap fixing, but still not closed, skip
         if wire_fixer.Wire().NbChildren() == 1 and not wire_fixer.Wire().Closed():
@@ -1205,3 +1208,57 @@ def export_edges(l_v, v_file):
                 line_str += f"l {i + num_points + 1} {i + num_points + 2}\n"
             num_points += edge.shape[0]
         f.write(line_str)
+
+
+def solid_valid_check(solid, tolerance=0.01):
+    # Refer to the SolidGen (https://arxiv.org/pdf/2203.13944#_ts1728973340413)
+    # A.6 Criteria used to Evaluate Validity of Generated B-reps
+    # We consider a B-rep to be valid if it was successfully built from the network’s output and additionally
+    # satisfies the following criteria:
+    # 1. Triangulatable. Every face in the B-rep must generate at least one triangle, otherwise it cannot be
+    #   rendered properly and is not possible to manufacture.
+    # 2. Wire ordering. The edges in each wire in the B-rep must be ordered correctly. We check this using
+    #   the ShapeAnalysis_Wire::CheckOrder() function in PythonOCC (Paviot, 2008) with a tolerance of 0.01.
+    # 3. No wire self-intersection. The wires should not self-intersect to ensure that faces are well-defined
+    #   and surfaces trimmed correctly. We check this using the ShapeAnalysis_Wire::CheckSelfIntersection()
+    #   function in PythonOCC with a tolerance of 0.01.
+    # 4. No bad edges. The edges in shells should be present once or twice but with different orientations.
+    # This can be checked with the ShapeAnalysis_Shell::HasBadEdges() function.
+
+    # 1. Check Triangulatable
+    face_exp = TopExp_Explorer(solid, TopAbs_FACE)
+    while face_exp.More():
+        face = topods.Face(face_exp.Current())
+        loc = TopLoc_Location()
+        mesh = BRepMesh_IncrementalMesh(face, 0.01)
+        triangulation = BRep_Tool.Triangulation(face, loc)
+        if triangulation is None:
+            return False
+        wire_exp = TopExp_Explorer(face, TopAbs_WIRE)
+        while wire_exp.More():
+            wire = topods.Wire(wire_exp.Current())
+            wire_analyzer = ShapeAnalysis_Wire(wire, face, tolerance)
+            # 2. Check wire ordering
+            is_wire_ordered = wire_analyzer.CheckOrder(False)
+            # is_wire_ordered = wire.Closed()
+            if not is_wire_ordered:
+                return False
+            # 3. Check no wire self-intersection
+            is_no_wire_self_intersection = wire_analyzer.CheckSelfIntersection()
+            if not is_no_wire_self_intersection:
+                return False
+            wire_exp.Next()
+        face_exp.Next()
+
+    # 4. Check no bad edges
+    shell_exp = TopExp_Explorer(solid, TopAbs_SHELL)
+    while shell_exp.More():
+        shell = topods.Shell(shell_exp.Current())
+        shell_analyzer = ShapeAnalysis_Shell()
+        shell_analyzer.LoadShells(shell)
+        has_bad_edges = shell_analyzer.HasBadEdges()
+        if has_bad_edges:
+            return False
+        shell_exp.Next()
+
+    return True

@@ -117,6 +117,40 @@ def test_check():
     print("Graphs are equal" if is_identical else "Graphs are not equal")
 
 
+def load_data_from_npz(data_npz_file):
+    data_npz = np.load(data_npz_file, allow_pickle=True)
+    # Brepgen
+    if 'face_edge_adj' in data_npz:
+        faces = data_npz['pred_face']
+        face_edge_adj = data_npz['face_edge_adj']
+        faces_adj_pair = []
+        N = face_edge_adj.shape[0]
+        for face_idx1 in range(N):
+            for face_idx2 in range(face_idx1 + 1, N):
+                face_edges1 = face_edge_adj[face_idx1]
+                face_edges2 = face_edge_adj[face_idx2]
+                if sorted((face_idx1, face_idx2)) in faces_adj_pair:
+                    continue
+                if len(set(face_edges1).intersection(set(face_edges2))) > 0:
+                    faces_adj_pair.append(sorted((face_idx1, face_idx2)))
+        return faces, faces_adj_pair
+    # Ours
+    if 'sample_points_faces' in data_npz and 'edge_face_connectivity' in data_npz:
+        face_points = data_npz['sample_points_faces']  # Face sample points (num_faces*20*20*3)
+        edge_points = data_npz['sample_points_lines']  # Edge sample points (num_lines*20*3)
+        edge_face_connectivity = data_npz['edge_face_connectivity']  # (num_intersection, (id_edge, id_face1, id_face2))
+    elif 'pred_face' in data_npz and 'pred_edge_face_connectivity' in data_npz:
+        face_points = data_npz['pred_face']
+        edge_points = data_npz['pred_edge']
+        edge_face_connectivity = data_npz['pred_edge_face_connectivity']
+    else:
+        raise ValueError("Invalid data format")
+    faces_adj_pair = []
+    for edge_idx, face_idx1, face_idx2 in edge_face_connectivity:
+        faces_adj_pair.append([face_idx1, face_idx2])
+    return face_points, faces_adj_pair
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--fake", type=str, required=True)
@@ -137,21 +171,7 @@ def main():
     # data_npz_file_list = data_npz_file_list[:100]
     gen_graph_list = []
     for data_npz_file in tqdm(data_npz_file_list):
-        data_npz = np.load(data_npz_file, allow_pickle=True)
-        faces = data_npz['pred_face']
-        face_edge_adj = data_npz['face_edge_adj']
-
-        faces_adj_pair = []
-        N = face_edge_adj.shape[0]
-        for face_idx1 in range(N):
-            for face_idx2 in range(face_idx1 + 1, N):
-                face_edges1 = face_edge_adj[face_idx1]
-                face_edges2 = face_edge_adj[face_idx2]
-                if sorted((face_idx1, face_idx2)) in faces_adj_pair:
-                    continue
-                if len(set(face_edges1).intersection(set(face_edges2))) > 0:
-                    faces_adj_pair.append(sorted((face_idx1, face_idx2)))
-
+        faces, faces_adj_pair = load_data_from_npz(data_npz_file)
         graph = build_graph(faces, faces_adj_pair, n_bit)
         gen_graph_list.append(graph)
 

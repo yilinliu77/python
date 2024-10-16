@@ -7,6 +7,8 @@ dataset:
   test_dataset: src/brepnet/data/list/deduplicated_abc_testing_brepnet.txt
   disable_half: false
 
+  is_aug: 0
+
 trainer:
   gpu: 1
   num_worker: 0

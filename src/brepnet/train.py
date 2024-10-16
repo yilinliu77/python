@@ -4,7 +4,7 @@ import sys
 import numpy as np
 import open3d as o3d
 
-from src.brepnet.dataset import AutoEncoder_dataset
+from src.brepnet.dataset import AutoEncoder_dataset, AutoEncoder_dataset2
 
 sys.path.append('../../../')
 import os.path
@@ -46,9 +46,7 @@ class TrainAutoEncoder(pl.LightningModule):
 
         model_mod = importlib.import_module("src.brepnet.model")
         model_mod = getattr(model_mod, self.hydra_conf["model"]["name"])
-        # self.model = AutoEncoder_base(self.hydra_conf["model"])
         self.model = model_mod(self.hydra_conf["model"])
-        # self.model = torch.compile(self.model)
         self.viz = {}
         pr_computer = {
             "P_5": BinaryPrecision(threshold=0.5),
@@ -169,8 +167,8 @@ class TrainAutoEncoder(pl.LightningModule):
 
             edge_points = np.concatenate((gt_edges, recon_edges), axis=0).reshape(-1, 3)
             edge_colors = np.concatenate(
-                (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0] * 32, axis=0),
-                    np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0] * 32, axis=0)), axis=0)
+                (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0] * gt_edges.shape[1], axis=0),
+                    np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0] * recon_edges.shape[1], axis=0)), axis=0)
             
             pc = o3d.geometry.PointCloud()
             pc.points = o3d.utility.Vector3dVector(edge_points)

@@ -22,6 +22,7 @@ import torchvision.transforms as T
 import networkx as nx
 
 from torch.nn.utils.rnn import pad_sequence
+from scipy.spatial.transform import Rotation
 
 import torch.nn.functional as F
 
@@ -117,6 +118,7 @@ class AutoEncoder_geo_dataset(torch.utils.data.Dataset):
         
         self.data_folders = [item.strip() for item in open(listfile).readlines()]
         self.root = Path(v_conf["data_root"])
+        self.is_aug = v_conf["is_aug"]
 
         print(len(self.data_folders))
 
@@ -166,11 +168,10 @@ class AutoEncoder_geo_dataset(torch.utils.data.Dataset):
         }
 
 
-
 class AutoEncoder_dataset2(AutoEncoder_geo_dataset):
     def __init__(self, v_training_mode, v_conf):
-        self.disable_half = v_conf["disable_half"]
         super(AutoEncoder_dataset2, self).__init__(v_training_mode, v_conf)
+        self.disable_half = v_conf["disable_half"]
 
     def __len__(self):
         return len(self.data_folders)
@@ -183,6 +184,39 @@ class AutoEncoder_dataset2(AutoEncoder_geo_dataset):
         # Face sample points (num_faces*32*32*3)
         face_points = torch.from_numpy(data_npz['sample_points_faces'])
         line_points = torch.from_numpy(data_npz['sample_points_lines'])
+
+        if self.is_aug == 0:
+            matrix = np.identity(3)
+        if self.is_aug == 1:
+            matrix = Rotation.from_euler('xyz', np.random.randint(0,3,3) * np.pi / 2).as_matrix()
+        elif self.is_aug == 2:
+            matrix = Rotation.from_euler('xyz', np.random.rand(3) * np.pi * 2).as_matrix()
+        if self.is_aug != 0:
+            matrix = torch.from_numpy(matrix).float()
+            fp = face_points[..., :3].reshape(-1,3)
+            lp = line_points[..., :3].reshape(-1,3)
+            fp1 = (matrix @ fp.T).T
+            lp1 = (matrix @ lp.T).T
+
+            if face_points.shape[1] > 3:
+                fn = face_points[..., 3:].reshape(-1,3)
+                ln = line_points[..., 3:].reshape(-1,3)
+                ft = fp + fn
+                lt = lp + ln
+                ft1 = (matrix @ ft.T).T
+                lt1 = (matrix @ lt.T).T
+
+                fn1 = ft1 - fp1
+                ln1 = lt1 - lp1
+
+                fn1 = fn1 / (1e-6 + torch.linalg.norm(fn, dim=-1, keepdim=True))
+                ln1 = ln1 / (1e-6 + torch.linalg.norm(ln, dim=-1, keepdim=True))
+                face_points[..., 3:] = fn1.reshape(face_points[..., 3:].shape)
+                line_points[..., 3:] = ln1.reshape(line_points[..., 3:].shape)
+
+            face_points[..., :3] = fp1.reshape(face_points[..., :3].shape)
+            line_points[..., :3] = lp1.reshape(line_points[..., :3].shape)
+
         num_faces = face_points.shape[0]
         num_edges = line_points.shape[0]
 
@@ -204,7 +238,7 @@ class AutoEncoder_dataset2(AutoEncoder_geo_dataset):
             line_points = line_points[edge_face_connectivity[:, 0]]
 
             edge_face_connectivity[:, 0] = torch.arange(edge_face_connectivity.shape[0])
-            edge_face_connectivity = torch.cat((edge_face_connectivity, edge_face_connectivity[:,[0,2,1]]), dim=0)
+            # edge_face_connectivity = torch.cat((edge_face_connectivity, edge_face_connectivity[:,[0,2,1]]), dim=0)
             face_adj = torch.zeros((num_faces,num_faces), dtype=bool)
             face_adj[edge_face_connectivity[:,1], edge_face_connectivity[:,2]] = True
             face_adj[edge_face_connectivity[:,2], edge_face_connectivity[:,1]] = True

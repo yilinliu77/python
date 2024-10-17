@@ -169,15 +169,17 @@ class TrainDiffusion(pl.LightningModule):
                           )
 
     def test_step(self, batch, batch_idx):
+        # if batch_idx != 147:
+        #     return
         data = batch
         # loss = self.model(data, v_test=True)
         # total_loss = loss["total_loss"]
         # self.log("Test_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
         #          sync_dist=True, batch_size=self.batch_size)
-        
-        results = self.model.inference(self.batch_size, self.device, v_data=data)
+        batch_size = min(len(batch['v_prefix']), self.batch_size)
+        results = self.model.inference(batch_size, self.device, v_data=data)
         log_root = Path(self.hydra_conf["trainer"]["test_output_dir"])
-        for idx in range(self.batch_size):
+        for idx in range(batch_size):
             global_id = batch_idx * self.batch_size + idx
             item_root = (log_root / "{:08d}".format(global_id))
             item_root.mkdir(parents=True, exist_ok=True)
@@ -198,9 +200,9 @@ class TrainDiffusion(pl.LightningModule):
             if "ori_imgs" in data["conditions"]:
                 imgs = data["conditions"]["ori_imgs"][idx].cpu().numpy().astype(np.uint8)
                 o3d.io.write_image(str(item_root / "img0.png"), o3d.geometry.Image(imgs[0]))
-                o3d.io.write_image(str(item_root / "img1.png"), o3d.geometry.Image(imgs[1]))
-                o3d.io.write_image(str(item_root / "img2.png"), o3d.geometry.Image(imgs[2]))
-                o3d.io.write_image(str(item_root / "img3.png"), o3d.geometry.Image(imgs[3]))
+                # o3d.io.write_image(str(item_root / "img1.png"), o3d.geometry.Image(imgs[1]))
+                # o3d.io.write_image(str(item_root / "img2.png"), o3d.geometry.Image(imgs[2]))
+                # o3d.io.write_image(str(item_root / "img3.png"), o3d.geometry.Image(imgs[3]))
 
     def on_test_epoch_end(self):
         for loss in self.trainer.callback_metrics:

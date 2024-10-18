@@ -54,17 +54,44 @@ def compute_gen_novel():
     pass
 
 
+def find_connected_components(matrix):
+    N = len(matrix)
+    visited = [False] * N
+    components = []
+
+    def dfs(idx, component):
+        stack = [idx]
+        while stack:
+            node = stack.pop()
+            if not visited[node]:
+                visited[node] = True
+                component.append(node)
+                for neighbor in range(N):
+                    if matrix[node][neighbor] and not visited[neighbor]:
+                        stack.append(neighbor)
+
+    for i in range(N):
+        if not visited[i]:
+            component = []
+            dfs(i, component)
+            components.append(component)
+
+    return components
+
+
 def compute_gen_unique(graph_list, is_use_ray=False, batch_size=100000):
     N = len(graph_list)
     unique_graph_idx = list(range(N))
     pair_0, pair_1 = np.triu_indices(N, k=1)
     check_pairs = list(zip(pair_0, pair_1))
+    deduplicate_matrix = np.zeros((N, N), dtype=bool)
 
     if not is_use_ray:
         for idx1, idx2 in tqdm(check_pairs):
             is_identical = is_graph_identical(graph_list[idx1], graph_list[idx2])
             if is_identical:
                 unique_graph_idx.remove(idx2) if idx2 in unique_graph_idx else None
+                deduplicate_matrix[idx1, idx2] = True
     else:
         ray.init()
         N_batch = len(check_pairs) // batch_size
@@ -80,12 +107,16 @@ def compute_gen_unique(graph_list, is_use_ray=False, batch_size=100000):
                 if not is_identical:
                     continue
                 idx1, idx2 = check_pairs[batch_idx * batch_size + idx]
-                unique_graph_idx.remove(idx2) if idx2 in unique_graph_idx else None
+                deduplicate_matrix[idx1, idx2] = True
+                deduplicate_matrix[idx2, idx1] = True
+                if idx2 in unique_graph_idx:
+                    unique_graph_idx.remove(idx2)
 
     unique = len(unique_graph_idx)
     print(f"Unique: {unique}/{N}")
     unique_ratio = unique / N
-    return unique_ratio
+
+    return unique_ratio, deduplicate_matrix
 
 
 def load_data_with_prefix(root_folder, prefix):
@@ -168,7 +199,7 @@ def main():
     # Load all the generated data files
     print("Loading generated data files...")
     data_npz_file_list = load_data_with_prefix(gen_data_root, '.npz')
-    # data_npz_file_list = data_npz_file_list[:100]
+    # data_npz_file_list = data_npz_file_list[:1000]
     gen_graph_list = []
     for data_npz_file in tqdm(data_npz_file_list):
         faces, faces_adj_pair = load_data_from_npz(data_npz_file)
@@ -176,9 +207,23 @@ def main():
         gen_graph_list.append(graph)
 
     print("Computing unique ratio...")
-    unique_ratio = compute_gen_unique(gen_graph_list, is_use_ray, batch_size)
+    unique_ratio, deduplicate_matrix = compute_gen_unique(gen_graph_list, is_use_ray, batch_size)
     print(f"Unique ratio: {unique_ratio}")
-    pass
+
+    # save the deduplicate set
+    # print the top-k deduplicated idx
+    # deduplicate_count = np.sum(deduplicate_matrix, axis=0)
+    # deduplicated_idx = np.where(deduplicate_count > 10)
+    # for idx in deduplicated_idx[0]:
+    #     print(f"idx: {idx}, count: {deduplicate_count[idx]}")
+    #     print(np.where(deduplicate_matrix[idx]))
+
+    deduplicate_components_txt = gen_data_root + f"_deduplicate_components_{n_bit}bit.txt"
+    fp = open(deduplicate_components_txt, "w")
+    deduplicate_components = find_connected_components(deduplicate_matrix)
+    for component in deduplicate_components:
+        if len(component) > 1:
+            print(f"Component: {component}", file=fp)
 
 
 if __name__ == "__main__":

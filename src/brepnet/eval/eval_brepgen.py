@@ -302,7 +302,7 @@ def main():
 
     print("n_test: {}, multiplier: {}, repeat times: {}".format(args.n_test, args.multi, args.times))
 
-    args.output = args.fake + '_results1.txt'
+    args.output = args.fake + '_results.txt'
 
     # Load reference pcd
     num_cpus = multiprocessing.cpu_count()

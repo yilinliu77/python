@@ -845,9 +845,11 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         #     wire_fixer.FixClosed()
 
         fixed_wire = wire_fixer.Wire()
+
         # assert fixed_wire.Closed()
         if not fixed_wire.Closed():
             continue
+
         face_fixer.Add(fixed_wire)
         fixed_wire_list.append(fixed_wire)
 
@@ -860,10 +862,14 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         face_fixer.FixWireTool().SetPrecision(connected_tolerance)
         face_fixer.FixWireTool().SetFixShiftedMode(True)
         face_fixer.FixWireTool().SetClosedWireMode(True)
+        face_fixer.FixWireTool().SetFixAddPCurveMode(True)
+        face_fixer.FixWireTool().SetFixAddCurve3dMode(True)
+        face_fixer.FixWireTool().SetFixGaps3dMode(True)
+        face_fixer.FixWireTool().SetFixTailMode(True)
         face_fixer.FixWireTool().Perform()
 
-        face_fixer.SetAutoCorrectPrecisionMode(False)
-        face_fixer.SetPrecision(connected_tolerance)
+        face_fixer.SetAutoCorrectPrecisionMode(True)
+        # face_fixer.SetPrecision(connected_tolerance)
         face_fixer.SetMaxTolerance(connected_tolerance)
         face_fixer.SetFixOrientationMode(True)
         face_fixer.SetFixMissingSeamMode(True)
@@ -883,6 +889,8 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         face_fixer.FixIntersectingWires()
         # face_fixer.FixPeriodicDegenerated()
         face_fixer.FixOrientation()
+        face_fixer.Perform()
+
     except Exception as e:
         print(f"Error fixing face {e}")
         return None
@@ -991,7 +999,7 @@ def try_create_trimmed_face(geom_face, topo_face, face_edges, connected_toleranc
     return wire_list2, trimmed_face2, False
 
 
-def get_separated_surface(trimmed_faces, v_precision1=1e-2, v_precision2=1e-1):
+def get_separated_surface(trimmed_faces, v_precision1=1e-3, v_precision2=1e-1):
     points = []
     faces = []
     num_points = 0

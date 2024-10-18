@@ -562,7 +562,7 @@ class Diffusion_condition(Diffusion_base):
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=1000,
             beta_schedule='squaredcos_cap_v2',
-            prediction_type='sample',
+            prediction_type=v_conf["diffusion_type"],
             beta_start=0.0001,
             beta_end=0.02,
             clip_sample=False,
@@ -575,6 +575,7 @@ class Diffusion_condition(Diffusion_base):
         )
 
         self.loss = nn.functional.l1_loss if v_conf["loss"] == "l1" else nn.functional.mse_loss
+        self.diffusion_type = v_conf["diffusion_type"]
 
     def inference(self, bs, device, v_data=None, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, 32)).to(device)
@@ -680,18 +681,21 @@ class Diffusion_condition(Diffusion_base):
         noise_input = self.noise_scheduler.add_noise(face_z, noise, timesteps)
 
         # Model
-        pred_x0 = self.diffuse(noise_input, timesteps, condition)
-        label = self.classifier(pred_x0)
+        pred = self.diffuse(noise_input, timesteps, condition)
+        label = self.classifier(pred)
 
         # Loss (predict x0)
         loss = {}
         if not self.is_train_decoder:
-            loss["diffusion_loss"] = nn.functional.l1_loss(pred_x0, face_z)
+            if self.diffusion_type == "sample":
+                loss["diffusion_loss"] = self.loss(pred, face_z)
+            else:
+                loss["diffusion_loss"] = self.loss(pred, noise)
         else:
-            pred_face_z = pred_x0[encoding_result["mask"]]
+            pred_face_z = pred[encoding_result["mask"]]
             encoding_result["face_z"] = pred_face_z
             loss, recon_data = self.ae_model.loss(v_data, encoding_result)
-            loss["l2"] = F.l1_loss(pred_x0, face_z)
+            loss["l2"] = self.loss(pred, face_z)
             loss["diffusion_loss"] += loss["l2"]
 
         mask = torch.logical_not((face_z.abs()<1e-4).all(dim=-1))

@@ -38,6 +38,7 @@ from torchmetrics import MetricCollection
 
 import trimesh
 
+
 def to_mesh(face_points):
     num_u_points, num_v_points = face_points.shape[1], face_points.shape[2]
     mesh_total = trimesh.Trimesh()
@@ -50,13 +51,14 @@ def to_mesh(face_points):
                 uv_points_array.SetValue(u_index, v_index, point_3d)
 
         approx_face = GeomAPI_PointsToBSplineSurface(
-            uv_points_array, 3, 8,
-            GeomAbs_C0, 5e-2).Surface()
+                uv_points_array, 3, 8,
+                GeomAbs_C0, 5e-2).Surface()
 
-        v,f = triangulate_shape(BRepBuilderAPI_MakeFace(approx_face, 5e-2).Face())
+        v, f = triangulate_shape(BRepBuilderAPI_MakeFace(approx_face, 5e-2).Face())
         mesh_item = trimesh.Trimesh(vertices=v, faces=f)
         mesh_total += mesh_item
     return mesh_total
+
 
 class TrainDiffusion(pl.LightningModule):
     def __init__(self, hparams):
@@ -153,8 +155,8 @@ class TrainDiffusion(pl.LightningModule):
         if "recon_faces" in self.viz:
             recon_faces = self.viz["recon_faces"].cpu().to(torch.float32).numpy()
             local_face = recon_faces
-            trimesh.PointCloud(local_face.reshape(-1,3)).export(str(self.log_root / "{}_faces.ply".format(self.current_epoch)))
-        self.viz={}
+            trimesh.PointCloud(local_face.reshape(-1, 3)).export(str(self.log_root / "{}_faces.ply".format(self.current_epoch)))
+        self.viz = {}
         return
 
     def test_dataloader(self):
@@ -167,15 +169,17 @@ class TrainDiffusion(pl.LightningModule):
                           )
 
     def test_step(self, batch, batch_idx):
+        # if batch_idx != 147:
+        #     return
         data = batch
         loss = self.model(data, v_test=True)
         total_loss = loss["total_loss"]
         self.log("Test_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
-        
-        results = self.model.inference(self.batch_size, self.device, v_data=data)
+        batch_size = min(len(batch['v_prefix']), self.batch_size)
+        results = self.model.inference(batch_size, self.device, v_data=data)
         log_root = Path(self.hydra_conf["trainer"]["test_output_dir"])
-        for idx in range(self.batch_size):
+        for idx in range(batch_size):
             global_id = batch_idx * self.batch_size + idx
             item_root = (log_root / "{:08d}".format(global_id))
             item_root.mkdir(parents=True, exist_ok=True)
@@ -200,11 +204,11 @@ class TrainDiffusion(pl.LightningModule):
                 o3d.io.write_image(str(item_root / "img2.png"), o3d.geometry.Image(imgs[2]))
                 o3d.io.write_image(str(item_root / "img3.png"), o3d.geometry.Image(imgs[3]))
 
-
     def on_test_epoch_end(self):
         for loss in self.trainer.callback_metrics:
             print("{}: {:.3f}".format(loss, self.trainer.callback_metrics[loss].cpu().item()))
         return
+
 
 @hydra.main(config_name="train_diffusion.yaml", config_path="../../configs/brepnet/", version_base="1.1")
 def main(v_cfg: DictConfig):
@@ -216,6 +220,7 @@ def main(v_cfg: DictConfig):
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name + "/" + str(datetime.now().strftime("%y-%m-%d-%H-%M-%S"))
     v_cfg["trainer"]["output"] = log_dir
+    print("Log in {}".format(log_dir))
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
 
@@ -223,26 +228,25 @@ def main(v_cfg: DictConfig):
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
     model = TrainDiffusion(v_cfg)
-    logger = TensorBoardLogger(
-        log_dir)
+    logger = TensorBoardLogger(log_dir)
 
     trainer = Trainer(
-        default_root_dir=log_dir,
-        logger=logger,
-        accelerator='gpu',
-        strategy="ddp_find_unused_parameters_true" if v_cfg["trainer"].gpu > 1 else "auto",
-        devices=v_cfg["trainer"].gpu,
-        enable_model_summary=True,
-        callbacks=[mc, lr_monitor],
-        max_epochs=int(v_cfg["trainer"]["max_epochs"]),
-        max_steps=int(v_cfg["trainer"]["max_steps"]),
-        # max_epochs=2,
-        num_sanity_val_steps=2,
-        check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
-        precision=v_cfg["trainer"]["accelerator"],
+            default_root_dir=log_dir,
+            logger=logger,
+            accelerator='gpu',
+            strategy="ddp_find_unused_parameters_true" if v_cfg["trainer"].gpu > 1 else "auto",
+            devices=v_cfg["trainer"].gpu,
+            enable_model_summary=True,
+            callbacks=[mc, lr_monitor],
+            max_epochs=int(v_cfg["trainer"]["max_epochs"]),
+            max_steps=int(v_cfg["trainer"]["max_steps"]),
+            # max_epochs=2,
+            num_sanity_val_steps=2,
+            check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
+            precision=v_cfg["trainer"]["accelerator"],
 
-        gradient_clip_algorithm="norm",
-        gradient_clip_val=0.5,
+            gradient_clip_algorithm="norm",
+            gradient_clip_val=0.5,
     )
 
     if v_cfg["trainer"].evaluate:

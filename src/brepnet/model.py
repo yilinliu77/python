@@ -5257,7 +5257,9 @@ class EncoderDecoder(nn.Module):
             res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
             nn.MaxPool1d(kernel_size=2, stride=2), # 4
             res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
             nn.MaxPool1d(kernel_size=2, stride=2), # 2
+            res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
             res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
             nn.Conv1d(ds, dl, kernel_size=1, stride=1, padding=0),
             Rearrange("b n w -> b (n w)"),
@@ -5310,11 +5312,11 @@ class EncoderDecoder(nn.Module):
 
         loss = {}
         loss["face_norm"] = nn.functional.l1_loss(
-            pred_face,
+            pred_face[...,:self.in_channels],
             v_data["face_norm"][...,:self.in_channels]
         )
         loss["edge_norm"] = nn.functional.l1_loss(
-            pred_edge,
+            pred_edge[...,:self.in_channels],
             v_data["edge_norm"][...,:self.in_channels]
         )
         loss["total_loss"] = sum(loss.values())
@@ -5342,6 +5344,210 @@ class EncoderDecoder(nn.Module):
             data["gt_edge"] = gt_edge.cpu().numpy()
 
         return loss, data
+
+
+class EncoderDecoderBig(EncoderDecoder):
+    def __init__(self, v_conf):
+        super().__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        ds = self.dim_shape
+        self.dim_latent = v_conf["dim_latent"]
+        dl = self.dim_latent
+        norm = v_conf["norm"]
+
+        # Encoder
+        self.in_channels = v_conf["in_channels"]
+        self.face_conv = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(self.in_channels, ds, kernel_size=3, stride=1, padding=1),
+            nn.LeakyReLU(),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 8
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 4
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 2
+            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            nn.Conv2d(ds, dl, kernel_size=1, stride=1, padding=0),
+            Rearrange("b n h w -> b (n h w)")
+        )
+        self.edge_conv = nn.Sequential(
+            Rearrange('b w n -> b n w'),
+            nn.Conv1d(self.in_channels, ds, kernel_size=3, stride=1, padding=1),
+            nn.LeakyReLU(),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 8
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 4
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 2
+            res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            nn.Conv1d(ds, dl, kernel_size=1, stride=1, padding=0),
+            Rearrange("b n w -> b (n w)"),
+        )
+
+        self.face_points_decoder = nn.Sequential(
+            Rearrange("b (n h w) -> b n h w", h=2, w=2),
+            nn.Conv2d(dl, ds, kernel_size=1, stride=1, padding=0),
+            nn.LeakyReLU(),
+            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            nn.ConvTranspose2d(ds, ds, kernel_size=2, stride=2),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.ConvTranspose2d(ds, ds, kernel_size=2, stride=2),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.ConvTranspose2d(ds, ds, kernel_size=2, stride=2),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.Conv2d(ds, self.in_channels, kernel_size=1, stride=1, padding=0),
+            Rearrange('... c w h -> ... w h c',c=self.in_channels),
+        )
+        self.edge_points_decoder = nn.Sequential(
+            Rearrange("b (n w)-> b n w", n=dl, w=2),
+            nn.Conv1d(dl, ds, kernel_size=1, stride=1, padding=0),
+            nn.LeakyReLU(),
+            res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            nn.ConvTranspose1d(ds, ds, kernel_size=2, stride=2),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.ConvTranspose1d(ds, ds, kernel_size=2, stride=2),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.ConvTranspose1d(ds, ds, kernel_size=2, stride=2),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.Conv1d(ds, self.in_channels, kernel_size=1, stride=1, padding=0),
+            Rearrange('... c w -> ... w c',c=self.in_channels),
+        )
+
+
+class EncoderDecoderLatent(nn.Module):
+    def __init__(self, v_conf):
+        super().__init__()
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        self.in_channels = v_conf["in_channels"]
+        df = self.dim_latent * 2 * 2
+        self.df = df
+
+        self.encoderdecoder = EncoderDecoder(v_conf)
+        if v_conf["encoderdecoder_weight"] is not None:
+            weights = torch.load(v_conf["encoderdecoder_weight"])["state_dict"]
+            weights = {k.replace("model.", ""): v for k, v in weights.items()}
+            self.encoderdecoder.load_state_dict(weights)
+        for param in self.encoderdecoder.parameters():
+            param.requires_grad = False
+        self.encoderdecoder.eval()
+
+        bd = 768
+        self.attn_in = nn.Sequential(
+            nn.Linear(df + 6, bd),
+            nn.LeakyReLU(),
+            nn.LayerNorm(bd),
+            nn.Linear(bd, bd),
+        )
+        layer = nn.TransformerEncoderLayer(
+            bd, 12, dim_feedforward=2048, dropout=0.1, 
+            batch_first=True, norm_first=True)
+        self.face_attn = nn.TransformerEncoder(layer, 8, nn.LayerNorm(bd))
+        self.attn_out = nn.Sequential(
+            nn.Linear(bd, df),
+            nn.LeakyReLU(),
+            nn.LayerNorm(df),
+            nn.Linear(df, df),
+        )
+
+        self.gaussian_weights = v_conf["gaussian_weights"]
+        self.with_sigmoid = v_conf["sigmoid"]
+        if self.gaussian_weights > 0:
+            self.gaussian_proj = nn.Sequential(
+            nn.Linear(df, df * 2),
+            nn.LeakyReLU(),
+            nn.LayerNorm(df * 2),
+            nn.Linear(df * 2, df * 2),
+        )
+        elif self.with_sigmoid:
+            self.gaussian_proj = nn.Sigmoid()
+        else:
+            self.gaussian_proj = nn.Identity()
+
+        self.attn_in2 = nn.Sequential(
+            nn.Linear(df, bd),
+            nn.LeakyReLU(),
+            nn.LayerNorm(bd),
+            nn.Linear(bd, bd),
+        )
+        layer2 = nn.TransformerEncoderLayer(
+            bd, 12, dim_feedforward=2048, dropout=0.1, 
+            batch_first=True, norm_first=True)
+        self.face_attn2 = nn.TransformerEncoder(layer2, 8, nn.LayerNorm(bd))
+        self.attn_out2 = nn.Sequential(
+            nn.Linear(bd, df + 6),
+            nn.LeakyReLU(),
+            nn.LayerNorm(df + 6),
+            nn.Linear(df + 6, df + 6),
+        )
+
+    def forward(self, v_data, v_test=False):
+        face_features = self.encoderdecoder.face_conv(v_data["face_norm"][...,:self.in_channels])
+
+        face_features_cat = torch.cat((face_features, v_data["face_bbox"]), dim=-1)
+        fused_face_features = self.attn_in(face_features_cat)
+        fused_face_features = self.face_attn(fused_face_features, v_data["attn_mask"])
+        fused_face_features = self.attn_out(fused_face_features)
+
+        face_z = self.gaussian_proj(fused_face_features)
+        loss = {}
+        if self.gaussian_weights > 0:
+            mean = face_z[..., :self.df]
+            logvar = face_z[..., self.df:]
+            loss["kl_loss"] = (-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())) * self.gaussian_weights
+            std = torch.exp(0.5 * logvar)
+            eps = torch.randn_like(std)
+            face_z = eps.mul(std).add_(mean)
+        elif self.with_sigmoid:
+            face_z = face_z *  2 - 1
+        else:
+            face_z = face_z
+
+        face_z = self.attn_in2(face_z)
+        face_z = self.face_attn2(face_z, v_data["attn_mask"])
+        face_z = self.attn_out2(face_z)
+
+        loss["face_feature"] = nn.functional.l1_loss(
+            face_z,
+            face_features_cat
+        )
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if v_test:
+            pred_face = self.encoderdecoder.face_points_decoder(face_z[..., :-6])
+            pred_face = denormalize_coord2(pred_face, face_z[..., -6:])
+
+            gt_face = denormalize_coord2(v_data["face_norm"], v_data["face_bbox"])
+
+            loss["face_coords"] = nn.functional.l1_loss(
+                pred_face[..., :3],
+                gt_face[..., :3]
+            )
+
+            data["pred_face"] = pred_face.cpu().numpy()
+            data["gt_face"] = gt_face.cpu().numpy()
+
+        return loss, data
+
 
 # BBox version
 class AutoEncoder_1012(nn.Module):

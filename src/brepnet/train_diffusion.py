@@ -172,10 +172,10 @@ class TrainDiffusion(pl.LightningModule):
         # if batch_idx != 147:
         #     return
         data = batch
-        # loss = self.model(data, v_test=True)
-        # total_loss = loss["total_loss"]
-        # self.log("Test_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-        #          sync_dist=True, batch_size=self.batch_size)
+        loss = self.model(data, v_test=True)
+        total_loss = loss["total_loss"]
+        self.log("Test_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                 sync_dist=True, batch_size=self.batch_size)
         batch_size = min(len(batch['v_prefix']), self.batch_size)
         results = self.model.inference(batch_size, self.device, v_data=data)
         log_root = Path(self.hydra_conf["trainer"]["test_output_dir"])
@@ -200,9 +200,9 @@ class TrainDiffusion(pl.LightningModule):
             if "ori_imgs" in data["conditions"]:
                 imgs = data["conditions"]["ori_imgs"][idx].cpu().numpy().astype(np.uint8)
                 o3d.io.write_image(str(item_root / "img0.png"), o3d.geometry.Image(imgs[0]))
-                # o3d.io.write_image(str(item_root / "img1.png"), o3d.geometry.Image(imgs[1]))
-                # o3d.io.write_image(str(item_root / "img2.png"), o3d.geometry.Image(imgs[2]))
-                # o3d.io.write_image(str(item_root / "img3.png"), o3d.geometry.Image(imgs[3]))
+                o3d.io.write_image(str(item_root / "img1.png"), o3d.geometry.Image(imgs[1]))
+                o3d.io.write_image(str(item_root / "img2.png"), o3d.geometry.Image(imgs[2]))
+                o3d.io.write_image(str(item_root / "img3.png"), o3d.geometry.Image(imgs[3]))
 
     def on_test_epoch_end(self):
         for loss in self.trainer.callback_metrics:
@@ -220,6 +220,7 @@ def main(v_cfg: DictConfig):
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name + "/" + str(datetime.now().strftime("%y-%m-%d-%H-%M-%S"))
     v_cfg["trainer"]["output"] = log_dir
+    print("Log in {}".format(log_dir))
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
 
@@ -227,8 +228,7 @@ def main(v_cfg: DictConfig):
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
     model = TrainDiffusion(v_cfg)
-    logger = TensorBoardLogger(
-            log_dir)
+    logger = TensorBoardLogger(log_dir)
 
     trainer = Trainer(
             default_root_dir=log_dir,

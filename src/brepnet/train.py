@@ -265,6 +265,7 @@ def main(v_cfg: DictConfig):
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name + "/" + str(datetime.now().strftime("%y-%m-%d-%H-%M-%S"))
     v_cfg["trainer"]["output"] = log_dir
+    print("Log dir: ", log_dir)
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
 
@@ -289,8 +290,8 @@ def main(v_cfg: DictConfig):
         num_sanity_val_steps=2,
         check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
         precision=v_cfg["trainer"]["accelerator"],
-        # gradient_clip_algorithm="norm",
-        # gradient_clip_val=0.5,
+        gradient_clip_algorithm="norm",
+        gradient_clip_val=0.5,
         # profiler="advanced",
         # max_steps=100
     )

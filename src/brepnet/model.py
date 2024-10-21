@@ -5252,7 +5252,7 @@ class AutoEncoder_1008(nn.Module):
         recon_data["edge_points_local1"] = edge_points_local1
         return loss, recon_data
     
-
+# Note, the sigmoid value is constant now!!!!!!!
 class EncoderDecoder(nn.Module):
     def __init__(self, v_conf):
         super().__init__()
@@ -5263,7 +5263,8 @@ class EncoderDecoder(nn.Module):
         norm = v_conf["norm"]
 
         # Encoder
-        self.sigmoid = v_conf["sigmoid"]
+        # self.sigmoid = v_conf["encoder_decoder_sigmoid"]
+        self.sigmoid = True
         self.in_channels = v_conf["in_channels"]
         self.face_conv = nn.Sequential(
             Rearrange('b h w n -> b n h w'),
@@ -5284,7 +5285,6 @@ class EncoderDecoder(nn.Module):
             nn.Sigmoid() if self.sigmoid else nn.Identity(),
             Rearrange("b n h w -> b (n h w)")
         )
-
         self.edge_conv = nn.Sequential(
             Rearrange('b w n -> b n w'),
             nn.Conv1d(self.in_channels, ds, kernel_size=3, stride=1, padding=1),
@@ -5323,7 +5323,6 @@ class EncoderDecoder(nn.Module):
             nn.Conv2d(ds, self.in_channels, kernel_size=1, stride=1, padding=0),
             Rearrange('... c w h -> ... w h c',c=self.in_channels),
         )
-                
         self.edge_points_decoder = nn.Sequential(
             Rearrange("b (n w)-> b n w", n=dl, w=2),
             nn.Conv1d(dl, ds, kernel_size=1, stride=1, padding=0),
@@ -5619,6 +5618,387 @@ class EncoderDecoderLatent(nn.Module):
         if v_test:
             pred_face = self.encoderdecoder.face_points_decoder(face_z[..., :-6])
             pred_face = denormalize_coord2(pred_face, face_z[..., -6:])
+
+            gt_face = denormalize_coord2(v_data["face_norm"], v_data["face_bbox"])
+
+            loss["face_coords"] = nn.functional.l1_loss(
+                pred_face[..., :3],
+                gt_face[..., :3]
+            )
+            if self.with_intersection:
+                gt_edge = denormalize_coord2(v_data["edge_norm"], v_data["edge_bbox"])
+                pred_edge = self.encoderdecoder.edge_points_decoder(pred_edge_out[..., :-6])
+                pred_edge = denormalize_coord2(pred_edge, pred_edge_out[..., -6:])
+
+                loss["edge_coords"] = nn.functional.l1_loss(
+                    pred_edge[..., :3],
+                    gt_edge[..., :3]
+                )
+                data["pred_edge"] = pred_edge.cpu().numpy()
+                data["gt_edge"] = gt_edge.cpu().numpy()
+            data["pred_face"] = pred_face.cpu().numpy()
+            data["gt_face"] = gt_face.cpu().numpy()
+
+        return loss, data
+
+
+class EncoderDecoderLatent2(nn.Module):
+    def __init__(self, v_conf):
+        super().__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        ds = self.dim_shape
+        self.in_channels = v_conf["in_channels"]
+        self.dim_latent = v_conf["dim_latent"]
+        dl = self.dim_latent
+        norm = v_conf["norm"]
+        df = self.dim_latent * 2 * 2
+        self.df = df
+
+        self.encoderdecoder = EncoderDecoder(v_conf)
+        if v_conf["encoderdecoder_weight"] is not None:
+            weights = torch.load(v_conf["encoderdecoder_weight"])["state_dict"]
+            weights = {k.replace("model.", ""): v for k, v in weights.items()}
+            self.encoderdecoder.load_state_dict(weights)
+        for param in self.encoderdecoder.parameters():
+            param.requires_grad = False
+        self.encoderdecoder.eval()
+
+        bd = 768
+        self.attn_in = nn.Sequential(
+            nn.Linear(df, bd // 2),
+            nn.LeakyReLU(),
+            nn.LayerNorm(bd // 2),
+            nn.Linear(bd // 2, bd // 2),
+        )
+        self.bbox_in = nn.Sequential(
+            nn.Linear(6, bd // 2),
+            nn.LeakyReLU(),
+            nn.LayerNorm(bd // 2),
+            nn.Linear(bd // 2, bd // 2),
+        )
+        layer = nn.TransformerEncoderLayer(
+            bd, 12, dim_feedforward=2048, dropout=0.1, 
+            batch_first=True, norm_first=True)
+        self.face_attn = nn.TransformerEncoder(layer, 8, nn.LayerNorm(bd))
+        self.attn_out = nn.Sequential(
+            nn.Linear(bd, df),
+            nn.LeakyReLU(),
+            nn.LayerNorm(df),
+            nn.Linear(df, df),
+        )
+
+        self.gaussian_weights = v_conf["gaussian_weights"]
+        self.with_sigmoid = v_conf["sigmoid"]
+        if self.gaussian_weights > 0:
+            self.gaussian_proj = nn.Sequential(
+            nn.Linear(df, df * 2),
+            nn.LeakyReLU(),
+            nn.Linear(df * 2, df * 2),
+        )
+        elif self.with_sigmoid:
+            self.gaussian_proj = nn.Sigmoid()
+        else:
+            self.gaussian_proj = nn.Identity()
+
+        self.attn_in2 = nn.Sequential(
+            nn.Linear(df, bd),
+            nn.LeakyReLU(),
+            nn.LayerNorm(bd),
+            nn.Linear(bd, bd),
+        )
+        layer2 = nn.TransformerEncoderLayer(
+            bd, 12, dim_feedforward=2048, dropout=0.1, 
+            batch_first=True, norm_first=True)
+        self.face_attn2 = nn.TransformerEncoder(layer2, 8, nn.LayerNorm(bd))
+        self.attn_out2 = nn.Sequential(
+            nn.Linear(bd, bd),
+            nn.LeakyReLU(),
+            nn.Linear(bd, df),
+        )
+
+        self.attn_out3 = nn.Sequential(
+            nn.Linear(bd, bd),
+            nn.LeakyReLU(),
+            nn.Linear(bd, 6),
+        )
+
+        self.with_intersection=False
+        if "with_intersection" in v_conf:
+            self.with_intersection = v_conf["with_intersection"]
+            norm = v_conf["norm"]
+            self.edge_feature_proj = nn.Sequential(
+                nn.Conv1d(bd * 2, bd, kernel_size=1, stride=1, padding=0),
+                res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+                res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+                res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+                res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+                res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+                res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+                nn.Conv1d(bd, bd, kernel_size=1, stride=1, padding=0),
+                Rearrange("b n w -> b (n w)"),
+            )
+            self.classifier = nn.Linear(bd, 1)
+            self.edge_out = nn.Linear(bd, self.dim_latent * 2 + 6)
+
+    def forward(self, v_data, v_test=False):
+        face_features = self.encoderdecoder.face_conv(v_data["face_norm"][...,:self.in_channels])
+
+        bbox_embedding = self.bbox_in(v_data["face_bbox"])
+        coords_embedding = self.attn_in(face_features)
+        fused_face_features = torch.cat((coords_embedding, bbox_embedding), dim=-1)
+        fused_face_features = self.face_attn(fused_face_features, v_data["attn_mask"])
+        fused_face_features = self.attn_out(fused_face_features)
+
+        face_z = self.gaussian_proj(fused_face_features)
+        loss = {}
+        if self.gaussian_weights > 0:
+            mean = face_z[..., :self.df]
+            logvar = face_z[..., self.df:]
+            loss["kl_loss"] = (-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())) * self.gaussian_weights
+            std = torch.exp(0.5 * logvar)
+            eps = torch.randn_like(std)
+            face_z = eps.mul(std).add_(mean)
+        elif self.with_sigmoid:
+            face_z = face_z *  2 - 1
+        else:
+            face_z = face_z
+
+        face_z = self.attn_in2(face_z)
+        face_z1 = self.face_attn2(face_z, v_data["attn_mask"])
+        face_coords_z = self.attn_out2(face_z1)
+        pred_face_bbox = self.attn_out3(face_z1)
+
+        if self.with_intersection:
+            edge_features = self.encoderdecoder.edge_conv(v_data["edge_norm"][...,:self.in_channels])
+            edge_features_cat = torch.cat((edge_features, v_data["edge_bbox"]), dim=-1)
+            edge_face_conn = v_data["edge_face_connectivity"]
+            zero_positions = v_data["zero_positions"]
+            true_intersection_embedding = face_z1[edge_face_conn[:, 1:]]
+            false_intersection_embedding = face_z1[zero_positions]
+            intersection_embedding = torch.cat((true_intersection_embedding, false_intersection_embedding), dim=0)
+            id_false_start = true_intersection_embedding.shape[0]
+
+            intersection_embedding = rearrange(intersection_embedding, 'b c n -> b (c n) 1')
+            intersection_embedding = self.edge_feature_proj(intersection_embedding)
+            probability = self.classifier(intersection_embedding)
+
+            gt_labels = torch.ones_like(probability)
+            gt_labels[id_false_start:] = 0
+            loss_edge_classification = F.binary_cross_entropy_with_logits(probability, gt_labels)
+
+            intersection_embedding = intersection_embedding[:id_false_start]
+            pred_edge_out = self.edge_out(intersection_embedding)
+            loss["edge_feature"] = nn.functional.l1_loss(
+                pred_edge_out,
+                edge_features_cat
+            )
+            loss["loss_edge_classification"] = loss_edge_classification * 0.1
+
+
+        loss["face_feature"] = nn.functional.l1_loss(
+            face_coords_z,
+            face_features
+        )
+        loss["face_bbox"] = nn.functional.l1_loss(
+            pred_face_bbox,
+            v_data["face_bbox"]
+        )
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if v_test:
+            pred_face = self.encoderdecoder.face_points_decoder(face_coords_z)
+            pred_face = denormalize_coord2(pred_face, pred_face_bbox)
+
+            gt_face = denormalize_coord2(v_data["face_norm"], v_data["face_bbox"])
+
+            loss["face_coords"] = nn.functional.l1_loss(
+                pred_face[..., :3],
+                gt_face[..., :3]
+            )
+            if self.with_intersection:
+                gt_edge = denormalize_coord2(v_data["edge_norm"], v_data["edge_bbox"])
+                pred_edge = self.encoderdecoder.edge_points_decoder(pred_edge_out[..., :-6])
+                pred_edge = denormalize_coord2(pred_edge, pred_edge_out[..., -6:])
+
+                loss["edge_coords"] = nn.functional.l1_loss(
+                    pred_edge[..., :3],
+                    gt_edge[..., :3]
+                )
+                data["pred_edge"] = pred_edge.cpu().numpy()
+                data["gt_edge"] = gt_edge.cpu().numpy()
+            data["pred_face"] = pred_face.cpu().numpy()
+            data["gt_face"] = gt_face.cpu().numpy()
+
+        return loss, data
+
+
+class EncoderDecoderLatent3(nn.Module):
+    def __init__(self, v_conf):
+        super().__init__()
+        self.dim_shape = v_conf["dim_shape"]
+        ds = self.dim_shape
+        self.in_channels = v_conf["in_channels"]
+        self.dim_latent = v_conf["dim_latent"]
+        dl = self.dim_latent
+        norm = v_conf["norm"]
+        df = self.dim_latent * 2 * 2
+        self.df = df
+
+        self.encoderdecoder = EncoderDecoder(v_conf)
+        if v_conf["encoderdecoder_weight"] is not None:
+            weights = torch.load(v_conf["encoderdecoder_weight"])["state_dict"]
+            weights = {k.replace("model.", ""): v for k, v in weights.items()}
+            self.encoderdecoder.load_state_dict(weights)
+        for param in self.encoderdecoder.parameters():
+            param.requires_grad = False
+        self.encoderdecoder.eval()
+
+        bd = 768
+        self.face_coord_in = nn.Sequential(
+            nn.Linear(df, bd // 2),
+            nn.LeakyReLU(),
+            nn.Linear(bd // 2, bd // 2),
+        )
+        self.face_bbox_in = nn.Sequential(
+            nn.Linear(6, bd // 2),
+            nn.LeakyReLU(),
+            nn.Linear(bd // 2, bd // 2),
+        )
+        layer = nn.TransformerEncoderLayer(
+            bd, 12, dim_feedforward=2048, dropout=0.1, 
+            batch_first=True, norm_first=True)
+        self.face_attn_in = nn.TransformerEncoder(layer, 8, nn.LayerNorm(bd))
+        self.face_attn_in_fc = nn.Sequential(
+            nn.Linear(bd, df),
+            nn.LeakyReLU(),
+            nn.Linear(df, df),
+        )
+
+        self.gaussian_weights = v_conf["gaussian_weights"]
+        self.with_sigmoid = v_conf["sigmoid"]
+        if self.gaussian_weights > 0:
+            self.gaussian_proj = nn.Sequential(
+            nn.Linear(df, df * 2),
+            nn.LeakyReLU(),
+            nn.Linear(df * 2, df * 2),
+        )
+        elif self.with_sigmoid:
+            self.gaussian_proj = nn.Sigmoid()
+        else:
+            self.gaussian_proj = nn.Identity()
+
+        self.face_attn_out_in = nn.Sequential(
+            nn.Linear(df, bd),
+            nn.LeakyReLU(),
+            nn.Linear(bd, bd),
+        )
+        layer2 = nn.TransformerEncoderLayer(
+            bd, 12, dim_feedforward=2048, dropout=0.1, 
+            batch_first=True, norm_first=True)
+        self.face_attn_out = nn.TransformerEncoder(layer2, 8, nn.LayerNorm(bd))
+        
+        self.face_coord_out = nn.Sequential(
+            res_linear(bd, bd, norm="layer"),
+            res_linear(bd, bd, norm="layer"),
+            res_linear(bd, bd, norm="layer"),
+            res_linear(bd, bd, norm="layer"),
+            nn.Linear(bd, df),
+        )
+        self.face_bbox_out = nn.Sequential(
+            res_linear(bd, bd, norm="layer"),
+            res_linear(bd, bd, norm="layer"),
+            res_linear(bd, bd, norm="layer"),
+            res_linear(bd, bd, norm="layer"),
+            nn.Linear(bd, 6),
+        )
+
+        self.with_intersection = False
+        if "with_intersection" in v_conf:
+            self.with_intersection = v_conf["with_intersection"]
+            norm = v_conf["norm"]
+            self.edge_feature_proj = nn.Sequential(
+                nn.Conv1d(bd * 2, bd, kernel_size=1, stride=1, padding=0),
+                res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+                res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+                res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+                res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+                res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+                res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
+                nn.Conv1d(bd, bd, kernel_size=1, stride=1, padding=0),
+                Rearrange("b n w -> b (n w)"),
+            )
+            self.classifier = nn.Linear(bd, 1)
+            self.edge_out = nn.Linear(bd, self.dim_latent * 2 + 6)
+
+    def forward(self, v_data, v_test=False):
+        face_features = self.encoderdecoder.face_conv(v_data["face_norm"][...,:self.in_channels])
+
+        bbox_embedding = self.face_bbox_in(v_data["face_bbox"])
+        coords_embedding = self.face_coord_in(face_features)
+        fused_face_features = torch.cat((coords_embedding, bbox_embedding), dim=-1)
+        fused_face_features = self.face_attn_in(fused_face_features, v_data["attn_mask"])
+        fused_face_features = self.face_attn_in_fc(fused_face_features)
+
+        face_z = self.gaussian_proj(fused_face_features)
+        loss = {}
+        if self.gaussian_weights > 0:
+            mean = face_z[..., :self.df]
+            logvar = face_z[..., self.df:]
+            loss["kl_loss"] = (-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())) * self.gaussian_weights
+            std = torch.exp(0.5 * logvar)
+            eps = torch.randn_like(std)
+            face_z = eps.mul(std).add_(mean)
+        elif self.with_sigmoid:
+            face_z = face_z *  2 - 1
+        else:
+            face_z = face_z
+
+        face_z = self.face_attn_out_in(face_z)
+        face_z1 = self.face_attn_out(face_z, v_data["attn_mask"])
+        face_coords_z = self.face_coord_out(face_z1)
+        pred_face_bbox = self.face_bbox_out(face_z1)
+
+        if self.with_intersection:
+            edge_features = self.encoderdecoder.edge_conv(v_data["edge_norm"][...,:self.in_channels])
+            edge_features_cat = torch.cat((edge_features, v_data["edge_bbox"]), dim=-1)
+            edge_face_conn = v_data["edge_face_connectivity"]
+            zero_positions = v_data["zero_positions"]
+            true_intersection_embedding = face_z1[edge_face_conn[:, 1:]]
+            false_intersection_embedding = face_z1[zero_positions]
+            intersection_embedding = torch.cat((true_intersection_embedding, false_intersection_embedding), dim=0)
+            id_false_start = true_intersection_embedding.shape[0]
+
+            intersection_embedding = rearrange(intersection_embedding, 'b c n -> b (c n) 1')
+            intersection_embedding = self.edge_feature_proj(intersection_embedding)
+            probability = self.classifier(intersection_embedding)
+
+            gt_labels = torch.ones_like(probability)
+            gt_labels[id_false_start:] = 0
+            loss_edge_classification = F.binary_cross_entropy_with_logits(probability, gt_labels)
+
+            intersection_embedding = intersection_embedding[:id_false_start]
+            pred_edge_out = self.edge_out(intersection_embedding)
+            loss["edge_feature"] = nn.functional.l1_loss(
+                pred_edge_out,
+                edge_features_cat
+            )
+            loss["loss_edge_classification"] = loss_edge_classification * 0.1
+
+        loss["face_feature"] = nn.functional.l1_loss(
+            face_coords_z,
+            face_features
+        )
+        loss["face_bbox"] = nn.functional.l1_loss(
+            pred_face_bbox,
+            v_data["face_bbox"]
+        )
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if v_test:
+            pred_face = self.encoderdecoder.face_points_decoder(face_coords_z)
+            pred_face = denormalize_coord2(pred_face, pred_face_bbox)
 
             gt_face = denormalize_coord2(v_data["face_norm"], v_data["face_bbox"])
 

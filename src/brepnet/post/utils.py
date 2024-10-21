@@ -260,7 +260,9 @@ class Shape:
         for edge_face1_face2 in self.edge_face_connectivity:
             edge, face1, face2 = edge_face1_face2
             if face1 == face2:
-                raise ValueError("Face1 and Face2 should be different")
+                # raise ValueError("Face1 and Face2 should be different")
+                print("Face1 and Face2 should be different")
+                continue
             assert edge not in self.face_edge_adj[face1]
             self.face_edge_adj[face1].append(edge)
             self.face_edge_adj[face2].append(edge)

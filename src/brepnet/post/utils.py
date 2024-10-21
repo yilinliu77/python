@@ -867,6 +867,7 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
 
     try:
         face_fixer.FixWireTool().SetModifyGeometryMode(True)
+        face_fixer.FixWireTool().SetMaxTolerance(FIX_PRECISION)
         face_fixer.FixWireTool().SetPrecision(connected_tolerance)
         face_fixer.FixWireTool().SetFixShiftedMode(True)
         face_fixer.FixWireTool().SetClosedWireMode(True)

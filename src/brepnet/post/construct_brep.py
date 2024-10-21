@@ -351,7 +351,6 @@ if __name__ == '__main__':
     # print(f"Total {len(all_folders)} folders to process")
 
     all_folders.sort()
-    all_folders = all_folders[::-1]
     # all_folders = all_folders[:50]
 
     if not is_use_ray:

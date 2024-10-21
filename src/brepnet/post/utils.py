@@ -477,9 +477,10 @@ def optimize(
     idx[is_end_point] = 15
     idx = torch.from_numpy(idx).to(device)
 
+    src_st = torch.FloatTensor([1, 0, 0, 0]).unsqueeze(0).repeat(edge_points.shape[0], 1).to(device)
     edge_st = nn.Parameter(torch.FloatTensor([1, 0, 0, 0]).unsqueeze(0).repeat(edge_points.shape[0], 1).to(device))
     edge_st.requires_grad = True
-    optimizer = torch.optim.Adam([edge_st], lr=5e-3, betas=(0.95, 0.999), weight_decay=1e-6, eps=1e-08, )
+    optimizer = torch.optim.Adam([edge_st], lr=8e-3)
 
     prev_loss = float('inf')
     if v_islog:
@@ -506,30 +507,35 @@ def optimize(
         #     adj_distance_loss += adj_distance_loss_c
 
         if pair1 is None:
-            endpoints_loss = torch.zeros_like(adj_distance_loss)
+            corners_loss = torch.zeros_like(adj_distance_loss)
         else:
-            endpoints = transformed_edges[pair1, idx]
-            endpoints_loss = torch.linalg.norm(endpoints[:, 0] - endpoints[:, 1], dim=-1) + \
-                             torch.linalg.norm(endpoints[:, 1] - endpoints[:, 2], dim=-1) + \
-                             torch.linalg.norm(endpoints[:, 0] - endpoints[:, 2], dim=-1)
-            endpoints_loss = (endpoints_loss / 3).mean()
+            corners = transformed_edges[pair1, idx]
+            corners_loss = torch.linalg.norm(corners[:, 0] - corners[:, 1], dim=-1) + \
+                           torch.linalg.norm(corners[:, 1] - corners[:, 2], dim=-1) + \
+                           torch.linalg.norm(corners[:, 0] - corners[:, 2], dim=-1)
+            corners_loss = (corners_loss / 3).mean()
 
-        wire_connected_loss = []
-        for face_edge_idx in face_edge_adj:
-            if len(face_edge_idx) == 0:
-                continue
-            face_edge_endpoint = torch.concatenate((transformed_edges[face_edge_idx, 0, :],
-                                                    transformed_edges[face_edge_idx, -1, :]))
-            dist_matrix = torch.cdist(face_edge_endpoint, face_edge_endpoint)
-            dist_matrix = dist_matrix + torch.eye(dist_matrix.shape[0]).to(device) * 1e6
-            connected_loss = dist_matrix.min(dim=0)[0].sum()
-            wire_connected_loss.append(connected_loss)
-        if len(wire_connected_loss) == 0:
+        if len(face_edge_adj) == 0:
             wire_connected_loss = torch.zeros_like(adj_distance_loss)
         else:
-            wire_connected_loss = torch.stack(wire_connected_loss).mean()
+            max_length = max(len(face_edge_idx) for face_edge_idx in face_edge_adj)
+            all_endpoints = []
+            for face_edge_idx in face_edge_adj:
+                if len(face_edge_idx) == 0:
+                    continue
+                face_edge_endpoint = torch.cat((transformed_edges[face_edge_idx, 0, :],
+                                                transformed_edges[face_edge_idx, -1, :]), dim=0)
+                padded_endpoints = torch.nn.functional.pad(face_edge_endpoint, (0, 0, 0, max_length * 2 - face_edge_endpoint.shape[0]),
+                                                           value=1e6)
+                all_endpoints.append(padded_endpoints)
 
-        loss = adj_distance_loss + endpoints_loss + wire_connected_loss
+            batch_endpoints = torch.stack(all_endpoints)
+            dist_matrix = torch.cdist(batch_endpoints, batch_endpoints)
+            dist_matrix = dist_matrix + torch.eye(dist_matrix.shape[-1], device=device).unsqueeze(0) * 1e6
+            connected_loss = dist_matrix.min(dim=-1)[0]
+            wire_connected_loss = connected_loss[connected_loss < 100].mean()
+
+        loss = adj_distance_loss + corners_loss + wire_connected_loss + 1e-6 * (edge_st - src_st).norm(p=1, dim=1).mean()
 
         optimizer.zero_grad()
         # if abs(prev_loss - loss.item()) < 1e-4 and False:
@@ -541,8 +547,10 @@ def optimize(
         optimizer.step()
         prev_loss = loss.item()
         if v_islog:
-            pbar.set_postfix(
-                    loss=loss.item(), adj=adj_distance_loss.cpu().item(), end=endpoints_loss.cpu().item())
+            pbar.set_postfix(loss=loss.item(),
+                             adj=adj_distance_loss.cpu().item(),
+                             corner=corners_loss.cpu().item(),
+                             connect=wire_connected_loss.cpu().item())
             pbar.update(1)
     if v_islog:
         print('Optimization finished!')
@@ -858,18 +866,15 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
 
     try:
         face_fixer.FixWireTool().SetModifyGeometryMode(True)
-        face_fixer.FixWireTool().SetMaxTolerance(FIX_PRECISION)
         face_fixer.FixWireTool().SetPrecision(connected_tolerance)
         face_fixer.FixWireTool().SetFixShiftedMode(True)
         face_fixer.FixWireTool().SetClosedWireMode(True)
-        face_fixer.FixWireTool().SetFixAddPCurveMode(True)
-        face_fixer.FixWireTool().SetFixAddCurve3dMode(True)
-        face_fixer.FixWireTool().SetFixGaps3dMode(True)
-        face_fixer.FixWireTool().SetFixTailMode(True)
+        # face_fixer.FixWireTool().SetFixAddPCurveMode(True)
+        # face_fixer.FixWireTool().SetFixAddCurve3dMode(True)
         face_fixer.FixWireTool().Perform()
 
-        face_fixer.SetAutoCorrectPrecisionMode(True)
-        # face_fixer.SetPrecision(connected_tolerance)
+        face_fixer.SetAutoCorrectPrecisionMode(False)
+        face_fixer.SetPrecision(connected_tolerance)
         face_fixer.SetMaxTolerance(connected_tolerance)
         face_fixer.SetFixOrientationMode(True)
         face_fixer.SetFixMissingSeamMode(True)
@@ -889,7 +894,6 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         face_fixer.FixIntersectingWires()
         # face_fixer.FixPeriodicDegenerated()
         face_fixer.FixOrientation()
-        face_fixer.Perform()
 
     except Exception as e:
         print(f"Error fixing face {e}")

@@ -341,7 +341,6 @@ if __name__ == '__main__':
     if list_file != "":
         valid_prefies = [item.strip() for item in open(list_file).readlines()]
         all_folders = list(set(all_folders) & set(valid_prefies))
-        all_folders.sort()
     # all_folders = os.listdir(r"E:\data\img2brep\.43\2024_09_22_21_57_44_0921_pure_out3_failed")
     # check_dir(v_out_root)
 

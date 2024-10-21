@@ -161,6 +161,7 @@ class Shape:
     def remove_half_edges(self, edge2face_threshold=2e-1, is_check_intersection=False, face2face_threshold=0.06):
         edge_face_connectivity = self.edge_face_connectivity
         cache_dict = {}
+        edge_face_connectivity = edge_face_connectivity.astype(np.int64)
         for conec in edge_face_connectivity:
             if (conec[1], conec[2]) in cache_dict:
                 cache_dict[(conec[1], conec[2])].append(conec[0])

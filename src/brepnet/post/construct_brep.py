@@ -231,8 +231,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             for edge_idx in range(len(shape.recon_edge_points)):
                 if edge_idx in shape.remove_edge_idx_new:
                     continue
-                export_point_cloud(os.path.join(
-                        debug_face_save_path, f'optim_edge{edge_idx}.ply'),
+                export_point_cloud(
+                        os.path.join(debug_face_save_path, f'optim_edge{edge_idx}.ply'),
                         shape.recon_edge_points[edge_idx].reshape(-1, 3),
                         np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
 
@@ -245,8 +245,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         # solid, faces_result = construct_brep(shape, connected_tolerance,
         #                                      isdebug=isdebug, is_save_face=True,
         #                                      folder_path=os.path.join(out_root, folder_name))
-        is_face_success_list, mesh, solid = construct_brep(shape, connected_tolerance,
-                                                           isdebug=isdebug)
+        is_face_success_list, mesh, solid = construct_brep(shape, connected_tolerance, isdebug=isdebug)
 
         # Check
         if mesh is None or solid is None:

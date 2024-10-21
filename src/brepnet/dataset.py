@@ -267,6 +267,7 @@ class AutoEncoder_dataset2(AutoEncoder_geo_dataset):
 
         return (
             prefix,
+            face_points, line_points,
             face_norm, edge_norm,
             face_bbox, edge_bbox,
             edge_face_connectivity, zero_positions, face_adj
@@ -276,6 +277,7 @@ class AutoEncoder_dataset2(AutoEncoder_geo_dataset):
     def collate_fn(batch):
         (
             prefix,
+            face_points, edge_points,
             face_norm, edge_norm,
             face_bbox, edge_bbox,
             edge_face_connectivity, zero_positions, face_adj
@@ -321,7 +323,9 @@ class AutoEncoder_dataset2(AutoEncoder_geo_dataset):
 
         return {
             "v_prefix"              : prefix,
+            "face_points"             : torch.cat(face_points, dim=0).to(dtype),
             "face_norm"             : torch.cat(face_norm, dim=0).to(dtype),
+            "edge_points"             : torch.cat(edge_points, dim=0).to(dtype),
             "edge_norm"             : torch.cat(edge_norm, dim=0).to(dtype),
             "face_bbox"             : torch.cat(face_bbox, dim=0).to(dtype),
             "edge_bbox"             : torch.cat(edge_bbox, dim=0).to(dtype),
@@ -593,9 +597,8 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             raise
 
         filelist1 = os.listdir(self.dataset_path)
-        # filelist2 = [item[:8] for item in os.listdir(self.face_z_dataset) if os.path.exists(os.path.join(self.face_z_dataset,
-        # item+"/features.npy"))]
-        filelist2 = filelist1
+        filelist2 = [item[:8] for item in os.listdir(self.face_z_dataset) if os.path.exists(os.path.join(self.face_z_dataset,item+"/features.npy"))]
+        # filelist2 = filelist1
         deduplicate_list = filelist1
         if v_conf["deduplicate_list"]:
             deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}.txt".format(v_training_mode)
@@ -620,6 +623,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         print("Total data num:", len(self.data_folders))
 
         self.is_aug = v_conf["is_aug"]
+        self.pad_method = v_conf["pad_method"]
 
         return
 
@@ -648,15 +652,23 @@ class Diffusion_dataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         # idx = 0
         folder_path = self.data_folders[idx]
-        # try:
-        #     data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "_feature.npz"))['face_features']
-        # except:
-        # data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "/features.npy"))
-        # face_features = torch.from_numpy(data_npz)
+        try:
+            data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "_feature.npz"))['face_features']
+        except:
+            data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "/features.npy"))
+        face_features = torch.from_numpy(data_npz)
 
-        padded_face_features = torch.zeros((self.max_faces, 32), dtype=torch.float32)
-        # padded_face_features[:face_features.shape[0]] = face_features
-
+        if self.pad_method == "zero":
+            padded_face_features = torch.zeros((self.max_faces, 32), dtype=torch.float32)
+            padded_face_features[:face_features.shape[0]] = face_features
+        elif self.pad_method == "random":
+            index = torch.randperm(face_features.shape[0])
+            num_repeats = math.ceil(self.max_faces / index.shape[0])
+            index = index.repeat(num_repeats)
+            index = index[:self.max_faces][torch.randperm(self.max_faces)]
+            padded_face_features = face_features[index]
+        else:
+            raise ValueError("Invalid pad method")
         condition = {
 
         }

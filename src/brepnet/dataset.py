@@ -267,6 +267,7 @@ class AutoEncoder_dataset2(AutoEncoder_geo_dataset):
 
         return (
             prefix,
+            face_points, line_points,
             face_norm, edge_norm,
             face_bbox, edge_bbox,
             edge_face_connectivity, zero_positions, face_adj
@@ -276,6 +277,7 @@ class AutoEncoder_dataset2(AutoEncoder_geo_dataset):
     def collate_fn(batch):
         (
             prefix,
+            face_points, edge_points,
             face_norm, edge_norm,
             face_bbox, edge_bbox,
             edge_face_connectivity, zero_positions, face_adj
@@ -321,7 +323,9 @@ class AutoEncoder_dataset2(AutoEncoder_geo_dataset):
 
         return {
             "v_prefix"              : prefix,
+            "face_points"             : torch.cat(face_points, dim=0).to(dtype),
             "face_norm"             : torch.cat(face_norm, dim=0).to(dtype),
+            "edge_points"             : torch.cat(edge_points, dim=0).to(dtype),
             "edge_norm"             : torch.cat(edge_norm, dim=0).to(dtype),
             "face_bbox"             : torch.cat(face_bbox, dim=0).to(dtype),
             "edge_bbox"             : torch.cat(edge_bbox, dim=0).to(dtype),

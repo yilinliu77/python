@@ -99,14 +99,27 @@ def get_data(v_filename):
     # specify the key to get the face points, edge points and edge_face_connectivity in data.npz
     # data_npz = np.load(os.path.join(data_root, folder_name, 'data.npz'), allow_pickle=True)['arr_0'].item()
     data_npz = np.load(v_filename, allow_pickle=True)
-    if 'sample_points_faces' in data_npz:
+    if 'sample_points_faces' in data_npz and 'edge_face_connectivity' in data_npz:
         face_points = data_npz['sample_points_faces']  # Face sample points (num_faces*20*20*3)
         edge_points = data_npz['sample_points_lines']  # Edge sample points (num_lines*20*3)
         edge_face_connectivity = data_npz['edge_face_connectivity']  # (num_intersection, (id_edge, id_face1, id_face2))
-    elif 'pred_face' in data_npz:
+    elif 'pred_face' in data_npz and 'pred_edge_face_connectivity' in data_npz:
         face_points = data_npz['pred_face']
         edge_points = data_npz['pred_edge']
         edge_face_connectivity = data_npz['pred_edge_face_connectivity']
+    elif 'pred_face' in data_npz and 'face_edge_adj' in data_npz:
+        face_points = data_npz['pred_face'].astype(np.float32)
+        edge_points = data_npz['pred_edge'].astype(np.float32)
+        face_edge_adj = data_npz['face_edge_adj']
+        edge_face_connectivity = []
+        N = face_points.shape[0]
+        for i in range(N):
+            for j in range(i + 1, N):
+                intersection = list(set(face_edge_adj[i]).intersection(set(face_edge_adj[j])))
+                if len(intersection) > 0:
+                    edge_face_connectivity.append([intersection[0], i, j])
+        edge_face_connectivity = np.array(edge_face_connectivity)
+
     else:
         raise ValueError(f"Unknown data npz format {v_filename}")
 
@@ -117,7 +130,7 @@ def get_data(v_filename):
 def construct_brep_from_datanpz(data_root, out_root, folder_name,
                                 is_ray=False, is_log=True,
                                 is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=False, is_save_data=True):
-    if not from_scratch and os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
+    if not from_scratch and os.path.exists(os.path.join(out_root, folder_name + "/valid.txt")):
         return
 
     printers = Message.message.DefaultMessenger().Printers()
@@ -218,8 +231,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             for edge_idx in range(len(shape.recon_edge_points)):
                 if edge_idx in shape.remove_edge_idx_new:
                     continue
-                export_point_cloud(os.path.join(
-                        debug_face_save_path, f'optim_edge{edge_idx}.ply'),
+                export_point_cloud(
+                        os.path.join(debug_face_save_path, f'optim_edge{edge_idx}.ply'),
                         shape.recon_edge_points[edge_idx].reshape(-1, 3),
                         np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
 
@@ -232,8 +245,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         # solid, faces_result = construct_brep(shape, connected_tolerance,
         #                                      isdebug=isdebug, is_save_face=True,
         #                                      folder_path=os.path.join(out_root, folder_name))
-        is_face_success_list, mesh, solid = construct_brep(shape, connected_tolerance,
-                                                           isdebug=isdebug)
+        is_face_success_list, mesh, solid = construct_brep(shape, connected_tolerance, isdebug=isdebug)
 
         # Check
         if mesh is None or solid is None:
@@ -242,6 +254,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             continue
 
         analyzer = BRepCheck_Analyzer(solid)
+        # analyzer.SetExactMethod(True)
         if not analyzer.IsValid():
             result = analyzer.Result(solid)
             continue
@@ -255,6 +268,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         mesh.export(os.path.join(out_root, folder_name, 'recon_brep.ply'))
     if is_successful:
         open(os.path.join(out_root, folder_name, 'success.txt'), 'w').close()
+    if is_successful and solid_valid_check(solid):
+        open(os.path.join(out_root, folder_name, 'valid.txt'), 'w').close()
 
     # if not is_successful:
     #     shutil.rmtree(os.path.join(out_root, folder_name))
@@ -326,7 +341,6 @@ if __name__ == '__main__':
     if list_file != "":
         valid_prefies = [item.strip() for item in open(list_file).readlines()]
         all_folders = list(set(all_folders) & set(valid_prefies))
-        all_folders.sort()
     # all_folders = os.listdir(r"E:\data\img2brep\.43\2024_09_22_21_57_44_0921_pure_out3_failed")
     # check_dir(v_out_root)
 

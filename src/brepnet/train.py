@@ -4,7 +4,7 @@ import sys
 import numpy as np
 import open3d as o3d
 
-from src.brepnet.dataset import AutoEncoder_dataset
+from src.brepnet.dataset import AutoEncoder_dataset, AutoEncoder_dataset2
 
 sys.path.append('../../../')
 import os.path
@@ -46,9 +46,7 @@ class TrainAutoEncoder(pl.LightningModule):
 
         model_mod = importlib.import_module("src.brepnet.model")
         model_mod = getattr(model_mod, self.hydra_conf["model"]["name"])
-        # self.model = AutoEncoder_base(self.hydra_conf["model"])
         self.model = model_mod(self.hydra_conf["model"])
-        # self.model = torch.compile(self.model)
         self.viz = {}
         pr_computer = {
             "P_5": BinaryPrecision(threshold=0.5),
@@ -143,8 +141,8 @@ class TrainAutoEncoder(pl.LightningModule):
             return
 
         if "pred_face" in self.viz:
-            gt_faces = self.viz["gt_face"][..., :-3]
-            recon_faces = self.viz["pred_face"][..., :-3]
+            gt_faces = self.viz["gt_face"][..., :3]
+            recon_faces = self.viz["pred_face"][..., :3]
             gt_faces = gt_faces[(gt_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)]
             recon_faces = recon_faces[(recon_faces != -1).all(axis=-1).all(axis=-1).all(axis=-1)]
 
@@ -161,16 +159,16 @@ class TrainAutoEncoder(pl.LightningModule):
                 str(self.log_root / f"{self.trainer.current_epoch:05}_viz_faces.ply"), pc)
 
         if "pred_edge" in self.viz and self.viz["pred_edge"].shape[0]>0:
-            recon_edges = self.viz["pred_edge"][..., :-3]
-            gt_edges = self.viz["gt_edge"][..., :-3]
+            recon_edges = self.viz["pred_edge"][..., :3]
+            gt_edges = self.viz["gt_edge"][..., :3]
 
             gt_edges = gt_edges[(gt_edges != -1).all(axis=-1).all(axis=-1)]
             recon_edges = recon_edges[(recon_edges != -1).all(axis=-1).all(axis=-1)]
 
             edge_points = np.concatenate((gt_edges, recon_edges), axis=0).reshape(-1, 3)
             edge_colors = np.concatenate(
-                (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0] * 32, axis=0),
-                    np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0] * 32, axis=0)), axis=0)
+                (np.repeat(np.array([[255, 0, 0]], dtype=np.uint8), gt_edges.shape[0] * gt_edges.shape[1], axis=0),
+                    np.repeat(np.array([[0, 255, 0]], dtype=np.uint8), recon_edges.shape[0] * recon_edges.shape[1], axis=0)), axis=0)
             
             pc = o3d.geometry.PointCloud()
             pc.points = o3d.utility.Vector3dVector(edge_points)
@@ -204,15 +202,15 @@ class TrainAutoEncoder(pl.LightningModule):
 
         if "pred_face_adj" in recon_data:
             self.pr_computer.update(recon_data["pred_face_adj"].reshape(-1), recon_data["gt_face_adj"].reshape(-1))
-        if False:
+        if True:
             local_root = log_root / f"{data['v_prefix'][0]}"
             local_root.mkdir(parents=True, exist_ok=True)
             np.savez_compressed(str(local_root / f"data.npz"),
-                                pred_face_adj_prob=recon_data["pred_face_adj_prob"].cpu().numpy(),
+                                pred_face_adj_prob=recon_data["pred_face_adj_prob"],
                                 pred_face_adj=recon_data["pred_face_adj"].cpu().numpy(),
-                                pred_face=recon_data["pred_face"].cpu().numpy(),
-                                pred_edge=recon_data["pred_edge"].cpu().numpy(),
-                                pred_edge_face_connectivity=recon_data["pred_edge_face_connectivity"].cpu().numpy(),
+                                pred_face=recon_data["pred_face"],
+                                pred_edge=recon_data["pred_edge"],
+                                pred_edge_face_connectivity=recon_data["pred_edge_face_connectivity"],
 
                                 gt_face_adj=recon_data["gt_face_adj"].cpu().numpy(),
                                 gt_face=recon_data["gt_face"],
@@ -224,7 +222,7 @@ class TrainAutoEncoder(pl.LightningModule):
                                 edge_loss_ori=loss["edge_coords1"].cpu().item(),
                                 )
             np.save(str(local_root / "features"),
-                                recon_data["face_features"].cpu().numpy(),
+                                recon_data["face_features"],
                                 )
             
         if False:
@@ -267,6 +265,7 @@ def main(v_cfg: DictConfig):
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name + "/" + str(datetime.now().strftime("%y-%m-%d-%H-%M-%S"))
     v_cfg["trainer"]["output"] = log_dir
+    print("Log dir: ", log_dir)
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
 

@@ -96,7 +96,8 @@ def compute_cov_mmd(sample_pcs, ref_pcs, batch_size):
 
 
 def jsd_between_point_cloud_sets(sample_pcs, ref_pcs, in_unit_sphere, resolution=28):
-    '''Computes the JSD between two sets of point-clouds, as introduced in the paper ```Learning Representations And Generative Models For 3D Point Clouds```.
+    '''Computes the JSD between two sets of point-clouds, as introduced in the paper ```Learning Representations And Generative Models
+    For 3D Point Clouds```.
     Args:
         sample_pcs: (np.ndarray S1xR2x3) S1 point-clouds, each of R1 points.
         ref_pcs: (np.ndarray S2xR2x3) S2 point-clouds, each of R2 points.
@@ -271,8 +272,7 @@ def collect_pc3(cad_folder):
     if pc.shape[0] > N_POINTS:
         pc = downsample_pc(pc, N_POINTS)
     pc = normalize_pc(pc)
-    rotated_point_cloud = np.dot(pc, rotation_matrix.T).astype(
-        np.float32)  # Transpose the rotation matrix to apply it correctly
+    rotated_point_cloud = np.dot(pc, rotation_matrix.T).astype(np.float32)  # Transpose the rotation matrix to apply it correctly
     return rotated_point_cloud
 
 

@@ -7,11 +7,13 @@ dataset:
   test_dataset: /mnt/d/img2brep/0825_test
 
   deduplicate_list: false
+  pad_method: zero
 
   scale_factor: 1
   condition:
   overfit: false
   is_aug: 0
+  num_max_faces: 64
 
 trainer:
   gpu: 1
@@ -40,7 +42,10 @@ model:
   condition:
 
   diffusion_latent: 512
+  diffusion_type: sample
   loss: l2
+  pad_method: zero
+  num_max_faces: 64
 
   autoencoder: AutoEncoder_0925
   dim_latent: 8

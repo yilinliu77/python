@@ -44,10 +44,20 @@ if __name__ == "__main__1":
     np.savetxt("1.txt", valid_names, "%s")
     
 if __name__ == "__main__":
-    files = [item.strip() for item in open("1.txt").readlines()]
-    exist_list = [item.strip() for item in open("src/brepnet/data/list/deduplicated_abc_testing.txt").readlines()]
-    print(len(exist_list))
-    results = list(set(files) & set(exist_list))
-    results.sort()
+    num_max = 30
+    prefies = [item.strip() for item in open("src/brepnet/data/list/deduplicated_deepcad_testing.txt").readlines()]
+    zdataset = os.listdir("/mnt/d/img2brep/ae_0925_7m_gaussian")
+    print(len(prefies))
+    print(len(zdataset))
+    # valid_sets = set(prefies) & set(zdataset)
+    valid_sets = prefies
+    results = []
+    for prefix in tqdm(valid_sets):
+        try:
+            num_faces = np.load("/mnt/d/img2brep/deepcad_test_v6/" + prefix + "/data.npz")["sample_points_faces"].shape[0]
+            if num_faces < num_max:
+                results.append(prefix)
+        except:
+            continue
     print(len(results))
-    np.savetxt("deduplicated_abc_testing_brepnet.txt", results, "%s")
+    np.savetxt("deduplicated_deepcad_testing_{}.txt".format(num_max), results, "%s")

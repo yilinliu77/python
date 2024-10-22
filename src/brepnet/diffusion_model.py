@@ -37,9 +37,9 @@ class res_block_1D(nn.Module):
             self.norm = nn.Identity()
         elif norm == "layer":
             self.norm = nn.Sequential(
-                Rearrange('... c h -> ... h c'),
-                nn.LayerNorm(dim_out),
-                Rearrange('... h c -> ... c h'),
+                    Rearrange('... c h -> ... h c'),
+                    nn.LayerNorm(dim_out),
+                    Rearrange('... h c -> ... c h'),
             )
         elif norm == "batch":
             self.norm = nn.BatchNorm1d(dim_out)
@@ -61,9 +61,9 @@ class res_block_2D(nn.Module):
             self.norm = nn.Identity()
         elif norm == "layer":
             self.norm = nn.Sequential(
-                Rearrange('... c h w -> ... h w c'),
-                nn.LayerNorm(dim_out),
-                Rearrange('... h w c -> ... c h w'),
+                    Rearrange('... c h w -> ... h w c'),
+                    nn.LayerNorm(dim_out),
+                    Rearrange('... h w c -> ... c h w'),
             )
         elif norm == "batch":
             self.norm = nn.BatchNorm2d(dim_out)
@@ -80,52 +80,52 @@ class Separate_encoder(nn.Module):
     def __init__(self, dim_shape=256, dim_latent=8, v_conf=None, **kwargs):
         super().__init__()
         self.face_coords = nn.Sequential(
-            Rearrange('b h w n -> b n h w'),
-            nn.Conv2d(3, dim_shape, kernel_size=5, stride=1, padding=2),
-            res_block_2D(dim_shape, dim_shape, ks=5, st=1, pa=2),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            res_block_2D(dim_shape, dim_shape, ks=3, st=1, pa=1),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            res_block_2D(dim_shape, dim_shape, ks=3, st=1, pa=1),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            res_block_2D(dim_shape, dim_shape, ks=3, st=1, pa=1),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            res_block_2D(dim_shape, dim_shape, ks=3, st=1, pa=1),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            res_block_2D(dim_shape, dim_shape, ks=1, st=1, pa=0),
-            Rearrange('b c 1 1 -> b c'),
+                Rearrange('b h w n -> b n h w'),
+                nn.Conv2d(3, dim_shape, kernel_size=5, stride=1, padding=2),
+                res_block_2D(dim_shape, dim_shape, ks=5, st=1, pa=2),
+                nn.MaxPool2d(kernel_size=2, stride=2),
+                res_block_2D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+                nn.MaxPool2d(kernel_size=2, stride=2),
+                res_block_2D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+                nn.MaxPool2d(kernel_size=2, stride=2),
+                res_block_2D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+                nn.MaxPool2d(kernel_size=2, stride=2),
+                res_block_2D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+                nn.MaxPool2d(kernel_size=2, stride=2),
+                res_block_2D(dim_shape, dim_shape, ks=1, st=1, pa=0),
+                Rearrange('b c 1 1 -> b c'),
         )
 
         self.face_fuser = Attn_fuser_single(dim_shape)
         self.face_proj = nn.Linear(dim_shape, dim_latent * 2)
 
         self.edge_coords = nn.Sequential(
-            Rearrange('b h n -> b n h'),
-            nn.Conv1d(3, dim_shape, kernel_size=5, stride=1, padding=2),
-            res_block_1D(dim_shape, dim_shape, ks=5, st=1, pa=2),
-            nn.MaxPool1d(kernel_size=2, stride=2),
-            res_block_1D(dim_shape, dim_shape, ks=3, st=1, pa=1),
-            nn.MaxPool1d(kernel_size=2, stride=2),
-            res_block_1D(dim_shape, dim_shape, ks=3, st=1, pa=1),
-            nn.MaxPool1d(kernel_size=2, stride=2),
-            res_block_1D(dim_shape, dim_shape, ks=3, st=1, pa=1),
-            nn.MaxPool1d(kernel_size=2, stride=2),
-            res_block_1D(dim_shape, dim_shape, ks=3, st=1, pa=1),
-            nn.MaxPool1d(kernel_size=2, stride=2),
-            res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
-            Rearrange('b c 1 -> b c'),
+                Rearrange('b h n -> b n h'),
+                nn.Conv1d(3, dim_shape, kernel_size=5, stride=1, padding=2),
+                res_block_1D(dim_shape, dim_shape, ks=5, st=1, pa=2),
+                nn.MaxPool1d(kernel_size=2, stride=2),
+                res_block_1D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+                nn.MaxPool1d(kernel_size=2, stride=2),
+                res_block_1D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+                nn.MaxPool1d(kernel_size=2, stride=2),
+                res_block_1D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+                nn.MaxPool1d(kernel_size=2, stride=2),
+                res_block_1D(dim_shape, dim_shape, ks=3, st=1, pa=1),
+                nn.MaxPool1d(kernel_size=2, stride=2),
+                res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
+                Rearrange('b c 1 -> b c'),
         )
 
         self.edge_fuser = Attn_fuser_single(dim_shape)
 
         self.vertex_coords = nn.Sequential(
-            Rearrange('b c-> b c 1'),
-            nn.Conv1d(3, dim_shape, kernel_size=1, stride=1, padding=0),
-            res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
-            res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
-            res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
-            res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
-            Rearrange('b c 1 -> b c'),
+                Rearrange('b c-> b c 1'),
+                nn.Conv1d(3, dim_shape, kernel_size=1, stride=1, padding=0),
+                res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
+                res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
+                res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
+                res_block_1D(dim_shape, dim_shape, ks=1, st=1, pa=0),
+                Rearrange('b c 1 -> b c'),
         )
 
         self.vertex_fuser = Attn_fuser_single(dim_shape)
@@ -153,12 +153,12 @@ class Separate_encoder(nn.Module):
         vertex_features = self.vertex_fuser(vertex_features, vertex_attn_mask)
 
         return {
-            "face_features": face_features,
-            "edge_features": edge_features,
+            "face_features"  : face_features,
+            "edge_features"  : edge_features,
             "vertex_features": vertex_features,
-            "face_mask": face_mask,
-            "edge_mask": edge_mask,
-            "vertex_mask": vertex_mask,
+            "face_mask"      : face_mask,
+            "edge_mask"      : edge_mask,
+            "vertex_mask"    : vertex_mask,
         }
 
 
@@ -206,7 +206,7 @@ def sincos_embedding(input, dim, max_period=10000):
     """
     half = dim // 2
     freqs = torch.exp(
-        -math.log(max_period) * torch.arange(start=0, end=half, dtype=input.dtype, device=input.device) / half
+            -math.log(max_period) * torch.arange(start=0, end=half, dtype=input.dtype, device=input.device) / half
     )
     for _ in range(len(input.size())):
         freqs = freqs[None]
@@ -220,6 +220,7 @@ def sincos_embedding(input, dim, max_period=10000):
 def inv_sigmoid(x):
     return torch.log(x / (1 - x + 1e-6))
 
+
 # Full continuous VAE
 class Diffusion_base_bak(nn.Module):
     def __init__(self,
@@ -231,37 +232,37 @@ class Diffusion_base_bak(nn.Module):
         self.time_statics = [0 for _ in range(10)]
 
         self.p_embed = nn.Sequential(
-            nn.Linear(self.dim_input, self.dim_latent),
-            nn.LayerNorm(self.dim_latent),
-            nn.SiLU(),
-            nn.Linear(self.dim_latent, self.dim_latent),
+                nn.Linear(self.dim_input, self.dim_latent),
+                nn.LayerNorm(self.dim_latent),
+                nn.SiLU(),
+                nn.Linear(self.dim_latent, self.dim_latent),
         )
 
         layer = nn.TransformerEncoderLayer(
-            d_model=self.dim_latent, nhead=12, norm_first=True, dim_feedforward=1024, dropout=0.1, batch_first=True)
+                d_model=self.dim_latent, nhead=12, norm_first=True, dim_feedforward=1024, dropout=0.1, batch_first=True)
         self.net = nn.TransformerEncoder(layer, 12, nn.LayerNorm(self.dim_latent))
 
         self.time_embed = nn.Sequential(
-            nn.Linear(self.dim_latent, self.dim_latent),
-            nn.LayerNorm(self.dim_latent),
-            nn.SiLU(),
-            nn.Linear(self.dim_latent, self.dim_latent),
+                nn.Linear(self.dim_latent, self.dim_latent),
+                nn.LayerNorm(self.dim_latent),
+                nn.SiLU(),
+                nn.Linear(self.dim_latent, self.dim_latent),
         )
 
         self.fc_out = nn.Sequential(
-            nn.Linear(self.dim_latent, self.dim_latent),
-            nn.LayerNorm(self.dim_latent),
-            nn.SiLU(),
-            nn.Linear(self.dim_latent, self.dim_input),
+                nn.Linear(self.dim_latent, self.dim_latent),
+                nn.LayerNorm(self.dim_latent),
+                nn.SiLU(),
+                nn.Linear(self.dim_latent, self.dim_input),
         )
 
         self.noise_scheduler = DDPMScheduler(
-            num_train_timesteps=1000,
-            beta_schedule='linear',
-            prediction_type='sample',
-            beta_start=0.0001,
-            beta_end=0.02,
-            clip_sample=False,
+                num_train_timesteps=1000,
+                beta_schedule='linear',
+                prediction_type='sample',
+                beta_start=0.0001,
+                beta_end=0.02,
+                clip_sample=False,
         )
 
     def inference(self, bs, device, **kwargs):
@@ -324,37 +325,37 @@ class Diffusion_base(nn.Module):
         self.ae_model = model_mod(v_conf)
 
         self.p_embed = nn.Sequential(
-            nn.Linear(self.dim_input, self.dim_latent),
-            nn.LayerNorm(self.dim_latent),
-            nn.SiLU(),
-            nn.Linear(self.dim_latent, self.dim_latent),
+                nn.Linear(self.dim_input, self.dim_latent),
+                nn.LayerNorm(self.dim_latent),
+                nn.SiLU(),
+                nn.Linear(self.dim_latent, self.dim_latent),
         )
 
         layer = nn.TransformerEncoderLayer(
-            d_model=self.dim_latent, nhead=12, dim_feedforward=1024, norm_first=True, dropout=0.1, batch_first=True)
+                d_model=self.dim_latent, nhead=12, dim_feedforward=1024, norm_first=True, dropout=0.1, batch_first=True)
         self.net = nn.TransformerEncoder(layer, 24, nn.LayerNorm(self.dim_latent))
 
         self.time_embed = nn.Sequential(
-            nn.Linear(self.dim_latent, self.dim_latent),
-            nn.LayerNorm(self.dim_latent),
-            nn.SiLU(),
-            nn.Linear(self.dim_latent, self.dim_latent),
+                nn.Linear(self.dim_latent, self.dim_latent),
+                nn.LayerNorm(self.dim_latent),
+                nn.SiLU(),
+                nn.Linear(self.dim_latent, self.dim_latent),
         )
 
         self.fc_out = nn.Sequential(
-            nn.Linear(self.dim_latent, self.dim_latent),
-            nn.LayerNorm(self.dim_latent),
-            nn.SiLU(),
-            nn.Linear(self.dim_latent, self.dim_input),
+                nn.Linear(self.dim_latent, self.dim_latent),
+                nn.LayerNorm(self.dim_latent),
+                nn.SiLU(),
+                nn.Linear(self.dim_latent, self.dim_input),
         )
 
         self.noise_scheduler = DDPMScheduler(
-            num_train_timesteps=1000,
-            beta_schedule='linear',
-            prediction_type='sample',
-            beta_start=0.0001,
-            beta_end=0.02,
-            clip_sample=False,
+                num_train_timesteps=1000,
+                beta_schedule='linear',
+                prediction_type='sample',
+                beta_start=0.0001,
+                beta_end=0.02,
+                clip_sample=False,
         )
 
         self.num_max_faces = 64
@@ -378,7 +379,7 @@ class Diffusion_base(nn.Module):
             timesteps = t.reshape(-1).to(device)
             pred_x0 = self.diffuse(face_features, timesteps)
             face_features = self.noise_scheduler.step(pred_x0, t, face_features).prev_sample
-            errors.append((v_data["face_features"] - pred_x0).abs().mean(dim=[1,2]))
+            errors.append((v_data["face_features"] - pred_x0).abs().mean(dim=[1, 2]))
 
         face_z = face_features
         recon_data = []
@@ -395,7 +396,7 @@ class Diffusion_base(nn.Module):
             face_features = v_data["face_features"]
             bs = face_features.shape[0]
             num_face = face_features.shape[1]
-            data["padded_face_z"] = face_features.reshape(bs,num_face, -1)
+            data["padded_face_z"] = face_features.reshape(bs, num_face, -1)
         else:
             encoding_result = self.ae_model.encode(v_data, v_test)
             data.update(encoding_result)
@@ -404,7 +405,7 @@ class Diffusion_base(nn.Module):
             num_faces = v_data["num_face_record"]
             bs = num_faces.shape[0]
             padded_face_z = torch.zeros(
-                (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
+                    (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
             # Fill the face_z to the padded_face_z without forloop
             mask = num_faces[:, None] > torch.arange(self.num_max_faces, device=num_faces.device)
             padded_face_z[mask] = face_features
@@ -426,7 +427,7 @@ class Diffusion_base(nn.Module):
         device = face_z.device
         bs = face_z.size(0)
         timesteps = torch.randint(
-            0, self.noise_scheduler.config.num_train_timesteps, (bs,), device=device).long()
+                0, self.noise_scheduler.config.num_train_timesteps, (bs,), device=device).long()
 
         noise = torch.randn(face_z.shape, device=device)
         noise_input = self.noise_scheduler.add_noise(face_z, noise, timesteps)
@@ -449,9 +450,9 @@ class Diffusion_base(nn.Module):
         return loss
 
 
-class Diffusion_condition(Diffusion_base):
+class Diffusion_condition(nn.Module):
     def __init__(self, v_conf, ):
-        super().__init__(v_conf)
+        super().__init__()
         self.dim_input = 8 * 2 * 2
         self.dim_latent = v_conf["diffusion_latent"]
         self.dim_condition = 256
@@ -459,16 +460,22 @@ class Diffusion_condition(Diffusion_base):
         self.time_statics = [0 for _ in range(10)]
 
         self.p_embed = nn.Sequential(
-            nn.Linear(self.dim_input, self.dim_latent),
-            nn.LayerNorm(self.dim_latent),
-            nn.SiLU(),
-            nn.Linear(self.dim_latent, self.dim_latent),
+                nn.Linear(self.dim_input, self.dim_latent),
+                nn.LayerNorm(self.dim_latent),
+                nn.SiLU(),
+                nn.Linear(self.dim_latent, self.dim_latent),
         )
 
         layer1 = nn.TransformerEncoderLayer(
-            d_model=self.dim_total,
-            nhead=12, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
+                d_model=self.dim_total,
+                nhead=16, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
         self.net1 = nn.TransformerEncoder(layer1, 24, nn.LayerNorm(self.dim_total))
+        self.fc_out = nn.Sequential(
+                nn.Linear(self.dim_total, self.dim_total),
+                nn.LayerNorm(self.dim_total),
+                nn.SiLU(),
+                nn.Linear(self.dim_total, self.dim_input),
+        )
 
         self.with_img = False
         self.with_pc = False
@@ -480,89 +487,89 @@ class Diffusion_condition(Diffusion_base):
             self.img_model.eval()
 
             self.img_fc = nn.Sequential(
-                nn.Linear(1024, 1024),
-                nn.LayerNorm(1024),
-                nn.SiLU(),
-                nn.Linear(1024, self.dim_condition),
+                    nn.Linear(1024, 1024),
+                    nn.LayerNorm(1024),
+                    nn.SiLU(),
+                    nn.Linear(1024, self.dim_condition),
             )
             self.camera_embedding = nn.Sequential(
-                nn.Embedding(24, 256),
-                nn.Linear(256, 256),
-                nn.LayerNorm(256),
-                nn.SiLU(),
-                nn.Linear(256, self.dim_condition),
+                    nn.Embedding(24, 256),
+                    nn.Linear(256, 256),
+                    nn.LayerNorm(256),
+                    nn.SiLU(),
+                    nn.Linear(256, self.dim_condition),
             )
         elif v_conf["condition"] == "pc":
             self.with_pc = True
             self.SA_modules = nn.ModuleList()
             # PointNet2
             c_in = 6
-            with_bn=False
+            with_bn = False
             self.SA_modules.append(
-                PointnetSAModuleMSG(
-                    npoint=1024,
-                    radii=[0.05, 0.1],
-                    nsamples=[16, 32],
-                    mlps=[[c_in, 32], [c_in, 64]],
-                    use_xyz=True,
-                    bn=with_bn
-                )
+                    PointnetSAModuleMSG(
+                            npoint=1024,
+                            radii=[0.05, 0.1],
+                            nsamples=[16, 32],
+                            mlps=[[c_in, 32], [c_in, 64]],
+                            use_xyz=True,
+                            bn=with_bn
+                    )
             )
             c_out_0 = 32 + 64
 
             c_in = c_out_0
             self.SA_modules.append(
-                PointnetSAModuleMSG(
-                    npoint=256,
-                    radii=[0.1, 0.2],
-                    nsamples=[16, 32],
-                    mlps=[[c_in, 64], [c_in, 128]],
-                    use_xyz=True,
-                    bn=with_bn
-                )
+                    PointnetSAModuleMSG(
+                            npoint=256,
+                            radii=[0.1, 0.2],
+                            nsamples=[16, 32],
+                            mlps=[[c_in, 64], [c_in, 128]],
+                            use_xyz=True,
+                            bn=with_bn
+                    )
             )
             c_out_1 = 64 + 128
             c_in = c_out_1
             self.SA_modules.append(
-                PointnetSAModuleMSG(
-                    npoint=64,
-                    radii=[0.2, 0.4],
-                    nsamples=[16, 32],
-                    mlps=[[c_in, 128], [c_in, 256]],
-                    use_xyz=True,
-                    bn=with_bn
-                )
+                    PointnetSAModuleMSG(
+                            npoint=64,
+                            radii=[0.2, 0.4],
+                            nsamples=[16, 32],
+                            mlps=[[c_in, 128], [c_in, 256]],
+                            use_xyz=True,
+                            bn=with_bn
+                    )
             )
             c_out_2 = 128 + 256
 
             c_in = c_out_2
             self.SA_modules.append(
-                PointnetSAModuleMSG(
-                    npoint=16,
-                    radii=[0.4, 0.8],
-                    nsamples=[16, 32],
-                    mlps=[[c_in, 512], [c_in, 512]],
-                    use_xyz=True,
-                    bn=with_bn
-                )
+                    PointnetSAModuleMSG(
+                            npoint=16,
+                            radii=[0.4, 0.8],
+                            nsamples=[16, 32],
+                            mlps=[[c_in, 512], [c_in, 512]],
+                            use_xyz=True,
+                            bn=with_bn
+                    )
             )
             self.fc_lyaer = nn.Sequential(
-                nn.Linear(1024, 1024),
-                nn.LayerNorm(1024),
-                nn.SiLU(),
-                nn.Linear(1024, self.dim_condition),
+                    nn.Linear(1024, 1024),
+                    nn.LayerNorm(1024),
+                    nn.SiLU(),
+                    nn.Linear(1024, self.dim_condition),
             )
 
         self.classifier = nn.Sequential(
-            nn.Linear(self.dim_input, self.dim_input),
-            nn.LayerNorm(self.dim_input),
-            nn.SiLU(),
-            nn.Linear(self.dim_input, 1),
+                nn.Linear(self.dim_input, self.dim_input),
+                nn.LayerNorm(self.dim_input),
+                nn.SiLU(),
+                nn.Linear(self.dim_input, 1),
         )
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=1000,
             beta_schedule='squaredcos_cap_v2',
-            prediction_type='sample',
+            prediction_type=v_conf["diffusion_type"],
             beta_start=0.0001,
             beta_end=0.02,
             clip_sample=False,
@@ -574,14 +581,34 @@ class Diffusion_condition(Diffusion_base):
             nn.Linear(self.dim_total, self.dim_total),
         )
 
+        self.num_max_faces = v_conf["num_max_faces"]
         self.loss = nn.functional.l1_loss if v_conf["loss"] == "l1" else nn.functional.mse_loss
+        self.diffusion_type = v_conf["diffusion_type"]
+        self.pad_method = v_conf["pad_method"]
+
+        # self.ae_model = AutoEncoder_0925(v_conf)
+        model_mod = importlib.import_module("src.brepnet.model")
+        model_mod = getattr(model_mod, v_conf["autoencoder"])
+        self.ae_model = model_mod(v_conf)
+
+        self.is_pretrained = v_conf["autoencoder_weights"] is not None
+        self.is_stored_z = v_conf["stored_z"]
+        self.is_train_decoder = v_conf["train_decoder"]
+        if self.is_pretrained:
+            checkpoint = torch.load(v_conf["autoencoder_weights"], weights_only=False)["state_dict"]
+            weights = {k.replace("model.", ""): v for k, v in checkpoint.items()}
+            self.ae_model.load_state_dict(weights)
+        if not self.is_train_decoder:
+            for param in self.ae_model.parameters():
+                param.requires_grad = False
+            self.ae_model.eval()
 
     def inference(self, bs, device, v_data=None, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, 32)).to(device)
         condition = None
         if self.with_img or self.with_pc:
             condition = self.extract_condition(v_data)[:bs]
-
+            # face_features = face_features[:condition.shape[0]]
         # error = []
         for t in tqdm(self.noise_scheduler.timesteps):
             timesteps = t.reshape(-1).to(device)
@@ -589,12 +616,16 @@ class Diffusion_condition(Diffusion_base):
             face_features = self.noise_scheduler.step(pred_x0, t, face_features).prev_sample
             # error.append((v_data["face_features"] - face_features).abs().mean(dim=[1,2]))
 
-        label = torch.sigmoid(self.classifier(face_features))[...,0]
         face_z = face_features
+        if self.pad_method == "zero":
+            label = torch.sigmoid(self.classifier(face_features))[..., 0]
+            mask = label > 0.5
+        else:
+            mask = torch.ones_like(face_z[:, :, 0]).to(bool)
+        
         recon_data = []
         for i in range(bs):
-            mask = label[i:i + 1] > 0.5
-            face_z_item = face_z[i:i + 1][mask]
+            face_z_item = face_z[i:i + 1][mask[i:i + 1]]
             data_item = self.ae_model.inference(face_z_item)
             recon_data.append(data_item)
         return recon_data
@@ -605,7 +636,7 @@ class Diffusion_condition(Diffusion_base):
             face_features = v_data["face_features"]
             bs = face_features.shape[0]
             num_face = face_features.shape[1]
-            data["padded_face_z"] = face_features.reshape(bs,num_face, -1)
+            data["padded_face_z"] = face_features.reshape(bs, num_face, -1)
         else:
             encoding_result = self.ae_model.encode(v_data, True)
             data.update(encoding_result)
@@ -614,7 +645,7 @@ class Diffusion_condition(Diffusion_base):
             num_faces = v_data["num_face_record"]
             bs = num_faces.shape[0]
             padded_face_z = torch.zeros(
-                (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
+                    (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
             # Fill the face_z to the padded_face_z without forloop
             mask = num_faces[:, None] > torch.arange(self.num_max_faces, device=num_faces.device)
             padded_face_z[mask] = face_features
@@ -655,7 +686,7 @@ class Diffusion_condition(Diffusion_base):
             condition = img_feature[:, None]
         elif self.with_pc:
             pc = v_data["conditions"]["points"]
-            l_xyz, l_features = [pc[:, 0, :, :3].contiguous()], [pc[:, 0,].permute(0, 2, 1).contiguous()]
+            l_xyz, l_features = [pc[:, 0, :, :3].contiguous()], [pc[:, 0, ].permute(0, 2, 1).contiguous()]
 
             with torch.autocast(device_type=pc.device.type, dtype=torch.float32):
                 for i in range(len(self.SA_modules)):
@@ -672,32 +703,33 @@ class Diffusion_condition(Diffusion_base):
         face_z = encoding_result["padded_face_z"]
         device = face_z.device
         bs = face_z.size(0)
-        timesteps = torch.randint(
-            0, self.noise_scheduler.config.num_train_timesteps, (bs,), device=device).long()
+        timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bs,), device=device).long()
 
         condition = self.extract_condition(v_data)
         noise = torch.randn(face_z.shape, device=device)
         noise_input = self.noise_scheduler.add_noise(face_z, noise, timesteps)
 
         # Model
-        pred_x0 = self.diffuse(noise_input, timesteps, condition)
-        label = self.classifier(pred_x0)
-
-        # Loss (predict x0)
+        pred = self.diffuse(noise_input, timesteps, condition)
+        
         loss = {}
-        if not self.is_train_decoder:
-            loss["diffusion_loss"] = nn.functional.l1_loss(pred_x0, face_z)
-        else:
-            pred_face_z = pred_x0[encoding_result["mask"]]
+        loss["diffusion_loss"] = self.loss(pred, face_z if self.diffusion_type == "sample" else noise)
+        if self.pad_method == "zero":
+            mask = torch.logical_not((face_z.abs() < 1e-4).all(dim=-1))
+            label = self.classifier(pred)
+            classification_loss = nn.functional.binary_cross_entropy_with_logits(label[..., 0], mask.float())
+            if self.loss == nn.functional.l1_loss:
+                classification_loss = classification_loss * 1e-1
+            else:
+                classification_loss = classification_loss * 1e-4
+            loss["classification"] = classification_loss
+        loss["total_loss"] = sum(loss.values())
+
+        if self.is_train_decoder:
+            raise
+            pred_face_z = pred[encoding_result["mask"]]
             encoding_result["face_z"] = pred_face_z
             loss, recon_data = self.ae_model.loss(v_data, encoding_result)
-            loss["l2"] = F.l1_loss(pred_x0, face_z)
+            loss["l2"] = self.loss(pred, face_z)
             loss["diffusion_loss"] += loss["l2"]
-
-        mask = torch.logical_not((face_z.abs()<1e-4).all(dim=-1))
-        loss["classification"] = nn.functional.binary_cross_entropy_with_logits(label[...,0], mask.float())
-        loss["total_loss"] = loss["classification"] * 1e-1 + loss["diffusion_loss"]
-
-        if torch.isnan(loss["total_loss"]).any():
-            print("NaN detected in loss")
         return loss

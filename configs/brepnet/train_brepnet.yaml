@@ -7,6 +7,8 @@ dataset:
   test_dataset: src/brepnet/data/list/deduplicated_abc_testing_brepnet.txt
   disable_half: false
 
+  is_aug: 0
+
 trainer:
   gpu: 1
   num_worker: 0
@@ -29,12 +31,16 @@ trainer:
 
 model:
   name: AutoEncoder_featuredv2
+  norm: "layer"
+  
   encoderdecoder_weight: 
+  encoder_decoder_sigmoid: false
   in_channels: 3
   dim_latent: 8
   dim_shape: 256
+  
+  with_intersection: false
   sigmoid: false
-  norm: "layer"
   gaussian_weights: 1e-6
 
 hydra:

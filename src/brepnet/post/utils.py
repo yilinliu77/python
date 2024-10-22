@@ -19,13 +19,13 @@ from OCC.Core.BRepTools import breptools
 
 from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface, GeomAPI_PointsToBSpline
 from OCC.Core.GeomAbs import GeomAbs_C0, GeomAbs_C1, GeomAbs_C2, GeomAbs_Cylinder, GeomAbs_Plane
-from OCC.Core.ShapeAnalysis import ShapeAnalysis_Wire
+from OCC.Core.ShapeAnalysis import ShapeAnalysis_Wire, ShapeAnalysis_Shell
 from OCC.Core.ShapeExtend import ShapeExtend_WireData
 from OCC.Core.ShapeFix import ShapeFix_Face, ShapeFix_Wire, ShapeFix_Edge, ShapeFix_Shell, ShapeFix_Solid, \
     ShapeFix_ComposeShell
 from OCC.Core.TColgp import TColgp_Array1OfPnt
 from OCC.Core.TColgp import TColgp_Array2OfPnt
-from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_FORWARD, TopAbs_REVERSED, TopAbs_FACE
+from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_FORWARD, TopAbs_REVERSED, TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_SHELL
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.gp import gp_Pnt, gp_XYZ, gp_Vec
 from OCC.Display.SimpleGui import init_display
@@ -79,11 +79,11 @@ import trimesh
 
 from itertools import combinations
 
-# EDGE_FITTING_TOLERANCE = [2e-4, 2e-3, 5e-3, 8e-3, 5e-2, ]
-# FACE_FITTING_TOLERANCE = [2e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]
+# EDGE_FITTING_TOLERANCE = [1e-5, 1e-4, 1e-3, 5e-3, 8e-3, 5e-2, ]
+# FACE_FITTING_TOLERANCE = [1e-4, 1e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]
 
-EDGE_FITTING_TOLERANCE = [1e-5, 1e-4, 1e-3, 5e-3, 8e-3, 5e-2, ]
-FACE_FITTING_TOLERANCE = [1e-4, 1e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]
+EDGE_FITTING_TOLERANCE = [1e-3, 5e-3, 8e-3, 5e-2, ]
+FACE_FITTING_TOLERANCE = [1e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]
 ROUGH_FITTING_TOLERANCE = 1e-1
 
 FIX_TOLERANCE = 1e-2
@@ -117,7 +117,7 @@ CONTINUITY = GeomAbs_C1
 # IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, True
 # CONTINUITY = GeomAbs_C2
 
-def interpolation_face_points(face, density=None, is_use_cuda=False, density_scale=10):
+def interpolation_face_points(face, density=None, is_use_cuda=False, density_scale=4):
     if type(face) is np.ndarray:
         if is_use_cuda:
             face = torch.from_numpy(face).cuda()
@@ -161,6 +161,7 @@ class Shape:
     def remove_half_edges(self, edge2face_threshold=2e-1, is_check_intersection=False, face2face_threshold=0.06):
         edge_face_connectivity = self.edge_face_connectivity
         cache_dict = {}
+        edge_face_connectivity = edge_face_connectivity.astype(np.int64)
         for conec in edge_face_connectivity:
             if (conec[1], conec[2]) in cache_dict:
                 cache_dict[(conec[1], conec[2])].append(conec[0])
@@ -259,7 +260,9 @@ class Shape:
         for edge_face1_face2 in self.edge_face_connectivity:
             edge, face1, face2 = edge_face1_face2
             if face1 == face2:
-                raise ValueError("Face1 and Face2 should be different")
+                # raise ValueError("Face1 and Face2 should be different")
+                print("Face1 and Face2 should be different")
+                continue
             assert edge not in self.face_edge_adj[face1]
             self.face_edge_adj[face1].append(edge)
             self.face_edge_adj[face2].append(edge)
@@ -477,9 +480,10 @@ def optimize(
     idx[is_end_point] = 15
     idx = torch.from_numpy(idx).to(device)
 
+    src_st = torch.FloatTensor([1, 0, 0, 0]).unsqueeze(0).repeat(edge_points.shape[0], 1).to(device)
     edge_st = nn.Parameter(torch.FloatTensor([1, 0, 0, 0]).unsqueeze(0).repeat(edge_points.shape[0], 1).to(device))
     edge_st.requires_grad = True
-    optimizer = torch.optim.Adam([edge_st], lr=5e-3, betas=(0.95, 0.999), weight_decay=1e-6, eps=1e-08, )
+    optimizer = torch.optim.Adam([edge_st], lr=8e-3)
 
     prev_loss = float('inf')
     if v_islog:
@@ -506,30 +510,35 @@ def optimize(
         #     adj_distance_loss += adj_distance_loss_c
 
         if pair1 is None:
-            endpoints_loss = torch.zeros_like(adj_distance_loss)
+            corners_loss = torch.zeros_like(adj_distance_loss)
         else:
-            endpoints = transformed_edges[pair1, idx]
-            endpoints_loss = torch.linalg.norm(endpoints[:, 0] - endpoints[:, 1], dim=-1) + \
-                             torch.linalg.norm(endpoints[:, 1] - endpoints[:, 2], dim=-1) + \
-                             torch.linalg.norm(endpoints[:, 0] - endpoints[:, 2], dim=-1)
-            endpoints_loss = (endpoints_loss / 3).mean()
+            corners = transformed_edges[pair1, idx]
+            corners_loss = torch.linalg.norm(corners[:, 0] - corners[:, 1], dim=-1) + \
+                           torch.linalg.norm(corners[:, 1] - corners[:, 2], dim=-1) + \
+                           torch.linalg.norm(corners[:, 0] - corners[:, 2], dim=-1)
+            corners_loss = (corners_loss / 3).mean()
 
-        wire_connected_loss = []
-        for face_edge_idx in face_edge_adj:
-            if len(face_edge_idx) == 0:
-                continue
-            face_edge_endpoint = torch.concatenate((transformed_edges[face_edge_idx, 0, :],
-                                                    transformed_edges[face_edge_idx, -1, :]))
-            dist_matrix = torch.cdist(face_edge_endpoint, face_edge_endpoint)
-            dist_matrix = dist_matrix + torch.eye(dist_matrix.shape[0]).to(device) * 1e6
-            connected_loss = dist_matrix.min(dim=0)[0].sum()
-            wire_connected_loss.append(connected_loss)
-        if len(wire_connected_loss) == 0:
+        if len(face_edge_adj) == 0:
             wire_connected_loss = torch.zeros_like(adj_distance_loss)
         else:
-            wire_connected_loss = torch.stack(wire_connected_loss).mean()
+            max_length = max(len(face_edge_idx) for face_edge_idx in face_edge_adj)
+            all_endpoints = []
+            for face_edge_idx in face_edge_adj:
+                if len(face_edge_idx) == 0:
+                    continue
+                face_edge_endpoint = torch.cat((transformed_edges[face_edge_idx, 0, :],
+                                                transformed_edges[face_edge_idx, -1, :]), dim=0)
+                padded_endpoints = torch.nn.functional.pad(face_edge_endpoint, (0, 0, 0, max_length * 2 - face_edge_endpoint.shape[0]),
+                                                           value=1e6)
+                all_endpoints.append(padded_endpoints)
 
-        loss = adj_distance_loss + endpoints_loss + wire_connected_loss
+            batch_endpoints = torch.stack(all_endpoints)
+            dist_matrix = torch.cdist(batch_endpoints, batch_endpoints)
+            dist_matrix = dist_matrix + torch.eye(dist_matrix.shape[-1], device=device).unsqueeze(0) * 1e6
+            connected_loss = dist_matrix.min(dim=-1)[0]
+            wire_connected_loss = connected_loss[connected_loss < 100].mean()
+
+        loss = adj_distance_loss + corners_loss + wire_connected_loss + 1e-6 * (edge_st - src_st).norm(p=1, dim=1).mean()
 
         optimizer.zero_grad()
         # if abs(prev_loss - loss.item()) < 1e-4 and False:
@@ -541,8 +550,10 @@ def optimize(
         optimizer.step()
         prev_loss = loss.item()
         if v_islog:
-            pbar.set_postfix(
-                    loss=loss.item(), adj=adj_distance_loss.cpu().item(), end=endpoints_loss.cpu().item())
+            pbar.set_postfix(loss=loss.item(),
+                             adj=adj_distance_loss.cpu().item(),
+                             corner=corners_loss.cpu().item(),
+                             connect=wire_connected_loss.cpu().item())
             pbar.update(1)
     if v_islog:
         print('Optimization finished!')
@@ -831,6 +842,7 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         wire_fixer.SetMaxTolerance(connected_tolerance)
         wire_fixer.FixGaps3d()
         wire_fixer.FixGaps2d()
+        # wire_fixer.Perform()
 
         # when only one edge, and being gap fixing, but still not closed, skip
         if wire_fixer.Wire().NbChildren() == 1 and not wire_fixer.Wire().Closed():
@@ -844,9 +856,11 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         #     wire_fixer.FixClosed()
 
         fixed_wire = wire_fixer.Wire()
+
         # assert fixed_wire.Closed()
         if not fixed_wire.Closed():
             continue
+
         face_fixer.Add(fixed_wire)
         fixed_wire_list.append(fixed_wire)
 
@@ -859,6 +873,8 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         face_fixer.FixWireTool().SetPrecision(connected_tolerance)
         face_fixer.FixWireTool().SetFixShiftedMode(True)
         face_fixer.FixWireTool().SetClosedWireMode(True)
+        # face_fixer.FixWireTool().SetFixAddPCurveMode(True)
+        # face_fixer.FixWireTool().SetFixAddCurve3dMode(True)
         face_fixer.FixWireTool().Perform()
 
         face_fixer.SetAutoCorrectPrecisionMode(False)
@@ -882,6 +898,7 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         face_fixer.FixIntersectingWires()
         # face_fixer.FixPeriodicDegenerated()
         face_fixer.FixOrientation()
+
     except Exception as e:
         print(f"Error fixing face {e}")
         return None
@@ -990,7 +1007,7 @@ def try_create_trimmed_face(geom_face, topo_face, face_edges, connected_toleranc
     return wire_list2, trimmed_face2, False
 
 
-def get_separated_surface(trimmed_faces, v_precision1=1e-2, v_precision2=1e-1):
+def get_separated_surface(trimmed_faces, v_precision1=1e-3, v_precision2=1e-1):
     points = []
     faces = []
     num_points = 0
@@ -1205,3 +1222,57 @@ def export_edges(l_v, v_file):
                 line_str += f"l {i + num_points + 1} {i + num_points + 2}\n"
             num_points += edge.shape[0]
         f.write(line_str)
+
+
+def solid_valid_check(solid, tolerance=0.01):
+    # Refer to the SolidGen (https://arxiv.org/pdf/2203.13944#_ts1728973340413)
+    # A.6 Criteria used to Evaluate Validity of Generated B-reps
+    # We consider a B-rep to be valid if it was successfully built from the network’s output and additionally
+    # satisfies the following criteria:
+    # 1. Triangulatable. Every face in the B-rep must generate at least one triangle, otherwise it cannot be
+    #   rendered properly and is not possible to manufacture.
+    # 2. Wire ordering. The edges in each wire in the B-rep must be ordered correctly. We check this using
+    #   the ShapeAnalysis_Wire::CheckOrder() function in PythonOCC (Paviot, 2008) with a tolerance of 0.01.
+    # 3. No wire self-intersection. The wires should not self-intersect to ensure that faces are well-defined
+    #   and surfaces trimmed correctly. We check this using the ShapeAnalysis_Wire::CheckSelfIntersection()
+    #   function in PythonOCC with a tolerance of 0.01.
+    # 4. No bad edges. The edges in shells should be present once or twice but with different orientations.
+    # This can be checked with the ShapeAnalysis_Shell::HasBadEdges() function.
+
+    # 1. Check Triangulatable
+    face_exp = TopExp_Explorer(solid, TopAbs_FACE)
+    while face_exp.More():
+        face = topods.Face(face_exp.Current())
+        loc = TopLoc_Location()
+        mesh = BRepMesh_IncrementalMesh(face, 0.01)
+        triangulation = BRep_Tool.Triangulation(face, loc)
+        if triangulation is None:
+            return False
+        wire_exp = TopExp_Explorer(face, TopAbs_WIRE)
+        while wire_exp.More():
+            wire = topods.Wire(wire_exp.Current())
+            wire_analyzer = ShapeAnalysis_Wire(wire, face, tolerance)
+            # 2. Check wire ordering
+            is_wire_ordered = wire_analyzer.CheckOrder(False)
+            # is_wire_ordered = wire.Closed()
+            if not is_wire_ordered:
+                return False
+            # 3. Check no wire self-intersection
+            is_no_wire_self_intersection = wire_analyzer.CheckSelfIntersection()
+            if not is_no_wire_self_intersection:
+                return False
+            wire_exp.Next()
+        face_exp.Next()
+
+    # 4. Check no bad edges
+    shell_exp = TopExp_Explorer(solid, TopAbs_SHELL)
+    while shell_exp.More():
+        shell = topods.Shell(shell_exp.Current())
+        shell_analyzer = ShapeAnalysis_Shell()
+        shell_analyzer.LoadShells(shell)
+        has_bad_edges = shell_analyzer.HasBadEdges()
+        if has_bad_edges:
+            return False
+        shell_exp.Next()
+
+    return True

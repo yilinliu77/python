@@ -555,7 +555,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             raise
 
         filelist1 = os.listdir(self.dataset_path)
-        filelist2 = [item[:8] for item in os.listdir(self.face_z_dataset) if os.path.exists(os.path.join(self.face_z_dataset, item+"/features.npy"))]
+        filelist2 = [item[:8] for item in os.listdir(self.face_z_dataset) if os.path.exists(os.path.join(self.face_z_dataset, item+"/feature.npy"))]
         
         deduplicate_list = filelist2
         if v_conf["deduplicate_list"]:
@@ -612,7 +612,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         try:
             data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "_feature.npz"))['face_features']
         except:
-            data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "/features.npy"))
+            data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "/feature.npy"))
         face_features = torch.from_numpy(data_npz)
 
         padded_face_features = torch.zeros((self.max_faces, *face_features.shape[1:]), dtype=torch.float32)
@@ -622,7 +622,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
 
         }
         if self.condition == "single_img" or self.condition == "multi_img" or self.condition == "sketch":
-            cache_data = True
+            cache_data = False
             if self.condition == "single_img":
                 idx = np.random.choice(np.arange(24), 1, replace=False)
             # elif self.condition == "sketch":

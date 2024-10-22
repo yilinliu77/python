@@ -200,7 +200,6 @@ class TrainDiffusion(pl.LightningModule):
                 o3d.io.write_image(str(item_root / "img2.png"), o3d.geometry.Image(imgs[2]))
                 o3d.io.write_image(str(item_root / "img3.png"), o3d.geometry.Image(imgs[3]))
 
-
     def on_test_epoch_end(self):
         for loss in self.trainer.callback_metrics:
             print("{}: {:.3f}".format(loss, self.trainer.callback_metrics[loss].cpu().item()))

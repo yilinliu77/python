@@ -24,8 +24,8 @@ if __name__ == '__main__':
         # local_mode=True,
     )
 
-    root = Path("C:/Users/yilin/Desktop/uncond_gaussian_200k")
-    output_root = Path("C:/Users/yilin/Desktop/uncond_gaussian_200k_points")
+    root = Path("C:/Users/yilin/Desktop/uncond_pure_450k")
+    output_root = Path("C:/Users/yilin/Desktop/uncond_pure_450k_points")
     output_root.mkdir(exist_ok=True, parents=True)
 
     tasks = []

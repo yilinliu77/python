@@ -602,6 +602,21 @@ class Diffusion_condition(Diffusion_base):
         recon_data = []
         for i in range(bs):
             face_z_item = face_z[i:i + 1][mask[i:i + 1]]
+            if self.pad_method == "random": # Deduplicate
+                threshold = 1e-2
+                index = torch.stack(torch.meshgrid(torch.arange(self.num_max_faces),torch.arange(self.num_max_faces), indexing="ij"), dim=2)
+                features = face_z_item[index]
+                distance = (features[:,:,0]-features[:,:,1]).abs().mean(dim=-1)
+                final_face_z = []
+                for j in range(self.num_max_faces):
+                    valid = True
+                    for k in final_face_z:
+                        if distance[j,k] < threshold:
+                            valid = False
+                            break
+                    if valid:
+                        final_face_z.append(j)
+                face_z_item = face_z_item[final_face_z]
             data_item = self.ae_model.inference(face_z_item)
             recon_data.append(data_item)
         return recon_data

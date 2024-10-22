@@ -3638,14 +3638,14 @@ class AutoEncoder_0925(nn.Module):
         edge_center = edge_center_scale[..., 0]
         edge_scale = edge_center_scale[..., 1]
         pred_edge_points = denormalize_coord(edge_points_local[..., :3], edge_center, edge_scale)
-        pred_edge_points = denormalize_coord2(edge_points_local, edge_center_scale.reshape(-1, 6))
+        # pred_edge_points = denormalize_coord2(edge_points_local, edge_center_scale.reshape(-1, 6))
 
         face_points_local = self.face_points_decoder(v_face_features)
         face_center_scale = self.face_center_scale_decoder(v_face_features)
         face_center = face_center_scale[..., 0]
         face_scale = face_center_scale[..., 1]
         pred_face_points = denormalize_coord(face_points_local[..., :3], face_center, face_scale)
-        pred_face_points = denormalize_coord2(face_points_local, face_center_scale.reshape(-1, 6))
+        # pred_face_points = denormalize_coord2(face_points_local, face_center_scale.reshape(-1, 6))
 
         pred_edge_face_connectivity = torch.cat((torch.arange(pred_edge_points.shape[0], device=device)[:,None], indexes[pred_labels]), dim=1)
         return {

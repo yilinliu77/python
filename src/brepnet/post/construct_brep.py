@@ -129,7 +129,7 @@ def get_data(v_filename):
 
 def construct_brep_from_datanpz(data_root, out_root, folder_name,
                                 is_ray=False, is_log=True,
-                                is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=False, is_save_data=True):
+                                is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=False, is_save_data=False):
     if not from_scratch and os.path.exists(os.path.join(out_root, folder_name + "/valid.txt")):
         return
 

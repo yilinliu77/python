@@ -727,3 +727,20 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             "face_features": face_features,
             "conditions"   : condition_out
         }
+
+
+class Dummy_dataset(torch.utils.data.Dataset):
+    def __init__(self, v_mode, v_conf):
+        self.length = v_conf["length"]
+
+    def __len__(self,):
+        return self.length
+
+    def __getitem__(self, idx):
+        return "{:08d}".format(idx)
+    
+    @staticmethod
+    def collate_fn(batch):
+        return {
+            "v_prefix"     : batch,
+        }

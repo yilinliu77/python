@@ -172,37 +172,47 @@ class TrainDiffusion(pl.LightningModule):
         # if batch_idx != 147:
         #     return
         data = batch
-        loss = self.model(data, v_test=True)
-        total_loss = loss["total_loss"]
-        self.log("Test_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                 sync_dist=True, batch_size=self.batch_size)
         batch_size = min(len(batch['v_prefix']), self.batch_size)
+        # Test loss
+        if len(data.keys()) != 1:
+            loss = self.model(data, v_test=True)
+            total_loss = loss["total_loss"]
+            self.log("Test_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
+                    sync_dist=True, batch_size=self.batch_size)
+        
+        # Generation
         results = self.model.inference(batch_size, self.device, v_data=data)
         log_root = Path(self.hydra_conf["trainer"]["test_output_dir"])
         for idx in range(batch_size):
-            global_id = batch_idx * self.batch_size + idx
-            item_root = (log_root / "{:08d}".format(global_id))
+            prefix = data["v_prefix"][idx]
+            item_root = (log_root / prefix)
             item_root.mkdir(parents=True, exist_ok=True)
             recon_data = results[idx]
 
-            mesh = to_mesh(recon_data["pred_face"].cpu().numpy())
-            mesh.export(str(item_root / "face.ply"))
-            export_edges(recon_data["pred_edge"].cpu().numpy(), str(item_root / "edge.obj"))
+            mesh = to_mesh(recon_data["pred_face"])
+            mesh.export(str(item_root / f"{prefix}_face.ply"))
+            export_edges(recon_data["pred_edge"], str(item_root / f"{prefix}_edge.obj"))
 
             np.savez_compressed(str(item_root / f"data.npz"),
-                                pred_face_adj_prob=recon_data["pred_face_adj_prob"].cpu().numpy(),
+                                pred_face_adj_prob=recon_data["pred_face_adj_prob"],
                                 pred_face_adj=recon_data["pred_face_adj"].cpu().numpy(),
-                                pred_face=recon_data["pred_face"].cpu().numpy(),
-                                pred_edge=recon_data["pred_edge"].cpu().numpy(),
-                                pred_edge_face_connectivity=recon_data["pred_edge_face_connectivity"].cpu().numpy(),
+                                pred_face=recon_data["pred_face"],
+                                pred_edge=recon_data["pred_edge"],
+                                pred_edge_face_connectivity=recon_data["pred_edge_face_connectivity"],
                                 )
 
-            if "ori_imgs" in data["conditions"]:
+            if "conditions" in data and "ori_imgs" in data["conditions"]:
                 imgs = data["conditions"]["ori_imgs"][idx].cpu().numpy().astype(np.uint8)
-                o3d.io.write_image(str(item_root / "img0.png"), o3d.geometry.Image(imgs[0]))
-                o3d.io.write_image(str(item_root / "img1.png"), o3d.geometry.Image(imgs[1]))
-                o3d.io.write_image(str(item_root / "img2.png"), o3d.geometry.Image(imgs[2]))
-                o3d.io.write_image(str(item_root / "img3.png"), o3d.geometry.Image(imgs[3]))
+                o3d.io.write_image(str(item_root / f"{prefix}_img0.png"), o3d.geometry.Image(imgs[0]))
+                o3d.io.write_image(str(item_root / f"{prefix}_img1.png"), o3d.geometry.Image(imgs[1]))
+                o3d.io.write_image(str(item_root / f"{prefix}_img2.png"), o3d.geometry.Image(imgs[2]))
+                o3d.io.write_image(str(item_root / f"{prefix}_img3.png"), o3d.geometry.Image(imgs[3]))
+            if "conditions" in data and "points" in data["conditions"]:
+                points = data["conditions"]["points"][idx].cpu().numpy().astype(np.float32)[0]
+                pc = o3d.geometry.PointCloud()
+                pc.points = o3d.utility.Vector3dVector(points[:,:3])
+                pc.normals = o3d.utility.Vector3dVector(points[:,3:])
+                o3d.io.write_point_cloud(str(item_root / f"{prefix}_pc.ply"), pc)
 
     def on_test_epoch_end(self):
         for loss in self.trainer.callback_metrics:

@@ -177,7 +177,8 @@ class Separate_encoder(nn.Module):
             "vertex_mask": vertex_mask,
         }
 
-
+def inv_sigmoid(x):
+    return torch.log(x / (1 - x))
 
 def prepare_connectivity(v_data, ):
     face_mask = (v_data["face_points"] != -1).all(dim=-1).all(dim=-1).all(dim=-1)
@@ -3343,8 +3344,8 @@ class AutoEncoder_0925(nn.Module):
         self.df = self.dim_latent * 2 * 2
         df = self.df
 
-        # self.in_channels = 3
-        self.in_channels = v_conf["in_channels"]
+        self.in_channels = 3
+        # self.in_channels = v_conf["in_channels"]
 
         self.face_conv1 = nn.Sequential(
             Rearrange('b h w n -> b n h w'),
@@ -3601,21 +3602,35 @@ class AutoEncoder_0925(nn.Module):
             data["gt_edge"] = v_data["edge_points"].detach().cpu().numpy()
             data["gt_edge_face_connectivity"] = v_data["edge_face_connectivity"].detach().cpu().numpy()
 
-            recon_bbox = rearrange(torch.stack((recon_data["face_center"], recon_data["face_scale"]),dim=-1), "... w h -> ... (w h)")
-            loss["face_coords"] = nn.functional.l1_loss(
-                denormalize_coord2(recon_data["face_points_local"], recon_bbox)[..., :3],
-                v_data["face_points"][..., :3]
-            )
-            recon_bbox = rearrange(torch.stack((recon_data["edge_center"], recon_data["edge_scale"]),dim=-1), "... w h -> ... (w h)")
-            recon_bbox1 = rearrange(torch.stack((recon_data["edge_center1"], recon_data["edge_scale1"]),dim=-1), "... w h -> ... (w h)")
-            loss["edge_coords"] = nn.functional.l1_loss(
-                denormalize_coord2(recon_data["edge_points_local"], recon_bbox)[..., :3],
-                v_data["edge_points"][..., :3][v_data["edge_face_connectivity"][:, 0]]
-            )
-            loss["edge_coords1"] = nn.functional.l1_loss(
-                denormalize_coord2(recon_data["edge_points_local1"], recon_bbox1)[..., :3],
-                v_data["edge_points"][..., :3]
-            )
+            if True:
+                loss["face_coords"] = nn.functional.l1_loss(
+                    denormalize_coord(recon_data["face_points_local"], recon_data["face_center"], recon_data["face_scale"])[..., :3],
+                    v_data["face_points"][..., :3]
+                )
+                loss["edge_coords"] = nn.functional.l1_loss(
+                    denormalize_coord(recon_data["edge_points_local"], recon_data["edge_center"], recon_data["edge_scale"])[..., :3],
+                    v_data["edge_points"][..., :3][v_data["edge_face_connectivity"][:, 0]]
+                )
+                loss["edge_coords1"] = nn.functional.l1_loss(
+                    denormalize_coord(recon_data["edge_points_local1"], recon_data["edge_center1"], recon_data["edge_scale1"])[..., :3],
+                    v_data["edge_points"][..., :3]
+                )
+            else:
+                recon_bbox = rearrange(torch.stack((recon_data["face_center"], recon_data["face_scale"]),dim=-1), "... w h -> ... (w h)")
+                loss["face_coords"] = nn.functional.l1_loss(
+                    recon_data["pred_face"][..., :3],
+                    v_data["face_points"][..., :3]
+                )
+                recon_bbox = rearrange(torch.stack((recon_data["edge_center"], recon_data["edge_scale"]),dim=-1), "... w h -> ... (w h)")
+                recon_bbox1 = rearrange(torch.stack((recon_data["edge_center1"], recon_data["edge_scale1"]),dim=-1), "... w h -> ... (w h)")
+                loss["edge_coords"] = nn.functional.l1_loss(
+                    denormalize_coord2(recon_data["edge_points_local"], recon_bbox)[..., :3],
+                    v_data["edge_points"][..., :3][v_data["edge_face_connectivity"][:, 0]]
+                )
+                loss["edge_coords1"] = nn.functional.l1_loss(
+                    denormalize_coord2(recon_data["edge_points_local1"], recon_bbox1)[..., :3],
+                    v_data["edge_points"][..., :3]
+                )
 
         return loss, data
 
@@ -3740,7 +3755,7 @@ class AutoEncoder_0925(nn.Module):
         # Loss
         loss={}
         loss["edge_classification"] = loss_edge_classification * 0.1
-        if True:
+        if False:
             loss["face_norm"] = nn.functional.l1_loss(
                 face_points_local,
                 v_data["face_norm"]
@@ -5263,8 +5278,8 @@ class EncoderDecoder(nn.Module):
         norm = v_conf["norm"]
 
         # Encoder
-        # self.sigmoid = v_conf["encoder_decoder_sigmoid"]
-        self.sigmoid = True
+        self.sigmoid = v_conf["encoder_decoder_sigmoid"]
+        # self.sigmoid = True
         self.in_channels = v_conf["in_channels"]
         self.face_conv = nn.Sequential(
             Rearrange('b h w n -> b n h w'),
@@ -5917,6 +5932,26 @@ class EncoderDecoderLatent3(nn.Module):
         if "with_intersection" in v_conf:
             self.with_intersection = v_conf["with_intersection"]
             norm = v_conf["norm"]
+
+            self.edge_coord_in = nn.Sequential(
+                nn.Linear(dl * 2, bd // 2),
+                nn.LeakyReLU(),
+                nn.Linear(bd // 2, bd // 2),
+            )
+            self.edge_bbox_in = nn.Sequential(
+                nn.Linear(6, bd // 2),
+                nn.LeakyReLU(),
+                nn.Linear(bd // 2, bd // 2),
+            )
+            
+            self.graph_face_edge = nn.ModuleList()
+            for i in range(5):
+                self.graph_face_edge.append(GATv2Conv(
+                    bd, bd,
+                    heads=1, edge_dim=bd,
+                ))
+                self.graph_face_edge.append(nn.ReLU())
+
             self.edge_feature_proj = nn.Sequential(
                 nn.Conv1d(bd * 2, bd, kernel_size=1, stride=1, padding=0),
                 res_block_1D(bd, bd, ks=1, st=1, pa=0, norm=norm),
@@ -5929,7 +5964,21 @@ class EncoderDecoderLatent3(nn.Module):
                 Rearrange("b n w -> b (n w)"),
             )
             self.classifier = nn.Linear(bd, 1)
-            self.edge_out = nn.Linear(bd, self.dim_latent * 2 + 6)
+            self.edge_coord_out = nn.Sequential(
+                res_linear(bd, bd, norm="layer"),
+                res_linear(bd, bd, norm="layer"),
+                res_linear(bd, bd, norm="layer"),
+                res_linear(bd, bd, norm="layer"),
+                nn.Linear(bd, self.dim_latent * 2),
+            )
+            self.edge_bbox_out = nn.Sequential(
+                res_linear(bd, bd, norm="layer"),
+                res_linear(bd, bd, norm="layer"),
+                res_linear(bd, bd, norm="layer"),
+                res_linear(bd, bd, norm="layer"),
+                nn.Linear(bd, 6),
+            )
+
 
     def forward(self, v_data, v_test=False):
         face_features = self.encoderdecoder.face_conv(v_data["face_norm"][...,:self.in_channels])
@@ -5937,6 +5986,25 @@ class EncoderDecoderLatent3(nn.Module):
         bbox_embedding = self.face_bbox_in(v_data["face_bbox"])
         coords_embedding = self.face_coord_in(face_features)
         fused_face_features = torch.cat((coords_embedding, bbox_embedding), dim=-1)
+
+        if self.with_intersection:
+            edge_features = self.encoderdecoder.edge_conv(v_data["edge_norm"][...,:self.in_channels])
+            edge_bbox_embedding = self.edge_bbox_in(v_data["edge_bbox"])
+            edge_coords_embedding = self.edge_coord_in(edge_features)
+            edge_features_cat = torch.cat((edge_coords_embedding, edge_bbox_embedding), dim=-1)
+            # Fuser
+            edge_face_connectivity = v_data["edge_face_connectivity"]
+            # Face graph
+            x = fused_face_features
+            edge_index = edge_face_connectivity[:, 1:].permute(1, 0)
+            edge_attr = edge_features_cat[edge_face_connectivity[:, 0]]
+            for layer in self.graph_face_edge:
+                if isinstance(layer, GATv2Conv):
+                    x = layer(x, edge_index, edge_attr) + x
+                else:
+                    x = layer(x)
+            fused_face_features = x
+
         fused_face_features = self.face_attn_in(fused_face_features, v_data["attn_mask"])
         fused_face_features = self.face_attn_in_fc(fused_face_features)
 
@@ -5960,11 +6028,8 @@ class EncoderDecoderLatent3(nn.Module):
         pred_face_bbox = self.face_bbox_out(face_z1)
 
         if self.with_intersection:
-            edge_features = self.encoderdecoder.edge_conv(v_data["edge_norm"][...,:self.in_channels])
-            edge_features_cat = torch.cat((edge_features, v_data["edge_bbox"]), dim=-1)
-            edge_face_conn = v_data["edge_face_connectivity"]
             zero_positions = v_data["zero_positions"]
-            true_intersection_embedding = face_z1[edge_face_conn[:, 1:]]
+            true_intersection_embedding = face_z1[edge_face_connectivity[:, 1:]]
             false_intersection_embedding = face_z1[zero_positions]
             intersection_embedding = torch.cat((true_intersection_embedding, false_intersection_embedding), dim=0)
             id_false_start = true_intersection_embedding.shape[0]
@@ -5978,10 +6043,15 @@ class EncoderDecoderLatent3(nn.Module):
             loss_edge_classification = F.binary_cross_entropy_with_logits(probability, gt_labels)
 
             intersection_embedding = intersection_embedding[:id_false_start]
-            pred_edge_out = self.edge_out(intersection_embedding)
+            pred_edge_coords_z = self.edge_coord_out(intersection_embedding)
+            pred_edge_bbox = self.edge_bbox_out(intersection_embedding)
             loss["edge_feature"] = nn.functional.l1_loss(
-                pred_edge_out,
-                edge_features_cat
+                pred_edge_coords_z,
+                edge_features
+            )
+            loss["edge_bbox"] = nn.functional.l1_loss(
+                pred_edge_bbox,
+                v_data["edge_bbox"]
             )
             loss["loss_edge_classification"] = loss_edge_classification * 0.1
 
@@ -6008,8 +6078,8 @@ class EncoderDecoderLatent3(nn.Module):
             )
             if self.with_intersection:
                 gt_edge = denormalize_coord2(v_data["edge_norm"], v_data["edge_bbox"])
-                pred_edge = self.encoderdecoder.edge_points_decoder(pred_edge_out[..., :-6])
-                pred_edge = denormalize_coord2(pred_edge, pred_edge_out[..., -6:])
+                pred_edge = self.encoderdecoder.edge_points_decoder(pred_edge_coords_z)
+                pred_edge = denormalize_coord2(pred_edge, pred_edge_bbox)
 
                 loss["edge_coords"] = nn.functional.l1_loss(
                     pred_edge[..., :3],
@@ -6023,6 +6093,29 @@ class EncoderDecoderLatent3(nn.Module):
         return loss, data
 
 
+class EncoderDecoderLatent3_bigger(EncoderDecoderLatent3):
+    def __init__(self, v_conf):
+        super().__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        ds = self.dim_shape
+        self.in_channels = v_conf["in_channels"]
+        self.dim_latent = v_conf["dim_latent"]
+        dl = self.dim_latent
+        norm = v_conf["norm"]
+        df = self.dim_latent * 2 * 2
+        self.df = df
+
+        bd = 768
+        layer = nn.TransformerEncoderLayer(
+            bd, 12, dim_feedforward=2048, dropout=0.1, 
+            batch_first=True, norm_first=True)
+        self.face_attn_in = nn.TransformerEncoder(layer, 16, nn.LayerNorm(bd))
+        
+        layer2 = nn.TransformerEncoderLayer(
+            bd, 12, dim_feedforward=2048, dropout=0.1, 
+            batch_first=True, norm_first=True)
+        self.face_attn_out = nn.TransformerEncoder(layer2, 16, nn.LayerNorm(bd))
+        
 # BBox version
 class AutoEncoder_1012(nn.Module):
     def __init__(self, v_conf):

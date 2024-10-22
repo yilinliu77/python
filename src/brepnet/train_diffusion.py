@@ -153,9 +153,8 @@ class TrainDiffusion(pl.LightningModule):
             return
 
         if "recon_faces" in self.viz:
-            recon_faces = self.viz["recon_faces"].cpu().to(torch.float32).numpy()
-            local_face = recon_faces
-            trimesh.PointCloud(local_face.reshape(-1, 3)).export(str(self.log_root / "{}_faces.ply".format(self.current_epoch)))
+            recon_faces = self.viz["recon_faces"]
+            trimesh.PointCloud(recon_faces.reshape(-1, 3)).export(str(self.log_root / "{}_faces.ply".format(self.current_epoch)))
         self.viz = {}
         return
 

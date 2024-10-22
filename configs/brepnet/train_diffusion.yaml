@@ -15,6 +15,7 @@ dataset:
   is_aug: 0
   
   length: 1000
+  num_max_faces: 64
 
 trainer:
   gpu: 1
@@ -46,6 +47,7 @@ model:
   diffusion_type: sample
   loss: l2
   pad_method: zero
+  num_max_faces: 64
 
   autoencoder: AutoEncoder_0925
   dim_latent: 8

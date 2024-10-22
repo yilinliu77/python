@@ -202,15 +202,15 @@ class TrainAutoEncoder(pl.LightningModule):
 
         if "pred_face_adj" in recon_data:
             self.pr_computer.update(recon_data["pred_face_adj"].reshape(-1), recon_data["gt_face_adj"].reshape(-1))
-        if False:
+        if True:
             local_root = log_root / f"{data['v_prefix'][0]}"
             local_root.mkdir(parents=True, exist_ok=True)
             np.savez_compressed(str(local_root / f"data.npz"),
-                                pred_face_adj_prob=recon_data["pred_face_adj_prob"].cpu().numpy(),
+                                pred_face_adj_prob=recon_data["pred_face_adj_prob"],
                                 pred_face_adj=recon_data["pred_face_adj"].cpu().numpy(),
-                                pred_face=recon_data["pred_face"].cpu().numpy(),
-                                pred_edge=recon_data["pred_edge"].cpu().numpy(),
-                                pred_edge_face_connectivity=recon_data["pred_edge_face_connectivity"].cpu().numpy(),
+                                pred_face=recon_data["pred_face"],
+                                pred_edge=recon_data["pred_edge"],
+                                pred_edge_face_connectivity=recon_data["pred_edge_face_connectivity"],
 
                                 gt_face_adj=recon_data["gt_face_adj"].cpu().numpy(),
                                 gt_face=recon_data["gt_face"],
@@ -222,7 +222,7 @@ class TrainAutoEncoder(pl.LightningModule):
                                 edge_loss_ori=loss["edge_coords1"].cpu().item(),
                                 )
             np.save(str(local_root / "features"),
-                                recon_data["face_features"].cpu().numpy(),
+                                recon_data["face_features"],
                                 )
             
         if False:

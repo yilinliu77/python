@@ -391,7 +391,7 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
             raise
 
         self.data_folders = [folder for folder in os.listdir(self.dataset_path) if os.path.isdir(os.path.join(self.dataset_path, folder))]
-        if v_conf["deduplicate_list"]:
+        if "deduplicate_list" in v_conf and v_conf["deduplicate_list"]:
             deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}.txt".format(v_training_mode)
             print("Use deduplicate list ", deduplicate_file)
             deduplicate_list = [item.strip() for item in open(deduplicate_file).readlines()]
@@ -596,16 +596,10 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         else:
             raise
 
-        filelist1 = os.listdir(self.dataset_path)
-        filelist2 = [item[:8] for item in os.listdir(self.face_z_dataset) if os.path.exists(os.path.join(self.face_z_dataset,item+"/features.npy"))]
-        # filelist2 = filelist1
-        deduplicate_list = filelist1
-        if v_conf["deduplicate_list"]:
-            deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}.txt".format(v_training_mode)
-            print("Use deduplicate list ", deduplicate_file)
-            deduplicate_list = [item.strip() for item in open(deduplicate_file).readlines()]
-
-        filelist = list(set(filelist1) & set(filelist2) & set(deduplicate_list))
+        self.max_faces = v_conf["num_max_faces"]
+        deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}_{}.txt".format(v_training_mode, self.max_faces)
+        print("Use deduplicate list ", deduplicate_file)
+        filelist = [item.strip() for item in open(deduplicate_file).readlines()]
         filelist.sort()
 
         self.condition = v_conf["condition"]
@@ -615,7 +609,6 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             T.ToTensor(),
             T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ])
-        self.max_faces = 64
         if v_conf["overfit"]:  # Overfitting mode
             self.data_folders = filelist[:100] * scale_factor
         else:
@@ -630,32 +623,10 @@ class Diffusion_dataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.data_folders)
 
-    def check_data(self, v_path, v_max_num=64):
-        print("Original data num:", len(self.data_folders))
-        filepath = os.path.join(v_path, "id_larger_than_{}_faces.txt".format(v_max_num))
-        if os.path.exists(filepath):
-            print("Found ignore file")
-            ignore_ids = [item.strip() for item in open(filepath).readlines()]
-        else:
-            print("Create ignore file")
-            ignore_ids = []
-            for item in self.data_folders:
-                shape_num = np.load(item)["face_features"].shape[0]
-                if shape_num > v_max_num:
-                    ignore_ids.append(item.stem)
-            with open(filepath, "w") as f:
-                for item in ignore_ids:
-                    f.write(item + "\n")
-
-        self.data_folders = [item for item in self.data_folders if item.stem not in ignore_ids]
-
     def __getitem__(self, idx):
         # idx = 0
         folder_path = self.data_folders[idx]
-        try:
-            data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "_feature.npz"))['face_features']
-        except:
-            data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "/features.npy"))
+        data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "/features.npy"))
         face_features = torch.from_numpy(data_npz)
 
         if self.pad_method == "zero":
@@ -726,4 +697,21 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             "v_prefix"     : v_prefix,
             "face_features": face_features,
             "conditions"   : condition_out
+        }
+
+
+class Dummy_dataset(torch.utils.data.Dataset):
+    def __init__(self, v_mode, v_conf):
+        self.length = v_conf["length"]
+
+    def __len__(self,):
+        return self.length
+
+    def __getitem__(self, idx):
+        return "{:08d}".format(idx)
+    
+    @staticmethod
+    def collate_fn(batch):
+        return {
+            "v_prefix"     : batch,
         }

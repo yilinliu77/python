@@ -450,9 +450,9 @@ class Diffusion_base(nn.Module):
         return loss
 
 
-class Diffusion_condition(Diffusion_base):
+class Diffusion_condition(nn.Module):
     def __init__(self, v_conf, ):
-        super().__init__(v_conf)
+        super().__init__()
         self.dim_input = 8 * 2 * 2
         self.dim_latent = v_conf["diffusion_latent"]
         self.dim_condition = 256
@@ -468,8 +468,14 @@ class Diffusion_condition(Diffusion_base):
 
         layer1 = nn.TransformerEncoderLayer(
                 d_model=self.dim_total,
-                nhead=12, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
+                nhead=16, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
         self.net1 = nn.TransformerEncoder(layer1, 24, nn.LayerNorm(self.dim_total))
+        self.fc_out = nn.Sequential(
+                nn.Linear(self.dim_total, self.dim_total),
+                nn.LayerNorm(self.dim_total),
+                nn.SiLU(),
+                nn.Linear(self.dim_total, self.dim_input),
+        )
 
         self.with_img = False
         self.with_pc = False
@@ -575,9 +581,27 @@ class Diffusion_condition(Diffusion_base):
             nn.Linear(self.dim_total, self.dim_total),
         )
 
+        self.num_max_faces = v_conf["num_max_faces"]
         self.loss = nn.functional.l1_loss if v_conf["loss"] == "l1" else nn.functional.mse_loss
         self.diffusion_type = v_conf["diffusion_type"]
         self.pad_method = v_conf["pad_method"]
+
+        # self.ae_model = AutoEncoder_0925(v_conf)
+        model_mod = importlib.import_module("src.brepnet.model")
+        model_mod = getattr(model_mod, v_conf["autoencoder"])
+        self.ae_model = model_mod(v_conf)
+
+        self.is_pretrained = v_conf["autoencoder_weights"] is not None
+        self.is_stored_z = v_conf["stored_z"]
+        self.is_train_decoder = v_conf["train_decoder"]
+        if self.is_pretrained:
+            checkpoint = torch.load(v_conf["autoencoder_weights"], weights_only=False)["state_dict"]
+            weights = {k.replace("model.", ""): v for k, v in checkpoint.items()}
+            self.ae_model.load_state_dict(weights)
+        if not self.is_train_decoder:
+            for param in self.ae_model.parameters():
+                param.requires_grad = False
+            self.ae_model.eval()
 
     def inference(self, bs, device, v_data=None, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, 32)).to(device)
@@ -602,6 +626,21 @@ class Diffusion_condition(Diffusion_base):
         recon_data = []
         for i in range(bs):
             face_z_item = face_z[i:i + 1][mask[i:i + 1]]
+            if self.pad_method == "random": # Deduplicate
+                threshold = 1e-2
+                index = torch.stack(torch.meshgrid(torch.arange(self.num_max_faces),torch.arange(self.num_max_faces), indexing="ij"), dim=2)
+                features = face_z_item[index]
+                distance = (features[:,:,0]-features[:,:,1]).abs().mean(dim=-1)
+                final_face_z = []
+                for j in range(self.num_max_faces):
+                    valid = True
+                    for k in final_face_z:
+                        if distance[j,k] < threshold:
+                            valid = False
+                            break
+                    if valid:
+                        final_face_z.append(j)
+                face_z_item = face_z_item[final_face_z]
             data_item = self.ae_model.inference(face_z_item)
             recon_data.append(data_item)
         return recon_data

@@ -238,7 +238,6 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
                         shape.recon_edge_points[edge_idx].reshape(-1, 3),
                         np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
 
-    t1 = time.time()
     # Construct Brep from face_points, edge_points, face_edge_adj
     solid = None
     mesh = None

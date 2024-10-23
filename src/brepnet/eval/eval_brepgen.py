@@ -295,7 +295,7 @@ def main():
     parser.add_argument("--fake", type=str)
     parser.add_argument("--real", type=str)
     parser.add_argument("--n_test", type=int, default=1000)
-    parser.add_argument("--multi", type=int, default=3)
+    parser.add_argument("--multi", type=int, default=2)
     parser.add_argument("--times", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=64)
     args = parser.parse_args()

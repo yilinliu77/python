@@ -12,7 +12,7 @@ import glob
 
 @ray.remote
 def sample(prefix, root, output_root):
-    option_file = glob.glob(os.path.join(root / prefix, '*.ply')) + glob.glob(os.path.join(root / prefix, '*.stl'))
+    option_file = glob.glob(os.path.join(root / prefix, '*.stl')) + glob.glob(os.path.join(root / prefix, '*.ply'))
     if len(option_file) == 0:
         return
     file = option_file[0]
@@ -28,9 +28,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Construct Brep From Data')
     parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\ourgen\uncond_gaussian_450k_post")
     parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\ourgen\uncond_gaussian_450k_post_sampled_pc")
+    parser.add_argument('--valid', action='store_true')
 
     root = Path(parser.parse_args().data_root)
     output_root = Path(parser.parse_args().out_root)
+    onlyvalid = parser.parse_args().valid
     output_root.mkdir(exist_ok=True, parents=True)
 
     ray.init(
@@ -40,6 +42,8 @@ if __name__ == '__main__':
 
     tasks = []
     for prefix in os.listdir(root):
+        if onlyvalid and not os.path.exists(root / prefix / "success.txt"):
+            continue
         tasks.append(sample.remote(prefix, root, output_root))
     ray.get(tasks)
     os.listdir()

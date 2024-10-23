@@ -16,6 +16,8 @@ import ray
 import argparse
 import trimesh
 
+import time
+
 
 @ray.remote(num_gpus=0.05)
 def optimize_geom_ray(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, is_log=False,
@@ -236,6 +238,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
                         shape.recon_edge_points[edge_idx].reshape(-1, 3),
                         np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
 
+    t1 = time.time()
     # Construct Brep from face_points, edge_points, face_edge_adj
     solid = None
     mesh = None
@@ -259,18 +262,25 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             result = analyzer.Result(solid)
             continue
 
-        is_successful = True
+        if solid.ShapeType() == TopAbs_SOLID and analyzer.IsValid():
+            is_successful = True
+        else:
+            is_successful = False
         break
 
     if solid is not None:
-        write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
+        try:
+            write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
+        except:
+            pass
     if mesh is not None:
         mesh.export(os.path.join(out_root, folder_name, 'recon_brep.ply'))
     if is_successful:
         open(os.path.join(out_root, folder_name, 'success.txt'), 'w').close()
-    if is_successful and solid_valid_check(solid):
-        open(os.path.join(out_root, folder_name, 'valid.txt'), 'w').close()
-
+        try:
+            write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01, angular_deflection=0.5)
+        except:
+            pass
     # if not is_successful:
     #     shutil.rmtree(os.path.join(out_root, folder_name))
 

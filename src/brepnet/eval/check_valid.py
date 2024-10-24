@@ -1,4 +1,5 @@
 from OCC.Core.BRepCheck import BRepCheck_Analyzer
+from OCC.Core.TopAbs import TopAbs_SOLID
 from OCC.Extend.DataExchange import read_step_file
 import os
 import argparse
@@ -30,16 +31,26 @@ if __name__ == "__main__":
     folders = os.listdir(data_root)
     step_file_list = load_data_with_prefix(data_root, ".step")
 
+    print(f"Total sample features: {len(folders)}")
+    print(f"Total CAD solids: {len(step_file_list)}")
+
+    print("Start checking CAD solids...")
     # Load cad data
-    is_valid_list = []
+    valid_count = 0
     pbar = tqdm(step_file_list)
     for step_file in pbar:
-        solid = read_step_file(step_file)
-        analyzer = BRepCheck_Analyzer(solid, True, True, False)
+        try:
+            shape = read_step_file(step_file)
+        except:
+            continue
+        if shape.ShapeType() != TopAbs_SOLID:
+            continue
+        analyzer = BRepCheck_Analyzer(shape, True, True, False)
         is_valid = analyzer.IsValid()
         # is_valid = solid_valid_check(solid)
-        is_valid_list.append(is_valid)
-        pbar.set_postfix({"valid_count": sum(is_valid_list)})
+        if is_valid:
+            valid_count += 1
+        pbar.set_postfix({"valid_count": valid_count})
 
-    valid_count = sum(is_valid_list)
     print(f"Number of valid CAD solids: {valid_count}")
+    print(f"Valid rate: {valid_count / len(folders) * 100:.2f}%")

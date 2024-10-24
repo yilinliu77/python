@@ -185,12 +185,14 @@ def load_data_from_npz(data_npz_file):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--fake", type=str, required=True)
+    parser.add_argument("--fake_post", type=str, required=False)
     parser.add_argument("--train", type=str, required=False)
     parser.add_argument("--n_bit", type=int, default=4)
     parser.add_argument("--use_ray", action='store_true')
     parser.add_argument("--batch_size", type=int, default=200000)
     args = parser.parse_args()
     gen_data_root = args.fake
+    gen_post_data_root = args.fake_post
     train_data_root = args.train
     is_use_ray = args.use_ray
     n_bit = args.n_bit
@@ -201,10 +203,17 @@ def main():
     data_npz_file_list = load_data_with_prefix(gen_data_root, '.npz')
     # data_npz_file_list = data_npz_file_list[:1000]
     gen_graph_list = []
+    prefix_list = []
     for data_npz_file in tqdm(data_npz_file_list):
+        folder_name = os.path.basename(os.path.dirname(data_npz_file))
+        if (gen_post_data_root and not os.path.exists(os.path.join(gen_post_data_root, folder_name, "success.txt"))):
+            continue
+        prefix_list.append(folder_name)
         faces, faces_adj_pair = load_data_from_npz(data_npz_file)
         graph = build_graph(faces, faces_adj_pair, n_bit)
         gen_graph_list.append(graph)
+
+    print(f"Loaded {len(gen_graph_list)} generated data files")
 
     print("Computing unique ratio...")
     unique_ratio, deduplicate_matrix = compute_gen_unique(gen_graph_list, is_use_ray, batch_size)
@@ -220,9 +229,11 @@ def main():
 
     deduplicate_components_txt = gen_data_root + f"_deduplicate_components_{n_bit}bit.txt"
     fp = open(deduplicate_components_txt, "w")
+    print(f"Unique ratio: {unique_ratio}", file=fp)
     deduplicate_components = find_connected_components(deduplicate_matrix)
     for component in deduplicate_components:
         if len(component) > 1:
+            component = [prefix_list[idx] for idx in component]
             print(f"Component: {component}", file=fp)
 
 

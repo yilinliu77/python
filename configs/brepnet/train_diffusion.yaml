@@ -6,7 +6,7 @@ dataset:
   val_dataset: D:/img2brep/deepcad_whole_test_v5
   test_dataset: /mnt/d/deepcad_test_v6
 
-  deduplicate_list: false
+  deduplicate_list: 0
   pad_method: zero
 
   scale_factor: 1

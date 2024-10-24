@@ -5,6 +5,7 @@ import os
 import queue
 import random
 import string
+import time
 from typing import List, Optional, Tuple, Union
 
 import numpy as np
@@ -25,13 +26,14 @@ from OCC.Core.ShapeFix import ShapeFix_Face, ShapeFix_Wire, ShapeFix_Edge, Shape
     ShapeFix_ComposeShell
 from OCC.Core.TColgp import TColgp_Array1OfPnt
 from OCC.Core.TColgp import TColgp_Array2OfPnt
-from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_FORWARD, TopAbs_REVERSED, TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_SHELL
+from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_FORWARD, TopAbs_REVERSED, TopAbs_FACE, TopAbs_WIRE, \
+    TopAbs_EDGE, TopAbs_SHELL, TopAbs_SOLID
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.gp import gp_Pnt, gp_XYZ, gp_Vec
 from OCC.Display.SimpleGui import init_display
 from OCC.Extend.TopologyUtils import TopologyExplorer, WireExplorer
 # from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-from OCC.Extend.DataExchange import write_stl_file, write_step_file
+from OCC.Extend.DataExchange import write_stl_file, write_step_file, read_step_file
 
 # xdt
 from OCC.Core.TopoDS import topods, TopoDS_Shell, TopoDS_Builder
@@ -141,7 +143,7 @@ class Shape:
     def __init__(self, v_face_point, v_edge_points, v_connectivity, is_use_cuda=True):
         self.recon_face_points = v_face_point
         self.recon_edge_points = v_edge_points
-        self.edge_face_connectivity = v_connectivity
+        self.edge_face_connectivity = v_connectivity.astype(np.int64)
         self.device = torch.device('cuda') if is_use_cuda else torch.device('cpu')
 
         # Build denser points
@@ -467,7 +469,7 @@ def optimize(
         v_interpolation_face, recon_edge_points,
         edge_face_connectivity, is_end_point, pair1,
         face_edge_adj, v_islog=True, v_max_iter=1000):
-    device = torch.device('cuda')
+    device = torch.device('cpu')
     interpolation_face = []
     for item in v_interpolation_face:
         interpolation_face.append(torch.from_numpy(item.copy()).to(device))
@@ -480,8 +482,8 @@ def optimize(
     idx[is_end_point] = 15
     idx = torch.from_numpy(idx).to(device)
 
-    src_st = torch.FloatTensor([1, 0, 0, 0]).unsqueeze(0).repeat(edge_points.shape[0], 1).to(device)
-    edge_st = nn.Parameter(torch.FloatTensor([1, 0, 0, 0]).unsqueeze(0).repeat(edge_points.shape[0], 1).to(device))
+    src_st = torch.FloatTensor([1, 0, 0, 0], device=device).unsqueeze(0).repeat(edge_points.shape[0], 1)
+    edge_st = nn.Parameter(torch.FloatTensor([1, 0, 0, 0], device=device).unsqueeze(0).repeat(edge_points.shape[0], 1))
     edge_st.requires_grad = True
     optimizer = torch.optim.Adam([edge_st], lr=8e-3)
 
@@ -555,6 +557,7 @@ def optimize(
                              corner=corners_loss.cpu().item(),
                              connect=wire_connected_loss.cpu().item())
             pbar.update(1)
+
     if v_islog:
         print('Optimization finished!')
         pbar.close()

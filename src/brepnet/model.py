@@ -3344,8 +3344,8 @@ class AutoEncoder_0925(nn.Module):
         self.df = self.dim_latent * 2 * 2
         df = self.df
 
-        # self.in_channels = 3
-        self.in_channels = v_conf["in_channels"]
+        self.in_channels = 3
+        # self.in_channels = v_conf["in_channels"]
 
         self.face_conv1 = nn.Sequential(
             Rearrange('b h w n -> b n h w'),
@@ -3602,21 +3602,35 @@ class AutoEncoder_0925(nn.Module):
             data["gt_edge"] = v_data["edge_points"].detach().cpu().numpy()
             data["gt_edge_face_connectivity"] = v_data["edge_face_connectivity"].detach().cpu().numpy()
 
-            recon_bbox = rearrange(torch.stack((recon_data["face_center"], recon_data["face_scale"]),dim=-1), "... w h -> ... (w h)")
-            loss["face_coords"] = nn.functional.l1_loss(
-                denormalize_coord2(recon_data["face_points_local"], recon_bbox)[..., :3],
-                v_data["face_points"][..., :3]
-            )
-            recon_bbox = rearrange(torch.stack((recon_data["edge_center"], recon_data["edge_scale"]),dim=-1), "... w h -> ... (w h)")
-            recon_bbox1 = rearrange(torch.stack((recon_data["edge_center1"], recon_data["edge_scale1"]),dim=-1), "... w h -> ... (w h)")
-            loss["edge_coords"] = nn.functional.l1_loss(
-                denormalize_coord2(recon_data["edge_points_local"], recon_bbox)[..., :3],
-                v_data["edge_points"][..., :3][v_data["edge_face_connectivity"][:, 0]]
-            )
-            loss["edge_coords1"] = nn.functional.l1_loss(
-                denormalize_coord2(recon_data["edge_points_local1"], recon_bbox1)[..., :3],
-                v_data["edge_points"][..., :3]
-            )
+            if True:
+                loss["face_coords"] = nn.functional.l1_loss(
+                    denormalize_coord(recon_data["face_points_local"], recon_data["face_center"], recon_data["face_scale"])[..., :3],
+                    v_data["face_points"][..., :3]
+                )
+                loss["edge_coords"] = nn.functional.l1_loss(
+                    denormalize_coord(recon_data["edge_points_local"], recon_data["edge_center"], recon_data["edge_scale"])[..., :3],
+                    v_data["edge_points"][..., :3][v_data["edge_face_connectivity"][:, 0]]
+                )
+                loss["edge_coords1"] = nn.functional.l1_loss(
+                    denormalize_coord(recon_data["edge_points_local1"], recon_data["edge_center1"], recon_data["edge_scale1"])[..., :3],
+                    v_data["edge_points"][..., :3]
+                )
+            else:
+                recon_bbox = rearrange(torch.stack((recon_data["face_center"], recon_data["face_scale"]),dim=-1), "... w h -> ... (w h)")
+                loss["face_coords"] = nn.functional.l1_loss(
+                    recon_data["pred_face"][..., :3],
+                    v_data["face_points"][..., :3]
+                )
+                recon_bbox = rearrange(torch.stack((recon_data["edge_center"], recon_data["edge_scale"]),dim=-1), "... w h -> ... (w h)")
+                recon_bbox1 = rearrange(torch.stack((recon_data["edge_center1"], recon_data["edge_scale1"]),dim=-1), "... w h -> ... (w h)")
+                loss["edge_coords"] = nn.functional.l1_loss(
+                    denormalize_coord2(recon_data["edge_points_local"], recon_bbox)[..., :3],
+                    v_data["edge_points"][..., :3][v_data["edge_face_connectivity"][:, 0]]
+                )
+                loss["edge_coords1"] = nn.functional.l1_loss(
+                    denormalize_coord2(recon_data["edge_points_local1"], recon_bbox1)[..., :3],
+                    v_data["edge_points"][..., :3]
+                )
 
         return loss, data
 
@@ -3639,14 +3653,14 @@ class AutoEncoder_0925(nn.Module):
         edge_center = edge_center_scale[..., 0]
         edge_scale = edge_center_scale[..., 1]
         pred_edge_points = denormalize_coord(edge_points_local[..., :3], edge_center, edge_scale)
-        pred_edge_points = denormalize_coord2(edge_points_local, edge_center_scale.reshape(-1, 6))
+        # pred_edge_points = denormalize_coord2(edge_points_local, edge_center_scale.reshape(-1, 6))
 
         face_points_local = self.face_points_decoder(v_face_features)
         face_center_scale = self.face_center_scale_decoder(v_face_features)
         face_center = face_center_scale[..., 0]
         face_scale = face_center_scale[..., 1]
         pred_face_points = denormalize_coord(face_points_local[..., :3], face_center, face_scale)
-        pred_face_points = denormalize_coord2(face_points_local, face_center_scale.reshape(-1, 6))
+        # pred_face_points = denormalize_coord2(face_points_local, face_center_scale.reshape(-1, 6))
 
         pred_edge_face_connectivity = torch.cat((torch.arange(pred_edge_points.shape[0], device=device)[:,None], indexes[pred_labels]), dim=1)
         return {
@@ -3741,7 +3755,7 @@ class AutoEncoder_0925(nn.Module):
         # Loss
         loss={}
         loss["edge_classification"] = loss_edge_classification * 0.1
-        if True:
+        if False:
             loss["face_norm"] = nn.functional.l1_loss(
                 face_points_local,
                 v_data["face_norm"]

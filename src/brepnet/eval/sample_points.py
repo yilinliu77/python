@@ -42,6 +42,7 @@ def sample(prefix, root, output_root, checkvalid):
     pass
 
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Construct Brep From Data')
     parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\ourgen\uncond_gaussian_450k_post")

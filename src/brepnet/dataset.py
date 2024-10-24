@@ -616,6 +616,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         print("Total data num:", len(self.data_folders))
 
         self.is_aug = v_conf["is_aug"]
+        self.cached_condition = v_conf["cached_condition"]
         self.pad_method = v_conf["pad_method"]
 
         return
@@ -644,7 +645,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
 
         }
         if self.condition == "single_img" or self.condition == "multi_img" or self.condition == "sketch":
-            cache_data = False
+            cache_data = self.cached_condition
             if self.condition == "single_img":
                 idx = np.random.choice(np.arange(24), 1, replace=False)
             # elif self.condition == "sketch":

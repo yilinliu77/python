@@ -4,10 +4,15 @@ import os, sys, shutil, traceback
 import numpy as np
 import torch
 from OCC.Core import Message
+from OCC.Core.IFSelect import IFSelect_ReturnStatus
 from OCC.Core.Message import Message_PrinterOStream, Message_Alarm
+from OCC.Core.ShapeFix import ShapeFix_ShapeTolerance
+from OCC.Core.TopoDS import TopoDS_Face
+from OCC.Extend.DataExchange import read_step_file
 
 from shared.common_utils import safe_check_dir, check_dir
 from shared.common_utils import export_point_cloud
+from shared.occ_utils import get_primitives
 
 from src.brepnet.post.utils import *
 from src.brepnet.post.geom_optimization import optimize_geom, test_optimize_geom
@@ -306,7 +311,7 @@ def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda, from_scratc
     debug_folder = [v_prefix]
     for folder in debug_folder:
         construct_brep_from_datanpz(v_data_root, v_out_root, folder,
-                                    use_cuda=use_cuda, is_optimize_geom=True, isdebug=True,
+                                    use_cuda=use_cuda, is_optimize_geom=True, isdebug=True, is_save_data=True,
                                     from_scratch=from_scratch)
     exit(0)
 

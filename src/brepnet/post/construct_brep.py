@@ -4,10 +4,15 @@ import os, sys, shutil, traceback
 import numpy as np
 import torch
 from OCC.Core import Message
+from OCC.Core.IFSelect import IFSelect_ReturnStatus
 from OCC.Core.Message import Message_PrinterOStream, Message_Alarm
+from OCC.Core.ShapeFix import ShapeFix_ShapeTolerance
+from OCC.Core.TopoDS import TopoDS_Face
+from OCC.Extend.DataExchange import read_step_file
 
 from shared.common_utils import safe_check_dir, check_dir
 from shared.common_utils import export_point_cloud
+from shared.occ_utils import get_primitives
 
 from src.brepnet.post.utils import *
 from src.brepnet.post.geom_optimization import optimize_geom, test_optimize_geom
@@ -15,6 +20,8 @@ from src.brepnet.post.geom_optimization import optimize_geom, test_optimize_geom
 import ray
 import argparse
 import trimesh
+
+import time
 
 
 @ray.remote(num_gpus=0.05)
@@ -129,8 +136,8 @@ def get_data(v_filename):
 
 def construct_brep_from_datanpz(data_root, out_root, folder_name,
                                 is_ray=False, is_log=True,
-                                is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=False, is_save_data=True):
-    if not from_scratch and os.path.exists(os.path.join(out_root, folder_name + "/valid.txt")):
+                                is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=False, is_save_data=False):
+    if not from_scratch and os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
         return
 
     printers = Message.message.DefaultMessenger().Printers()
@@ -259,18 +266,25 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             result = analyzer.Result(solid)
             continue
 
-        is_successful = True
+        if solid.ShapeType() == TopAbs_SOLID and analyzer.IsValid():
+            is_successful = True
+        else:
+            is_successful = False
         break
 
     if solid is not None:
-        write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
+        try:
+            write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
+        except:
+            pass
     if mesh is not None:
         mesh.export(os.path.join(out_root, folder_name, 'recon_brep.ply'))
     if is_successful:
         open(os.path.join(out_root, folder_name, 'success.txt'), 'w').close()
-    if is_successful and solid_valid_check(solid):
-        open(os.path.join(out_root, folder_name, 'valid.txt'), 'w').close()
-
+        try:
+            write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01, angular_deflection=0.5)
+        except:
+            pass
     # if not is_successful:
     #     shutil.rmtree(os.path.join(out_root, folder_name))
 
@@ -306,7 +320,7 @@ def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda, from_scratc
     debug_folder = [v_prefix]
     for folder in debug_folder:
         construct_brep_from_datanpz(v_data_root, v_out_root, folder,
-                                    use_cuda=use_cuda, is_optimize_geom=True, isdebug=True,
+                                    use_cuda=use_cuda, is_optimize_geom=True, isdebug=True, is_save_data=True,
                                     from_scratch=from_scratch)
     exit(0)
 

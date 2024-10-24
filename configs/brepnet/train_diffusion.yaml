@@ -4,9 +4,9 @@ dataset:
   face_z: /root/repo/python/outputs_brepnet/0925_pure_face_z
   train_dataset: D:/img2brep/deepcad_whole_test_v5
   val_dataset: D:/img2brep/deepcad_whole_test_v5
-  test_dataset: /mnt/d/img2brep/0825_test
+  test_dataset: /mnt/d/deepcad_test_v6
 
-  deduplicate_list: false
+  deduplicate_list: 0
   pad_method: zero
   cached_condition: true
 
@@ -14,6 +14,8 @@ dataset:
   condition:
   overfit: false
   is_aug: 0
+  
+  length: 1000
   num_max_faces: 64
 
 trainer:

@@ -391,7 +391,7 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
             raise
 
         self.data_folders = [folder for folder in os.listdir(self.dataset_path) if os.path.isdir(os.path.join(self.dataset_path, folder))]
-        if "deduplicate_list" in v_conf and v_conf["deduplicate_list"]:
+        if True:
             deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}.txt".format(v_training_mode)
             print("Use deduplicate list ", deduplicate_file)
             deduplicate_list = [item.strip() for item in open(deduplicate_file).readlines()]
@@ -568,10 +568,10 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
             "num_face_record"       : num_face_record,
             "valid_mask"            : valid_mask,
 
-            "face_points_norm"      : torch.cat(face_points_norm, dim=0),
+            "face_norm"      : torch.cat(face_points_norm, dim=0),
             "face_center"           : torch.cat(face_center, dim=0),
             "face_scale"            : torch.cat(face_scale, dim=0),
-            "edge_points_norm"      : torch.cat(edge_points_norm, dim=0),
+            "edge_norm"      : torch.cat(edge_points_norm, dim=0),
             "edge_center"           : torch.cat(edge_center, dim=0),
             "edge_scale"            : torch.cat(edge_scale, dim=0),
         }
@@ -597,7 +597,11 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             raise
 
         self.max_faces = v_conf["num_max_faces"]
-        deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}_{}.txt".format(v_training_mode, self.max_faces)
+        self.deduplicate_list = v_conf["deduplicate_list"]
+        if self.deduplicate_list == 0:
+            deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}_7_30.txt".format(v_training_mode)
+        elif self.deduplicate_list == 1:
+            deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}_30.txt".format(v_training_mode)
         print("Use deduplicate list ", deduplicate_file)
         filelist = [item.strip() for item in open(deduplicate_file).readlines()]
         filelist.sort()
@@ -698,4 +702,21 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             "v_prefix"     : v_prefix,
             "face_features": face_features,
             "conditions"   : condition_out
+        }
+
+
+class Dummy_dataset(torch.utils.data.Dataset):
+    def __init__(self, v_mode, v_conf):
+        self.length = v_conf["length"]
+
+    def __len__(self,):
+        return self.length
+
+    def __getitem__(self, idx):
+        return "{:08d}".format(idx)
+    
+    @staticmethod
+    def collate_fn(batch):
+        return {
+            "v_prefix"     : batch,
         }

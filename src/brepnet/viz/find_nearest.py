@@ -14,7 +14,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--src_root", type=str, required=True)
     parser.add_argument("--ref_root", type=str, required=True)
-    parser.add_argument("--prefix", type=str, required=True, default="")
+    parser.add_argument("--prefix", type=str, required=False, default="")
     args = parser.parse_args()
     src_root = args.src_root
     ref_root = args.ref_root
@@ -23,6 +23,7 @@ if __name__ == "__main__":
     num_cpus = multiprocessing.cpu_count()
     ref_pcs = []
     shape_paths = load_data_with_prefix(ref_root, '.ply')
+    shape_paths = shape_paths[0:100]
     load_iter = multiprocessing.Pool(num_cpus).imap(collect_pc2, shape_paths)
     for pc in tqdm(load_iter, total=len(shape_paths)):
         if len(pc) > 0:
@@ -36,10 +37,10 @@ if __name__ == "__main__":
         shape_paths = load_data_with_prefix(os.path.join(src_root, args.prefix), '.ply')
     else:
         shape_paths = load_data_with_prefix(src_root, '.ply')
+
+    shape_paths = shape_paths[0:100]
     load_iter = multiprocessing.Pool(num_cpus).imap(collect_pc2, shape_paths)
     for pc in tqdm(load_iter, total=len(shape_paths)):
         if len(pc) > 0:
             src_pcs.append(pc)
     src_pcs = np.stack(src_pcs, axis=0)
-
-    pass

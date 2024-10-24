@@ -8,6 +8,7 @@ dataset:
 
   deduplicate_list: 0
   pad_method: zero
+  cached_condition: true
 
   scale_factor: 1
   condition:

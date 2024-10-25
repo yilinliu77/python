@@ -1,17 +1,35 @@
 import os
+import shutil
 from pathlib import Path
 
 import trimesh
 import ray
 from trimesh.sample import sample_surface
-
+from tqdm import tqdm
 import argparse
 
 import glob
 
+from OCC.Core.BRepCheck import BRepCheck_Analyzer
+from OCC.Core.TopAbs import TopAbs_SOLID
+from OCC.Extend.DataExchange import read_step_file
+from OCC.Core.ShapeFix import ShapeFix_ShapeTolerance
+
+from src.brepnet.eval.check_valid import check_step_valid_soild
+
 
 @ray.remote
-def sample(prefix, root, output_root):
+def sample(prefix, root, output_root, checkvalid):
+    # check valid
+    if checkvalid:
+        step_file = glob.glob(os.path.join(root / prefix, '*.step'))
+        if len(step_file) == 0:
+            return
+        is_valid = check_step_valid_soild(step_file[0])
+        if not is_valid:
+            return
+
+    # prefer stl
     option_file = glob.glob(os.path.join(root / prefix, '*.stl')) + glob.glob(os.path.join(root / prefix, '*.ply'))
     if len(option_file) == 0:
         return
@@ -24,6 +42,7 @@ def sample(prefix, root, output_root):
     pass
 
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Construct Brep From Data')
     parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\ourgen\uncond_gaussian_450k_post")
@@ -32,18 +51,19 @@ if __name__ == '__main__':
 
     root = Path(parser.parse_args().data_root)
     output_root = Path(parser.parse_args().out_root)
-    onlyvalid = parser.parse_args().valid
-    output_root.mkdir(exist_ok=True, parents=True)
+    check_valid = parser.parse_args().valid
+    if os.path.exists(output_root):
+        shutil.rmtree(output_root)
+    output_root.mkdir(exist_ok=False)
 
+    print("\nStart Sampling PointCloud...")
     ray.init(
             # num_cpus=1,
             # local_mode=True,
     )
 
     tasks = []
-    for prefix in os.listdir(root):
-        if onlyvalid and not os.path.exists(root / prefix / "success.txt"):
-            continue
-        tasks.append(sample.remote(prefix, root, output_root))
+    for prefix in tqdm(os.listdir(root)):
+        tasks.append(sample.remote(prefix, root, output_root, check_valid))
     ray.get(tasks)
-    os.listdir()
+    print("Finish Sampling PointCloud\n")

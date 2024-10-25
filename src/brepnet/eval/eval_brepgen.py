@@ -92,7 +92,7 @@ def compute_cov_mmd(sample_pcs, ref_pcs, batch_size):
     return {
         'MMD-CD': mmd.item(),
         'COV-CD': cov.item(),
-    }
+    }, min_idx.cpu().numpy()
 
 
 def jsd_between_point_cloud_sets(sample_pcs, ref_pcs, in_unit_sphere, resolution=28):
@@ -295,7 +295,7 @@ def main():
     parser.add_argument("--fake", type=str)
     parser.add_argument("--real", type=str)
     parser.add_argument("--n_test", type=int, default=1000)
-    parser.add_argument("--multi", type=int, default=2)
+    parser.add_argument("--multi", type=int, default=3)
     parser.add_argument("--times", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=64)
     args = parser.parse_args()
@@ -307,9 +307,9 @@ def main():
     # Load reference pcd
     num_cpus = multiprocessing.cpu_count()
     ref_pcs = []
-    shape_paths = load_data_with_prefix(args.real, '.ply')
-    load_iter = multiprocessing.Pool(num_cpus).imap(collect_pc2, shape_paths)
-    for pc in tqdm(load_iter, total=len(shape_paths)):
+    gt_shape_paths = load_data_with_prefix(args.real, '.ply')
+    load_iter = multiprocessing.Pool(num_cpus).imap(collect_pc2, gt_shape_paths)
+    for pc in tqdm(load_iter, total=len(gt_shape_paths)):
         if len(pc) > 0:
             ref_pcs.append(pc)
     ref_pcs = np.stack(ref_pcs, axis=0)
@@ -331,19 +331,26 @@ def main():
     result_list = []
     for i in range(args.times):
         print("iteration {}...".format(i))
-        select_idx = random.sample(list(range(len(sample_pcs))), int(args.multi * args.n_test))
-        rand_sample_pcs = sample_pcs[select_idx]
+        select_idx1 = random.sample(list(range(len(sample_pcs))), int(args.multi * args.n_test))
+        rand_sample_pcs = sample_pcs[select_idx1]
 
-        select_idx = random.sample(list(range(len(ref_pcs))), args.n_test)
-        rand_ref_pcs = ref_pcs[select_idx]
+        select_idx2 = random.sample(list(range(len(ref_pcs))), args.n_test)
+        rand_ref_pcs = ref_pcs[select_idx2]
 
         jsd = jsd_between_point_cloud_sets(rand_sample_pcs, rand_ref_pcs, in_unit_sphere=False)
         with torch.no_grad():
             rand_sample_pcs = torch.tensor(rand_sample_pcs).cuda()
             rand_ref_pcs = torch.tensor(rand_ref_pcs).cuda()
-            result = compute_cov_mmd(rand_sample_pcs, rand_ref_pcs, batch_size=args.batch_size)
+            result, idx = compute_cov_mmd(rand_sample_pcs, rand_ref_pcs, batch_size=args.batch_size)
         result.update({"JSD": jsd})
 
+        if False:
+            unique_idx = np.unique(idx, return_counts=True)
+            id_gts = unique_idx[0][np.argsort(unique_idx[1])[::-1][:100]]
+            gt_prefixes = [os.path.basename(gt_shape_paths[i])[:8] for i in select_idx2]
+            pred_prefixes = [os.path.basename(shape_paths[i])[:8] for i in select_idx1]
+
+            gt_prefixes[403]
         print(result)
         print(result, file=fp)
         result_list.append(result)

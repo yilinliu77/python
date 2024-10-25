@@ -4,10 +4,15 @@ import os, sys, shutil, traceback
 import numpy as np
 import torch
 from OCC.Core import Message
+from OCC.Core.IFSelect import IFSelect_ReturnStatus
 from OCC.Core.Message import Message_PrinterOStream, Message_Alarm
+from OCC.Core.ShapeFix import ShapeFix_ShapeTolerance
+from OCC.Core.TopoDS import TopoDS_Face
+from OCC.Extend.DataExchange import read_step_file
 
 from shared.common_utils import safe_check_dir, check_dir
 from shared.common_utils import export_point_cloud
+from shared.occ_utils import get_primitives
 
 from src.brepnet.post.utils import *
 from src.brepnet.post.geom_optimization import optimize_geom, test_optimize_geom
@@ -255,6 +260,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         if solid.ShapeType() == TopAbs_COMPOUND:
             continue
 
+        shape_tol_setter = ShapeFix_ShapeTolerance()
+        shape_tol_setter.SetTolerance(solid, 1e-1)
         analyzer = BRepCheck_Analyzer(solid)
         # analyzer.SetExactMethod(True)
         if not analyzer.IsValid():

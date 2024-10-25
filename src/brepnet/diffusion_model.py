@@ -435,6 +435,10 @@ class Diffusion_base(nn.Module):
         # Model
         pred_x0 = self.diffuse(noise_input, timesteps)
 
+        if False:
+            final_pred = self.noise_scheduler.step(pred_x0, timesteps, noise).pred_original_sample
+            loss = nn.functional.mse_loss(final_pred, face_z)
+
         # Loss (predict x0)
         loss = {}
         if not self.is_train_decoder:

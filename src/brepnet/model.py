@@ -3636,6 +3636,25 @@ class AutoEncoder_0925(nn.Module):
 
     def inference(self, v_face_features):
         device = v_face_features.device
+        if True: # Deduplicate
+            face_points_local = self.face_points_decoder(v_face_features)
+            face_center_scale = self.face_center_scale_decoder(v_face_features)
+            face_center = face_center_scale[..., 0]
+            face_scale = face_center_scale[..., 1]
+            pred_face_points = denormalize_coord(face_points_local[..., :3], face_center, face_scale)
+            num_faces = v_face_features.shape[0]
+
+            deduplicate_face_id = []
+            for i in range(num_faces):
+                is_duplicate = False
+                for j in deduplicate_face_id:
+                    if torch.sqrt(((pred_face_points[i]-pred_face_points[j])**2).sum(dim=-1)).mean() < 1e-3:
+                        is_duplicate=True
+                        break
+                if not is_duplicate:
+                    deduplicate_face_id.append(i)
+            v_face_features = v_face_features[deduplicate_face_id]
+
         num_faces = v_face_features.shape[0]
         indexes = torch.stack(torch.meshgrid(torch.arange(num_faces), torch.arange(num_faces), indexing="ij"), dim=2)
 

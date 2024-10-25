@@ -1,4 +1,6 @@
 #!/bin/bash
+# ./src/brepnet/scripts/uncond_sample_post_eval.sh /mnt/d/deepcad_test_pcd /mnt/d/uncond_checkpoints/1025_gaussian_epsilon_f730_400k.ckpt 1e-6 epsilon 6000 /mnt/d/uncond_results/1025_gaussian_epsilon_f730_400k
+
 gt_test_pc_root=$1
 ckpt=$2
 gaussian_weights=$3

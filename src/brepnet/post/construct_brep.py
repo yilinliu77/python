@@ -322,7 +322,7 @@ def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list,
             return None
 
 
-construct_brep_from_datanpz_batch_ray = ray.remote(max_retries=2, num_cpus=1, num_gpus=0.01)(construct_brep_from_datanpz_batch)
+construct_brep_from_datanpz_batch_ray = ray.remote(max_retries=2, num_cpus=1, num_gpus=0.1)(construct_brep_from_datanpz_batch)
 
 
 def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda, from_scratch):

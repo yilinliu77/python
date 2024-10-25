@@ -19,7 +19,7 @@ for var in "${variables[@]}"; do
 done
 
 GREEN='\033[0;32m'
-NC='\033[0m' # 无颜色
+NC='\033[0m'
 echo -e "${GREEN}Sample & Post & Evaluate${NC}"
 echo -e "${GREEN}gt_test_pc_root: ${gt_test_pc_root}${NC}"
 echo -e "${GREEN}ckpt: ${ckpt}${NC}"

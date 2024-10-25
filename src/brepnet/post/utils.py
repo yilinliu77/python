@@ -249,7 +249,7 @@ class Shape:
         recon_edge = self.recon_edge_points
         dirs = (recon_edge[:, [0, -1]] - np.mean(recon_edge, axis=1, keepdims=True))
         cos_dir = ((dirs[:, 0] * dirs[:, 1]).sum(axis=1) /
-                   np.linalg.norm(dirs[:, 0], axis=1) / np.linalg.norm(dirs[:, 1], axis=1))
+                   (np.linalg.norm(dirs[:, 0], axis=1) * np.linalg.norm(dirs[:, 1], axis=1) + 1e-6))
         self.openness = cos_dir > v_threshold
 
         delta = recon_edge[:, [0, -1]].mean(axis=1)

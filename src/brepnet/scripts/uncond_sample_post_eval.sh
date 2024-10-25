@@ -8,6 +8,14 @@ fake_sample_feature_root=$6
 fake_post_root=${fake_sample_feature_root}"_post"
 fake_post_pcd_root=${fake_post_root}"_pcd"
 
+variables=(gt_test_pc_root ckpt gaussian_weights diffusion_type sample_size fake_sample_feature_root fake_post_root fake_post_pcd_root)
+for var in "${variables[@]}"; do
+    if [ -z "${!var}" ]; then
+        echo "Error: $var is empty"
+        exit 1
+    fi
+done
+
 echo "Sample & Post & Evaluate"
 echo "  ckpt: $ckpt"
 echo "  diffusion_type: $diffusion_type"

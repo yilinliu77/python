@@ -30,16 +30,16 @@ echo -e "${GREEN}fake_sample_feature_root: ${fake_sample_feature_root}${NC}"
 echo -e "${GREEN}fake_post_root: ${fake_post_root}${NC}"
 echo -e "${GREEN}fake_post_pcd_root: ${fake_post_pcd_root}${NC}"
 
-echo "${GREEN}STep0 Sample${NC}"
+echo -e "${GREEN}STep0 Sample${NC}"
 python -m src.brepnet.train_diffusion model.name=Diffusion_condition model.diffusion_latent=768 trainer.resume_from_checkpoint=${ckpt} trainer.evaluate=true trainer.accelerator=16-mixed trainer.batch_size=1024 model.num_max_faces=30 dataset.num_max_faces=30 trainer.test_output_dir=${fake_sample_feature_root} model.gaussian_weights=${gaussian_weights} model.diffusion_type=${diffusion_type} model.pad_method=random model.sigmoid=false dataset.name=Dummy_dataset dataset.length=${sample_size} || exit 1
 
-echo "${GREEN}STEP1 Build Brep${NC}"
+echo -e "${GREEN}STEP1 Build Brep${NC}"
 python -m src.brepnet.post.construct_brep --data_root ${fake_sample_feature_root} --out_root ${fake_post_root} --use_ray --use_cuda --num_cpus 16 || exit 1
 
-echo "${GREEN}STEP2 Sample Points${NC}"
+echo -e "${GREEN}STEP2 Sample Points${NC}"
 python -m src.brepnet.eval.sample_points --data_root ${fake_post_root} --out_root ${fake_post_pcd_root} --valid || exit 1
 
-echo "${GREEN}STEP3 Evaluate${NC}"
+echo -e "${GREEN}STEP3 Evaluate${NC}"
 python -m src.brepnet.eval.eval_brepgen --real ${gt_test_pc_root} --fake ${fake_post_pcd_root} || exit 1
 
 echo "${GREEN}POST ADN EVAL DONE${NC}"

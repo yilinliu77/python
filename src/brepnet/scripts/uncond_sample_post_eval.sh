@@ -18,26 +18,28 @@ for var in "${variables[@]}"; do
     fi
 done
 
-echo "Sample & Post & Evaluate"
-echo "gt_test_pc_root: ${gt_test_pc_root}"
-echo "ckpt: ${ckpt}"
-echo "gaussian_weights: ${gaussian_weights}"
-echo "diffusion_type: ${diffusion_type}"
-echo "sample_size: ${sample_size}"
-echo "fake_sample_feature_root: ${fake_sample_feature_root}"
-echo "fake_post_root: ${fake_post_root}"
-echo "fake_post_pcd_root: ${fake_post_pcd_root}"
+GREEN='\033[0;32m'
+NC='\033[0m' # 无颜色
+echo -e "${GREEN}Sample & Post & Evaluate${NC}"
+echo -e "${GREEN}gt_test_pc_root: ${gt_test_pc_root}${NC}"
+echo -e "${GREEN}ckpt: ${ckpt}${NC}"
+echo -e "${GREEN}gaussian_weights: ${gaussian_weights}${NC}"
+echo -e "${GREEN}diffusion_type: ${diffusion_type}${NC}"
+echo -e "${GREEN}sample_size: ${sample_size}${NC}"
+echo -e "${GREEN}fake_sample_feature_root: ${fake_sample_feature_root}${NC}"
+echo -e "${GREEN}fake_post_root: ${fake_post_root}${NC}"
+echo -e "${GREEN}fake_post_pcd_root: ${fake_post_pcd_root}${NC}"
 
-echo "STep0 Sample"
+echo "${GREEN}STep0 Sample${NC}"
 python -m src.brepnet.train_diffusion model.name=Diffusion_condition model.diffusion_latent=768 trainer.resume_from_checkpoint=${ckpt} trainer.evaluate=true trainer.accelerator=16-mixed trainer.batch_size=1024 model.num_max_faces=30 dataset.num_max_faces=30 trainer.test_output_dir=${fake_sample_feature_root} model.gaussian_weights=${gaussian_weights} model.diffusion_type=${diffusion_type} model.pad_method=random model.sigmoid=false dataset.name=Dummy_dataset dataset.length=${sample_size} || exit 1
 
-echo "STEP1 Build Brep"
+echo "${GREEN}STEP1 Build Brep${NC}"
 python -m src.brepnet.post.construct_brep --data_root ${fake_sample_feature_root} --out_root ${fake_post_root} --use_ray --use_cuda --num_cpus 16 || exit 1
 
-echo "STEP2 Sample Points"
+echo "${GREEN}STEP2 Sample Points${NC}"
 python -m src.brepnet.eval.sample_points --data_root ${fake_post_root} --out_root ${fake_post_pcd_root} --valid || exit 1
 
-echo "STEP3 Evaluate"
+echo "${GREEN}STEP3 Evaluate${NC}"
 python -m src.brepnet.eval.eval_brepgen --real ${gt_test_pc_root} --fake ${fake_post_pcd_root} || exit 1
 
-echo "POST ADN EVAL DONE"
+echo "${GREEN}POST ADN EVAL DONE${NC}"

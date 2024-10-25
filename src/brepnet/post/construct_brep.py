@@ -254,7 +254,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     is_successful = False
     for i in range(len(CONNECT_TOLERANCE)):
         connected_tolerance = CONNECT_TOLERANCE[i]
-        print(f"Try connected_tolerance {connected_tolerance}")
+        if is_log:
+            print(f"Try connected_tolerance {connected_tolerance}")
         # solid, faces_result = construct_brep(shape, connected_tolerance,
         #                                      isdebug=isdebug, is_save_face=True,
         #                                      folder_path=os.path.join(out_root, folder_name))

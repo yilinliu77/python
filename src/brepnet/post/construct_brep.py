@@ -18,14 +18,6 @@ import trimesh
 
 import time
 
-
-@ray.remote(num_gpus=0.05)
-def optimize_geom_ray(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, is_log=False,
-                      max_iter=100):
-    return optimize_geom(recon_face, recon_edge, edge_face_connectivity, face_edge_adj, is_use_cuda, max_iter,
-                         is_log=is_log)
-
-
 def construct_brep_item(face_points, edge_points, edge_face_connectivity, ):
     # face_edge_adj store the edge idx list of each face
     face_edge_adj = [[] for _ in range(face_points.shape[0])]
@@ -132,8 +124,10 @@ def get_data(v_filename):
 def construct_brep_from_datanpz(data_root, out_root, folder_name,
                                 is_ray=False, is_log=True,
                                 is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=False, is_save_data=False):
+    time_records = [0,0,0,0,0,0]
+    timer = time.time()
     if not from_scratch and os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
-        return
+        return time_records
 
     printers = Message.message.DefaultMessenger().Printers()
     for idx in range(printers.Length()):
@@ -175,10 +169,13 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         if is_log:
             print(f"{Colors.RED}No data in {folder_name}{Colors.RESET}")
         # shutil.rmtree(os.path.join(out_root, folder_name))
-        return
+        return [0,0,0,0,0,0]
 
     if isdebug:
         print(f"{Colors.GREEN}Remove {len(shape.remove_edge_idx_src) + len(shape.remove_edge_idx_new)} edges{Colors.RESET}")
+    
+    time_records[0] = time.time() - timer
+    timer = time.time()
 
     if is_save_data:
         export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), shape.recon_face_points.reshape(-1, 3))
@@ -205,7 +202,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     if is_optimize_geom:
         interpolation_face = []
         for item in shape.interpolation_face:
-            interpolation_face.append(item.cpu().numpy())
+            interpolation_face.append(item)
 
         if not is_ray:
             shape.recon_edge_points = optimize(
@@ -213,11 +210,11 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
                     shape.face_edge_adj, v_islog=isdebug, v_max_iter=200)
         else:
-            task = optimize_ray.remote(
-                    interpolation_face, shape.recon_edge_points,
+            shape.recon_edge_points = optimize(
+                    shape.interpolation_face, shape.recon_edge_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                    shape.face_edge_adj, v_max_iter=200)
-            shape.recon_edge_points = ray.get(task)
+                    shape.face_edge_adj, v_islog=False, v_max_iter=200)
+            # shape.recon_edge_points = ray.get(task)
 
         if is_save_data:
             updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx_new, axis=0)
@@ -237,6 +234,9 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
                         os.path.join(debug_face_save_path, f'optim_edge{edge_idx}.ply'),
                         shape.recon_edge_points[edge_idx].reshape(-1, 3),
                         np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+
+    time_records[1] = time.time() - timer
+    timer = time.time()
 
     # Construct Brep from face_points, edge_points, face_edge_adj
     solid = None
@@ -267,6 +267,9 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             is_successful = False
         break
 
+    time_records[2] = time.time() - timer
+    timer = time.time()
+
     if solid is not None:
         try:
             write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
@@ -280,6 +283,9 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01, angular_deflection=0.5)
         except:
             pass
+    time_records[3] = time.time() - timer
+    timer = time.time()
+    return time_records
     # if not is_successful:
     #     shutil.rmtree(os.path.join(out_root, folder_name))
 
@@ -291,10 +297,11 @@ def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list,
                                       ):
     for folder_name in folder_name_list:
         try:
-            construct_brep_from_datanpz(data_root, out_root, folder_name,
+            result = construct_brep_from_datanpz(data_root, out_root, folder_name,
                                         is_log=False,
                                         is_ray=True, is_optimize_geom=is_optimize_geom,
                                         isdebug=False, use_cuda=use_cuda, from_scratch=from_scratch)
+            return result
         except Exception as e:
             with open(os.path.join(out_root, "error.txt"), "a") as f:
                 tb_list = traceback.extract_tb(sys.exc_info()[2])
@@ -305,9 +312,10 @@ def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list,
                 print(e)
                 print(f"An error occurred on line {last_traceback.lineno} in {last_traceback.name}\n\n")
                 shutil.rmtree(os.path.join(out_root, folder_name))
+            return None
 
 
-construct_brep_from_datanpz_batch_ray = ray.remote(max_retries=2)(construct_brep_from_datanpz_batch)
+construct_brep_from_datanpz_batch_ray = ray.remote(max_retries=2, num_cpus=1, num_gpus=0.01)(construct_brep_from_datanpz_batch)
 
 
 def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda, from_scratch):
@@ -315,7 +323,7 @@ def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda, from_scratc
     debug_folder = [v_prefix]
     for folder in debug_folder:
         construct_brep_from_datanpz(v_data_root, v_out_root, folder,
-                                    use_cuda=use_cuda, is_optimize_geom=True, isdebug=True,
+                                    use_cuda=use_cuda, is_optimize_geom=True, isdebug=True, is_save_data=True,
                                     from_scratch=from_scratch)
     exit(0)
 
@@ -360,7 +368,7 @@ if __name__ == '__main__':
     # print(f"Total {len(all_folders)} folders to process")
 
     all_folders.sort()
-    # all_folders = all_folders[:50]
+    # all_folders = all_folders[:100]
 
     if not is_use_ray:
         # random.shuffle(all_folders)
@@ -382,5 +390,9 @@ if __name__ == '__main__':
                     v_data_root, v_out_root,
                     all_folders[i * batch_size:(i + 1) * batch_size],
                     use_cuda=use_cuda, from_scratch=from_scratch))
-        ray.get(tasks)
+        results = ray.get(tasks)
+        results = [item for item in results if item is not None]
+        print(len(results))
+        results = np.array(results)
+        print(results.mean(axis=0))
     print("Done")

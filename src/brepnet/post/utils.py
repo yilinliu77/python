@@ -469,10 +469,11 @@ def optimize(
         v_interpolation_face, recon_edge_points,
         edge_face_connectivity, is_end_point, pair1,
         face_edge_adj, v_islog=True, v_max_iter=1000):
-    device = torch.device('cpu')
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     interpolation_face = []
     for item in v_interpolation_face:
-        interpolation_face.append(torch.from_numpy(item.copy()).to(device))
+        # interpolation_face.append(torch.from_numpy(item.copy()).to(device))
+        interpolation_face.append(item.to(device))
     padded_points = pad_sequence(interpolation_face, batch_first=True, padding_value=10)
     edge_points = torch.from_numpy(recon_edge_points.copy()).to(device)
     edge_face_connectivity = torch.from_numpy(edge_face_connectivity.copy()).to(device)
@@ -482,8 +483,8 @@ def optimize(
     idx[is_end_point] = 15
     idx = torch.from_numpy(idx).to(device)
 
-    src_st = torch.FloatTensor([1, 0, 0, 0], device=device).unsqueeze(0).repeat(edge_points.shape[0], 1)
-    edge_st = nn.Parameter(torch.FloatTensor([1, 0, 0, 0], device=device).unsqueeze(0).repeat(edge_points.shape[0], 1))
+    src_st = torch.tensor([1, 0, 0, 0], dtype=torch.float32, device=device).unsqueeze(0).repeat(edge_points.shape[0], 1)
+    edge_st = nn.Parameter(torch.tensor([1, 0, 0, 0], dtype=torch.float32, device=device).unsqueeze(0).repeat(edge_points.shape[0], 1))
     edge_st.requires_grad = True
     optimizer = torch.optim.Adam([edge_st], lr=8e-3)
 
@@ -566,7 +567,7 @@ def optimize(
     return transformed_edges
 
 
-@ray.remote(num_gpus=0.05)
+# @ray.remote(num_gpus=0.05)
 def optimize_ray(interpolation_face, recon_edge_points,
                  edge_face_connectivity, is_end_point, pair1, face_edge_adj, v_max_iter=1000):
     return optimize(interpolation_face, recon_edge_points,

@@ -1,5 +1,6 @@
 import shutil
 
+from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeSolid
 from OCC.Core.BRepCheck import BRepCheck_Analyzer
 from OCC.Core.TopAbs import TopAbs_SOLID
 from OCC.Extend.DataExchange import read_step_file
@@ -14,7 +15,7 @@ from src.brepnet.post.utils import solid_valid_check
 
 def check_step_valid_soild(step_file, precision=1e-1):
     try:
-        shape = read_step_file(step_file)
+        shape = read_step_file(step_file, as_compound=False, verbosity=False)
     except:
         return False
     if shape.ShapeType() != TopAbs_SOLID:
@@ -43,9 +44,19 @@ def load_data_with_prefix(root_folder, prefix):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_root", type=str, required=True)
+    parser.add_argument("--prefix", type=str, required=False, default="")
     args = parser.parse_args()
     data_root = args.data_root
     folders = os.listdir(data_root)
+
+    if args.prefix:
+        step_file_list = load_data_with_prefix(os.path.join(data_root, args.prefix), ".step")
+        assert len(step_file_list) > 0
+        print(f"Checking CAD solids in {args.prefix}...")
+        isvalid = check_step_valid_soild(step_file_list[0])
+        print("Valid" if isvalid else "Invalid")
+        exit(0)
+
     step_file_list = load_data_with_prefix(data_root, ".step")
 
     print(f"Total sample features: {len(folders)}")

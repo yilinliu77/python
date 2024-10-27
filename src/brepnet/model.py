@@ -5399,6 +5399,148 @@ class EncoderDecoder(nn.Module):
 
         return loss, data
 
+    
+# Note, the sigmoid value is constant now!!!!!!!
+class EncoderDecoderWhole(nn.Module):
+    def __init__(self, v_conf):
+        super().__init__()
+        self.dim_shape = v_conf["dim_shape"]
+        ds = self.dim_shape
+        self.dim_latent = v_conf["dim_latent"]
+        dl = self.dim_latent
+        norm = v_conf["norm"]
+
+        # Encoder
+        self.sigmoid = v_conf["encoder_decoder_sigmoid"]
+        self.in_channels = 6
+        self.face_conv = nn.Sequential(
+            Rearrange('b h w n -> b n h w'),
+            nn.Conv2d(self.in_channels, ds, kernel_size=3, stride=1, padding=1),
+            nn.LeakyReLU(),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 8
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 4
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 2
+            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            nn.Conv2d(ds, dl, kernel_size=1, stride=1, padding=0),
+            nn.Sigmoid() if self.sigmoid else nn.Identity(),
+            Rearrange("b n h w -> b (n h w)")
+        )
+        self.edge_conv = nn.Sequential(
+            Rearrange('b w n -> b n w'),
+            nn.Conv1d(self.in_channels, ds, kernel_size=3, stride=1, padding=1),
+            nn.LeakyReLU(),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 8
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 4
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 2
+            res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            nn.Conv1d(ds, dl, kernel_size=1, stride=1, padding=0),
+            nn.Sigmoid() if self.sigmoid else nn.Identity(),
+            Rearrange("b n w -> b (n w)"),
+        )
+
+        self.face_points_decoder = nn.Sequential(
+            Rearrange("b (n h w) -> b n h w", h=2, w=2),
+            nn.Conv2d(dl, ds, kernel_size=1, stride=1, padding=0),
+            nn.LeakyReLU(),
+            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_2D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            nn.ConvTranspose2d(ds, ds, kernel_size=2, stride=2),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.ConvTranspose2d(ds, ds, kernel_size=2, stride=2),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.ConvTranspose2d(ds, ds, kernel_size=2, stride=2),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_2D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.Conv2d(ds, self.in_channels, kernel_size=1, stride=1, padding=0),
+            Rearrange('... c w h -> ... w h c',c=self.in_channels),
+        )
+        self.edge_points_decoder = nn.Sequential(
+            Rearrange("b (n w)-> b n w", n=dl, w=2),
+            nn.Conv1d(dl, ds, kernel_size=1, stride=1, padding=0),
+            nn.LeakyReLU(),
+            res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            res_block_1D(ds, ds, ks=1, st=1, pa=0, norm=norm),
+            nn.ConvTranspose1d(ds, ds, kernel_size=2, stride=2),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.ConvTranspose1d(ds, ds, kernel_size=2, stride=2),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.ConvTranspose1d(ds, ds, kernel_size=2, stride=2),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            res_block_1D(ds, ds, ks=3, st=1, pa=1, norm=norm),
+            nn.Conv1d(ds, self.in_channels, kernel_size=1, stride=1, padding=0),
+            Rearrange('... c w -> ... w c',c=self.in_channels),
+        )
+
+    def forward(self, v_data, v_test=False):
+        face_features = self.face_conv(v_data["face_points"][...,:self.in_channels])
+        edge_features = self.edge_conv(v_data["edge_points"][...,:self.in_channels])
+
+        pred_face = self.face_points_decoder(face_features)
+        pred_edge = self.edge_points_decoder(edge_features)
+
+        loss = {}
+        gt_face_bbox = v_data["face_bbox"]
+        gt_face_coords = v_data["face_points"][...,:3]
+        
+        pred_face_coords = pred_face[..., :3]
+        pred_face_normals = pred_face[..., 3:6]
+        pred_face_coords = pred_face_coords * gt_face_bbox[..., None, None, 3:] + gt_face_bbox[..., None, None, :3]
+        gt_face_coords = gt_face_coords * gt_face_bbox[..., None, None, 3:] + gt_face_bbox[..., None, None, :3]
+        
+        loss["loss_face_coords"] = nn.functional.l1_loss(pred_face_coords, gt_face_coords)
+        loss["loss_face_normals"] = nn.functional.l1_loss(pred_face_normals, v_data["face_points"][...,3:]) * 0.1
+
+        pred_edge_coords = pred_edge[..., :3]
+        pred_edge_normals = pred_edge[..., 3:6]
+        gt_edge_bbox = v_data["edge_bbox"]
+        gt_edge_coords = v_data["edge_points"][...,:3]
+        pred_edge_coords = pred_edge_coords * gt_edge_bbox[..., None, 3:] + gt_edge_bbox[..., None, :3]
+        gt_edge_coords = gt_edge_coords * gt_edge_bbox[..., None, 3:] + gt_edge_bbox[..., None, :3]
+
+        loss["loss_edge_coords"] = nn.functional.l1_loss(pred_edge_coords, gt_edge_coords)
+        loss["loss_edge_normals"] = nn.functional.l1_loss(pred_edge_normals, v_data["edge_points"][...,3:]) * 0.1
+        loss["total_loss"] = sum(loss.values())
+
+        data = {}
+        if v_test:
+            gt_face = denormalize_coord2(v_data["face_norm"], v_data["face_bbox"])
+            gt_edge = denormalize_coord2(v_data["edge_norm"], v_data["edge_bbox"])
+
+            loss["face_coords"] = nn.functional.l1_loss(
+                pred_face[..., :3],
+                v_data["face_points"][..., :3]
+            )
+            loss["edge_coords"] = nn.functional.l1_loss(
+                pred_edge[..., :3],
+                v_data["edge_points"][..., :3]
+            )
+
+            data["pred_face"] = pred_face.cpu().numpy()
+            data["pred_edge"] = pred_edge.cpu().numpy()
+            data["gt_face"] = gt_face.cpu().numpy()
+            data["gt_edge"] = gt_edge.cpu().numpy()
+
+        return loss, data
+
+
 
 class EncoderDecoderBig(EncoderDecoder):
     def __init__(self, v_conf):
@@ -6261,6 +6403,7 @@ class EncoderDecoderLatent3_bigger2(EncoderDecoderLatent3_bigger):
             nn.Linear(bd, bd),
         )
 
+
 class AutoEncoder_0925_plus(nn.Module):
     def __init__(self, v_conf):
         super().__init__()
@@ -6458,6 +6601,7 @@ class AutoEncoder_0925_plus(nn.Module):
             Rearrange('... c w -> ... (c w)'),
         )
         
+        self.sigmoid = v_conf["sigmoid"]
         self.gaussian_weights = v_conf["gaussian_weights"]
         if self.gaussian_weights > 0:
             self.gaussian_proj = nn.Sequential(
@@ -6465,6 +6609,8 @@ class AutoEncoder_0925_plus(nn.Module):
                 nn.LeakyReLU(),
                 nn.Linear(self.df*2, self.df*2),
             )
+        else:
+            self.gaussian_proj = nn.Identity() if self.sigmoid else nn.Sigmoid()
 
         self.times = {
             "Encoder": 0,
@@ -6495,7 +6641,7 @@ class AutoEncoder_0925_plus(nn.Module):
 
     def sample(self, v_fused_face_features, v_is_test=False):
         if self.gaussian_weights <= 0:
-            return v_fused_face_features, torch.zeros_like(v_fused_face_features[0,0])
+            return self.gaussian_proj(v_fused_face_features), torch.zeros_like(v_fused_face_features[0,0])
 
         fused_face_features_gau = self.gaussian_proj(v_fused_face_features)
         fused_face_features_gau = fused_face_features_gau.reshape(-1, self.df, 2)

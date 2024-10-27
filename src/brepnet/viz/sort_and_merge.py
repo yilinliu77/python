@@ -221,6 +221,6 @@ if __name__ == "__main__":
         for idx, folder in enumerate(tqdm(sorted_folders)):
             shutil.copytree(str(os.path.join(data_root, folder[0])), str(os.path.join(out_root, f"{idx:05d}_{folder[0]}")))
         ray.shutdown()
-        mesh_path_list = glob.glob(os.path.join(out_root, "**", "*.ply"), recursive=True)
+        mesh_path_list = glob.glob(os.path.join(out_root, "**", "*.stl"), recursive=True)
         mesh_path_list.sort()
         arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"))

@@ -435,6 +435,10 @@ class Diffusion_base(nn.Module):
         # Model
         pred_x0 = self.diffuse(noise_input, timesteps)
 
+        if False:
+            final_pred = self.noise_scheduler.step(pred_x0, timesteps, noise).pred_original_sample
+            loss = nn.functional.mse_loss(final_pred, face_z)
+
         # Loss (predict x0)
         loss = {}
         if not self.is_train_decoder:
@@ -468,7 +472,7 @@ class Diffusion_condition(nn.Module):
 
         layer1 = nn.TransformerEncoderLayer(
                 d_model=self.dim_total,
-                nhead=16, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
+                nhead=self.dim_total // 64, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
         self.net1 = nn.TransformerEncoder(layer1, 24, nn.LayerNorm(self.dim_total))
         self.fc_out = nn.Sequential(
                 nn.Linear(self.dim_total, self.dim_total),

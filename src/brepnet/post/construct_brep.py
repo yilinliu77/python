@@ -13,6 +13,7 @@ from OCC.Extend.DataExchange import read_step_file
 from shared.common_utils import safe_check_dir, check_dir
 from shared.common_utils import export_point_cloud
 from shared.occ_utils import get_primitives
+from src.brepnet.eval.check_valid import check_step_valid_soild
 
 from src.brepnet.post.utils import *
 from src.brepnet.post.geom_optimization import optimize_geom, test_optimize_geom
@@ -22,6 +23,7 @@ import argparse
 import trimesh
 
 import time
+
 
 def construct_brep_item(face_points, edge_points, edge_face_connectivity, ):
     # face_edge_adj store the edge idx list of each face
@@ -128,11 +130,14 @@ def get_data(v_filename):
 
 def construct_brep_from_datanpz(data_root, out_root, folder_name,
                                 is_ray=False, is_log=True,
-                                is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=False, is_save_data=False):
-    time_records = [0,0,0,0,0,0]
+                                is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=True, is_save_data=False):
+    time_records = [0, 0, 0, 0, 0, 0]
     timer = time.time()
     if not from_scratch and os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
         return time_records
+
+    if os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
+        os.remove(os.path.join(out_root, folder_name + "/success.txt"))
 
     printers = Message.message.DefaultMessenger().Printers()
     for idx in range(printers.Length()):
@@ -174,11 +179,11 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         if is_log:
             print(f"{Colors.RED}No data in {folder_name}{Colors.RESET}")
         # shutil.rmtree(os.path.join(out_root, folder_name))
-        return [0,0,0,0,0,0]
+        return [0, 0, 0, 0, 0, 0]
 
     if isdebug:
         print(f"{Colors.GREEN}Remove {len(shape.remove_edge_idx_src) + len(shape.remove_edge_idx_new)} edges{Colors.RESET}")
-    
+
     time_records[0] = time.time() - timer
     timer = time.time()
 
@@ -249,6 +254,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     is_successful = False
     for i in range(len(CONNECT_TOLERANCE)):
         connected_tolerance = CONNECT_TOLERANCE[i]
+        if is_log:
+            print(f"Try connected_tolerance {connected_tolerance}")
         # solid, faces_result = construct_brep(shape, connected_tolerance,
         #                                      isdebug=isdebug, is_save_face=True,
         #                                      folder_path=os.path.join(out_root, folder_name))
@@ -260,8 +267,6 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         if solid.ShapeType() == TopAbs_COMPOUND:
             continue
 
-        shape_tol_setter = ShapeFix_ShapeTolerance()
-        shape_tol_setter.SetTolerance(solid, 1e-1)
         analyzer = BRepCheck_Analyzer(solid)
         # analyzer.SetExactMethod(True)
         if not analyzer.IsValid():
@@ -277,19 +282,19 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     time_records[2] = time.time() - timer
     timer = time.time()
 
-    if solid is not None:
-        try:
-            write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
-        except:
-            pass
     if mesh is not None:
         mesh.export(os.path.join(out_root, folder_name, 'recon_brep.ply'))
-    if is_successful:
-        open(os.path.join(out_root, folder_name, 'success.txt'), 'w').close()
+
+    if solid is not None:
         try:
-            write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01, angular_deflection=0.5)
+            write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'), "AP242DIS")
+            if check_step_valid_soild(os.path.join(out_root, folder_name, 'recon_brep.step')):
+                open(os.path.join(out_root, folder_name, 'success.txt'), 'w').close()
+                write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01,
+                               angular_deflection=0.5)
         except:
             pass
+
     time_records[3] = time.time() - timer
     timer = time.time()
     return time_records
@@ -305,9 +310,9 @@ def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list,
     for folder_name in folder_name_list:
         try:
             result = construct_brep_from_datanpz(data_root, out_root, folder_name,
-                                        is_log=False,
-                                        is_ray=True, is_optimize_geom=is_optimize_geom,
-                                        isdebug=False, use_cuda=use_cuda, from_scratch=from_scratch)
+                                                 is_log=False,
+                                                 is_ray=True, is_optimize_geom=is_optimize_geom,
+                                                 isdebug=False, use_cuda=use_cuda, from_scratch=from_scratch)
             return result
         except Exception as e:
             with open(os.path.join(out_root, "error.txt"), "a") as f:
@@ -325,13 +330,12 @@ def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list,
 construct_brep_from_datanpz_batch_ray = ray.remote(num_cpus=1, num_gpus=0.2)(construct_brep_from_datanpz_batch)
 
 
-def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda, from_scratch):
+def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda):
     # debug_folder = os.listdir(v_out_root)
     debug_folder = [v_prefix]
     for folder in debug_folder:
         construct_brep_from_datanpz(v_data_root, v_out_root, folder,
-                                    use_cuda=use_cuda, is_optimize_geom=True, isdebug=True, is_save_data=True,
-                                    from_scratch=from_scratch)
+                                    use_cuda=use_cuda, is_optimize_geom=True, isdebug=True, is_save_data=True, )
     exit(0)
 
 
@@ -360,7 +364,7 @@ if __name__ == '__main__':
         raise ValueError(f"Data root path {v_data_root} does not exist.")
 
     if args.prefix != "":
-        test_construct_brep(v_data_root, v_out_root, args.prefix, use_cuda, from_scratch=from_scratch)
+        test_construct_brep(v_data_root, v_out_root, args.prefix, use_cuda)
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
     if list_file != "":
         valid_prefies = [item.strip() for item in open(list_file).readlines()]

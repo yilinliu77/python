@@ -254,7 +254,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     is_successful = False
     for i in range(len(CONNECT_TOLERANCE)):
         connected_tolerance = CONNECT_TOLERANCE[i]
-        print(f"Try connected_tolerance {connected_tolerance}")
+        if is_log:
+            print(f"Try connected_tolerance {connected_tolerance}")
         # solid, faces_result = construct_brep(shape, connected_tolerance,
         #                                      isdebug=isdebug, is_save_face=True,
         #                                      folder_path=os.path.join(out_root, folder_name))
@@ -326,7 +327,7 @@ def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list,
             return None
 
 
-construct_brep_from_datanpz_batch_ray = ray.remote(max_retries=2, num_cpus=1, num_gpus=0.1)(construct_brep_from_datanpz_batch)
+construct_brep_from_datanpz_batch_ray = ray.remote(num_gpus=0.01)(construct_brep_from_datanpz_batch)
 
 
 def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda):

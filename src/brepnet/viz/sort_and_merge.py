@@ -218,9 +218,9 @@ if __name__ == "__main__":
                                 key=lambda x: (x[1]["num_faces"], x[1]["mean_curvature"], x[1]["num_edges"], x[1]["num_vertices"]),
                                 reverse=True)
 
-        for idx, folder in enumerate(sorted_folders):
+        for idx, folder in enumerate(tqdm(sorted_folders)):
             shutil.copytree(str(os.path.join(data_root, folder[0])), str(os.path.join(out_root, f"{idx:05d}_{folder[0]}")))
         ray.shutdown()
-        mesh_path_list = glob.glob(os.path.join(out_root, "**", "*.ply"), recursive=True)
+        mesh_path_list = glob.glob(os.path.join(out_root, "**", "*.stl"), recursive=True)
         mesh_path_list.sort()
         arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"), color_mode="index")

@@ -223,4 +223,4 @@ if __name__ == "__main__":
         ray.shutdown()
         mesh_path_list = glob.glob(os.path.join(out_root, "**", "*.ply"), recursive=True)
         mesh_path_list.sort()
-        arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"))
+        arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"), color_mode="index")

@@ -191,6 +191,7 @@ def test_check():
 
 def load_data_from_npz(data_npz_file):
     data_npz = np.load(data_npz_file, allow_pickle=True)
+    data_npz1 = np.load(data_npz_file.replace("deepcad_32", "deepcad_train_v6"), allow_pickle=True)
     # Brepgen
     if 'face_edge_adj' in data_npz:
         faces = data_npz['pred_face']
@@ -207,13 +208,11 @@ def load_data_from_npz(data_npz_file):
                     faces_adj_pair.append(sorted((face_idx1, face_idx2)))
         return faces, faces_adj_pair
     # Ours
-    if 'sample_points_faces' in data_npz and 'edge_face_connectivity' in data_npz:
+    if 'sample_points_faces' in data_npz:
         face_points = data_npz['sample_points_faces']  # Face sample points (num_faces*20*20*3)
-        edge_points = data_npz['sample_points_lines']  # Edge sample points (num_lines*20*3)
-        edge_face_connectivity = data_npz['edge_face_connectivity']  # (num_intersection, (id_edge, id_face1, id_face2))
+        edge_face_connectivity = data_npz1['edge_face_connectivity']  # (num_intersection, (id_edge, id_face1, id_face2))
     elif 'pred_face' in data_npz and 'pred_edge_face_connectivity' in data_npz:
         face_points = data_npz['pred_face']
-        edge_points = data_npz['pred_edge']
         edge_face_connectivity = data_npz['pred_edge_face_connectivity']
     else:
         raise ValueError("Invalid data format")
@@ -290,20 +289,20 @@ def main():
         gen_graph_list, gen_prefix_list = load_and_build_graph(gen_data_npz_file_list, gen_post_data_root, n_bit)
     print(f"Loaded {len(gen_graph_list)} generated data files")
 
-    print("Computing Unique ratio...")
-    unique_ratio, deduplicate_matrix = compute_gen_unique(gen_graph_list, is_use_ray, compute_batch_size)
-    print(f"Unique ratio: {unique_ratio}")
-
-    deduplicate_components_txt = gen_data_root + f"_deduplicate_components_{n_bit}bit.txt"
-    fp = open(deduplicate_components_txt, "w")
-    print(f"Unique ratio: {unique_ratio}", file=fp)
-    deduplicate_components = find_connected_components(deduplicate_matrix)
-    for component in deduplicate_components:
-        if len(component) > 1:
-            component = [gen_prefix_list[idx] for idx in component]
-            print(f"Component: {component}", file=fp)
-    print(f"Deduplicate components are saved to {deduplicate_components_txt}")
-    fp.close()
+    # print("Computing Unique ratio...")
+    # unique_ratio, deduplicate_matrix = compute_gen_unique(gen_graph_list, is_use_ray, compute_batch_size)
+    # print(f"Unique ratio: {unique_ratio}")
+    #
+    # deduplicate_components_txt = gen_data_root + f"_deduplicate_components_{n_bit}bit.txt"
+    # fp = open(deduplicate_components_txt, "w")
+    # print(f"Unique ratio: {unique_ratio}", file=fp)
+    # deduplicate_components = find_connected_components(deduplicate_matrix)
+    # for component in deduplicate_components:
+    #     if len(component) > 1:
+    #         component = [gen_prefix_list[idx] for idx in component]
+    #         print(f"Component: {component}", file=fp)
+    # print(f"Deduplicate components are saved to {deduplicate_components_txt}")
+    # fp.close()
 
     # For accelerate, please first run the find_nerest.py to find the nearest item in train data for each fake sample
     ################################################### Novel ########################################################

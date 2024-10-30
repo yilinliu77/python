@@ -5,10 +5,12 @@ import numpy as np
 import argparse
 import os
 
+import trimesh
 from tqdm import tqdm
 import ray
 
 from src.brepnet.eval.check_valid import check_step_valid_soild, load_data_with_prefix
+from src.brepnet.eval.eval_brepgen import normalize_pc
 
 
 def real2bit(data, n_bits=8, min_range=-1, max_range=1):
@@ -166,12 +168,13 @@ def is_graph_identical_list(graph1, graph2_path_list):
     # Check if the two graphs are isomorphic considering node attributes
     graph2_list, graph2_prefix_list = load_and_build_graph(graph2_path_list)
     for graph2 in graph2_list:
-        if nx.is_isomorphic(
-                graph1, graph2,
-                node_match=lambda n1, n2: np.array_equal(n1['shape_geometry'], n2['shape_geometry'])
-        ):
+        if nx.is_isomorphic(graph1, graph2,
+                            node_match=lambda n1, n2: np.array_equal(n1['shape_geometry'], n2['shape_geometry'])):
             return True
     return False
+
+
+is_graph_identical_list_remote = ray.remote(is_graph_identical_list)
 
 
 def test_check():
@@ -210,7 +213,7 @@ def load_data_from_npz(data_npz_file):
     # Ours
     if 'sample_points_faces' in data_npz:
         face_points = data_npz['sample_points_faces']  # Face sample points (num_faces*20*20*3)
-        edge_face_connectivity = data_npz1['edge_face_connectivity']  # (num_intersection, (id_edge, id_face1, id_face2))
+        edge_face_connectivity = data_npz['edge_face_connectivity']  # (num_intersection, (id_edge, id_face1, id_face2))
     elif 'pred_face' in data_npz and 'pred_edge_face_connectivity' in data_npz:
         face_points = data_npz['pred_face']
         edge_face_connectivity = data_npz['pred_edge_face_connectivity']
@@ -221,6 +224,9 @@ def load_data_from_npz(data_npz_file):
         faces_adj_pair.append([face_idx1, face_idx2])
     if face_points.shape[-1] != 3:
         face_points = face_points[..., :3]
+
+    src_shape = face_points.shape
+    face_points = normalize_pc(face_points.reshape(-1, 3)).reshape(src_shape)
     return face_points, faces_adj_pair
 
 
@@ -289,20 +295,20 @@ def main():
         gen_graph_list, gen_prefix_list = load_and_build_graph(gen_data_npz_file_list, gen_post_data_root, n_bit)
     print(f"Loaded {len(gen_graph_list)} generated data files")
 
-    # print("Computing Unique ratio...")
-    # unique_ratio, deduplicate_matrix = compute_gen_unique(gen_graph_list, is_use_ray, compute_batch_size)
-    # print(f"Unique ratio: {unique_ratio}")
-    #
-    # deduplicate_components_txt = gen_data_root + f"_deduplicate_components_{n_bit}bit.txt"
-    # fp = open(deduplicate_components_txt, "w")
-    # print(f"Unique ratio: {unique_ratio}", file=fp)
-    # deduplicate_components = find_connected_components(deduplicate_matrix)
-    # for component in deduplicate_components:
-    #     if len(component) > 1:
-    #         component = [gen_prefix_list[idx] for idx in component]
-    #         print(f"Component: {component}", file=fp)
-    # print(f"Deduplicate components are saved to {deduplicate_components_txt}")
-    # fp.close()
+    print("Computing Unique ratio...")
+    unique_ratio, deduplicate_matrix = compute_gen_unique(gen_graph_list, is_use_ray, compute_batch_size)
+    print(f"Unique ratio: {unique_ratio}")
+
+    deduplicate_components_txt = gen_data_root + f"_deduplicate_components_{n_bit}bit.txt"
+    fp = open(deduplicate_components_txt, "w")
+    print(f"Unique ratio: {unique_ratio}", file=fp)
+    deduplicate_components = find_connected_components(deduplicate_matrix)
+    for component in deduplicate_components:
+        if len(component) > 1:
+            component = [gen_prefix_list[idx] for idx in component]
+            print(f"Component: {component}", file=fp)
+    print(f"Deduplicate components are saved to {deduplicate_components_txt}")
+    fp.close()
 
     # For accelerate, please first run the find_nerest.py to find the nearest item in train data for each fake sample
     ################################################### Novel ########################################################
@@ -313,15 +319,6 @@ def main():
 
     is_identical = np.zeros(len(gen_graph_list), dtype=bool)
     if is_use_ray:
-        for gen_graph_idx, gen_graph in enumerate(tqdm(gen_graph_list)):
-            nearest_txt = os.path.join(gen_post_data_root, gen_prefix_list[gen_graph_idx], "nearest.txt")
-            if not os.path.exists(nearest_txt):
-                continue
-            with open(nearest_txt, "r+") as f:
-                lines = f.readlines()
-                train_folders = [os.path.join(train_data_root, line.strip().split(" ")[0], 'data.npz') for line in lines[2:]]
-            is_identical[gen_graph_idx] = is_graph_identical_list(gen_graph, train_folders)
-    else:
         ray.init()
         futures = []
         for gen_graph_idx, gen_graph in enumerate(tqdm(gen_graph_list)):
@@ -331,14 +328,23 @@ def main():
             with open(nearest_txt, "r+") as f:
                 lines = f.readlines()
                 train_folders = [os.path.join(train_data_root, line.strip().split(" ")[0], 'data.npz') for line in lines[2:]]
-            futures.append(is_graph_identical_remote.remote(gen_graph, train_folders))
+            futures.append(is_graph_identical_list_remote.remote(gen_graph, train_folders))
         results = ray.get(futures)
         for gen_graph_idx, result in enumerate(results):
             is_identical[gen_graph_idx] = result
         ray.shutdown()
+    else:
+        pbar = tqdm(gen_graph_list)
+        for gen_graph_idx, gen_graph in enumerate(pbar):
+            nearest_txt = os.path.join(gen_post_data_root, gen_prefix_list[gen_graph_idx], "nearest.txt")
+            if not os.path.exists(nearest_txt):
+                continue
+            with open(nearest_txt, "r+") as f:
+                lines = f.readlines()
+                train_folders = [os.path.join(train_data_root, line.strip().split(" ")[0], 'data.npz') for line in lines[2:]]
+            is_identical[gen_graph_idx] = is_graph_identical_list(gen_graph, train_folders)
+            pbar.set_postfix({"novel_count": np.sum(~is_identical)})
 
-    novel_ratio = 1 - np.sum(is_identical) / len(gen_graph_list)
-    print(f"Novel ration = {len(gen_graph_list) - np.sum(is_identical)} / {len(gen_graph_list)} = {novel_ratio}")
     identical_folder = np.array(gen_prefix_list)[is_identical]
     with open(gen_data_root + f"_not_novel_{n_bit}bit.txt", "w") as f:
         for folder in identical_folder:

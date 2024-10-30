@@ -6,6 +6,8 @@ import os
 from tqdm import tqdm
 import ray
 
+from src.brepnet.eval.check_valid import check_step_valid_soild, load_data_with_prefix
+
 
 def real2bit(data, n_bits=8, min_range=-1, max_range=1):
     """Convert vertices in [-1., 1.] to discrete values in [0, n_bits**2 - 1]."""
@@ -50,10 +52,6 @@ def is_graph_identical_batch(graph_pair_list):
 is_graph_identical_remote = ray.remote(is_graph_identical_batch)
 
 
-def compute_gen_novel():
-    pass
-
-
 def find_connected_components(matrix):
     N = len(matrix)
     visited = [False] * N
@@ -92,6 +90,7 @@ def compute_gen_unique(graph_list, is_use_ray=False, batch_size=100000):
             if is_identical:
                 unique_graph_idx.remove(idx2) if idx2 in unique_graph_idx else None
                 deduplicate_matrix[idx1, idx2] = True
+                deduplicate_matrix[idx2, idx1] = True
     else:
         ray.init()
         N_batch = len(check_pairs) // batch_size
@@ -111,6 +110,7 @@ def compute_gen_unique(graph_list, is_use_ray=False, batch_size=100000):
                 deduplicate_matrix[idx2, idx1] = True
                 if idx2 in unique_graph_idx:
                     unique_graph_idx.remove(idx2)
+        ray.shutdown()
 
     unique = len(unique_graph_idx)
     print(f"Unique: {unique}/{N}")
@@ -119,18 +119,44 @@ def compute_gen_unique(graph_list, is_use_ray=False, batch_size=100000):
     return unique_ratio, deduplicate_matrix
 
 
-def load_data_with_prefix(root_folder, prefix):
-    data_files = []
+def compute_gen_novel(gen_graph_list, train_graph_list, is_use_ray=False, batch_size=100000):
+    M, N = len(gen_graph_list), len(train_graph_list)
+    deduplicate_matrix = np.zeros((M, N), dtype=bool)
+    pair_0, pair_1 = np.triu_indices_from(deduplicate_matrix, k=1)
+    check_pairs = list(zip(pair_0, pair_1))
+    non_novel_graph_idx = np.zeros(M, dtype=bool)
 
-    # Walk through the directory tree starting from the root folder
-    for root, dirs, files in os.walk(root_folder):
-        for filename in files:
-            # Check if the file ends with the specified prefix
-            if filename.endswith(prefix):
-                file_path = os.path.join(root, filename)
-                data_files.append(file_path)
+    if not is_use_ray:
+        for idx1, idx2 in tqdm(check_pairs):
+            if non_novel_graph_idx[idx1]:
+                continue
+            is_identical = is_graph_identical(gen_graph_list[idx1], train_graph_list[idx2])
+            if is_identical:
+                non_novel_graph_idx[idx1] = True
+                deduplicate_matrix[idx1, idx2] = True
+    else:
+        ray.init()
+        N_batch = len(check_pairs) // batch_size
+        futures = []
+        for i in tqdm(range(N_batch)):
+            batch_pairs = check_pairs[i * batch_size: (i + 1) * batch_size]
+            batch_graph_pair = [(gen_graph_list[idx1], train_graph_list[idx2]) for idx1, idx2 in batch_pairs]
+            futures.append(is_graph_identical_remote.remote(batch_graph_pair))
+        results = ray.get(futures)
 
-    return data_files
+        for batch_idx in tqdm(range(N_batch)):
+            for idx, is_identical in enumerate(results[batch_idx]):
+                if not is_identical:
+                    continue
+                idx1, idx2 = check_pairs[batch_idx * batch_size + idx]
+                deduplicate_matrix[idx1, idx2] = True
+                non_novel_graph_idx[idx1] = True
+        ray.shutdown()
+
+    novel = M - np.sum(non_novel_graph_idx)
+    print(f"Novel: {novel}/{M}")
+    novel_ratio = novel / M
+    return novel_ratio, deduplicate_matrix
 
 
 def test_check():
@@ -182,50 +208,94 @@ def load_data_from_npz(data_npz_file):
     return face_points, faces_adj_pair
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--fake", type=str, required=True)
-    parser.add_argument("--fake_post", type=str, required=False)
-    parser.add_argument("--train", type=str, required=False)
-    parser.add_argument("--n_bit", type=int, default=4)
-    parser.add_argument("--use_ray", action='store_true')
-    parser.add_argument("--batch_size", type=int, default=200000)
-    args = parser.parse_args()
-    gen_data_root = args.fake
-    gen_post_data_root = args.fake_post
-    train_data_root = args.train
-    is_use_ray = args.use_ray
-    n_bit = args.n_bit
-    batch_size = args.batch_size
-
-    # Load all the generated data files
-    print("Loading generated data files...")
-    data_npz_file_list = load_data_with_prefix(gen_data_root, '.npz')
-    # data_npz_file_list = data_npz_file_list[:1000]
+def load_and_build_graph(data_npz_file_list, gen_post_data_root=None, n_bit=4):
     gen_graph_list = []
     prefix_list = []
-    for data_npz_file in tqdm(data_npz_file_list):
+    for data_npz_file in data_npz_file_list:
         folder_name = os.path.basename(os.path.dirname(data_npz_file))
-        if (gen_post_data_root and not os.path.exists(os.path.join(gen_post_data_root, folder_name, "success.txt"))):
-            continue
+        if gen_post_data_root:
+            step_file_list = load_data_with_prefix(os.path.join(gen_post_data_root, folder_name), ".step")
+            if len(step_file_list) == 0:
+                continue
+            if not check_step_valid_soild(step_file_list[0]):
+                continue
         prefix_list.append(folder_name)
         faces, faces_adj_pair = load_data_from_npz(data_npz_file)
         graph = build_graph(faces, faces_adj_pair, n_bit)
         gen_graph_list.append(graph)
+    return gen_graph_list, prefix_list
 
+
+load_and_build_graph_remote = ray.remote(load_and_build_graph)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--fake", type=str, required=True)
+    parser.add_argument("--fake_post", type=str, required=False)
+    parser.add_argument("--train_root", type=str, required=False)
+    parser.add_argument("--n_bit", type=int, default=4)
+    parser.add_argument("--use_ray", action='store_true')
+    parser.add_argument("--load_batch_size", type=int, default=400)
+    parser.add_argument("--compute_batch_size", type=int, default=200000)
+    parser.add_argument("--txt", type=str, default=None)
+    parser.add_argument("--num_cpus", type=int, default=16)
+    args = parser.parse_args()
+    gen_data_root = args.fake
+    gen_post_data_root = args.fake_post
+    train_data_root = args.train_root
+    is_use_ray = args.use_ray
+    n_bit = args.n_bit
+    load_batch_size = args.load_batch_size
+    compute_batch_size = args.compute_batch_size
+    folder_list_txt = args.txt
+    num_cpus = args.num_cpus
+
+    # Load all the generated data files
+    print("Loading generated data files...")
+    data_npz_file_list = load_data_with_prefix(gen_data_root, 'data.npz')
+    if is_use_ray:
+        ray.init(num_cpus=num_cpus)
+        futures = []
+        gen_graph_list = []
+        gen_prefix_list = []
+        for i in tqdm(range(0, len(data_npz_file_list), load_batch_size)):
+            batch_data_npz_file_list = data_npz_file_list[i: i + load_batch_size]
+            futures.append(load_and_build_graph_remote.remote(batch_data_npz_file_list, gen_post_data_root, n_bit))
+        for future in tqdm(futures):
+            result = ray.get(future)
+            gen_graph_list_batch, gen_prefix_list_batch = result
+            gen_graph_list.extend(gen_graph_list_batch)
+            gen_prefix_list.extend(gen_prefix_list_batch)
+        ray.shutdown()
+    else:
+        gen_graph_list, gen_prefix_list = load_and_build_graph(data_npz_file_list, gen_post_data_root, n_bit)
     print(f"Loaded {len(gen_graph_list)} generated data files")
 
-    print("Computing unique ratio...")
-    unique_ratio, deduplicate_matrix = compute_gen_unique(gen_graph_list, is_use_ray, batch_size)
-    print(f"Unique ratio: {unique_ratio}")
+    print("Loading training data files...")
+    data_npz_file_list = load_data_with_prefix(train_data_root, 'data.npz', folder_list_txt=folder_list_txt)
+    load_batch_size = load_batch_size * 5
+    if is_use_ray:
+        ray.init(num_cpus=num_cpus)
+        futures = []
+        train_graph_list = []
+        train_prefix_list = []
+        for i in tqdm(range(0, len(data_npz_file_list), load_batch_size)):
+            batch_data_npz_file_list = data_npz_file_list[i: i + load_batch_size]
+            futures.append(load_and_build_graph_remote.remote(batch_data_npz_file_list, None, n_bit))
+        for future in tqdm(futures):
+            result = ray.get(future)
+            train_graph_list_batch, train_prefix_list_batch = result
+            train_graph_list.extend(train_graph_list_batch)
+            train_prefix_list.extend(train_prefix_list_batch)
+        ray.shutdown()
+    else:
+        train_graph_list, train_prefix_list = load_and_build_graph(data_npz_file_list, None, n_bit)
+    print(f"Loaded {len(train_graph_list)} training data files")
 
-    # save the deduplicate set
-    # print the top-k deduplicated idx
-    # deduplicate_count = np.sum(deduplicate_matrix, axis=0)
-    # deduplicated_idx = np.where(deduplicate_count > 10)
-    # for idx in deduplicated_idx[0]:
-    #     print(f"idx: {idx}, count: {deduplicate_count[idx]}")
-    #     print(np.where(deduplicate_matrix[idx]))
+    print("Computing Unique ratio...")
+    unique_ratio, deduplicate_matrix = compute_gen_unique(gen_graph_list, is_use_ray, compute_batch_size)
+    print(f"Unique ratio: {unique_ratio}")
 
     deduplicate_components_txt = gen_data_root + f"_deduplicate_components_{n_bit}bit.txt"
     fp = open(deduplicate_components_txt, "w")
@@ -233,8 +303,14 @@ def main():
     deduplicate_components = find_connected_components(deduplicate_matrix)
     for component in deduplicate_components:
         if len(component) > 1:
-            component = [prefix_list[idx] for idx in component]
+            component = [gen_prefix_list[idx] for idx in component]
             print(f"Component: {component}", file=fp)
+    print(f"Deduplicate components are saved to {deduplicate_components_txt}")
+
+    print("Computing Novel ratio...")
+    novel_ratio = compute_gen_novel(gen_graph_list, train_graph_list, is_use_ray, compute_batch_size)
+    print(f"Novel ratio: {novel_ratio}")
+    print("Done")
 
 
 if __name__ == "__main__":

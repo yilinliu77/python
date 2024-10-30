@@ -16,17 +16,17 @@ from src.brepnet.viz.sort_and_merge import arrange_meshes
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--src_root", type=str, required=True)
-    parser.add_argument("--src_pc_root", type=str, required=True)
-    parser.add_argument("--ref_root", type=str, required=True)
+    parser.add_argument("--fake_root", type=str, required=True)
+    parser.add_argument("--fake_pcd_root", type=str, required=False)
+    parser.add_argument("--train_root", type=str, required=True)
     parser.add_argument("--prefix", type=str, required=False, default="")
     parser.add_argument("--txt", type=str, required=False, default="")
     args = parser.parse_args()
-    src_root = args.src_root
-    src_pc_root = args.src_pc_root
-    ref_root = args.ref_root
+    fake_root = args.fake_root
+    fake_pcd_root = args.fake_pcd_root
+    train_root = args.train_root
 
-    if not os.path.exists(src_root) or not os.path.exists(ref_root) or not os.path.exists(src_pc_root):
+    if not os.path.exists(fake_root) or not os.path.exists(train_root) or not os.path.exists(fake_pcd_root):
         raise ValueError("Invalid path")
 
     print("\nLoading reference point clouds...")
@@ -36,9 +36,9 @@ if __name__ == "__main__":
     if args.txt:
         with open(args.txt, "r") as f:
             ref_folders = [line.strip() for line in f.readlines()]
-        ref_shape_paths = [os.path.join(ref_root, folder, "pc.ply") for folder in ref_folders]
+        ref_shape_paths = [os.path.join(train_root, folder, "pc.ply") for folder in ref_folders]
     else:
-        ref_shape_paths = load_data_with_prefix(ref_root, 'pc.ply')
+        ref_shape_paths = load_data_with_prefix(train_root, 'pc.ply')
 
     assert len(ref_shape_paths) > 0
     ref_shape_paths.sort()
@@ -53,9 +53,9 @@ if __name__ == "__main__":
     print("\nLoading fake point clouds...")
     src_pcs = []
     if args.prefix:
-        src_shape_paths = [os.path.join(src_pc_root, args.prefix + ".ply")]
+        src_shape_paths = [os.path.join(fake_pcd_root, args.prefix + ".ply")]
     else:
-        src_shape_paths = load_data_with_prefix(src_pc_root, '.ply')
+        src_shape_paths = load_data_with_prefix(fake_pcd_root, '.ply')
 
     assert len(src_shape_paths) > 0
     src_shape_paths.sort()
@@ -73,15 +73,18 @@ if __name__ == "__main__":
     print("\nFinding nearest...")
     chamferdist = ChamferDistance()
     batch_size = 10
+    nearest_list = []
     for i in tqdm(range(src_pcs.shape[0])):
-        local_out_root = os.path.join(src_root, os.path.basename(src_shape_paths[i])[:-4])
-        cf2ref = chamferdist(src_pcs[i].unsqueeze(0).repeat(ref_pcs.shape[0], 1, 1), ref_pcs, batch_reduction=None, bidirectional=False)
+        local_out_root = os.path.join(fake_root, os.path.basename(src_shape_paths[i])[:-4])
+        cf2ref = chamferdist(src_pcs[i].unsqueeze(0).repeat(ref_pcs.shape[0], 1, 1), ref_pcs,
+                             batch_reduction=None, point_reduction='mean', bidirectional=True)
         topk_near_idx = torch.topk(-cf2ref, 10).indices.tolist()
         with open(os.path.join(local_out_root, "nearest.txt"), "w") as f:
             f.write("Source: {}\n".format(os.path.basename(local_out_root)))
             f.write("Top10 Nearest:\n")
             for ref_idx in topk_near_idx:
-                f.write(os.path.basename(os.path.dirname(ref_shape_paths[ref_idx])) + "\n")
+                folder_name = os.path.basename(os.path.dirname(ref_shape_paths[ref_idx]))
+                f.write(f"{folder_name} {cf2ref[ref_idx]}\n")
         near_mesh_paths = [os.path.join(os.path.dirname(ref_shape_paths[ref_idx]), "mesh.ply") for ref_idx in topk_near_idx]
         src_mesh_paths = glob.glob(os.path.join(local_out_root, "*.stl"))
         mesh_paths = src_mesh_paths + near_mesh_paths

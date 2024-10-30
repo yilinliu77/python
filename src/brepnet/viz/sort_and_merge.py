@@ -41,14 +41,13 @@ def normalize_mesh(mesh):
     return mesh
 
 
-def arrange_meshes(file_paths, out_path, intervals=0.5, color_mode="random"):
+def arrange_meshes(file_paths, out_path, intervals=0.5, color_mode="index"):
     assert color_mode in ["random", "index"]
     meshes = [normalize_mesh(trimesh.load(file)) for file in file_paths]
     num_meshes = len(meshes)
 
     grid_size = int(np.ceil(np.sqrt(num_meshes)))
     combined = []
-
     for idx, mesh in enumerate(meshes):
         row = idx // grid_size
         col = idx % grid_size
@@ -149,6 +148,7 @@ if __name__ == "__main__":
     parser.add_argument("--sample_num", type=int, default=100)
     parser.add_argument("--use_ray", action='store_true')
     parser.add_argument("--valid", action='store_true')
+    parser.add_argument("--index", action='store_true')
     args = parser.parse_args()
     data_root = args.data_root
     out_root = args.out_root
@@ -223,4 +223,7 @@ if __name__ == "__main__":
         ray.shutdown()
         mesh_path_list = glob.glob(os.path.join(out_root, "**", "*.stl"), recursive=True)
         mesh_path_list.sort()
-        arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"))
+        if args.index:
+            arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"), color_mode="index")
+        else:
+            arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"), color_mode="random")

@@ -19,7 +19,7 @@ NC='\033[0m'
 variables=(gt_test_pc_root ckpt gaussian_weights diffusion_type sample_size fake_sample_feature_root train_root train_txt fake_post_root fake_post_pcd_root)
 for var in "${variables[@]}"; do
     if [ -n "${!var}" ]; then
-        echo -e "${GREEN}${var} is set to ${!var}${NC}"
+        echo -e "${GREEN}${var}: ${!var}${NC}"
     else
         echo "${RED}Error: ${var} is empty${NC}"
         exit 1

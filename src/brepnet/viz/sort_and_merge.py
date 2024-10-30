@@ -8,6 +8,7 @@ import shutil
 import ray
 import glob
 
+from src.brepnet.eval.check_valid import check_step_valid_soild
 from src.brepnet.post.utils import *
 from OCC.Core.BRepLProp import BRepLProp_SLProps
 from OCC.Core.TopAbs import TopAbs_SOLID
@@ -40,18 +41,44 @@ def normalize_mesh(mesh):
     return mesh
 
 
-def arrange_meshes(file_paths, out_path, intervals=0.5):
+def arrange_meshes(file_paths, out_path, intervals=0.5, color_mode="index"):
+    assert color_mode in ["random", "index"]
     meshes = [normalize_mesh(trimesh.load(file)) for file in file_paths]
     num_meshes = len(meshes)
 
     grid_size = int(np.ceil(np.sqrt(num_meshes)))
     combined = []
-
     for idx, mesh in enumerate(meshes):
         row = idx // grid_size
         col = idx % grid_size
         translation = [col * (2 + intervals), -row * (2 + intervals), 0]
-        mesh.visual.face_colors = np.array([random_rgba()] * len(mesh.faces))
+        if color_mode == "index":
+            mesh.visual.face_colors = np.array([idx_to_rgba(idx)] * len(mesh.faces))
+        elif color_mode == "random":
+            mesh.visual.face_colors = np.array([random_rgba()] * len(mesh.faces))
+        else:
+            raise ValueError("Invalid color mode")
+        mesh.apply_translation(translation)
+        combined.append(mesh)
+
+    combined_mesh = trimesh.util.concatenate(combined)
+    combined_mesh.export(out_path)
+
+
+def arrange_meshes_row(file_paths, out_path, intervals=0.5, color_mode="random"):
+    assert color_mode in ["random", "index"]
+    meshes = [normalize_mesh(trimesh.load(file)) for file in file_paths]
+    num_meshes = len(meshes)
+
+    combined = []
+    for idx, mesh in enumerate(meshes):
+        translation = [idx * (2 + intervals), 0, 0]
+        if color_mode == "index":
+            mesh.visual.face_colors = np.array([idx_to_rgba(idx)] * len(mesh.faces))
+        elif color_mode == "random":
+            mesh.visual.face_colors = np.array([random_rgba()] * len(mesh.faces))
+        else:
+            raise ValueError("Invalid color mode")
         mesh.apply_translation(translation)
         combined.append(mesh)
 
@@ -75,12 +102,7 @@ def compute_solid_complexity(file_path, num_samples=4):
     except:
         return {"is_valid_solid": False, "mean_curvature": -1, "num_faces": -1, "num_edges": -1, "num_vertices": -1}
 
-    solid_checker = BRepCheck_Analyzer(shape, True)
-
-    if shape.ShapeType() == TopAbs_SOLID and solid_checker.IsValid():
-        is_valid = True
-    else:
-        is_valid = False
+    is_valid = check_step_valid_soild(file_path)
 
     sample_point_curvature = []
 
@@ -126,6 +148,7 @@ if __name__ == "__main__":
     parser.add_argument("--sample_num", type=int, default=100)
     parser.add_argument("--use_ray", action='store_true')
     parser.add_argument("--valid", action='store_true')
+    parser.add_argument("--index", action='store_true')
     args = parser.parse_args()
     data_root = args.data_root
     out_root = args.out_root
@@ -195,9 +218,15 @@ if __name__ == "__main__":
                                 key=lambda x: (x[1]["num_faces"], x[1]["mean_curvature"], x[1]["num_edges"], x[1]["num_vertices"]),
                                 reverse=True)
 
-        for idx, folder in enumerate(sorted_folders):
+        for idx, folder in enumerate(tqdm(sorted_folders)):
             shutil.copytree(str(os.path.join(data_root, folder[0])), str(os.path.join(out_root, f"{idx:05d}_{folder[0]}")))
         ray.shutdown()
-        mesh_path_list = glob.glob(os.path.join(out_root, "**", "*.ply"), recursive=True)
+        mesh_path_list = glob.glob(os.path.join(out_root, "**", "*.stl"), recursive=True)
         mesh_path_list.sort()
-        arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"))
+        if args.index:
+            arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"), color_mode="index")
+        else:
+            arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"), color_mode="random")
+        print(f"arranged mesh is saved to {os.path.join(out_root, 'arranged.ply')}")
+
+    print("Done")

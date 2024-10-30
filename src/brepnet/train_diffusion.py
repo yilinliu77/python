@@ -202,10 +202,8 @@ class TrainDiffusion(pl.LightningModule):
 
             if "conditions" in data and "ori_imgs" in data["conditions"]:
                 imgs = data["conditions"]["ori_imgs"][idx].cpu().numpy().astype(np.uint8)
-                o3d.io.write_image(str(item_root / f"{prefix}_img0.png"), o3d.geometry.Image(imgs[0]))
-                o3d.io.write_image(str(item_root / f"{prefix}_img1.png"), o3d.geometry.Image(imgs[1]))
-                o3d.io.write_image(str(item_root / f"{prefix}_img2.png"), o3d.geometry.Image(imgs[2]))
-                o3d.io.write_image(str(item_root / f"{prefix}_img3.png"), o3d.geometry.Image(imgs[3]))
+                for i in range(imgs.shape[0]):
+                    o3d.io.write_image(str(item_root / f"{prefix}_img{i}.png"), o3d.geometry.Image(imgs[i]))
             if "conditions" in data and "points" in data["conditions"]:
                 points = data["conditions"]["points"][idx].cpu().numpy().astype(np.float32)[0]
                 pc = o3d.geometry.PointCloud()

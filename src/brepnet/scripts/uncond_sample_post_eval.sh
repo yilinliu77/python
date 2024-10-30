@@ -42,4 +42,4 @@ python -m src.brepnet.eval.sample_points --data_root ${fake_post_root} --out_roo
 echo -e "${GREEN}STEP3 Evaluate${NC}"
 python -m src.brepnet.eval.eval_brepgen --real ${gt_test_pc_root} --fake ${fake_post_pcd_root} || exit 1
 
-echo "${GREEN}POST ADN EVAL DONE${NC}"
+echo -e "${GREEN}POST ADN EVAL DONE${NC}"

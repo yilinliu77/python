@@ -13,25 +13,18 @@ train_txt=$8
 fake_post_root=${fake_sample_feature_root}"_post"
 fake_post_pcd_root=${fake_post_root}"_pcd"
 
-variables=(gt_test_pc_root ckpt gaussian_weights diffusion_type sample_size fake_sample_feature_root fake_post_root fake_post_pcd_root)
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+NC='\033[0m'
+variables=(gt_test_pc_root ckpt gaussian_weights diffusion_type sample_size fake_sample_feature_root train_root train_txt fake_post_root fake_post_pcd_root)
 for var in "${variables[@]}"; do
-    if [ -z "${!var}" ]; then
-        echo "Error: $var is empty"
+    if [ -n "${!var}" ]; then
+        echo -e "${GREEN}${var} is set to ${!var}${NC}"
+    else
+        echo "${RED}Error: ${var} is empty${NC}"
         exit 1
     fi
 done
-
-GREEN='\033[0;32m'
-NC='\033[0m'
-echo -e "${GREEN}Sample & Post & Evaluate${NC}"
-echo -e "${GREEN}gt_test_pc_root: ${gt_test_pc_root}${NC}"
-echo -e "${GREEN}ckpt: ${ckpt}${NC}"
-echo -e "${GREEN}gaussian_weights: ${gaussian_weights}${NC}"
-echo -e "${GREEN}diffusion_type: ${diffusion_type}${NC}"
-echo -e "${GREEN}sample_size: ${sample_size}${NC}"
-echo -e "${GREEN}fake_sample_feature_root: ${fake_sample_feature_root}${NC}"
-echo -e "${GREEN}fake_post_root: ${fake_post_root}${NC}"
-echo -e "${GREEN}fake_post_pcd_root: ${fake_post_pcd_root}${NC}"
 
 echo -e "${GREEN}STep0 Sample${NC}"
 python -m src.brepnet.train_diffusion model.name=Diffusion_condition model.diffusion_latent=768 trainer.resume_from_checkpoint=${ckpt} trainer.evaluate=true trainer.accelerator=16-mixed trainer.batch_size=1024 model.num_max_faces=30 dataset.num_max_faces=30 trainer.test_output_dir=${fake_sample_feature_root} model.gaussian_weights=${gaussian_weights} model.diffusion_type=${diffusion_type} model.pad_method=random model.sigmoid=false dataset.name=Dummy_dataset dataset.length=${sample_size} || exit 1

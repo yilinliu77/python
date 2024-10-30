@@ -14,19 +14,41 @@ from chamferdist import ChamferDistance
 
 from src.brepnet.viz.sort_and_merge import arrange_meshes
 
+
+def find_nearest(local_out_root, src_pcs_c, ref_pcs, ref_shape_paths):
+    chamferdist = ChamferDistance()
+    cf2ref = chamferdist(src_pcs_c.unsqueeze(0).repeat(ref_pcs.shape[0], 1, 1), ref_pcs,
+                         batch_reduction=None, point_reduction='mean', bidirectional=True)
+    topk_near_idx = torch.topk(-cf2ref, 10).indices.tolist()
+    with open(os.path.join(local_out_root, "nearest.txt"), "w") as f:
+        f.write("Source: {}\n".format(os.path.basename(local_out_root)))
+        f.write("Top10 Nearest:\n")
+        for ref_idx in topk_near_idx:
+            folder_name = os.path.basename(os.path.dirname(ref_shape_paths[ref_idx]))
+            f.write(f"{folder_name} {cf2ref[ref_idx]}\n")
+    near_mesh_paths = [os.path.join(os.path.dirname(ref_shape_paths[ref_idx]), "mesh.ply") for ref_idx in topk_near_idx]
+    src_mesh_paths = glob.glob(os.path.join(local_out_root, "*.stl"))
+    mesh_paths = src_mesh_paths + near_mesh_paths
+    arrange_meshes(mesh_paths, os.path.join(local_out_root, "nearest.ply"))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--fake_root", type=str, required=True)
+    parser.add_argument("--fake_post", type=str, required=True)
     parser.add_argument("--fake_pcd_root", type=str, required=False)
     parser.add_argument("--train_root", type=str, required=True)
     parser.add_argument("--prefix", type=str, required=False, default="")
     parser.add_argument("--txt", type=str, required=False, default="")
+    parser.add_argument("--use_ray", action='store_true')
+    parser.add_argument("--num_gpus", type=float, default=1)
+    parser.add_argument("--num_gpus_task", type=float, default=0.5)
+
     args = parser.parse_args()
-    fake_root = args.fake_root
+    fake_post = args.fake_post
     fake_pcd_root = args.fake_pcd_root
     train_root = args.train_root
 
-    if not os.path.exists(fake_root) or not os.path.exists(train_root) or not os.path.exists(fake_pcd_root):
+    if not os.path.exists(fake_post) or not os.path.exists(train_root) or not os.path.exists(fake_pcd_root):
         raise ValueError("Invalid path")
 
     print("\nLoading reference point clouds...")
@@ -71,21 +93,19 @@ if __name__ == "__main__":
     ref_pcs = torch.from_numpy(ref_pcs).to(device).to(torch.float32)
 
     print("\nFinding nearest...")
-    chamferdist = ChamferDistance()
-    batch_size = 10
-    nearest_list = []
-    for i in tqdm(range(src_pcs.shape[0])):
-        local_out_root = os.path.join(fake_root, os.path.basename(src_shape_paths[i])[:-4])
-        cf2ref = chamferdist(src_pcs[i].unsqueeze(0).repeat(ref_pcs.shape[0], 1, 1), ref_pcs,
-                             batch_reduction=None, point_reduction='mean', bidirectional=True)
-        topk_near_idx = torch.topk(-cf2ref, 10).indices.tolist()
-        with open(os.path.join(local_out_root, "nearest.txt"), "w") as f:
-            f.write("Source: {}\n".format(os.path.basename(local_out_root)))
-            f.write("Top10 Nearest:\n")
-            for ref_idx in topk_near_idx:
-                folder_name = os.path.basename(os.path.dirname(ref_shape_paths[ref_idx]))
-                f.write(f"{folder_name} {cf2ref[ref_idx]}\n")
-        near_mesh_paths = [os.path.join(os.path.dirname(ref_shape_paths[ref_idx]), "mesh.ply") for ref_idx in topk_near_idx]
-        src_mesh_paths = glob.glob(os.path.join(local_out_root, "*.stl"))
-        mesh_paths = src_mesh_paths + near_mesh_paths
-        arrange_meshes(mesh_paths, os.path.join(local_out_root, "nearest.ply"))
+    if not args.use_ray:
+        for i in tqdm(range(src_pcs.shape[0])):
+            local_out_root = os.path.join(fake_post, os.path.basename(src_shape_paths[i])[:-4])
+            find_nearest(local_out_root, src_pcs[i], ref_pcs, ref_shape_paths)
+    else:
+        find_nearest_remote = ray.remote(num_gpus=args.num_gpus_task)(find_nearest)
+        ray.init(
+                # local_mode=True,
+                num_gpus=args.num_gpus,
+        )
+        futures = []
+        for i in tqdm(range(src_pcs.shape[0])):
+            local_out_root = os.path.join(fake_post, os.path.basename(src_shape_paths[i])[:-4])
+            futures.append(find_nearest_remote.remote(local_out_root, src_pcs[i], ref_pcs, ref_shape_paths))
+        ray.get(futures)
+        ray.shutdown()

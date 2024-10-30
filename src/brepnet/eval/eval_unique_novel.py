@@ -253,7 +253,7 @@ load_and_build_graph_remote = ray.remote(load_and_build_graph)
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--fake", type=str, required=True)
+    parser.add_argument("--fake_root", type=str, required=True)
     parser.add_argument("--fake_post", type=str, required=True)
     parser.add_argument("--train_root", type=str, required=True)
     parser.add_argument("--n_bit", type=int, default=4)
@@ -263,7 +263,7 @@ def main():
     parser.add_argument("--txt", type=str, default=None)
     parser.add_argument("--num_cpus", type=int, default=32)
     args = parser.parse_args()
-    gen_data_root = args.fake
+    gen_data_root = args.fake_root
     gen_post_data_root = args.fake_post
     train_data_root = args.train_root
     is_use_ray = args.use_ray
@@ -346,6 +346,7 @@ def main():
             pbar.set_postfix({"novel_count": np.sum(~is_identical)})
 
     identical_folder = np.array(gen_prefix_list)[is_identical]
+    print(f"Novel ratio: {np.sum(~is_identical) / len(gen_graph_list)}")
     with open(gen_data_root + f"_not_novel_{n_bit}bit.txt", "w") as f:
         for folder in identical_folder:
             f.write(folder + "\n")

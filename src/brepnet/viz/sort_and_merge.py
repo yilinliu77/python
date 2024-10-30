@@ -227,3 +227,6 @@ if __name__ == "__main__":
             arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"), color_mode="index")
         else:
             arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"), color_mode="random")
+        print(f"arranged mesh is saved to {os.path.join(out_root, 'arranged.ply')}")
+
+    print("Done")

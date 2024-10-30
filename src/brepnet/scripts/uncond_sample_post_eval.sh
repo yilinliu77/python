@@ -1,5 +1,5 @@
 #!/bin/bash
-# ./src/brepnet/scripts/uncond_sample_post_eval.sh /mnt/d/deepcad_test_pcd /mnt/d/uncond_checkpoints/1025_gaussian_epsilon_f730_400k.ckpt 1e-6 epsilon 6000 /mnt/d/uncond_results/1025_gaussian_epsilon_f730_400k
+# ./src/brepnet/scripts/uncond_sample_post_eval.sh /mnt/d/deepcad_test_pcd /mnt/d/uncond_checkpoints/1025_gaussian_epsilon_f730_400k.ckpt 1e-6 epsilon 6000 /mnt/d/uncond_results/1025_gaussian_epsilon_f730_400k /mnt/d/deepcad_train_pcd ./src/brepnet/data/list/deduplicated_deepcad_training_30.txt
 
 gt_test_pc_root=$1
 ckpt=$2
@@ -7,6 +7,9 @@ gaussian_weights=$3
 diffusion_type=$4
 sample_size=$5
 fake_sample_feature_root=$6
+train_root=$7
+train_txt=$8
+
 fake_post_root=${fake_sample_feature_root}"_post"
 fake_post_pcd_root=${fake_post_root}"_pcd"
 
@@ -42,10 +45,10 @@ python -m src.brepnet.eval.sample_points --data_root ${fake_post_root} --out_roo
 echo -e "${GREEN}STEP3 Evaluate MMD & COV & JSD ${NC}"
 python -m src.brepnet.eval.eval_brepgen --real ${gt_test_pc_root} --fake ${fake_post_pcd_root} || exit 1
 
-echo -e "${GREEN}STEP3 Evaluate Unique & Novel ${NC}"
-echo -e "${GREEN}Find Nearest in the training set for each sample using CD${NC}"
-python -m src.brepnet.viz.find_nearest_pc_cd --fake_root /mnt/d/uncond_results/uncond_gaussian_epsilon_7_30_post --fake_pcd_root /mnt/d/uncond_results/uncond_gaussian_epsilon_7_30_post_pcd --train_root /mnt/d/deepcad_train_v6 --txt ./src/brepnet/data/list/deduplicated_deepcad_training_30.txt
-echo -e "${GREEN}Computing Unique & Novel${NC}"
-python -m src.brepnet.eval.eval_unique_novel --fake /mnt/d/uncond_results/uncond_gaussian_epsilon_7_30 --fake_post /mnt/d/uncond_results/uncond_gaussian_epsilon_7_30_post --train_root /mnt/d/deepcad_train_v6 --use_ray --txt ./src/brepnet/data/list/deduplicated_deepcad_training_30.txt
+echo -e "${GREEN}STEP4 Find Nearest in the training set for each sample using CD${NC}"
+python -m src.brepnet.viz.find_nearest_pc_cd --fake_post ${fake_post_root} --fake_pcd ${fake_post_pcd_root} --train_root ${train_root} --txt ${train_txt} --use_ray --num_gpus 8 --num_gpus_task 0.5 || exit 1
+
+echo -e "${GREEN}STEP4 Evaluate Unique & Novel ${NC}"
+python -m src.brepnet.eval.eval_unique_novel --fake_root ${fake_sample_feature_root} --fake_post ${fake_post} --train_root ${train_root} --use_ray --txt ${train_txt} || exit 1
 
 echo -e "${GREEN}POST ADN EVAL DONE${NC}"

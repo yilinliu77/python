@@ -39,7 +39,13 @@ python -m src.brepnet.post.construct_brep --data_root ${fake_sample_feature_root
 echo -e "${GREEN}STEP2 Sample Points${NC}"
 python -m src.brepnet.eval.sample_points --data_root ${fake_post_root} --out_root ${fake_post_pcd_root} --valid || exit 1
 
-echo -e "${GREEN}STEP3 Evaluate${NC}"
+echo -e "${GREEN}STEP3 Evaluate MMD & COV & JSD ${NC}"
 python -m src.brepnet.eval.eval_brepgen --real ${gt_test_pc_root} --fake ${fake_post_pcd_root} || exit 1
+
+echo -e "${GREEN}STEP3 Evaluate Unique & Novel ${NC}"
+echo -e "${GREEN}Find Nearest in the training set for each sample using CD${NC}"
+python -m src.brepnet.viz.find_nearest_pc_cd --fake_root /mnt/d/uncond_results/uncond_gaussian_epsilon_7_30_post --fake_pcd_root /mnt/d/uncond_results/uncond_gaussian_epsilon_7_30_post_pcd --train_root /mnt/d/deepcad_train_v6 --txt ./src/brepnet/data/list/deduplicated_deepcad_training_30.txt
+echo -e "${GREEN}Computing Unique & Novel${NC}"
+python -m src.brepnet.eval.eval_unique_novel --fake /mnt/d/uncond_results/uncond_gaussian_epsilon_7_30 --fake_post /mnt/d/uncond_results/uncond_gaussian_epsilon_7_30_post --train_root /mnt/d/deepcad_train_v6 --use_ray --txt ./src/brepnet/data/list/deduplicated_deepcad_training_30.txt
 
 echo -e "${GREEN}POST ADN EVAL DONE${NC}"

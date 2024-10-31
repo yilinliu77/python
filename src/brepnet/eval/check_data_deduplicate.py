@@ -270,8 +270,8 @@ def main():
     parser.add_argument("--train_root", type=str, required=True)
     parser.add_argument("--n_bit", type=int, default=6)
     parser.add_argument("--use_ray", action='store_true')
-    parser.add_argument("--load_batch_size", type=int, default=400)
-    parser.add_argument("--compute_batch_size", type=int, default=200000)
+    parser.add_argument("--load_batch_size", type=int, default=100)
+    parser.add_argument("--compute_batch_size", type=int, default=10000)
     parser.add_argument("--txt", type=str, default=None)
     parser.add_argument("--num_cpus", type=int, default=32)
     args = parser.parse_args()
@@ -323,10 +323,13 @@ def main():
     fp_novel.close()
 
     if is_use_ray:
-        ray.init(_temp_dir=r"E:\temp_ray")
+        ray.init(_temp_dir=r"/mnt/d/img2brep/ray_temp")
     unique_graph_idx_list = []
     pbar = tqdm(range(3, 31))
     for num_face in pbar:
+        if num_face != 6:
+            continue
+        print(f"Processing {num_face}")
         pbar.set_description(f"Processing {num_face}")
         fp_identical_pairs = open(identical_pairs_txt, "a")
         fp_novel = open(novel_txt, "a")

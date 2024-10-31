@@ -95,7 +95,7 @@ def generate_upper_triangle(N, batch_size):
         yield batch
 
 
-def compute_unique(graph_list, is_use_ray=False, batch_size=100000):
+def compute_unique_bk(graph_list, is_use_ray=False, batch_size=100000):
     N = len(graph_list)
     identical_pairs = []
     unique_graph_idx = list(range(N))
@@ -139,22 +139,24 @@ def compute_unique(graph_list, is_use_ray=False, batch_size=100000):
     return unique_graph_idx, identical_pairs
 
 
-def compute_unique_bk(graph_list, is_use_ray=False, batch_size=100000):
+def compute_unique(graph_list, is_use_ray=False, batch_size=100000, num_max_split_batch=128):
     N = len(graph_list)
+    identical_pairs = []
     unique_graph_idx = list(range(N))
     pair_0, pair_1 = np.triu_indices(N, k=1)
-    check_pairs = list(zip(pair_0, pair_1))
-    deduplicate_matrix = np.zeros((N, N), dtype=bool)
+    check_pairs = np.column_stack((pair_0, pair_1))
+
+    num_split_batch = len(check_pairs) // batch_size
+    if num_split_batch > 64:
+        num_split_batch = num_max_split_batch
+        batch_size = len(check_pairs) // num_split_batch
 
     if not is_use_ray:
         for idx1, idx2 in tqdm(check_pairs):
             is_identical = is_graph_identical(graph_list[idx1], graph_list[idx2])
             if is_identical:
                 unique_graph_idx.remove(idx2) if idx2 in unique_graph_idx else None
-                deduplicate_matrix[idx1, idx2] = True
-                deduplicate_matrix[idx2, idx1] = True
     else:
-        ray.init()
         N_batch = len(check_pairs) // batch_size
         futures = []
         for i in tqdm(range(N_batch)):
@@ -168,17 +170,11 @@ def compute_unique_bk(graph_list, is_use_ray=False, batch_size=100000):
                 if not is_identical:
                     continue
                 idx1, idx2 = check_pairs[batch_idx * batch_size + idx]
-                deduplicate_matrix[idx1, idx2] = True
-                deduplicate_matrix[idx2, idx1] = True
                 if idx2 in unique_graph_idx:
                     unique_graph_idx.remove(idx2)
-        ray.shutdown()
+                identical_pairs.append((idx1, idx2))
 
-    unique = len(unique_graph_idx)
-    print(f"Unique: {unique}/{N}")
-    unique_ratio = unique / N
-
-    return unique_ratio, deduplicate_matrix
+    return unique_graph_idx, identical_pairs
 
 
 def is_graph_identical_list(graph1, graph2_path_list):

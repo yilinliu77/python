@@ -248,12 +248,12 @@ def load_data_from_npz(data_npz_file):
     return face_points, faces_adj_pair
 
 
-def load_and_build_graph(data_npz_file_list, check_folders, n_bit=4):
+def load_and_build_graph(data_npz_file_list, check_folders=None, n_bit=4):
     graph_list = []
     prefix_list = []
     for data_npz_file in data_npz_file_list:
         folder_name = os.path.basename(os.path.dirname(data_npz_file))
-        if folder_name not in check_folders:
+        if check_folders and folder_name not in check_folders:
             continue
         prefix_list.append(folder_name)
         faces, faces_adj_pair = load_data_from_npz(data_npz_file)
@@ -283,8 +283,11 @@ def main():
     folder_list_txt = args.txt
     num_cpus = args.num_cpus
 
-    with open(folder_list_txt, "r") as f:
-        train_folders = [line.strip() for line in f.readlines()]
+    if folder_list_txt:
+        with open(folder_list_txt, "r") as f:
+            check_folders = [line.strip() for line in f.readlines()]
+    else:
+        check_folders = None
 
     ################################################## Unqiue #######################################################
     # Load all the data files
@@ -298,7 +301,7 @@ def main():
         prefix_list = []
         for i in tqdm(range(0, len(data_npz_file_list), load_batch_size)):
             batch_data_npz_file_list = data_npz_file_list[i: i + load_batch_size]
-            futures.append(load_and_build_graph_remote.remote(batch_data_npz_file_list, train_folders, n_bit))
+            futures.append(load_and_build_graph_remote.remote(batch_data_npz_file_list, check_folders, n_bit))
         for future in tqdm(futures):
             result = ray.get(future)
             graph_list_batch, prefix_list_batch = result

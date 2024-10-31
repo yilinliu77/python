@@ -602,6 +602,11 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}_7_30.txt".format(v_training_mode)
         elif self.deduplicate_list == 1:
             deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}_30.txt".format(v_training_mode)
+        elif self.deduplicate_list == 2:
+            if v_training_mode == "training":
+                deduplicate_file = "src/brepnet/data/list/deduplicated2_deepcad_{}_30.txt".format(v_training_mode)
+            else:
+                deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}_30.txt".format(v_training_mode)
         print("Use deduplicate list ", deduplicate_file)
         filelist = [item.strip() for item in open(deduplicate_file).readlines()]
         filelist.sort()

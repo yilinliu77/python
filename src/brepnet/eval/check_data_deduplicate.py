@@ -139,7 +139,7 @@ def compute_unique_bk(graph_list, is_use_ray=False, batch_size=100000):
     return unique_graph_idx, identical_pairs
 
 
-def compute_unique(graph_list, is_use_ray=False, batch_size=100000):
+def compute_unique(graph_list, is_use_ray=False, batch_size=100000, num_max_split_batch=128):
     N = len(graph_list)
     identical_pairs = []
     unique_graph_idx = list(range(N))
@@ -148,7 +148,7 @@ def compute_unique(graph_list, is_use_ray=False, batch_size=100000):
 
     num_split_batch = len(check_pairs) // batch_size
     if num_split_batch > 64:
-        num_split_batch = 64
+        num_split_batch = num_max_split_batch
         batch_size = len(check_pairs) // num_split_batch
 
     if not is_use_ray:

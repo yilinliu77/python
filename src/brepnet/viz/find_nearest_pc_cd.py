@@ -41,7 +41,7 @@ if __name__ == "__main__":
     parser.add_argument("--txt", type=str, required=False, default="")
     parser.add_argument("--use_ray", action='store_true')
     parser.add_argument("--num_gpus", type=int, default=1)
-    parser.add_argument("--num_gpus_task", type=float, default=0.5)
+    parser.add_argument("--num_gpus_task", type=float, default=1)
 
     args = parser.parse_args()
     fake_post = args.fake_post
@@ -49,6 +49,9 @@ if __name__ == "__main__":
     train_root = args.train_root
 
     if not os.path.exists(fake_post) or not os.path.exists(train_root) or not os.path.exists(fake_pcd_root):
+        print("fake_post: ", fake_post)
+        print("train_root: ", train_root)
+        print("fake_pcd_root: ", fake_pcd_root)
         raise ValueError("Invalid path")
 
     print("\nLoading reference point clouds...")

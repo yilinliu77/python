@@ -81,7 +81,9 @@ class TrainDiffusion(pl.LightningModule):
         model_mod = getattr(model_mod, self.hydra_conf["model"]["name"])
         self.model = model_mod(self.hydra_conf["model"])
 
-        self.viz = {}
+        self.viz = {
+            "time_loss": []
+        }
 
     def train_dataloader(self):
         self.train_dataset = self.dataset_mod("training", self.hydra_conf["dataset"], )
@@ -118,7 +120,7 @@ class TrainDiffusion(pl.LightningModule):
         loss = self.model(data)
         total_loss = loss["total_loss"]
         for key in loss:
-            if key == "total_loss":
+            if key == "total_loss" or key == "t":
                 continue
             self.log(f"Training_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                      sync_dist=True, batch_size=self.batch_size)
@@ -132,7 +134,7 @@ class TrainDiffusion(pl.LightningModule):
         loss = self.model(data, v_test=True)
         total_loss = loss["total_loss"]
         for key in loss:
-            if key == "total_loss":
+            if key == "total_loss" or key == "t":
                 continue
             self.log(f"Validation_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                      sync_dist=True, batch_size=self.batch_size)
@@ -141,8 +143,13 @@ class TrainDiffusion(pl.LightningModule):
 
         if batch_idx == 0 and self.global_rank == 0:
             result = self.model.inference(1, self.device, data)[0]
-            self.viz = {}
+            self.viz = {
+                "time_loss": []
+            }
             self.viz["recon_faces"] = result["pred_face"]
+        
+        if self.global_rank == 0 and "t" in loss:
+            self.viz["time_loss"].append(loss["t"])
 
         return total_loss
 
@@ -152,10 +159,18 @@ class TrainDiffusion(pl.LightningModule):
         if self.global_rank != 0:
             return
 
+        if "time_loss" in self.viz:
+            time_loss = torch.cat(self.viz["time_loss"]).cpu().numpy()
+            results = []
+            for i in range(10):
+                results.append(time_loss[np.logical_and(time_loss[:,0]>=i*100, time_loss[:,0]<(i+1)*100), 1].mean())
+                self.logger.experiment.add_scalars('tloss', 
+                                           {f'tloss_{i}': results[-1]}, 
+                                           global_step=self.global_step)
         if "recon_faces" in self.viz:
             recon_faces = self.viz["recon_faces"]
             trimesh.PointCloud(recon_faces.reshape(-1, 3)).export(str(self.log_root / "{}_faces.ply".format(self.current_epoch)))
-        self.viz = {}
+        self.viz = {"time_loss": []}
         return
 
     def test_dataloader(self):

@@ -125,6 +125,10 @@ class AutoEncoder_geo_dataset(torch.utils.data.Dataset):
         self.root = Path(v_conf["data_root"])
         self.is_aug = v_conf["is_aug"]
 
+        if v_conf["is_overfit"]:
+            self.data_folders = self.data_folders[:100]
+            if v_training_mode == "training":
+                self.data_folders = self.data_folders * 100
         print(len(self.data_folders))
 
     def __len__(self):

@@ -262,6 +262,7 @@ def main():
     parser.add_argument("--compute_batch_size", type=int, default=200000)
     parser.add_argument("--txt", type=str, default=None)
     parser.add_argument("--num_cpus", type=int, default=32)
+    parser.add_argument("--min_face", type=int, required=False)
     args = parser.parse_args()
     gen_data_root = args.fake_root
     gen_post_data_root = args.fake_post
@@ -295,19 +296,25 @@ def main():
         gen_graph_list, gen_prefix_list = load_and_build_graph(gen_data_npz_file_list, gen_post_data_root, n_bit)
     print(f"Loaded {len(gen_graph_list)} generated data files")
 
+    if args.min_face:
+        graph_node_num = [len(graph.nodes) for graph in gen_graph_list]
+        gen_graph_list = [gen_graph_list[idx] for idx, num in enumerate(graph_node_num) if num >= args.min_face]
+        gen_prefix_list = [gen_prefix_list[idx] for idx, num in enumerate(graph_node_num) if num >= args.min_face]
+        print(f"Filtered sample that face_num < {args.min_face}, remain {len(gen_graph_list)}")
+
     print("Computing Unique ratio...")
     unique_ratio, deduplicate_matrix = compute_gen_unique(gen_graph_list, is_use_ray, compute_batch_size)
     print(f"Unique ratio: {unique_ratio}")
 
-    deduplicate_components_txt = gen_data_root + f"_deduplicate_components_{n_bit}bit.txt"
-    fp = open(deduplicate_components_txt, "w")
+    unique_txt = gen_data_root + f"_unique_{n_bit}bit_results.txt"
+    fp = open(unique_txt, "w")
     print(f"Unique ratio: {unique_ratio}", file=fp)
     deduplicate_components = find_connected_components(deduplicate_matrix)
     for component in deduplicate_components:
         if len(component) > 1:
             component = [gen_prefix_list[idx] for idx in component]
             print(f"Component: {component}", file=fp)
-    print(f"Deduplicate components are saved to {deduplicate_components_txt}")
+    print(f"Deduplicate components are saved to {unique_txt}")
     fp.close()
 
     # For accelerate, please first run the find_nerest.py to find the nearest item in train data for each fake sample
@@ -347,7 +354,9 @@ def main():
 
     identical_folder = np.array(gen_prefix_list)[is_identical]
     print(f"Novel ratio: {np.sum(~is_identical) / len(gen_graph_list)}")
-    with open(gen_data_root + f"_not_novel_{n_bit}bit.txt", "w") as f:
+    novel_txt = gen_data_root + f"_novel_{n_bit}bit_results.txt"
+    with open(novel_txt, "w") as f:
+        f.write(f"Novel ratio: {np.sum(~is_identical) / len(gen_graph_list)}\n")
         for folder in identical_folder:
             f.write(folder + "\n")
     print("Done")

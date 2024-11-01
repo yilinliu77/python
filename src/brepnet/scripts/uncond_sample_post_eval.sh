@@ -1,5 +1,5 @@
 #!/bin/bash
-# ./src/brepnet/scripts/uncond_sample_post_eval.sh /mnt/d/deepcad_test_pcd /mnt/d/uncond_checkpoints/1025_gaussian_epsilon_f730_400k.ckpt 1e-6 epsilon 6000 /mnt/d/uncond_results/1025_gaussian_epsilon_f730_400k /mnt/d/deepcad_train_pcd ./src/brepnet/data/list/deduplicated_deepcad_training_30.txt
+# ./src/brepnet/scripts/uncond_sample_post_eval.sh /mnt/d/deepcad_test_pcd /mnt/d/uncond_checkpoints/uncond_gaussian_epsilon_f30_3m.ckpt 1e-6 epsilon 6000 /mnt/d/uncond_results/uncond_gaussian_epsilon_f30_3m /mnt/d/deepcad_train_v6 ./src/brepnet/data/list/deduplicated_deepcad_training_30.txt
 
 gt_test_pc_root=$1
 ckpt=$2
@@ -39,9 +39,9 @@ echo -e "\n${GREEN}STEP3 Evaluate MMD & COV & JSD ${NC}"
 python -m src.brepnet.eval.eval_brepgen --real ${gt_test_pc_root} --fake ${fake_post_pcd_root} || exit 1
 
 echo -e "\n${GREEN}STEP4 Find Nearest in the training set for each sample using CD${NC}"
-python -m src.brepnet.viz.find_nearest_pc_cd --fake_post ${fake_post_root} --fake_pcd ${fake_post_pcd_root} --train_root ${train_root} --txt ${train_txt} --use_ray --num_gpus 8 --num_gpus_task 0.5 || exit 1
+python -m src.brepnet.viz.find_nearest_pc_cd --fake_post ${fake_post_root} --fake_pcd_root ${fake_post_pcd_root} --train_root ${train_root} --txt ${train_txt}|| exit 1
 
 echo -e "\n${GREEN}STEP5 Evaluate Unique & Novel ${NC}"
-python -m src.brepnet.eval.eval_unique_novel --fake_root ${fake_sample_feature_root} --fake_post ${fake_post} --train_root ${train_root} --use_ray --txt ${train_txt} || exit 1
+python -m src.brepnet.eval.eval_unique_novel --fake_root ${fake_sample_feature_root} --fake_post ${fake_post_root} --train_root ${train_root} --use_ray --txt ${train_txt} || exit 1
 
 echo -e "\n${GREEN}POST ADN EVAL DONE${NC}"

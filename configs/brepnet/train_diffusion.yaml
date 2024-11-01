@@ -17,6 +17,7 @@ dataset:
   
   length: 1000
   num_max_faces: 64
+  addition_tag: false
 
 trainer:
   gpu: 1
@@ -49,6 +50,8 @@ model:
   loss: l2
   pad_method: zero
   num_max_faces: 64
+  beta_schedule: squaredcos_cap_v2
+  addition_tag: false
 
   autoencoder: AutoEncoder_0925
   dim_latent: 8

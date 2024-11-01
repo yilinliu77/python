@@ -27,11 +27,16 @@ def check_step_valid_soild(step_file, precision=1e-1):
     return is_valid
 
 
-def load_data_with_prefix(root_folder, prefix):
+def load_data_with_prefix(root_folder, prefix, folder_list_txt=None):
     data_files = []
-
+    folder_list = []
+    if folder_list_txt is not None:
+        with open(folder_list_txt, "r") as f:
+            folder_list = f.read().splitlines()
     # Walk through the directory tree starting from the root folder
     for root, dirs, files in os.walk(root_folder):
+        if folder_list_txt is not None and os.path.basename(root) not in folder_list:
+            continue
         for filename in files:
             # Check if the file ends with the specified prefix
             if filename.endswith(prefix):

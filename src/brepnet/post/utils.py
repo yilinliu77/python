@@ -91,7 +91,8 @@ ROUGH_FITTING_TOLERANCE = 1e-1
 FIX_TOLERANCE = 1e-2
 FIX_PRECISION = 1e-2
 # CONNECT_TOLERANCE = 2e-2
-CONNECT_TOLERANCE = [2e-3, 6e-3, 1e-2, 1.5e-2, 2e-2, 2.5e-2, 5e-2, 8e-2, ]
+# CONNECT_TOLERANCE = [2e-3, 6e-3, 1e-2, 1.5e-2, 2e-2, 2.5e-2, 5e-2, 8e-2, ]
+CONNECT_TOLERANCE = [2e-2]
 SEWING_TOLERANCE = 8e-2
 REMOVE_EDGE_TOLERANCE = 1e-3
 TRANSFER_PRECISION = 1e-3
@@ -486,7 +487,7 @@ def optimize(
     src_st = torch.tensor([1, 0, 0, 0], dtype=torch.float32, device=device).unsqueeze(0).repeat(edge_points.shape[0], 1)
     edge_st = nn.Parameter(torch.tensor([1, 0, 0, 0], dtype=torch.float32, device=device).unsqueeze(0).repeat(edge_points.shape[0], 1))
     edge_st.requires_grad = True
-    optimizer = torch.optim.Adam([edge_st], lr=8e-3)
+    optimizer = torch.optim.Adam([edge_st], lr=8e-3, betas=(0.95, 0.999), eps=1e-08, )
 
     prev_loss = float('inf')
     if v_islog:

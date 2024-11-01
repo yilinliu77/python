@@ -42,6 +42,6 @@ done
 # python -m src.brepnet.viz.find_nearest_pc_cd --fake_post ${fake_post_root} --fake_pcd_root ${fake_post_pcd_root} --train_root ${train_root} --txt ${train_txt}|| exit 1
 
 echo -e "\n${GREEN}STEP5 Evaluate Unique & Novel ${NC}"
-python -m src.brepnet.eval.eval_unique_novel --fake_root ${fake_sample_feature_root} --fake_post ${fake_post_root} --train_root ${train_root} --use_ray --txt ${train_txt} || exit 1
+python -m src.brepnet.eval.eval_unique_novel --fake_root ${fake_sample_feature_root} --fake_post ${fake_post_root} --train_root ${train_root} --use_ray --txt ${train_txt} --min_face 7 || exit 1
 
 echo -e "\n${GREEN}POST ADN EVAL DONE${NC}"

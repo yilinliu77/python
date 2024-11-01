@@ -262,6 +262,7 @@ def main():
     parser.add_argument("--compute_batch_size", type=int, default=200000)
     parser.add_argument("--txt", type=str, default=None)
     parser.add_argument("--num_cpus", type=int, default=32)
+    parser.add_argument("--min_face", type=int, required=False)
     args = parser.parse_args()
     gen_data_root = args.fake_root
     gen_post_data_root = args.fake_post
@@ -294,6 +295,12 @@ def main():
     else:
         gen_graph_list, gen_prefix_list = load_and_build_graph(gen_data_npz_file_list, gen_post_data_root, n_bit)
     print(f"Loaded {len(gen_graph_list)} generated data files")
+
+    if args.min_face:
+        graph_node_num = [len(graph.nodes) for graph in gen_graph_list]
+        gen_graph_list = [gen_graph_list[idx] for idx, num in enumerate(graph_node_num) if num >= args.min_face]
+        gen_prefix_list = [gen_prefix_list[idx] for idx, num in enumerate(graph_node_num) if num >= args.min_face]
+        print(f"Filtered sample that face_num < {args.min_face}, remain {len(gen_graph_list)}")
 
     print("Computing Unique ratio...")
     unique_ratio, deduplicate_matrix = compute_gen_unique(gen_graph_list, is_use_ray, compute_batch_size)

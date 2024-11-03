@@ -278,21 +278,13 @@ def main(v_cfg: DictConfig):
 
     model = TrainAutoEncoder(v_cfg)
 
-    if True:
-        # wandb.init(
-        #     # set the wandb project where this run will be logged
-        #     project="BRepNet++",
-
-        #     # track hyperparameters and run metadata
-        #     config=v_cfg
-        # )
+    if v_cfg["trainer"]["evaluate"] is False:
         logger = WandbLogger(
             project='BRepNet++',
             save_dir=log_dir,
             name=exp_name,
         )
         logger.watch(model)
-        logger.experiment.config["batch_size"] = v_cfg["trainer"]["batch_size"]
     else:
         logger = TensorBoardLogger(log_dir)
 

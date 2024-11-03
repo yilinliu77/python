@@ -26,6 +26,11 @@ from torch.optim import Adam
 from torchmetrics.classification import BinaryPrecision, BinaryRecall, BinaryAveragePrecision, BinaryF1Score
 from torchmetrics import MetricCollection
 
+import wandb
+from pytorch_lightning.loggers import WandbLogger
+
+os.environ["HTTP_PROXY"] = "http://172.31.178.126:7890"
+os.environ["HTTPS_PROXY"] = "http://172.31.178.126:7890"
 
 class TrainAutoEncoder(pl.LightningModule):
     def __init__(self, hparams):
@@ -91,15 +96,14 @@ class TrainAutoEncoder(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         data = batch
-
         loss, data = self.model(data)
         total_loss = loss["total_loss"]
         for key in loss:
             if key == "total_loss":
                 continue
-            self.log(f"Training_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
+            self.log(f"Training/{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                      sync_dist=True, batch_size=self.batch_size)
-        self.log("Training_Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
+        self.log("Training/Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
         if torch.isnan(total_loss).any():
             print("NAN Loss")
@@ -113,9 +117,9 @@ class TrainAutoEncoder(pl.LightningModule):
         for key in loss:
             if key == "total_loss":
                 continue
-            self.log(f"Validation_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
+            self.log(f"Validation/{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                      sync_dist=True, batch_size=self.batch_size)
-        self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
+        self.log("Validation/Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
 
         if batch_idx == 0:
@@ -263,18 +267,26 @@ def main(v_cfg: DictConfig):
 
     exp_name = v_cfg["trainer"]["exp_name"]
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
-    log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name + "/" + str(datetime.now().strftime("%y-%m-%d-%H-%M-%S"))
+    log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name
     v_cfg["trainer"]["output"] = log_dir
     print("Log dir: ", log_dir)
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
 
-    mc = ModelCheckpoint(monitor="Validation_Loss", save_top_k=3, save_last=True)
+    mc = ModelCheckpoint(monitor="Validation/Loss", save_top_k=3, save_last=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
     model = TrainAutoEncoder(v_cfg)
-    logger = TensorBoardLogger(
-        log_dir)
+
+    if v_cfg["trainer"]["evaluate"] is False:
+        logger = WandbLogger(
+            project='BRepNet++',
+            save_dir=log_dir,
+            name=exp_name,
+        )
+        logger.watch(model)
+    else:
+        logger = TensorBoardLogger(log_dir)
 
     trainer = Trainer(
         default_root_dir=log_dir,

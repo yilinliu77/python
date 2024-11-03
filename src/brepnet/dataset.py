@@ -606,11 +606,6 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}_7_30.txt".format(v_training_mode)
         elif self.deduplicate_list == 1:
             deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}_30.txt".format(v_training_mode)
-        elif self.deduplicate_list == 2:
-            if v_training_mode == "training":
-                deduplicate_file = "src/brepnet/data/list/deduplicated2_deepcad_{}_30.txt".format(v_training_mode)
-            else:
-                deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}_30.txt".format(v_training_mode)
         print("Use deduplicate list ", deduplicate_file)
         filelist = [item.strip() for item in open(deduplicate_file).readlines()]
         filelist.sort()
@@ -631,6 +626,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         self.is_aug = v_conf["is_aug"]
         self.cached_condition = v_conf["cached_condition"]
         self.pad_method = v_conf["pad_method"]
+        self.addition_tag = v_conf["addition_tag"]
 
         return
 
@@ -647,11 +643,18 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             padded_face_features = torch.zeros((self.max_faces, 32), dtype=torch.float32)
             padded_face_features[:face_features.shape[0]] = face_features
         elif self.pad_method == "random":
+            add_flag = torch.ones(self.max_faces, dtype=face_features.dtype)
+            add_flag[face_features.shape[0]:] = -1
+            add_flag = add_flag[:,None]
+
             index = torch.randperm(face_features.shape[0])
             num_repeats = math.ceil(self.max_faces / index.shape[0])
-            index = index.repeat(num_repeats)
-            index = index[:self.max_faces][torch.randperm(self.max_faces)]
+            index = index.repeat(num_repeats)[:self.max_faces]
+            index2 = torch.randperm(self.max_faces)
+            index = index[index2]
             padded_face_features = face_features[index]
+            if self.addition_tag:
+                padded_face_features = torch.cat((padded_face_features, add_flag[index2]), dim=-1)
         else:
             raise ValueError("Invalid pad method")
         condition = {

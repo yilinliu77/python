@@ -273,7 +273,7 @@ def main(v_cfg: DictConfig):
 
     if v_cfg["trainer"].evaluate:
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
-        weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, weights_only=False)["state_dict"]
+        weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, weights_only=False, map_location="cpu")["state_dict"]
         # weights = {k.replace("model.", ""): v for k, v in weights.items()}
         model.load_state_dict(weights)
         trainer.test(model)

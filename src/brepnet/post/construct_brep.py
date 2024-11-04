@@ -267,7 +267,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         if solid.ShapeType() == TopAbs_COMPOUND:
             continue
 
-            analyzer = BRepCheck_Analyzer(solid)
+        analyzer = BRepCheck_Analyzer(solid)
         # analyzer.SetExactMethod(True)
         if not analyzer.IsValid():
             result = analyzer.Result(solid)

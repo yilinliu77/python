@@ -121,5 +121,5 @@ if __name__ == "__main__":
     print("\nComputing LFD...")
     for idx, fake_mesh in enumerate(tqdm(fake_meshes)):
         local_root = os.path.dirname(fake_mesh_paths[idx])
-        find_nearest_lfd(fake_mesh, training_meshes, local_root, all_trainin_folders, topk=10, use_ray=False)
-        # find_nearest_lfd_remote.remote(fake_mesh, training_meshes, local_root, all_trainin_folders, topk=10, use_ray=True)
+        # find_nearest_lfd(fake_mesh, training_meshes, local_root, all_trainin_folders, topk=10, use_ray=False)
+        find_nearest_lfd_remote.remote(fake_mesh, training_meshes, local_root, all_trainin_folders, topk=10, use_ray=True)

@@ -5,8 +5,13 @@ import numpy as np
 import torch
 from OCC.Core import Message
 from OCC.Core.IFSelect import IFSelect_ReturnStatus
+from OCC.Core.IGESControl import IGESControl_Writer
+from OCC.Core.Interface import Interface_Static
 from OCC.Core.Message import Message_PrinterOStream, Message_Alarm
+from OCC.Core.STEPControl import STEPControl_Writer, STEPControl_AsIs, STEPControl_ManifoldSolidBrep, \
+    STEPControl_FacetedBrep, STEPControl_ShellBasedSurfaceModel
 from OCC.Core.ShapeFix import ShapeFix_ShapeTolerance
+from OCC.Core.TopAbs import TopAbs_SHAPE
 from OCC.Core.TopoDS import TopoDS_Face
 from OCC.Extend.DataExchange import read_step_file
 
@@ -267,8 +272,9 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         if solid.ShapeType() == TopAbs_COMPOUND:
             continue
 
+        shape_tol_setter = ShapeFix_ShapeTolerance()
+        shape_tol_setter.SetTolerance(solid, 1e-1)
         analyzer = BRepCheck_Analyzer(solid)
-        # analyzer.SetExactMethod(True)
         if not analyzer.IsValid():
             result = analyzer.Result(solid)
             continue
@@ -287,11 +293,16 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
 
     if solid is not None:
         try:
-            write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'), "AP242DIS")
+            Interface_Static.SetIVal("write.precision.mode", 2)
+            Interface_Static.SetRVal("write.precision.val", 1e-1)
+            step_writer = STEPControl_Writer()
+            step_writer.SetTolerance(1e-1)
+            step_writer.Transfer(solid, STEPControl_AsIs)
+            status = step_writer.Write(os.path.join(out_root, folder_name, 'recon_brep.step'))
             if check_step_valid_soild(os.path.join(out_root, folder_name, 'recon_brep.step')):
                 open(os.path.join(out_root, folder_name, 'success.txt'), 'w').close()
                 write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01,
-                               angular_deflection=0.5)
+                               angular_deflection=0.1)
         except:
             pass
 

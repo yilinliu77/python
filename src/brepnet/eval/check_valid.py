@@ -2,7 +2,11 @@ import shutil
 
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeSolid
 from OCC.Core.BRepCheck import BRepCheck_Analyzer
-from OCC.Core.TopAbs import TopAbs_SOLID
+from OCC.Core.IGESControl import IGESControl_Reader
+from OCC.Core.Interface import Interface_Static
+from OCC.Core.STEPControl import STEPControl_Reader
+from OCC.Core.StepData import StepData_StepModel
+from OCC.Core.TopAbs import TopAbs_SOLID, TopAbs_COMPOUND, TopAbs_SHELL, TopAbs_FACE
 from OCC.Extend.DataExchange import read_step_file
 from OCC.Core.ShapeFix import ShapeFix_ShapeTolerance
 import os
@@ -10,11 +14,17 @@ import argparse
 import glob
 from tqdm import tqdm
 
-from src.brepnet.post.utils import solid_valid_check
+from shared.occ_utils import get_primitives
+from src.brepnet.post.utils import solid_valid_check, viz_shapes, get_solid, CONNECT_TOLERANCE
 
 
 def check_step_valid_soild(step_file, precision=1e-1):
     try:
+        Interface_Static.SetIVal("read.precision.mode", 1)
+        Interface_Static.SetRVal("read.precision.val", precision)
+        Interface_Static.SetIVal("read.stdsameparameter.mode", 1)
+        Interface_Static.SetIVal("read.surfacecurve.mode", 3)
+        # Interface_Static.SetRVal("read.encoderegularity.angle", 1)
         shape = read_step_file(step_file, as_compound=False, verbosity=False)
     except:
         return False

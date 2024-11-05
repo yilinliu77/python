@@ -23,7 +23,7 @@ from OCC.Core.GeomAbs import GeomAbs_C0, GeomAbs_C1, GeomAbs_C2, GeomAbs_Cylinde
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_Wire, ShapeAnalysis_Shell
 from OCC.Core.ShapeExtend import ShapeExtend_WireData
 from OCC.Core.ShapeFix import ShapeFix_Face, ShapeFix_Wire, ShapeFix_Edge, ShapeFix_Shell, ShapeFix_Solid, \
-    ShapeFix_ComposeShell
+    ShapeFix_ComposeShell, ShapeFix_ShapeTolerance
 from OCC.Core.TColgp import TColgp_Array1OfPnt
 from OCC.Core.TColgp import TColgp_Array2OfPnt
 from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_FORWARD, TopAbs_REVERSED, TopAbs_FACE, TopAbs_WIRE, \
@@ -81,6 +81,8 @@ import trimesh
 
 from itertools import combinations
 
+from shared.occ_utils import get_primitives
+
 # EDGE_FITTING_TOLERANCE = [1e-5, 1e-4, 1e-3, 5e-3, 8e-3, 5e-2, ]
 # FACE_FITTING_TOLERANCE = [1e-4, 1e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]
 
@@ -92,7 +94,7 @@ FIX_TOLERANCE = 1e-2
 FIX_PRECISION = 1e-2
 # CONNECT_TOLERANCE = 2e-2
 # CONNECT_TOLERANCE = [2e-3, 6e-3, 1e-2, 1.5e-2, 2e-2, 2.5e-2, 5e-2, 8e-2, ]
-CONNECT_TOLERANCE = [2e-2]
+CONNECT_TOLERANCE = [2e-2, 5e-2, 1e-1]
 SEWING_TOLERANCE = 8e-2
 REMOVE_EDGE_TOLERANCE = 1e-3
 TRANSFER_PRECISION = 1e-3
@@ -102,7 +104,7 @@ FIX_CLOSE_TOLERANCE = 1
 FIX_GAP_TOLERANCE = 1e-1
 weight_CurveLength, weight_Curvature, weight_Torsion = 1, 5, 5
 IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, False
-CONTINUITY = GeomAbs_C1
+CONTINUITY = GeomAbs_C2
 
 
 # EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
@@ -965,6 +967,8 @@ def create_trimmed_face1(geom_face, face_edges, connected_tolerance, face_edges_
         trimmed_face = create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance)
         if trimmed_face is None or trimmed_face.IsNull():
             continue
+        shape_tol_setter = ShapeFix_ShapeTolerance()
+        shape_tol_setter.SetTolerance(trimmed_face, 1e-1)
         face_analyzer = BRepCheck_Analyzer(trimmed_face, False)
         is_face_valid = face_analyzer.IsValid()
         if is_face_valid:
@@ -1047,36 +1051,51 @@ def get_separated_surface(trimmed_faces, v_precision1=1e-3, v_precision2=1e-1):
 
 def get_solid(trimmed_faces, connected_tolerance):
     try:
+        # Sew shells
         random.shuffle(trimmed_faces)
         sewing = BRepBuilderAPI_Sewing()
         sewing.SetTolerance(SEWING_TOLERANCE)
+        sewing.SetMaxTolerance(SEWING_TOLERANCE)
         for face in trimmed_faces:
             sewing.Add(face)
         sewing.Perform()
         # sewing.Dump()
         sewn_shell = sewing.SewedShape()
+        if sewn_shell.ShapeType() == TopAbs_COMPOUND:
+            sewn_shell = get_primitives(sewn_shell, TopAbs_SHELL)[0]
+        shape_tol_setter = ShapeFix_ShapeTolerance()
+        shape_tol_setter.SetTolerance(sewn_shell, 1e-1)
 
-        fix_shell = ShapeFix_Shell(sewn_shell)
-        fix_shell.SetPrecision(connected_tolerance)
-        fix_shell.SetMaxTolerance(connected_tolerance)
-        fix_shell.SetFixFaceMode(True)
-        fix_shell.SetFixOrientationMode(True)
-        fix_shell.Perform()
-        sewn_shell = fix_shell.Shell()
+        # Fix if it is not valid
+        if not BRepCheck_Analyzer(sewn_shell).IsValid():
+            fix_shell = ShapeFix_Shell(sewn_shell)
+            fix_shell.SetPrecision(connected_tolerance)
+            fix_shell.SetMaxTolerance(connected_tolerance)
+            fix_shell.SetFixFaceMode(True)
+            fix_shell.SetFixOrientationMode(True)
+            fix_shell.Perform()
+            sewn_shell = fix_shell.Shell()
+            shape_tol_setter = ShapeFix_ShapeTolerance()
+            shape_tol_setter.SetTolerance(sewn_shell, 1e-1)
 
+        # Solid
         maker = BRepBuilderAPI_MakeSolid()
         maker.Add(sewn_shell)
         maker.Build()
         solid = maker.Solid()
+        shape_tol_setter = ShapeFix_ShapeTolerance()
+        shape_tol_setter.SetTolerance(solid, 1e-1)
 
-        fix_solid = ShapeFix_Solid(solid)
-        fix_solid.SetPrecision(connected_tolerance)
-        fix_solid.SetMaxTolerance(connected_tolerance)
-        fix_solid.SetFixShellMode(True)
-        fix_solid.SetFixShellOrientationMode(True)
-        fix_solid.SetCreateOpenSolidMode(False)
-        fix_solid.Perform()
-        solid = fix_solid.Solid()
+        # Fix if it is not valid
+        if not BRepCheck_Analyzer(solid).IsValid():
+            fix_solid = ShapeFix_Solid(solid)
+            fix_solid.SetPrecision(connected_tolerance)
+            fix_solid.SetMaxTolerance(connected_tolerance)
+            fix_solid.SetFixShellMode(True)
+            fix_solid.SetFixShellOrientationMode(True)
+            fix_solid.SetCreateOpenSolidMode(False)
+            fix_solid.Perform()
+            solid = fix_solid.Solid()
         return solid
 
     except:

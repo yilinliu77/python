@@ -692,7 +692,7 @@ class Diffusion_condition(nn.Module):
         time_embeds = self.time_embed(sincos_embedding(v_timesteps, self.dim_total)).unsqueeze(1)
         noise_features = self.p_embed(v_feature)
         v_condition = torch.zeros((bs, 1, self.dim_condition), device=de, dtype=dt) if v_condition is None else v_condition
-        v_condition = v_condition.repeat(1, self.num_max_faces, 1)
+        v_condition = v_condition.repeat(1, v_feature.shape[1], 1)
         noise_features = torch.cat([noise_features, v_condition], dim=-1)
         noise_features = noise_features + time_embeds
 

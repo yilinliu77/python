@@ -84,23 +84,23 @@ if __name__ == "__main__":
 
     print("\nLoading fake mesh...")
     if args.prefix:
-        all_folders = [os.path.join(fake_post, args.prefix)]
+        fake_mesh_paths = [os.path.join(fake_post, args.prefix + ".stl")]
     else:
+        fake_mesh_paths = []
         all_folders = [f for f in os.listdir(fake_post) if os.path.isdir(os.path.join(fake_post, f))]
         all_folders.sort()
         all_folders = all_folders[:10]
-    fake_mesh_paths = []
-    for folder in tqdm(all_folders):
-        local_root = os.path.join(fake_post, folder)
-        step_file = glob.glob(os.path.join(local_root, "*.step"))
-        if len(step_file) == 0:
-            continue
-        if not check_step_valid_soild(step_file[0]):
-            continue
-        stl_file = glob.glob(os.path.join(local_root, "*.stl"))
-        if len(stl_file) == 0:
-            continue
-        fake_mesh_paths.append(stl_file[0])
+        for folder in tqdm(all_folders):
+            local_root = os.path.join(fake_post, folder)
+            step_file = glob.glob(os.path.join(local_root, "*.step"))
+            if len(step_file) == 0:
+                continue
+            if not check_step_valid_soild(step_file[0]):
+                continue
+            stl_file = glob.glob(os.path.join(local_root, "*.stl"))
+            if len(stl_file) == 0:
+                continue
+            fake_mesh_paths.append(stl_file[0])
     fake_meshes = batch_load_mesh(fake_mesh_paths)
     print(f"Loding {len(fake_meshes)} fake meshes")
     assert len(fake_meshes) > 0
@@ -112,7 +112,7 @@ if __name__ == "__main__":
     else:
         all_trainin_folders = [f for f in os.listdir(train_root) if os.path.isdir(os.path.join(train_root, f))]
     training_meshes_paths = [os.path.join(train_root, folder, "mesh.ply") for folder in all_trainin_folders]
-    training_meshes_paths = training_meshes_paths[:10]
+    training_meshes_paths = training_meshes_paths[:1000]
     training_meshes = batch_load_mesh(training_meshes_paths)
     print(f"Loding {len(training_meshes)} training meshes")
     assert len(training_meshes) > 0
@@ -121,5 +121,5 @@ if __name__ == "__main__":
     print("\nComputing LFD...")
     for idx, fake_mesh in enumerate(tqdm(fake_meshes)):
         local_root = os.path.dirname(fake_mesh_paths[idx])
-        find_nearest_lfd(fake_mesh, training_meshes, local_root, all_trainin_folders, topk=10, use_ray=False)
-        # find_nearest_lfd_remote.remote(fake_mesh, training_meshes, local_root, all_trainin_folders, topk=10, use_ray=True)
+        # find_nearest_lfd(fake_mesh, training_meshes, local_root, all_trainin_folders, topk=10, use_ray=False)
+        find_nearest_lfd_remote.remote(fake_mesh, training_meshes, local_root, all_trainin_folders, topk=10, use_ray=True)

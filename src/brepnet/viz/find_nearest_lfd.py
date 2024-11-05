@@ -84,23 +84,23 @@ if __name__ == "__main__":
 
     print("\nLoading fake mesh...")
     if args.prefix:
-        fake_mesh_paths = [os.path.join(fake_post, args.prefix + ".stl")]
+        all_folders = [os.path.join(fake_post, args.prefix)]
     else:
-        fake_mesh_paths = []
         all_folders = [f for f in os.listdir(fake_post) if os.path.isdir(os.path.join(fake_post, f))]
         all_folders.sort()
         all_folders = all_folders[:10]
-        for folder in tqdm(all_folders):
-            local_root = os.path.join(fake_post, folder)
-            step_file = glob.glob(os.path.join(local_root, "*.step"))
-            if len(step_file) == 0:
-                continue
-            if not check_step_valid_soild(step_file[0]):
-                continue
-            stl_file = glob.glob(os.path.join(local_root, "*.stl"))
-            if len(stl_file) == 0:
-                continue
-            fake_mesh_paths.append(stl_file[0])
+    fake_mesh_paths = []
+    for folder in tqdm(all_folders):
+        local_root = os.path.join(fake_post, folder)
+        step_file = glob.glob(os.path.join(local_root, "*.step"))
+        if len(step_file) == 0:
+            continue
+        if not check_step_valid_soild(step_file[0]):
+            continue
+        stl_file = glob.glob(os.path.join(local_root, "*.stl"))
+        if len(stl_file) == 0:
+            continue
+        fake_mesh_paths.append(stl_file[0])
     fake_meshes = batch_load_mesh(fake_mesh_paths)
     print(f"Loding {len(fake_meshes)} fake meshes")
     assert len(fake_meshes) > 0

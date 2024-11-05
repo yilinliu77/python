@@ -1,7 +1,9 @@
 from utils import *
 import numpy as np
-
-data_npz_path = r"D:\WorkSpace\BrepGen\samples_deepcad\6H4XQtsnGFylEbb_4\init_data.npz"
+import argparse
+from src.brepnet.eval.check_valid import load_data_with_prefix
+import ray
+from tqdm import tqdm
 
 
 def get_data(v_filename):
@@ -49,21 +51,62 @@ def get_data(v_filename):
     return face_points, edge_points, face_edge_adj
 
 
-recon_face_points, recon_edge_points, face_edge_adj = get_data(data_npz_path)
-recon_geom_faces = [create_surface(points) for points in recon_face_points]
-recon_topo_faces = [BRepBuilderAPI_MakeFace(geom_face, 1e-3).Face() for geom_face in recon_geom_faces]
-recon_curves = [create_edge(points) for points in recon_edge_points]
-recon_edge = [BRepBuilderAPI_MakeEdge(curve).Edge() for curve in recon_curves]
+def process_one(data_npz_path, connected_tolerance=0.1, is_log=False):
+    recon_face_points, recon_edge_points, face_edge_adj = get_data(data_npz_path)
+    recon_geom_faces = [create_surface(points) for points in recon_face_points]
+    recon_curves = [create_edge(points) for points in recon_edge_points]
+    recon_edge = [BRepBuilderAPI_MakeEdge(curve).Edge() for curve in recon_curves]
 
-trimmed_face_validity_list = []
-connected_tolerance = 0.01
-for face_idx, face_edge_adj_c in enumerate(face_edge_adj):
-    geom_face = recon_geom_faces[face_idx]
-    topo_face = recon_topo_faces[face_idx]
-    face_edges = [recon_edge[i] for i in face_edge_adj_c]
-    wire_list1, trimmed_face1, is_face_valid1 = create_trimmed_face1(geom_face, face_edges, connected_tolerance)
-    trimmed_face_validity_list.append(is_face_valid1)
+    trimmed_face_validity_list = []
+    for face_idx, face_edge_adj_c in enumerate(face_edge_adj):
+        geom_face = recon_geom_faces[face_idx]
+        face_edges = [recon_edge[i] for i in face_edge_adj_c]
+        wire_list1, trimmed_face1, is_face_valid1 = create_trimmed_face1(geom_face, face_edges, connected_tolerance)
+        trimmed_face_validity_list.append(is_face_valid1)
 
-print(trimmed_face_validity_list)
-print(f"Total valid faces ratio: {sum(trimmed_face_validity_list) / len(trimmed_face_validity_list)}")
-pass
+    if is_log:
+        print(trimmed_face_validity_list)
+        print(f"Total valid faces ratio: {sum(trimmed_face_validity_list) / len(trimmed_face_validity_list)}")
+
+    return trimmed_face_validity_list
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_root", type=str, required=True)
+    parser.add_argument("--prefix", type=str, required=False, default="")
+    parser.add_argument("--connect_tol", type=float, required=False, default=0.1)
+    parser.add_argument("--use_ray", action='store_true')
+    args = parser.parse_args()
+
+    if args.prefix:
+        process_one(os.path.join(args.data_root, args.connect_tol, args.prefix))
+        exit(0)
+
+    data_files = load_data_with_prefix(args.data_root, "init_data.npz")
+    data_files.sort()
+    data_files = data_files[0:100]
+    print(f"Total data files: {len(data_files)}")
+
+    if not args.use_ray:
+        all_results = []
+        pbar = tqdm(data_files)
+        for data_npz_path in pbar:
+            results = process_one(data_npz_path, args.connect_tol)
+            all_results.extend(results)
+            pbar.set_postfix({"valid_faces_ratio": sum(all_results) / len(all_results)})
+        print(f"Total valid faces ratio: {sum(all_results) / len(all_results)}")
+    else:
+        ray.init()
+        process_one_remote = ray.remote(process_one)
+        futures = [process_one_remote.remote(data_npz_path, args.connect_tol) for data_npz_path in tqdm(data_files)]
+        all_results = []
+        for future in tqdm(futures):
+            results = ray.get(future)
+            all_results.extend(results)
+        print(f"Total valid faces ratio: {sum(all_results) / len(all_results)}")
+        ray.shutdown()
+
+
+if __name__ == "__main__":
+    main()

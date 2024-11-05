@@ -19,7 +19,7 @@ from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 from OCC.Core.BRepTools import breptools
 
 from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface, GeomAPI_PointsToBSpline
-from OCC.Core.GeomAbs import GeomAbs_C0, GeomAbs_C1, GeomAbs_C2, GeomAbs_Cylinder, GeomAbs_Plane
+from OCC.Core.GeomAbs import GeomAbs_C0, GeomAbs_C1, GeomAbs_C2, GeomAbs_C3, GeomAbs_G1
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_Wire, ShapeAnalysis_Shell
 from OCC.Core.ShapeExtend import ShapeExtend_WireData
 from OCC.Core.ShapeFix import ShapeFix_Face, ShapeFix_Wire, ShapeFix_Edge, ShapeFix_Shell, ShapeFix_Solid, \
@@ -74,6 +74,13 @@ from OCC.Core.Geom import Geom_BSplineCurve
 
 from OCC.Core import Message
 from OCC.Core.Message import Message_PrinterOStream, Message_Alarm
+
+from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
+
+from OCC.Core.STEPControl import STEPControl_Writer, STEPControl_AsIs
+from OCC.Core.Interface import Interface_Static
+from OCC.Core.IFSelect import IFSelect_RetDone
+
 from chamferdist import ChamferDistance
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
@@ -92,17 +99,16 @@ ROUGH_FITTING_TOLERANCE = 1e-1
 
 FIX_TOLERANCE = 1e-2
 FIX_PRECISION = 1e-2
-# CONNECT_TOLERANCE = 2e-2
-# CONNECT_TOLERANCE = [2e-3, 6e-3, 1e-2, 1.5e-2, 2e-2, 2.5e-2, 5e-2, 8e-2, ]
-CONNECT_TOLERANCE = [2e-2, 5e-2, 1e-1]
-SEWING_TOLERANCE = 8e-2
+# CONNECT_TOLERANCE = [2e-2]
+CONNECT_TOLERANCE = [2e-3, 6e-3, 1e-2, 1.5e-2, 2e-2, 2.5e-2, 5e-2, 8e-2, ]
+SEWING_TOLERANCE = 5e-2
 REMOVE_EDGE_TOLERANCE = 1e-3
 TRANSFER_PRECISION = 1e-3
 MAX_DISTANCE_THRESHOLD = 1e-1
 USE_VARIATIONAL_SMOOTHING = True
 FIX_CLOSE_TOLERANCE = 1
 FIX_GAP_TOLERANCE = 1e-1
-weight_CurveLength, weight_Curvature, weight_Torsion = 1, 5, 5
+weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
 IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, False
 CONTINUITY = GeomAbs_C2
 
@@ -122,7 +128,7 @@ CONTINUITY = GeomAbs_C2
 # IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, True
 # CONTINUITY = GeomAbs_C2
 
-def interpolation_face_points(face, density=None, is_use_cuda=False, density_scale=4):
+def interpolation_face_points(face, density=None, is_use_cuda=False, density_scale=10):
     if type(face) is np.ndarray:
         if is_use_cuda:
             face = torch.from_numpy(face).cuda()
@@ -489,7 +495,7 @@ def optimize(
     src_st = torch.tensor([1, 0, 0, 0], dtype=torch.float32, device=device).unsqueeze(0).repeat(edge_points.shape[0], 1)
     edge_st = nn.Parameter(torch.tensor([1, 0, 0, 0], dtype=torch.float32, device=device).unsqueeze(0).repeat(edge_points.shape[0], 1))
     edge_st.requires_grad = True
-    optimizer = torch.optim.Adam([edge_st], lr=8e-3, betas=(0.95, 0.999), eps=1e-08, )
+    optimizer = torch.optim.Adam([edge_st], lr=5e-3, betas=(0.95, 0.999), eps=1e-08, )
 
     prev_loss = float('inf')
     if v_islog:
@@ -500,11 +506,11 @@ def optimize(
         dis_matrix1 = chamferdist(
                 transformed_edges[edge_face_connectivity[:, 0]],
                 padded_points[edge_face_connectivity[:, 1]],
-                batch_reduction=None, point_reduction="mean")
+                batch_reduction=None, point_reduction="mean", bidirectional=False)
         dis_matrix2 = chamferdist(
                 transformed_edges[edge_face_connectivity[:, 0]],
                 padded_points[edge_face_connectivity[:, 2]],
-                batch_reduction=None, point_reduction="mean")
+                batch_reduction=None, point_reduction="mean", bidirectional=False)
         adj_distance_loss = ((dis_matrix1 + dis_matrix2) / 2).sum() + (dis_matrix1 - dis_matrix2).abs().sum()
 
         # For loop version
@@ -544,11 +550,11 @@ def optimize(
             connected_loss = dist_matrix.min(dim=-1)[0]
             wire_connected_loss = connected_loss[connected_loss < 100].mean()
 
-        loss = adj_distance_loss + corners_loss + wire_connected_loss + 1e-6 * (edge_st - src_st).norm(p=1, dim=1).mean()
+        loss = adj_distance_loss + corners_loss + wire_connected_loss + 1e-6 * (edge_st - src_st).norm(p=1, dim=1).sum()
 
         optimizer.zero_grad()
         # if abs(prev_loss - loss.item()) < 1e-4 and False:
-        if loss.item() < 5e-4:
+        if loss.item() < 1e-4:
             if v_islog:
                 print(f'Early stop at iter {iter}')
             break
@@ -880,8 +886,6 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         face_fixer.FixWireTool().SetPrecision(connected_tolerance)
         face_fixer.FixWireTool().SetFixShiftedMode(True)
         face_fixer.FixWireTool().SetClosedWireMode(True)
-        # face_fixer.FixWireTool().SetFixAddPCurveMode(True)
-        # face_fixer.FixWireTool().SetFixAddCurve3dMode(True)
         face_fixer.FixWireTool().Perform()
 
         face_fixer.SetAutoCorrectPrecisionMode(False)
@@ -889,13 +893,11 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         face_fixer.SetMaxTolerance(connected_tolerance)
         face_fixer.SetFixOrientationMode(True)
         face_fixer.SetFixMissingSeamMode(True)
-        # face_fixer.SetFixSplitFaceMode(True)
         face_fixer.SetFixWireMode(True)
         face_fixer.SetFixLoopWiresMode(True)
         face_fixer.SetFixIntersectingWiresMode(True)
         face_fixer.SetFixPeriodicDegeneratedMode(True)
         face_fixer.SetFixSmallAreaWireMode(True)
-        # face_fixer.SetRemoveSmallAreaFaceMode(True)
         face_fixer.Perform()
 
         face_fixer.FixAddNaturalBound()
@@ -1300,3 +1302,102 @@ def solid_valid_check(solid, tolerance=0.01):
         shell_exp.Next()
 
     return True
+
+
+def my_write_stp_file(v_shape, path):
+    # initialize the STEP exporter
+    step_writer = STEPControl_Writer()
+    dd = step_writer.WS().TransferWriter().FinderProcess()
+    Interface_Static.SetCVal("write.step.schema", "AP203")
+    # transfer shapes and write file
+    step_writer.Transfer(v_shape, STEPControl_AsIs)
+    status = step_writer.Write(path)
+
+    if status != IFSelect_RetDone:
+        raise AssertionError("load failed")
+
+
+def solid_to_faceadj_graph(solid, radius=0.01):
+    import numpy as np
+    from occwl.solid import Solid
+    from occwl.viewer import Viewer
+    from occwl.graph import face_adjacency
+
+    solid = Solid(solid)
+    g = face_adjacency(solid, self_loops=True)
+
+    print(f"Number of nodes (faces): {len(g.nodes)}")
+    print(f"Number of edges: {len(g.edges)}")
+
+    v = Viewer()
+    v.display(solid, transparency=0.8)
+
+    # Get the points at each face's center
+    face_centers = {}
+    for face_idx in g.nodes():
+        # Display a sphere for each face's center
+        face = g.nodes[face_idx]["face"]
+        parbox = face.uv_bounds()
+        umin, vmin = parbox.min_point()
+        umax, vmax = parbox.max_point()
+        center_uv = (umin + 0.5 * (umax - umin), vmin + 0.5 * (vmax - vmin))
+        center = face.point(center_uv)
+        v.display(Solid.make_sphere(center=center, radius=radius))
+        face_centers[face_idx] = center
+
+    for fi, fj in g.edges():
+        pt1 = face_centers[fi]
+        pt2 = face_centers[fj]
+        # Make a cylinder for each edge connecting a pair of faces
+        up_dir = pt2 - pt1
+        height = np.linalg.norm(up_dir)
+        if height > 1e-3:
+            v.display(
+                    Solid.make_cylinder(
+                            radius=radius, height=height, base_point=pt1, up_dir=up_dir
+                    )
+            )
+
+    # Show the viewer
+    v.fit()
+    v.show()
+
+
+def solid_to_vertadj_graph(solid, radius=0.01):
+    import numpy as np
+    from occwl.solid import Solid
+    from occwl.viewer import Viewer
+    from occwl.graph import vertex_adjacency
+
+    solid = Solid(solid)
+    g = vertex_adjacency(solid, self_loops=True)
+
+    print(f"Number of nodes (vertices): {len(g.nodes)}")
+    print(f"Number of edges: {len(g.edges)}")
+
+    v = Viewer()
+    v.display(solid, transparency=0.5)
+    # Get the points for each vertex
+    points = {}
+    for vert_idx in g.nodes:
+        pt = g.nodes[vert_idx]["vertex"].point()
+        points[vert_idx] = pt
+        v.display(Solid.make_sphere(center=pt, radius=radius))
+
+    # Make a cylinder for each edge connecting a pair of vertices
+    for vi, vj in g.edges:
+        pt1 = points[vi]
+        pt2 = points[vj]
+        up_dir = pt2 - pt1
+        if np.linalg.norm(up_dir) < 1e-6:
+            # This must be a loop with one Vertex
+            continue
+        v.display(
+                Solid.make_cylinder(
+                        radius=radius, height=np.linalg.norm(up_dir), base_point=pt1, up_dir=up_dir
+                )
+        )
+
+    # Show the viewer
+    v.fit()
+    v.show()

@@ -29,7 +29,7 @@ def find_nearest(local_out_root, src_pcs_c, ref_pcs, ref_shape_paths):
     near_mesh_paths = [os.path.join(os.path.dirname(ref_shape_paths[ref_idx]), "mesh.ply") for ref_idx in topk_near_idx]
     src_mesh_paths = glob.glob(os.path.join(local_out_root, "*.stl"))
     mesh_paths = src_mesh_paths + near_mesh_paths
-    arrange_meshes(mesh_paths, os.path.join(local_out_root, "nearest.ply"))
+    arrange_meshes(mesh_paths, os.path.join(local_out_root, "cd_nearest.ply"))
 
 
 if __name__ == "__main__":

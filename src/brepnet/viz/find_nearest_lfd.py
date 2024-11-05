@@ -88,7 +88,7 @@ if __name__ == "__main__":
     else:
         all_folders = [f for f in os.listdir(fake_post) if os.path.isdir(os.path.join(fake_post, f))]
         all_folders.sort()
-        all_folders = all_folders[:10]
+        all_folders = all_folders[:100]
     fake_mesh_paths = []
     for folder in tqdm(all_folders):
         local_root = os.path.join(fake_post, folder)

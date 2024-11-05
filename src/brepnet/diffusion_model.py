@@ -463,11 +463,17 @@ class Diffusion_condition(nn.Module):
         self.dim_total = self.dim_latent + self.dim_condition
         self.time_statics = [0 for _ in range(10)]
 
+        self.addition_tag = False
+        if "addition_tag" in v_conf:
+            self.addition_tag = v_conf["addition_tag"]
+        if self.addition_tag:
+            self.dim_input += 1 
+
         self.p_embed = nn.Sequential(
-                nn.Linear(self.dim_input, self.dim_latent),
-                nn.LayerNorm(self.dim_latent),
-                nn.SiLU(),
-                nn.Linear(self.dim_latent, self.dim_latent),
+            nn.Linear(self.dim_input, self.dim_latent),
+            nn.LayerNorm(self.dim_latent),
+            nn.SiLU(),
+            nn.Linear(self.dim_latent, self.dim_latent),
         )
 
         layer1 = nn.TransformerEncoderLayer(
@@ -569,10 +575,13 @@ class Diffusion_condition(nn.Module):
                 nn.LayerNorm(self.dim_input),
                 nn.SiLU(),
                 nn.Linear(self.dim_input, 1),
-        )
+        )    
+        beta_schedule = "squaredcos_cap_v2"
+        if "beta_schedule" in v_conf:
+            beta_schedule = v_conf["beta_schedule"]
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=1000,
-            beta_schedule='squaredcos_cap_v2',
+            beta_schedule=beta_schedule,
             prediction_type=v_conf["diffusion_type"],
             beta_start=0.0001,
             beta_end=0.02,
@@ -608,7 +617,7 @@ class Diffusion_condition(nn.Module):
             self.ae_model.eval()
 
     def inference(self, bs, device, v_data=None, **kwargs):
-        face_features = torch.randn((bs, self.num_max_faces, 32)).to(device)
+        face_features = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
         condition = None
         if self.with_img or self.with_pc:
             condition = self.extract_condition(v_data)[:bs]
@@ -630,13 +639,17 @@ class Diffusion_condition(nn.Module):
         recon_data = []
         for i in range(bs):
             face_z_item = face_z[i:i + 1][mask[i:i + 1]]
+            if self.addition_tag: # Deduplicate
+                flag = face_z_item[...,-1] > 0
+                face_z_item = face_z_item[flag][:, :-1]
             if self.pad_method == "random": # Deduplicate
                 threshold = 1e-2
-                index = torch.stack(torch.meshgrid(torch.arange(self.num_max_faces),torch.arange(self.num_max_faces), indexing="ij"), dim=2)
+                max_faces = face_z_item.shape[0]
+                index = torch.stack(torch.meshgrid(torch.arange(max_faces),torch.arange(max_faces), indexing="ij"), dim=2)
                 features = face_z_item[index]
                 distance = (features[:,:,0]-features[:,:,1]).abs().mean(dim=-1)
                 final_face_z = []
-                for j in range(self.num_max_faces):
+                for j in range(max_faces):
                     valid = True
                     for k in final_face_z:
                         if distance[j,k] < threshold:
@@ -732,7 +745,8 @@ class Diffusion_condition(nn.Module):
         pred = self.diffuse(noise_input, timesteps, condition)
         
         loss = {}
-        loss["diffusion_loss"] = self.loss(pred, face_z if self.diffusion_type == "sample" else noise)
+        loss_item = self.loss(pred, face_z if self.diffusion_type == "sample" else noise, reduction="none")
+        loss["diffusion_loss"] = loss_item.mean()
         if self.pad_method == "zero":
             mask = torch.logical_not((face_z.abs() < 1e-4).all(dim=-1))
             label = self.classifier(pred)
@@ -743,6 +757,7 @@ class Diffusion_condition(nn.Module):
                 classification_loss = classification_loss * 1e-4
             loss["classification"] = classification_loss
         loss["total_loss"] = sum(loss.values())
+        loss["t"] = torch.stack((timesteps, loss_item.mean(dim=1).mean(dim=1)), dim=1)
 
         if self.is_train_decoder:
             raise

@@ -327,7 +327,7 @@ def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list,
             return None
 
 
-construct_brep_from_datanpz_batch_ray = ray.remote(num_gpus=0.01)(construct_brep_from_datanpz_batch)
+construct_brep_from_datanpz_batch_ray = ray.remote(num_cpus=1, num_gpus=0.2)(construct_brep_from_datanpz_batch)
 
 
 def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda):
@@ -342,7 +342,7 @@ def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Construct Brep From Data')
     parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test")
-    parser.add_argument('--list_file', type=str, default="")
+    parser.add_argument('--list', type=str, default="")
     parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test_out")
     parser.add_argument('--is_cover', type=bool, default=False)
     parser.add_argument('--num_cpus', type=int, default=12)
@@ -354,7 +354,7 @@ if __name__ == '__main__':
     v_data_root = args.data_root
     v_out_root = args.out_root
     is_cover = args.is_cover
-    list_file = args.list_file
+    filter_list = args.list
     is_use_ray = args.use_ray
     num_cpus = args.num_cpus
     use_cuda = args.use_cuda
@@ -366,8 +366,16 @@ if __name__ == '__main__':
     if args.prefix != "":
         test_construct_brep(v_data_root, v_out_root, args.prefix, use_cuda)
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
-    if list_file != "":
-        valid_prefies = [item.strip() for item in open(list_file).readlines()]
+    if filter_list != "":
+        print(f"Use filter_list {filter_list}")
+        if not os.path.exists(filter_list):
+            raise ValueError(f"List {filter_list} does not exist.")
+        if os.path.isdir(filter_list):
+            valid_prefies = [f for f in os.listdir(filter_list) if os.path.isdir(os.path.join(filter_list, f))]
+        elif filter_list.endswith(".txt"):
+            valid_prefies = [item.strip() for item in open(filter_list).readlines()]
+        else:
+            raise ValueError(f"Invalid list {filter_list}")
         all_folders = list(set(all_folders) & set(valid_prefies))
     # all_folders = os.listdir(r"E:\data\img2brep\.43\2024_09_22_21_57_44_0921_pure_out3_failed")
     # check_dir(v_out_root)
@@ -381,10 +389,13 @@ if __name__ == '__main__':
     all_folders.sort()
     # all_folders = all_folders[:100]
 
+    print(f"Total {len(all_folders)} folders")
+
     if not is_use_ray:
         # random.shuffle(all_folders)
         for i in tqdm(range(len(all_folders))):
-            construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i], use_cuda=use_cuda, from_scratch=from_scratch)
+            construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i], use_cuda=use_cuda, from_scratch=from_scratch,
+                                        is_save_data=True, is_log=False)
     else:
         ray.init(
                 dashboard_host="0.0.0.0",

@@ -41,9 +41,14 @@ def normalize_mesh(mesh):
     return mesh
 
 
-def arrange_meshes(file_paths, out_path, intervals=0.5, color_mode="index"):
+def arrange_meshes(files, out_path, intervals=0.5, color_mode="index"):
     assert color_mode in ["random", "index"]
-    meshes = [normalize_mesh(trimesh.load(file)) for file in file_paths]
+    if type(files[0]) == str:
+        meshes = [normalize_mesh(trimesh.load(file)) for file in files]
+    elif type(files[0]) == trimesh.Trimesh:
+        meshes = [normalize_mesh(mesh) for mesh in files]
+    else:
+        raise ValueError("Invalid input type")
     num_meshes = len(meshes)
 
     grid_size = int(np.ceil(np.sqrt(num_meshes)))

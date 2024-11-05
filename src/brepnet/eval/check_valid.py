@@ -20,8 +20,8 @@ def check_step_valid_soild(step_file, precision=1e-1):
         return False
     if shape.ShapeType() != TopAbs_SOLID:
         return False
-    # shape_tol_setter = ShapeFix_ShapeTolerance()
-    # shape_tol_setter.SetTolerance(shape, precision)
+    shape_tol_setter = ShapeFix_ShapeTolerance()
+    shape_tol_setter.SetTolerance(shape, precision)
     analyzer = BRepCheck_Analyzer(shape)
     is_valid = analyzer.IsValid()
     return is_valid

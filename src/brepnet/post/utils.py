@@ -88,6 +88,8 @@ import trimesh
 
 from itertools import combinations
 
+from shared.occ_utils import get_primitives
+
 # EDGE_FITTING_TOLERANCE = [1e-5, 1e-4, 1e-3, 5e-3, 8e-3, 5e-2, ]
 # FACE_FITTING_TOLERANCE = [1e-4, 1e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]
 
@@ -252,7 +254,7 @@ class Shape:
         self.edge_face_connectivity = np.stack(edge_face_connectivity, axis=0)
         pass
 
-    def check_openness(self, v_threshold=0.9):
+    def check_openness(self, v_threshold=0.95):
         recon_edge = self.recon_edge_points
         dirs = (recon_edge[:, [0, -1]] - np.mean(recon_edge, axis=1, keepdims=True))
         cos_dir = ((dirs[:, 0] * dirs[:, 1]).sum(axis=1) /
@@ -260,8 +262,8 @@ class Shape:
         self.openness = cos_dir > v_threshold
 
         delta = recon_edge[:, [0, -1]].mean(axis=1)
-        recon_edge[self.openness, 0] = delta[self.openness]
-        recon_edge[self.openness, -1] = delta[self.openness]
+        # recon_edge[self.openness, 0] = delta[self.openness]
+        # recon_edge[self.openness, -1] = delta[self.openness]
 
     def build_fe(self):
         # face_edge_adj store the edge idx list of each face
@@ -454,7 +456,7 @@ class Shape:
 
     def build_geom(self):
         self.recon_geom_faces = [create_surface(points) for points in self.recon_face_points]
-        self.recon_topo_faces = [BRepBuilderAPI_MakeFace(geom_face, 1e-3).Face() for geom_face in self.recon_geom_faces]
+        self.recon_topo_faces = [BRepBuilderAPI_MakeFace(geom_face, 1e-1).Face() for geom_face in self.recon_geom_faces]
         self.recon_curves = [create_edge(points) for points in self.recon_edge_points]
         self.recon_edge = [BRepBuilderAPI_MakeEdge(curve).Edge() for curve in self.recon_curves]
 
@@ -493,7 +495,7 @@ def optimize(
     src_st = torch.tensor([1, 0, 0, 0], dtype=torch.float32, device=device).unsqueeze(0).repeat(edge_points.shape[0], 1)
     edge_st = nn.Parameter(torch.tensor([1, 0, 0, 0], dtype=torch.float32, device=device).unsqueeze(0).repeat(edge_points.shape[0], 1))
     edge_st.requires_grad = True
-    optimizer = torch.optim.Adam([edge_st], lr=5e-3, betas=(0.95, 0.999), eps=1e-08, )
+    optimizer = torch.optim.Adam([edge_st], lr=5e-4, betas=(0.95, 0.999), eps=1e-08, )
 
     prev_loss = float('inf')
     if v_islog:
@@ -553,9 +555,10 @@ def optimize(
         optimizer.zero_grad()
         # if abs(prev_loss - loss.item()) < 1e-4 and False:
         if loss.item() < 1e-4:
-            if v_islog:
-                print(f'Early stop at iter {iter}')
-            break
+            pass
+            # if v_islog:
+            #     print(f'Early stop at iter {iter}')
+            # break
         loss.backward()
         optimizer.step()
         prev_loss = loss.item()
@@ -839,21 +842,36 @@ def create_wire_from_unordered_edges(face_edges, connected_tolerance, max_retry_
 
     return wire_list
 
+def set_tolerance(v_item, v_precision):
+    tolorancer = ShapeFix_ShapeTolerance()
+    tolorancer.SetTolerance(v_item, v_precision)
+    return v_item
 
 def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
     face_fixer = ShapeFix_Face()
-    topo_face = BRepBuilderAPI_MakeFace(geom_face, TRANSFER_PRECISION).Face()
+    topo_face = BRepBuilderAPI_MakeFace(geom_face, connected_tolerance).Face()
+    is_debug = False
+    if len(wire_list) == 6:
+        # is_debug=True
+        pass
+    if (geom_face.IsUPeriodic() or geom_face.IsVPeriodic()) and len(wire_list) == 2 and len(get_primitives(topo_face, TopAbs_WIRE)) == 1:
+        final_wire = get_primitives(topo_face, TopAbs_WIRE)[0]
+        final_wire = set_tolerance(final_wire, connected_tolerance)
+        wire_list = [final_wire]
+        # is_debug=True
+        pass
     face_fixer.Init(geom_face, connected_tolerance, True)
     fixed_wire_list = []
     for wire in wire_list:
-        wire_fixer = ShapeFix_Wire(wire, topo_face, FIX_TOLERANCE)
+        wire_fixer = ShapeFix_Wire(wire, topo_face, connected_tolerance)
         wire_fixer.SetModifyTopologyMode(True)
         wire_fixer.SetModifyGeometryMode(True)
         wire_fixer.FixSmall(False, REMOVE_EDGE_TOLERANCE)
         wire_fixer.SetMaxTolerance(connected_tolerance)
+        wire_fixer.SetPrecision(connected_tolerance)
         wire_fixer.FixGaps3d()
         wire_fixer.FixGaps2d()
-        # wire_fixer.Perform()
+        wire_fixer.Perform()
 
         # when only one edge, and being gap fixing, but still not closed, skip
         if wire_fixer.Wire().NbChildren() == 1 and not wire_fixer.Wire().Closed():
@@ -872,6 +890,7 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         if not fixed_wire.Closed():
             continue
 
+        fixed_wire = set_tolerance(fixed_wire, connected_tolerance)
         face_fixer.Add(fixed_wire)
         fixed_wire_list.append(fixed_wire)
 
@@ -880,7 +899,7 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
 
     try:
         face_fixer.FixWireTool().SetModifyGeometryMode(True)
-        face_fixer.FixWireTool().SetMaxTolerance(FIX_PRECISION)
+        face_fixer.FixWireTool().SetMaxTolerance(connected_tolerance)
         face_fixer.FixWireTool().SetPrecision(connected_tolerance)
         face_fixer.FixWireTool().SetFixShiftedMode(True)
         face_fixer.FixWireTool().SetClosedWireMode(True)
@@ -892,10 +911,10 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         face_fixer.SetFixOrientationMode(True)
         face_fixer.SetFixMissingSeamMode(True)
         face_fixer.SetFixWireMode(True)
-        face_fixer.SetFixLoopWiresMode(True)
-        face_fixer.SetFixIntersectingWiresMode(True)
-        face_fixer.SetFixPeriodicDegeneratedMode(True)
-        face_fixer.SetFixSmallAreaWireMode(True)
+        face_fixer.SetFixLoopWiresMode(False)
+        face_fixer.SetFixIntersectingWiresMode(False)
+        face_fixer.SetFixPeriodicDegeneratedMode(False)
+        face_fixer.SetFixSmallAreaWireMode(False)
         face_fixer.Perform()
 
         face_fixer.FixAddNaturalBound()
@@ -911,7 +930,9 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
         return None
 
     face_occ = face_fixer.Face()
-
+    face_occ = set_tolerance(face_occ, connected_tolerance)
+    if is_debug:
+        viz_shapes([face_occ])
     return face_occ
 
 
@@ -967,9 +988,8 @@ def create_trimmed_face1(geom_face, face_edges, connected_tolerance, face_edges_
         trimmed_face = create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance)
         if trimmed_face is None or trimmed_face.IsNull():
             continue
-
         shape_tol_setter = ShapeFix_ShapeTolerance()
-        shape_tol_setter.SetTolerance(trimmed_face, 0.1)
+        shape_tol_setter.SetTolerance(trimmed_face, connected_tolerance)
         face_analyzer = BRepCheck_Analyzer(trimmed_face, False)
         is_face_valid = face_analyzer.IsValid()
         if is_face_valid:
@@ -1052,36 +1072,49 @@ def get_separated_surface(trimmed_faces, v_precision1=1e-3, v_precision2=1e-1):
 
 def get_solid(trimmed_faces, connected_tolerance):
     try:
+        # Sew shells
         random.shuffle(trimmed_faces)
         sewing = BRepBuilderAPI_Sewing()
-        sewing.SetTolerance(SEWING_TOLERANCE)
+        sewing.SetTolerance(connected_tolerance)
         for face in trimmed_faces:
             sewing.Add(face)
         sewing.Perform()
         # sewing.Dump()
         sewn_shell = sewing.SewedShape()
+        if sewn_shell.ShapeType() == TopAbs_COMPOUND:
+            sewn_shell = get_primitives(sewn_shell, TopAbs_SHELL)[0]
+        shape_tol_setter = ShapeFix_ShapeTolerance()
+        shape_tol_setter.SetTolerance(sewn_shell, connected_tolerance)
 
-        fix_shell = ShapeFix_Shell(sewn_shell)
-        fix_shell.SetPrecision(connected_tolerance)
-        fix_shell.SetMaxTolerance(connected_tolerance)
-        fix_shell.SetFixFaceMode(True)
-        fix_shell.SetFixOrientationMode(True)
-        fix_shell.Perform()
-        sewn_shell = fix_shell.Shell()
+        # Fix if it is not valid
+        if not BRepCheck_Analyzer(sewn_shell).IsValid():
+            fix_shell = ShapeFix_Shell(sewn_shell)
+            fix_shell.SetPrecision(connected_tolerance)
+            fix_shell.SetFixFaceMode(True)
+            fix_shell.SetFixOrientationMode(True)
+            fix_shell.Perform()
+            sewn_shell = fix_shell.Shell()
+            shape_tol_setter = ShapeFix_ShapeTolerance()
+            shape_tol_setter.SetTolerance(sewn_shell, connected_tolerance)
 
+        # Solid
         maker = BRepBuilderAPI_MakeSolid()
         maker.Add(sewn_shell)
         maker.Build()
         solid = maker.Solid()
+        shape_tol_setter = ShapeFix_ShapeTolerance()
+        shape_tol_setter.SetTolerance(solid, connected_tolerance)
 
-        fix_solid = ShapeFix_Solid(solid)
-        fix_solid.SetPrecision(connected_tolerance)
-        fix_solid.SetMaxTolerance(connected_tolerance)
-        fix_solid.SetFixShellMode(True)
-        fix_solid.SetFixShellOrientationMode(True)
-        fix_solid.SetCreateOpenSolidMode(False)
-        fix_solid.Perform()
-        solid = fix_solid.Solid()
+        # Fix if it is not valid
+        if not BRepCheck_Analyzer(solid).IsValid() or True:
+            fix_solid = ShapeFix_Solid(solid)
+            fix_solid.SetPrecision(connected_tolerance)
+            fix_solid.SetMaxTolerance(connected_tolerance)
+            fix_solid.SetFixShellMode(True)
+            fix_solid.SetFixShellOrientationMode(True)
+            fix_solid.SetCreateOpenSolidMode(False)
+            fix_solid.Perform()
+            solid = fix_solid.Solid()
         return solid
 
     except:
@@ -1089,7 +1122,7 @@ def get_solid(trimmed_faces, connected_tolerance):
 
 
 def construct_brep(v_shape, connected_tolerance, isdebug=False):
-    debug_idx = []
+    debug_idx = [8]
     if isdebug:
         print(f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
     v_shape.build_geom()
@@ -1125,8 +1158,8 @@ def construct_brep(v_shape, connected_tolerance, isdebug=False):
         is_valid = False if trimmed_face is None else is_valid
 
         if idx in debug_idx:
-            viz_shapes([geom_face, wire_list])
-            # viz_shapes([trimmed_face])
+            # viz_shapes([geom_face, wire_list])
+            pass
 
         if isdebug and not is_valid:
             print(f"Face {idx} is not valid{Colors.RESET}")

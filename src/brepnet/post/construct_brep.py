@@ -5,15 +5,20 @@ import numpy as np
 import torch
 from OCC.Core import Message
 from OCC.Core.IFSelect import IFSelect_ReturnStatus
+from OCC.Core.IGESControl import IGESControl_Writer
+from OCC.Core.Interface import Interface_Static
 from OCC.Core.Message import Message_PrinterOStream, Message_Alarm
+from OCC.Core.STEPControl import STEPControl_Writer, STEPControl_AsIs, STEPControl_ManifoldSolidBrep, \
+    STEPControl_FacetedBrep, STEPControl_ShellBasedSurfaceModel
 from OCC.Core.ShapeFix import ShapeFix_ShapeTolerance
+from OCC.Core.TopAbs import TopAbs_SHAPE
 from OCC.Core.TopoDS import TopoDS_Face
 from OCC.Extend.DataExchange import read_step_file
 
 from shared.common_utils import safe_check_dir, check_dir
 from shared.common_utils import export_point_cloud
 from shared.occ_utils import get_primitives
-from src.brepnet.eval.check_valid import check_step_valid_soild
+from src.brepnet.eval.check_valid import check_step_valid_soild, save_step_file
 
 from src.brepnet.post.utils import *
 from src.brepnet.post.geom_optimization import optimize_geom, test_optimize_geom
@@ -267,8 +272,9 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         if solid.ShapeType() == TopAbs_COMPOUND:
             continue
 
+        shape_tol_setter = ShapeFix_ShapeTolerance()
+        shape_tol_setter.SetTolerance(solid, 1e-1)
         analyzer = BRepCheck_Analyzer(solid)
-        # analyzer.SetExactMethod(True)
         if not analyzer.IsValid():
             result = analyzer.Result(solid)
             continue
@@ -277,6 +283,10 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             is_successful = True
         else:
             is_successful = False
+
+        save_step_file(os.path.join(out_root, folder_name, 'recon_brep.step'), solid)
+        if not check_step_valid_soild(os.path.join(out_root, folder_name, 'recon_brep.step')):
+            continue
         break
 
     time_records[2] = time.time() - timer
@@ -287,11 +297,11 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
 
     if solid is not None:
         try:
-            write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'), "AP242DIS")
+            save_step_file(os.path.join(out_root, folder_name, 'recon_brep.step'), solid)
             if check_step_valid_soild(os.path.join(out_root, folder_name, 'recon_brep.step')):
                 open(os.path.join(out_root, folder_name, 'success.txt'), 'w').close()
                 write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01,
-                               angular_deflection=0.5)
+                               angular_deflection=0.1)
         except:
             pass
 
@@ -327,7 +337,7 @@ def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list,
             return None
 
 
-construct_brep_from_datanpz_batch_ray = ray.remote(num_cpus=1, num_gpus=0.2)(construct_brep_from_datanpz_batch)
+construct_brep_from_datanpz_batch_ray = ray.remote(num_cpus=1, num_gpus=0.4)(construct_brep_from_datanpz_batch)
 
 
 def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda):

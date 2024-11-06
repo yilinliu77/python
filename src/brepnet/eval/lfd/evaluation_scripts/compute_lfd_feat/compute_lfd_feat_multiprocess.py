@@ -27,7 +27,7 @@ def seed_everything(seed):
 
 
 def load_mesh_v(mesh_name, normalized_scale=0.9):
-    if mesh_name.endswith('obj'):
+    if mesh_name.endswith('obj') or mesh_name.endswith('OBJ'):
         mesh_1 = kal.io.obj.import_mesh(mesh_name)
         vertices = mesh_1.vertices.cpu().numpy()
         mesh_f1 = mesh_1.faces.cpu().numpy()

@@ -54,10 +54,15 @@ from functools import partial
 
 
 def align_mesh_feature(mesh_name, align_feature_sample_folder):
-    mesh_fodler = mesh_name.split('/')[-3:]
-    mesh_fodler[-1] = mesh_fodler[-1].split('.')[0]
-    mesh_fodler = '/'.join(mesh_fodler)
+    # mesh_fodler = mesh_name.split('/')[-3:]
+    # print(mesh_fodler)
+    # mesh_fodler[-1] = mesh_fodler[-1].split('.')[0]
+    # print(mesh_fodler)
+    # mesh_fodler = '/'.join(mesh_fodler)
+    mesh_fodler = os.path.basename(os.path.dirname(mesh_name))
     mesh_fodler = os.path.join(align_feature_sample_folder, mesh_fodler)
+    # print(mesh_fodler)
+    
     if not os.path.exists(mesh_fodler):
         os.makedirs(mesh_fodler)
     if os.path.exists(os.path.join(mesh_fodler, 'mesh_q4_v1.8.art')) and os.path.getsize(
@@ -132,5 +137,6 @@ if __name__ == "__main__":
     ]
 
     models = load_data_with_prefix(args.gen_path, args.prefix)
+    models.sort()
     print(f"Loading {len(models)} models")
     compute_lfd_feture(models, args.n_process, args.save_path)

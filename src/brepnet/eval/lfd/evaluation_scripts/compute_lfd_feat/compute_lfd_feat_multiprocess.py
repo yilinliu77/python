@@ -7,6 +7,8 @@
 # license agreement from NVIDIA CORPORATION & AFFILIATES is strictly prohibited.
 
 import argparse
+import glob
+
 import numpy as np
 import torch
 import os
@@ -128,14 +130,16 @@ if __name__ == "__main__":
     parser.add_argument("--save_path", type=str, required=True, help="path to save the generated features for each model")
     parser.add_argument("--n_models", type=int, default=-1, help="Number of models used for evaluation")
     parser.add_argument("--n_process", type=int, default=32, help="Number of process used for evaluation")
-    parser.add_argument("--prefix", type=str, required=False, default=".obj")
+    parser.add_argument("--prefix", type=str, required=False, default="mesh.ply")
 
     args = parser.parse_args()
 
     models = []
     all_folders = os.listdir(args.gen_path)
     for folder in all_folders:
-        models.append(os.path.join(args.gen_path, folder, args.prefix))
+        files = glob.glob(os.path.join(args.gen_path, folder), args.prefix)
+        assert len(files) == 1
+        models.append(os.path.join(args.gen_path, folder, files[0]))
     models.sort()
     print(f"Loading {len(models)} models")
     compute_lfd_feture(models, args.n_process, args.save_path)

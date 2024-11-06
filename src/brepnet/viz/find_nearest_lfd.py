@@ -114,7 +114,7 @@ if __name__ == "__main__":
     training_meshes_paths = [os.path.join(train_root, folder, "mesh.ply") for folder in all_trainin_folders]
     training_meshes_paths = training_meshes_paths[:100]
     training_meshes = batch_load_mesh(training_meshes_paths)
-    print(f"Loding {len(training_meshes)} training meshes")
+    print(f"Loading {len(training_meshes)} training meshes")
     assert len(training_meshes) > 0
 
     print("\nComputing LFD...")

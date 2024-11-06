@@ -18,6 +18,7 @@ import kaolin as kal
 import point_cloud_utils as pcu
 import trimesh
 
+
 def seed_everything(seed):
     if seed < 0:
         return
@@ -96,6 +97,7 @@ def compute_lfd_feture(sample_pcs, n_process, save_path):
     pool.close()
     pool.join()
 
+
 def load_data_with_prefix(root_folder, prefix, folder_list_txt=None):
     data_files = []
     folder_list = []
@@ -113,6 +115,7 @@ def load_data_with_prefix(root_folder, prefix, folder_list_txt=None):
                 data_files.append(file_path)
 
     return data_files
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

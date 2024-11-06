@@ -183,6 +183,9 @@ class TrainDiffusion(pl.LightningModule):
                           )
 
     def test_step(self, batch, batch_idx):
+        if batch_idx == 0:
+            seed_everything(self.global_rank)
+            
         # if batch_idx != 147:
         #     return
         data = batch

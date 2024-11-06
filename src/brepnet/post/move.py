@@ -2,6 +2,7 @@ import os, shutil
 from tqdm import tqdm
 import argparse, sys
 
+from src.brepnet.eval.check_valid import check_step_valid_soild
 from src.brepnet.post.utils import *
 
 from OCC.Extend.DataExchange import read_step_file, write_step_file, write_stl_file
@@ -93,9 +94,9 @@ def check_invalid(data_root):
     for filename in tqdm(all_files):
         if os.path.exists(os.path.join(data_root, filename, "recon_brep.step")):
             try:
-                gen_shape = read_step_file(os.path.join(data_root, filename, "recon_brep.step"), verbosity=False)
-                shape_analyzer = BRepCheck_Analyzer(gen_shape)
-                if not shape_analyzer.IsValid():
+                is_valid = check_step_valid_soild(os.path.join(data_root, filename, "recon_brep.step"))
+                if not is_valid:
+                    gen_shape = read_step_file(os.path.join(data_root, filename, "recon_brep.step"), verbosity=False)
                     validity_percentage = calculate_valid_percentage(gen_shape)
                     exception_folder_validity_percentage.append(validity_percentage)
                     exception_folder.append(filename)
@@ -114,6 +115,10 @@ def check_invalid(data_root):
     print(f"Total {len(exception_folder)} invalid folders")
     print(exception_folder)
     print(exception_folder_validity_percentage)
+    with open(os.path.join(exception_save_root, "exception.txt"), "w") as f:
+        for except_folder, val_per in zip(exception_folder, exception_folder_validity_percentage):
+            f.write(f"{except_folder} {val_per}\n")
+        f.write(f"Average validity percentage: {sum(exception_folder_validity_percentage) / len(exception_folder_validity_percentage)}")
     print(f"Average validity percentage: {sum(exception_folder_validity_percentage) / len(exception_folder_validity_percentage)}")
 
 

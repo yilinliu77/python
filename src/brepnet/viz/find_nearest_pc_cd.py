@@ -29,7 +29,7 @@ def find_nearest(local_out_root, src_pcs_c, ref_pcs, ref_shape_paths):
     near_mesh_paths = [os.path.join(os.path.dirname(ref_shape_paths[ref_idx]), "mesh.ply") for ref_idx in topk_near_idx]
     src_mesh_paths = glob.glob(os.path.join(local_out_root, "*.stl"))
     mesh_paths = src_mesh_paths + near_mesh_paths
-    arrange_meshes(mesh_paths, os.path.join(local_out_root, "nearest.ply"))
+    arrange_meshes(mesh_paths, os.path.join(local_out_root, "cd_nearest.ply"))
 
 
 if __name__ == "__main__":
@@ -41,7 +41,7 @@ if __name__ == "__main__":
     parser.add_argument("--txt", type=str, required=False, default="")
     parser.add_argument("--use_ray", action='store_true')
     parser.add_argument("--num_gpus", type=int, default=1)
-    parser.add_argument("--num_gpus_task", type=float, default=0.5)
+    parser.add_argument("--num_gpus_task", type=float, default=1)
 
     args = parser.parse_args()
     fake_post = args.fake_post

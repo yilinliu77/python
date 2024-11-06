@@ -8,6 +8,7 @@ dataset:
   disable_half: false
 
   is_aug: 0
+  is_overfit: false
 
 trainer:
   gpu: 1
@@ -32,6 +33,8 @@ trainer:
 model:
   name: AutoEncoder_featuredv2
   norm: "layer"
+  fixed_gaussian: 1
+  loss: "l2"
   
   encoderdecoder_weight: 
   encoder_decoder_sigmoid: false

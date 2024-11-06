@@ -18,7 +18,7 @@ from OCC.Extend.DataExchange import read_step_file
 from shared.common_utils import safe_check_dir, check_dir
 from shared.common_utils import export_point_cloud
 from shared.occ_utils import get_primitives
-from src.brepnet.eval.check_valid import check_step_valid_soild
+from src.brepnet.eval.check_valid import check_step_valid_soild, save_step_file
 
 from src.brepnet.post.utils import *
 from src.brepnet.post.geom_optimization import optimize_geom, test_optimize_geom
@@ -283,6 +283,10 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             is_successful = True
         else:
             is_successful = False
+
+        save_step_file(os.path.join(out_root, folder_name, 'recon_brep.step'), solid)
+        if not check_step_valid_soild(os.path.join(out_root, folder_name, 'recon_brep.step')):
+            continue
         break
 
     time_records[2] = time.time() - timer
@@ -293,12 +297,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
 
     if solid is not None:
         try:
-            Interface_Static.SetIVal("write.precision.mode", 2)
-            Interface_Static.SetRVal("write.precision.val", 1e-1)
-            step_writer = STEPControl_Writer()
-            step_writer.SetTolerance(1e-1)
-            step_writer.Transfer(solid, STEPControl_AsIs)
-            status = step_writer.Write(os.path.join(out_root, folder_name, 'recon_brep.step'))
+            save_step_file(os.path.join(out_root, folder_name, 'recon_brep.step'), solid)
             if check_step_valid_soild(os.path.join(out_root, folder_name, 'recon_brep.step')):
                 open(os.path.join(out_root, folder_name, 'success.txt'), 'w').close()
                 write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01,

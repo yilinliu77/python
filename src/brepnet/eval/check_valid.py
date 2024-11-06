@@ -4,7 +4,7 @@ from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeSolid
 from OCC.Core.BRepCheck import BRepCheck_Analyzer
 from OCC.Core.IGESControl import IGESControl_Reader
 from OCC.Core.Interface import Interface_Static
-from OCC.Core.STEPControl import STEPControl_Reader
+from OCC.Core.STEPControl import STEPControl_Reader, STEPControl_Writer, STEPControl_AsIs
 from OCC.Core.StepData import StepData_StepModel
 from OCC.Core.TopAbs import TopAbs_SOLID, TopAbs_COMPOUND, TopAbs_SHELL, TopAbs_FACE
 from OCC.Extend.DataExchange import read_step_file
@@ -16,6 +16,17 @@ from tqdm import tqdm
 
 from shared.occ_utils import get_primitives
 from src.brepnet.post.utils import solid_valid_check, viz_shapes, get_solid, CONNECT_TOLERANCE
+
+def save_step_file(step_file, shape):
+    Interface_Static.SetCVal("write.step.schema", "DIS")
+    Interface_Static.SetIVal("write.precision.mode", 2)
+    Interface_Static.SetRVal("write.precision.val", 1e-1)
+    # Interface_Static.SetIVal("write.surfacecurve.mode", 0)
+    step_writer = STEPControl_Writer()
+    step_writer.SetTolerance(1e-1)
+    step_writer.Model(True)
+    step_writer.Transfer(shape, STEPControl_AsIs)
+    status = step_writer.Write(step_file)
 
 
 def check_step_valid_soild(step_file, precision=1e-1):

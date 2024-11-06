@@ -18,6 +18,7 @@ import kaolin as kal
 import point_cloud_utils as pcu
 import trimesh
 
+
 def seed_everything(seed):
     if seed < 0:
         return
@@ -27,7 +28,7 @@ def seed_everything(seed):
 
 
 def load_mesh_v(mesh_name, normalized_scale=0.9):
-    if mesh_name.endswith('obj'):
+    if mesh_name.endswith('obj') or mesh_name.endswith('OBJ'):
         mesh_1 = kal.io.obj.import_mesh(mesh_name)
         vertices = mesh_1.vertices.cpu().numpy()
         mesh_f1 = mesh_1.faces.cpu().numpy()
@@ -96,6 +97,7 @@ def compute_lfd_feture(sample_pcs, n_process, save_path):
     pool.close()
     pool.join()
 
+
 def load_data_with_prefix(root_folder, prefix, folder_list_txt=None):
     data_files = []
     folder_list = []
@@ -113,6 +115,7 @@ def load_data_with_prefix(root_folder, prefix, folder_list_txt=None):
                 data_files.append(file_path)
 
     return data_files
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

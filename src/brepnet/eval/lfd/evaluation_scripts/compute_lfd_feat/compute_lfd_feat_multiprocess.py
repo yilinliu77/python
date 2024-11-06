@@ -62,7 +62,7 @@ def align_mesh_feature(mesh_name, align_feature_sample_folder):
     mesh_fodler = os.path.basename(os.path.dirname(mesh_name))
     mesh_fodler = os.path.join(align_feature_sample_folder, mesh_fodler)
     # print(mesh_fodler)
-    
+
     if not os.path.exists(mesh_fodler):
         os.makedirs(mesh_fodler)
     if os.path.exists(os.path.join(mesh_fodler, 'mesh_q4_v1.8.art')) and os.path.getsize(

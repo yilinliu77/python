@@ -131,12 +131,11 @@ if __name__ == "__main__":
     parser.add_argument("--prefix", type=str, required=False, default=".obj")
 
     args = parser.parse_args()
-    path_list = [
-    ]
-    n_model_list = [
-    ]
 
-    models = load_data_with_prefix(args.gen_path, args.prefix)
+    models = []
+    all_folders = os.listdir(args.gen_path)
+    for folder in all_folders:
+        models.append(os.path.join(args.gen_path, folder, args.prefix))
     models.sort()
     print(f"Loading {len(models)} models")
     compute_lfd_feture(models, args.n_process, args.save_path)

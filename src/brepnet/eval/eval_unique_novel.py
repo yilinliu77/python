@@ -264,7 +264,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--fake_root", type=str, required=True)
     parser.add_argument("--fake_post", type=str, required=True)
-    parser.add_argument("--train_root", type=str, required=True)
+    parser.add_argument("--train_root", type=str, required=False)
     parser.add_argument("--n_bit", type=int, required=False)
     parser.add_argument("--atol", type=float, required=False)
     parser.add_argument("--use_ray", action='store_true')
@@ -290,6 +290,9 @@ def main():
         raise ValueError("Must set either n_bit or atol")
     if n_bit and atol:
         raise ValueError("Cannot set both n_bit and atol")
+
+    if not args.only_unique and not train_data_root:
+        raise ValueError("Must set train_data_root when not only_unique")
 
     if n_bit:
         atol = None

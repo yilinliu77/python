@@ -265,7 +265,8 @@ def main():
     parser.add_argument("--fake_root", type=str, required=True)
     parser.add_argument("--fake_post", type=str, required=True)
     parser.add_argument("--train_root", type=str, required=True)
-    parser.add_argument("--n_bit", type=int, default=4, required=True)
+    parser.add_argument("--n_bit", type=int, default=4, required=False)
+    parser.add_argument("--atol", type=float, default=0.01, required=False)
     parser.add_argument("--use_ray", action='store_true')
     parser.add_argument("--load_batch_size", type=int, default=400)
     parser.add_argument("--compute_batch_size", type=int, default=200000)
@@ -279,15 +280,21 @@ def main():
     train_data_root = args.train_root
     is_use_ray = args.use_ray
     n_bit = args.n_bit
+    atol = args.atol
     load_batch_size = args.load_batch_size
     compute_batch_size = args.compute_batch_size
     folder_list_txt = args.txt
     num_cpus = args.num_cpus
 
-    if args.n_bit == -1:
-        atol = 0.01
-    else:
+    if not n_bit and not atol:
+        raise ValueError("Must set either n_bit or atol")
+    if n_bit and atol:
+        raise ValueError("Cannot set both n_bit and atol")
+
+    if n_bit:
         atol = None
+    if atol:
+        n_bit = -1
 
     ################################################## Unqiue #######################################################
     # Load all the generated data files

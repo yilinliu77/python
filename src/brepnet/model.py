@@ -7161,8 +7161,14 @@ class AutoEncoder_0925_plus_loss2(AutoEncoder_0925_plus):
 class AutoEncoder_0925_plus_fix_variance(AutoEncoder_0925_plus):
     def __init__(self, v_conf):
         super().__init__(v_conf)
-        self.fixed_gaussian = v_conf["fixed_gaussian"]
+        self.fixed_gaussian = torch.tensor(v_conf["fixed_gaussian"], dtype=torch.float32)
         
+    def vae_loss_modified(self, mu, logvar, prior_var=0.1):
+        KLD = -0.5 * torch.sum(
+            1 + logvar - torch.log(prior_var**2) - (mu.pow(2) + logvar.exp()) / (prior_var**2)
+        )
+        return KLD
+
     def sample(self, v_fused_face_features, v_is_test=False):
         if self.gaussian_weights <= 0:
             return self.gaussian_proj(v_fused_face_features), torch.zeros_like(v_fused_face_features[0,0])
@@ -7170,11 +7176,11 @@ class AutoEncoder_0925_plus_fix_variance(AutoEncoder_0925_plus):
         fused_face_features_gau = self.gaussian_proj(v_fused_face_features)
         fused_face_features_gau = fused_face_features_gau.reshape(-1, self.df, 2)
         mean = fused_face_features_gau[:, :, 0]
+        std = fused_face_features_gau[:, :, 1]
 
-        std = self.fixed_gaussian
         eps = torch.randn_like(mean)
         fused_face_features = eps.mul(std).add_(mean)
-        kl_loss = torch.zeros_like(v_fused_face_features[0,0])
+        kl_loss = self.vae_loss_modified(mean, std, self.fixed_gaussian) * self.gaussian_weights
         if v_is_test:
             fused_face_features = mean
         return fused_face_features, kl_loss
@@ -7191,7 +7197,6 @@ class AutoEncoder_1101(AutoEncoder_0925_plus):
         self.face_attn_proj_in2 = None
         self.face_attn_proj_out2 = None
         self.face_attn2 = None
-
 
     def encode(self, v_data, v_test):
         # torch.cuda.synchronize()

@@ -52,13 +52,13 @@ from src.brepnet.post.utils import Shape
 debug_id = None
 # debug_id = "00000003"
 
-render_img = True
+render_img = False
 write_debug_data = False
 check_post_processing = False
 data_root = Path(r"/mnt/e/yilin/data_step")
-output_root = Path(r"/mnt/d/img2brep/abc_v0/")
-img_root = Path(r"/mnt/d/img2brep/abc_imgs_v0")
-data_split = r"src/brepnet/data/list/deduplicated_abc.txt"
+output_root = Path(r"/mnt/d/img2brep/brepgen_train/")
+img_root = Path(r"/mnt/d/img2brep/abc_imgs_vxx")
+data_split = r"/root/repo/python/src/brepnet/data/list/deepcad_train_whole.txt"
 
 exception_files = [
     r"src/brepnet/data/list/abc_with_others_ids.txt",

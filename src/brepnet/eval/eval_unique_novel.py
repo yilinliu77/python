@@ -328,7 +328,10 @@ def main():
     unique_ratio, deduplicate_matrix = compute_gen_unique(gen_graph_list, is_use_ray, compute_batch_size, atol=atol)
     print(f"Unique ratio: {unique_ratio}")
 
-    unique_txt = gen_data_root + f"_unique_{n_bit}bit_results.txt"
+    if n_bit == -1:
+        unique_txt = gen_data_root + f"_unique_atol_{atol}_results.txt"
+    else:
+        unique_txt = gen_data_root + f"_unique_{n_bit}bit_results.txt"
     fp = open(unique_txt, "w")
     print(f"Unique ratio: {unique_ratio}", file=fp)
     deduplicate_components = find_connected_components(deduplicate_matrix)

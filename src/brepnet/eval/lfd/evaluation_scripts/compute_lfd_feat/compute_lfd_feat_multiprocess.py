@@ -142,7 +142,8 @@ if __name__ == "__main__":
         if not os.path.isdir(os.path.join(args.gen_path, folder)):
             continue
         files = glob.glob(os.path.join(args.gen_path, folder, args.prefix))
-        assert len(files) == 1
+        if len(files) == 0:
+            continue
         models.append(os.path.join(args.gen_path, folder, files[0]))
     models.sort()
     print(f"Loading {len(models)} models")

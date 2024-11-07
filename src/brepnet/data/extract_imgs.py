@@ -20,9 +20,9 @@ from shared.occ_utils import normalize_shape, get_triangulations, get_primitives
 debug_id = None
 # debug_id = "00000003"
 
-data_root = Path(r"D:/Datasets/data_step")
-output_root = Path(r"D:/Datasets/test")
-img_root = Path(r"D:/Datasets/img_test")
+data_root = Path(r"/mnt/e/yilin/data_step")
+output_root = Path(r"/mnt/d/img2brep/deepcad_730_imgs_npz")
+img_root = Path(r"/mnt/d/img2brep/deepcad_730_imgs_png")
 data_split = r"src/brepnet/data/list/deduplicated_deepcad_7_30.txt"
 
 exception_files = [
@@ -164,7 +164,7 @@ if __name__ == '__main__':
     num_original = len(total_ids)
     total_ids = list(set(total_ids) - set(exception_ids))
     total_ids.sort()
-    total_ids = total_ids[:100]
+    total_ids = total_ids
     print("Total ids: {} -> {}".format(num_original, len(total_ids)))
     check_dir(output_root)
     safe_check_dir(img_root)

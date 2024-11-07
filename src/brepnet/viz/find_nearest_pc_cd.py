@@ -15,7 +15,14 @@ from chamferdist import ChamferDistance
 from src.brepnet.viz.sort_and_merge import arrange_meshes
 
 
-def find_nearest(local_out_root, src_pcs_c, ref_pcs, ref_shape_paths):
+def find_nearest(local_out_root, src_pcs_c_ref, ref_pcs, ref_shape_paths, is_ray=-1):
+    device = torch.device("cpu")
+    if is_ray>=0:
+        src_pcs_c = src_pcs_c_ref[is_ray].to(device)
+        ref_pcs = ref_pcs.to(device)
+    else:
+        src_pcs_c = src_pcs_c_ref.to(device)
+        ref_pcs = ref_pcs.to(device)
     chamferdist = ChamferDistance()
     cf2ref = chamferdist(src_pcs_c.unsqueeze(0).repeat(ref_pcs.shape[0], 1, 1), ref_pcs,
                          batch_reduction=None, point_reduction='mean', bidirectional=True)
@@ -73,6 +80,7 @@ if __name__ == "__main__":
             ref_pcs.append(pc)
     ref_pcs = np.stack(ref_pcs, axis=0)
     print("real point clouds: {}".format(ref_pcs.shape))
+    
 
     # Load fake pcd
     print("\nLoading fake point clouds...")
@@ -91,9 +99,8 @@ if __name__ == "__main__":
     src_pcs = np.stack(src_pcs, axis=0)
     print("fake point clouds: {}".format(src_pcs.shape))
 
-    device = torch.device("cuda")
-    src_pcs = torch.from_numpy(src_pcs).to(device).to(torch.float32)
-    ref_pcs = torch.from_numpy(ref_pcs).to(device).to(torch.float32)
+    src_pcs = torch.from_numpy(src_pcs).to(torch.float32)
+    ref_pcs = torch.from_numpy(ref_pcs).to(torch.float32)
 
     print("\nFinding nearest...")
     if not args.use_ray:
@@ -101,14 +108,18 @@ if __name__ == "__main__":
             local_out_root = os.path.join(fake_post, os.path.basename(src_shape_paths[i])[:-4])
             find_nearest(local_out_root, src_pcs[i], ref_pcs, ref_shape_paths)
     else:
-        find_nearest_remote = ray.remote(num_gpus=args.num_gpus_task)(find_nearest)
+        find_nearest_remote = ray.remote(num_gpus=args.num_gpus_task, num_cpus=1)(find_nearest)
         ray.init(
                 # local_mode=True,
+                num_cpus=80,
                 num_gpus=args.num_gpus,
         )
+        src_pcs_ref = ray.put(src_pcs)
+        ref_pcs_ref = ray.put(ref_pcs)
         futures = []
         for i in tqdm(range(src_pcs.shape[0])):
             local_out_root = os.path.join(fake_post, os.path.basename(src_shape_paths[i])[:-4])
-            futures.append(find_nearest_remote.remote(local_out_root, src_pcs[i], ref_pcs, ref_shape_paths))
-        ray.get(futures)
+            futures.append(find_nearest_remote.remote(local_out_root, src_pcs_ref, ref_pcs_ref, ref_shape_paths, i))
+        for i in tqdm(range(src_pcs.shape[0])):
+            ray.get(futures[i])
         ray.shutdown()

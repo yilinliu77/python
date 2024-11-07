@@ -24,31 +24,40 @@ def real2bit(data, n_bits=8, min_range=-1, max_range=1):
 def build_graph(faces, faces_adj, n_bit=4):
     # faces1 and faces2 are np.array of shape (n_faces, n_points, n_points, 3)
     # faces_adj1 and faces_adj2 are lists of (face_idx, face_idx) adjacency, ex. [[0, 1], [1, 2]]
-    faces_bits = real2bit(faces, n_bits=n_bit)
+    if n_bit < 0:
+        faces_bits = faces
+    else:
+        faces_bits = real2bit(faces, n_bits=n_bit)
     """Build a graph from a shape."""
     G = nx.Graph()
     for face_idx, face_bit in enumerate(faces_bits):
-        face_bit = face_bit.reshape(-1, 3)
-        face_bit_ordered = face_bit[np.lexsort((face_bit[:, 0], face_bit[:, 1], face_bit[:, 2]))]
-        G.add_node(face_idx, shape_geometry=face_bit_ordered)
+        # face_bit = face_bit.reshape(-1, 3)
+        # face_bit_ordered = face_bit[np.lexsort((face_bit[:, 0], face_bit[:, 1], face_bit[:, 2]))]
+        G.add_node(face_idx, shape_geometry=face_bit)
     for pair in faces_adj:
         G.add_edge(pair[0], pair[1])
     return G
 
 
-def is_graph_identical(graph1, graph2):
+def is_graph_identical(graph1, graph2, atol=None):
     """Check if two shapes are identical."""
     # Check if the two graphs are isomorphic considering node attributes
-    return nx.is_isomorphic(
-            graph1, graph2,
-            node_match=lambda n1, n2: np.array_equal(n1['shape_geometry'], n2['shape_geometry'])
-    )
+    if atol is None:
+        return nx.is_isomorphic(
+                graph1, graph2,
+                node_match=lambda n1, n2: np.array_equal(n1['shape_geometry'], n2['shape_geometry'])
+        )
+    else:
+        return nx.is_isomorphic(
+                graph1, graph2,
+                node_match=lambda n1, n2: np.allclose(n1['shape_geometry'], n2['shape_geometry'], atol=atol, rtol=0)
+        )
 
 
-def is_graph_identical_batch(graph_pair_list):
+def is_graph_identical_batch(graph_pair_list, atol=None):
     is_identical_list = []
     for graph1, graph2 in graph_pair_list:
-        is_identical = is_graph_identical(graph1, graph2)
+        is_identical = is_graph_identical(graph1, graph2, atol=atol)
         is_identical_list.append(is_identical)
     return is_identical_list
 
@@ -81,7 +90,7 @@ def find_connected_components(matrix):
     return components
 
 
-def compute_gen_unique(graph_list, is_use_ray=False, batch_size=100000):
+def compute_gen_unique(graph_list, is_use_ray=False, batch_size=100000, atol=None):
     N = len(graph_list)
     unique_graph_idx = list(range(N))
     pair_0, pair_1 = np.triu_indices(N, k=1)
@@ -90,7 +99,7 @@ def compute_gen_unique(graph_list, is_use_ray=False, batch_size=100000):
 
     if not is_use_ray:
         for idx1, idx2 in tqdm(check_pairs):
-            is_identical = is_graph_identical(graph_list[idx1], graph_list[idx2])
+            is_identical = is_graph_identical(graph_list[idx1], graph_list[idx2], atol=atol)
             if is_identical:
                 unique_graph_idx.remove(idx2) if idx2 in unique_graph_idx else None
                 deduplicate_matrix[idx1, idx2] = True
@@ -102,7 +111,7 @@ def compute_gen_unique(graph_list, is_use_ray=False, batch_size=100000):
         for i in tqdm(range(N_batch)):
             batch_pairs = check_pairs[i * batch_size: (i + 1) * batch_size]
             batch_graph_pair = [(graph_list[idx1], graph_list[idx2]) for idx1, idx2 in batch_pairs]
-            futures.append(is_graph_identical_remote.remote(batch_graph_pair))
+            futures.append(is_graph_identical_remote.remote(batch_graph_pair, atol))
         results = ray.get(futures)
 
         for batch_idx in tqdm(range(N_batch)):
@@ -256,13 +265,14 @@ def main():
     parser.add_argument("--fake_root", type=str, required=True)
     parser.add_argument("--fake_post", type=str, required=True)
     parser.add_argument("--train_root", type=str, required=True)
-    parser.add_argument("--n_bit", type=int, default=4)
+    parser.add_argument("--n_bit", type=int, default=4, required=True)
     parser.add_argument("--use_ray", action='store_true')
     parser.add_argument("--load_batch_size", type=int, default=400)
     parser.add_argument("--compute_batch_size", type=int, default=200000)
     parser.add_argument("--txt", type=str, default=None)
     parser.add_argument("--num_cpus", type=int, default=32)
     parser.add_argument("--min_face", type=int, required=False)
+    parser.add_argument("--only_unique", action='store_true')
     args = parser.parse_args()
     gen_data_root = args.fake_root
     gen_post_data_root = args.fake_post
@@ -273,6 +283,11 @@ def main():
     compute_batch_size = args.compute_batch_size
     folder_list_txt = args.txt
     num_cpus = args.num_cpus
+
+    if args.n_bit == -1:
+        atol = 0.01
+    else:
+        atol = None
 
     ################################################## Unqiue #######################################################
     # Load all the generated data files
@@ -303,8 +318,11 @@ def main():
         print(f"Filtered sample that face_num < {args.min_face}, remain {len(gen_graph_list)}")
 
     print("Computing Unique ratio...")
-    unique_ratio, deduplicate_matrix = compute_gen_unique(gen_graph_list, is_use_ray, compute_batch_size)
+    unique_ratio, deduplicate_matrix = compute_gen_unique(gen_graph_list, is_use_ray, compute_batch_size, atol=atol)
     print(f"Unique ratio: {unique_ratio}")
+
+    if args.only_unique:
+        exit(0)
 
     unique_txt = gen_data_root + f"_unique_{n_bit}bit_results.txt"
     fp = open(unique_txt, "w")

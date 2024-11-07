@@ -20,6 +20,8 @@ import kaolin as kal
 import point_cloud_utils as pcu
 import trimesh
 
+from tqdm import tqdm
+
 
 def seed_everything(seed):
     if seed < 0:
@@ -136,8 +138,10 @@ if __name__ == "__main__":
 
     models = []
     all_folders = os.listdir(args.gen_path)
-    for folder in all_folders:
-        files = glob.glob(os.path.join(args.gen_path, folder), args.prefix)
+    for folder in tqdm(all_folders):
+        if not os.path.isdir(os.path.join(args.gen_path, folder)):
+            continue
+        files = glob.glob(os.path.join(args.gen_path, folder, args.prefix))
         assert len(files) == 1
         models.append(os.path.join(args.gen_path, folder, files[0]))
     models.sort()

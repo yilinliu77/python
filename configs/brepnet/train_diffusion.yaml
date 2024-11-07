@@ -7,7 +7,7 @@ dataset:
   test_dataset: /mnt/d/deepcad_test_v6
 
   deduplicate_list: 0
-  pad_method: zero
+  pad_method: random
   cached_condition: true
 
   scale_factor: 1
@@ -40,15 +40,15 @@ trainer:
   exp_name: test
 
 model:
-  name: Diffusion_base
+  name: Diffusion_condition
   train_decoder: false
   stored_z: True
   condition:
 
   diffusion_latent: 512
-  diffusion_type: sample
+  diffusion_type: epsilon
   loss: l2
-  pad_method: zero
+  pad_method: random
   num_max_faces: 64
   beta_schedule: squaredcos_cap_v2
   addition_tag: false
@@ -58,7 +58,7 @@ model:
   dim_shape: 768
   sigmoid: false
   in_channels: 3
-  gaussian_weights: 0
+  gaussian_weights: 1e-6
   norm: "layer"
   autoencoder_weights: 
 

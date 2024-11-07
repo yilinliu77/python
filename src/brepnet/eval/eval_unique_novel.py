@@ -328,9 +328,6 @@ def main():
     unique_ratio, deduplicate_matrix = compute_gen_unique(gen_graph_list, is_use_ray, compute_batch_size, atol=atol)
     print(f"Unique ratio: {unique_ratio}")
 
-    if args.only_unique:
-        exit(0)
-
     unique_txt = gen_data_root + f"_unique_{n_bit}bit_results.txt"
     fp = open(unique_txt, "w")
     print(f"Unique ratio: {unique_ratio}", file=fp)
@@ -341,6 +338,9 @@ def main():
             print(f"Component: {component}", file=fp)
     print(f"Deduplicate components are saved to {unique_txt}")
     fp.close()
+
+    if args.only_unique:
+        exit(0)
 
     # For accelerate, please first run the find_nerest.py to find the nearest item in train data for each fake sample
     ################################################### Novel ########################################################

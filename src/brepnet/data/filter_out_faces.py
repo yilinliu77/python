@@ -26,7 +26,7 @@ if __name__ == "__main__":
     num_unknown_failed = 0
     for prefix in tqdm(prefies):
         try:
-            if not (Path("/mnt/d/yilin/img2brep/brepgen_ae_0925_7m_gaussian")/prefix).exists():
+            if not (Path("/mnt/d/yilin/img2brep/brepgen_ae_0925_7m_gaussian") / prefix).exists():
                 print(1)
 
             num_faces = np.load(root_path / prefix / "data.npz")["sample_points_faces"].shape[0]
@@ -37,7 +37,7 @@ if __name__ == "__main__":
                 num_min_face_failed += 1
                 continue
             else:
-                mesh = o3d.io.read_triangle_mesh(str(root_path/prefix/"mesh.ply"))
+                mesh = o3d.io.read_triangle_mesh(str(root_path / prefix / "mesh.ply"))
                 v = np.asarray(mesh.vertices)
                 dx = np.max(v[:, 0]) - np.min(v[:, 0])
                 dy = np.max(v[:, 1]) - np.min(v[:, 1])

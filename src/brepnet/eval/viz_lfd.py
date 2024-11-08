@@ -2,7 +2,7 @@ from matplotlib import pyplot as plt
 import sys, pickle
 import numpy as np
 
-pkl = r"/mnt/d/uncond_results/1106/1103_wcube_uncond_gaussian_epsilon_730_li_30_22m_30_lfd.pkl"
+pkl = r"/mnt/d/uncond_results/1106/1108_730_li_600k_30_lfd.pkl"
 output_path = r"lfd.png"
 
 if __name__ == "__main__":
@@ -21,5 +21,9 @@ if __name__ == "__main__":
     plt.ylabel("Light Field Distance (LFD)")
     plt.savefig(output_path, dpi=600)
     print(data.mean())
+
+    if True:
+        pass
+
     pass
 

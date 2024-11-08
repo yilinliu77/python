@@ -6,6 +6,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION & AFFILIATES is strictly prohibited.
 
+import random
 import numpy as np
 import ray
 import torch
@@ -60,7 +61,7 @@ def compute_lfd_all(src_folder_list, tgt_folder_list, split_path, debug=False, s
     add_model_str = False
     src_folder_list.sort()
     tgt_folder_list.sort()
-    # src_folder_list = src_folder_list[0:3000]
+    src_folder_list = src_folder_list[0:1]
 
     print("==> Reading data")
     print(f"len of src_folder_list: {len(src_folder_list)}")
@@ -110,7 +111,9 @@ if __name__ == '__main__':
         tgt_folder_list = sorted(list(set(valid_folders) & set(tgt_folder_list)))
         tgt_folder_list = [os.path.join(args.dataset_path, f) for f in tgt_folder_list]
 
-    src_folder_list = sorted(os.listdir(args.gen_path))
+    src_folder_list = os.listdir(args.gen_path)
+    random.shuffle(src_folder_list)
+    src_folder_list = sorted(src_folder_list[:800])
     src_folder_list = [os.path.join(args.gen_path, f) for f in src_folder_list]
 
     compute_lfd_all_remote = ray.remote(num_gpus=1, num_cpus=os.cpu_count() // num_workers)(compute_lfd_all)

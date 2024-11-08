@@ -61,11 +61,6 @@ def compute_lfd_all(src_folder_list, tgt_folder_list, split_path, debug=False, s
     add_model_str = False
     src_folder_list.sort()
     tgt_folder_list.sort()
-    src_folder_list = src_folder_list
-
-    print("==> Reading data")
-    print(f"len of src_folder_list: {len(src_folder_list)}")
-    print(f"len of tgt_folder_list: {len(tgt_folder_list)}")
 
     q8_table, align_10, src_ArtCoeff, src_FdCoeff_q8, src_CirCoeff_q8, src_EccCoeff_q8 = read_all_data(src_folder_list, load_data, add_model_str=False)
     q8_table, align_10, tgt_ArtCoeff, tgt_FdCoeff_q8, tgt_CirCoeff_q8, tgt_EccCoeff_q8 = read_all_data(tgt_folder_list, load_data, add_model_str=add_model_str, add_ori_name=add_ori_name)  ###
@@ -105,10 +100,15 @@ if __name__ == '__main__':
         num_gpus=num_workers,
     )
 
+    print(f"dataset_path: {args.dataset_path}")
+    print(f"gen_path: {args.gen_path}")
+
     tgt_folder_list = sorted(os.listdir(args.dataset_path))
     if listfile is not None:
         valid_folders = [item.strip() for item in open(listfile, 'r').readlines()]
         tgt_folder_list = sorted(list(set(valid_folders) & set(tgt_folder_list)))
+        tgt_folder_list = [os.path.join(args.dataset_path, f) for f in tgt_folder_list]
+    else:
         tgt_folder_list = [os.path.join(args.dataset_path, f) for f in tgt_folder_list]
 
     src_folder_list = os.listdir(args.gen_path)
@@ -118,10 +118,17 @@ if __name__ == '__main__':
 
     compute_lfd_all_remote = ray.remote(num_gpus=1, num_cpus=os.cpu_count() // num_workers)(compute_lfd_all)
 
+    print("Check data")
+    print(f"len of src_folder_list: {len(src_folder_list)}")
+    print(f"len of tgt_folder_list: {len(tgt_folder_list)}")
+    print(src_folder_list[0])
+    print(tgt_folder_list[0])
+
     results = []
     for i in range(num_workers):
         i_start = i * len(src_folder_list) // num_workers
         i_end = (i + 1) * len(src_folder_list) // num_workers
+        print(i, i_start, i_end)
         results.append(compute_lfd_all_remote.remote(
             src_folder_list[i_start:i_end],
             tgt_folder_list,

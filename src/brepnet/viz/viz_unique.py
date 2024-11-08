@@ -30,6 +30,9 @@ if __name__ == '__main__':
         component = ast.literal_eval(component_string)
         component = [os.path.join(fake_post, folder, "recon_brep.stl") for folder in component if
                      os.path.exists(os.path.join(fake_post, folder, "recon_brep.stl"))]
+        if len(component) == 0:
+            print(f"Component {component_idx} is empty.")
+            continue
         component_arranged_mesh_path = os.path.join(out_root, f"component_{component_idx}.ply")
         arrange_meshes(component, component_arranged_mesh_path)
         print(f"Component {component_idx} is saved to {component_arranged_mesh_path}.")

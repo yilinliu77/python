@@ -110,7 +110,7 @@ if __name__ == '__main__':
         tgt_folder_list = sorted(list(set(valid_folders) & set(tgt_folder_list)))
         tgt_folder_list = [os.path.join(args.dataset_path, f) for f in tgt_folder_list]
 
-    src_folder_list = sorted(os.listdir(args.gen_path))[:80]
+    src_folder_list = sorted(os.listdir(args.gen_path))
     src_folder_list = [os.path.join(args.gen_path, f) for f in src_folder_list]
 
     compute_lfd_all_remote = ray.remote(num_gpus=1, num_cpus=os.cpu_count() // num_workers)(compute_lfd_all)

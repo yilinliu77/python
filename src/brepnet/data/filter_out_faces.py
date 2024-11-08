@@ -13,11 +13,12 @@ import open3d as o3d
 root_path = Path("/mnt/d/brepgen_train")
 input_list = Path("src/brepnet/data/list/deduplicated_deepcad_training.txt")
 
+
 num_max = 30
 num_min = 7
 
 if __name__ == "__main__":
-    prefies = [item.strip() for item in open("src/brepnet/data/list/deduplicated_deepcad_training.txt").readlines()]
+    prefies = [item.strip() for item in open(input_list).readlines()]
     print(len(prefies))
     results = []
     num_ratio_failed = 0
@@ -26,6 +27,8 @@ if __name__ == "__main__":
     num_unknown_failed = 0
     for prefix in tqdm(prefies):
         try:
+            if not (Path("/mnt/d/yilin/img2brep/brepgen_ae_0925_7m_gaussian")/prefix).exists():
+                print(1)
             num_faces = np.load(root_path / prefix / "data.npz")["sample_points_faces"].shape[0]
             if num_faces > num_max:
                 num_max_face_failed += 1

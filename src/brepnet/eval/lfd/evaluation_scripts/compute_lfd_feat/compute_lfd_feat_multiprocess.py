@@ -131,11 +131,14 @@ if __name__ == "__main__":
     parser.add_argument("--gen_path", type=str, required=True, help="path to the generated models")
     parser.add_argument("--save_path", type=str, required=True, help="path to save the generated features for each model")
     parser.add_argument("--n_models", type=int, default=-1, help="Number of models used for evaluation")
-    parser.add_argument("--n_process", type=int, default=32, help="Number of process used for evaluation")
+    parser.add_argument("--n_process", type=int, default=-1, help="Number of process used for evaluation")
     parser.add_argument("--prefix", type=str, required=False, default="mesh.ply")
 
     args = parser.parse_args()
-
+    if args.n_process == -1:
+        num_cpus = min(64, os.cpu_count())
+    else:
+        num_cpus = args.n_process
     models = []
     all_folders = os.listdir(args.gen_path)
     for folder in tqdm(all_folders):
@@ -147,4 +150,4 @@ if __name__ == "__main__":
         models.append(os.path.join(args.gen_path, folder, files[0]))
     models.sort()
     print(f"Loading {len(models)} models")
-    compute_lfd_feture(models, args.n_process, args.save_path)
+    compute_lfd_feture(models, num_cpus, args.save_path)

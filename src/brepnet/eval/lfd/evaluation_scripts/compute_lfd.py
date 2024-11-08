@@ -100,10 +100,15 @@ if __name__ == '__main__':
         num_gpus=num_workers,
     )
 
+    print(f"dataset_path: {args.dataset_path}")
+    print(f"gen_path: {args.gen_path}")
+
     tgt_folder_list = sorted(os.listdir(args.dataset_path))
     if listfile is not None:
         valid_folders = [item.strip() for item in open(listfile, 'r').readlines()]
         tgt_folder_list = sorted(list(set(valid_folders) & set(tgt_folder_list)))
+        tgt_folder_list = [os.path.join(args.dataset_path, f) for f in tgt_folder_list]
+    else:
         tgt_folder_list = [os.path.join(args.dataset_path, f) for f in tgt_folder_list]
 
     src_folder_list = os.listdir(args.gen_path)
@@ -113,8 +118,11 @@ if __name__ == '__main__':
 
     compute_lfd_all_remote = ray.remote(num_gpus=1, num_cpus=os.cpu_count() // num_workers)(compute_lfd_all)
 
+    print("Check data")
     print(f"len of src_folder_list: {len(src_folder_list)}")
     print(f"len of tgt_folder_list: {len(tgt_folder_list)}")
+    print(src_folder_list[0])
+    print(tgt_folder_list[0])
 
     results = []
     for i in range(num_workers):

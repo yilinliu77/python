@@ -10,13 +10,15 @@ if __name__ == "__main__":
         pkl = sys.argv[1]
         output_path = sys.argv[2]
     
-    nearest_name, data = pickle.load(open(pkl, "rb"))
+    src_folder_list, nearest_name, data = pickle.load(open(pkl, "rb"))
     data = data.min(axis=1)
 
     his, bin_edges = np.histogram(data, bins=45, range=(0, 4500))
+    plt.xlim(0, 100)
     plt.barh(bin_edges[:-1], his, height=50)
     plt.title("Light Field Distance (LFD) Distribution of the Generated Shapes")
     plt.xlabel("Frequency")
     plt.ylabel("Light Field Distance (LFD)")
     plt.savefig(output_path, dpi=600)
+    print(data.mean())
     pass

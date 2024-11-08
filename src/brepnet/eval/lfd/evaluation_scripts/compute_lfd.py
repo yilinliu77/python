@@ -61,7 +61,7 @@ def compute_lfd_all(src_folder_list, tgt_folder_list, split_path, debug=False, s
     add_model_str = False
     src_folder_list.sort()
     tgt_folder_list.sort()
-    src_folder_list = src_folder_list[0:1]
+    src_folder_list = src_folder_list
 
     print("==> Reading data")
     print(f"len of src_folder_list: {len(src_folder_list)}")
@@ -134,5 +134,6 @@ if __name__ == '__main__':
     import pickle
     save_name = args.save_name
     nearest_name = [tgt_folder_list[idx].split("/")[-1] for idx in lfd_matrix.argmin(axis=1)]
-    pickle.dump([nearest_name, lfd_matrix], open(save_name, 'wb'))
+    src_folder_list = [src_folder_list[idx].split("/")[-1] for idx in range(len(src_folder_list))]
+    pickle.dump([src_folder_list, nearest_name, lfd_matrix], open(save_name, 'wb'))
     print(f"pkl is saved to {save_name}")

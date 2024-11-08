@@ -12,8 +12,8 @@ if __name__ == '__main__':
     pkl_root = args.pkl_root
     lfd_threshold = args.lfd
     out_txt_path = os.path.join(pkl_root, f"brepgen_train_novel_lfd_{lfd_threshold}.txt")
-
     all_pkl_files = os.listdir(pkl_root)
+    all_pkl_files.sort()
     folder_list = []
     unique_folder_list = []
     for pkl_file in tqdm(all_pkl_files):

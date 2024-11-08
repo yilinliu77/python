@@ -10,8 +10,8 @@ from pathlib import Path
 from tqdm import tqdm
 import open3d as o3d
 
-root_path = Path("/mnt/d/brepgen_train")
-input_list = Path("src/brepnet/data/list/deduplicated_deepcad_training.txt")
+root_path = Path("/mnt/d/img2brep/brepgen_train")
+input_list = Path("src/brepnet/data/list/deduplicated_deepcad_training_30.txt")
 
 num_max = 30
 num_min = 7
@@ -28,6 +28,7 @@ if __name__ == "__main__":
         try:
             if not (Path("/mnt/d/yilin/img2brep/brepgen_ae_0925_7m_gaussian") / prefix).exists():
                 print(1)
+
             num_faces = np.load(root_path / prefix / "data.npz")["sample_points_faces"].shape[0]
             if num_faces > num_max:
                 num_max_face_failed += 1

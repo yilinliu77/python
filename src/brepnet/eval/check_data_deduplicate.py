@@ -11,49 +11,7 @@ import ray
 
 from src.brepnet.eval.check_valid import check_step_valid_soild, load_data_with_prefix
 from src.brepnet.eval.eval_brepgen import normalize_pc
-
-
-def real2bit(data, n_bits=8, min_range=-1, max_range=1):
-    """Convert vertices in [-1., 1.] to discrete values in [0, n_bits**2 - 1]."""
-    range_quantize = 2 ** n_bits - 1
-    data_quantize = (data - min_range) * range_quantize / (max_range - min_range)
-    data_quantize = np.clip(data_quantize, a_min=0, a_max=range_quantize)  # clip values
-    return data_quantize.astype(int)
-
-
-def build_graph(faces, faces_adj, n_bit=4):
-    # faces1 and faces2 are np.array of shape (n_faces, n_points, n_points, 3)
-    # faces_adj1 and faces_adj2 are lists of (face_idx, face_idx) adjacency, ex. [[0, 1], [1, 2]]
-    faces_bits = real2bit(faces, n_bits=n_bit)
-    """Build a graph from a shape."""
-    G = nx.Graph()
-    for face_idx, face_bit in enumerate(faces_bits):
-        face_bit = face_bit.reshape(-1, 3)
-        face_bit_ordered = face_bit[np.lexsort((face_bit[:, 0], face_bit[:, 1], face_bit[:, 2]))]
-        G.add_node(face_idx, shape_geometry=face_bit_ordered)
-    for pair in faces_adj:
-        G.add_edge(pair[0], pair[1])
-    return G
-
-
-def is_graph_identical(graph1, graph2):
-    """Check if two shapes are identical."""
-    # Check if the two graphs are isomorphic considering node attributes
-    return nx.is_isomorphic(
-            graph1, graph2,
-            node_match=lambda n1, n2: np.array_equal(n1['shape_geometry'], n2['shape_geometry'])
-    )
-
-
-def is_graph_identical_batch(graph_pair_list):
-    is_identical_list = []
-    for graph1, graph2 in graph_pair_list:
-        is_identical = is_graph_identical(graph1, graph2)
-        is_identical_list.append(is_identical)
-    return is_identical_list
-
-
-is_graph_identical_remote = ray.remote(is_graph_identical_batch)
+from src.brepnet.eval.eval_unique_novel import *
 
 
 def find_connected_components(matrix):
@@ -81,65 +39,7 @@ def find_connected_components(matrix):
     return components
 
 
-def generate_upper_triangle(N, batch_size):
-    batch = []
-    for i in range(N):
-        for j in range(i + 1, N):
-            if i == j:
-                continue
-            batch.append((i, j))
-            if len(batch) == batch_size:
-                yield batch
-                batch = []
-    if batch:
-        yield batch
-
-
-def compute_unique_bk(graph_list, is_use_ray=False, batch_size=100000):
-    N = len(graph_list)
-    identical_pairs = []
-    unique_graph_idx = list(range(N))
-
-    if not is_use_ray:
-        check_pairs_yield = generate_upper_triangle(N, 1)
-        pbar = tqdm(total=N * (N - 1) // 2, leave=False, dynamic_ncols=True)
-        for batch_pairs in check_pairs_yield:
-            idx1, idx2 = batch_pairs[0]
-            pbar.update(1)
-            if idx1 not in unique_graph_idx or idx2 not in unique_graph_idx:
-                continue  # Skip if the graph is already removed
-            is_identical = is_graph_identical(graph_list[idx1], graph_list[idx2])
-            if is_identical:
-                unique_graph_idx.remove(idx2) if idx2 in unique_graph_idx else None
-            pbar.set_description(f"Unique: {len(unique_graph_idx)}/{N}")
-    else:
-        futures = []
-        check_pairs_yield = generate_upper_triangle(N, batch_size)
-        pbar = tqdm(total=(N * (N - 1) // 2) // batch_size, leave=False, dynamic_ncols=True)
-        for batch_pairs in check_pairs_yield:
-            batch_graph_pair = [(graph_list[idx1], graph_list[idx2]) for idx1, idx2 in batch_pairs]
-            futures.append(is_graph_identical_remote.remote(batch_graph_pair))
-            pbar.update(1)
-        pbar.close()
-
-        check_pairs_yield = generate_upper_triangle(N, batch_size)
-        pbar = tqdm(total=(N * (N - 1) // 2) // batch_size)
-        for batch_idx, batch_pairs in enumerate(check_pairs_yield):
-            result = ray.get(futures[batch_idx])
-            for idx, is_identical in enumerate(result):
-                if not is_identical:
-                    continue
-                idx1, idx2 = batch_pairs[idx]
-                if idx2 in unique_graph_idx:
-                    unique_graph_idx.remove(idx2)
-                identical_pairs.append((idx1, idx2))
-            pbar.update(1)
-        pbar.close()
-
-    return unique_graph_idx, identical_pairs
-
-
-def compute_unique(graph_list, is_use_ray=False, batch_size=100000, num_max_split_batch=128):
+def compute_unique(graph_list, atol=None, is_use_ray=False, batch_size=100000, num_max_split_batch=128):
     N = len(graph_list)
     identical_pairs = []
     unique_graph_idx = list(range(N))
@@ -153,7 +53,7 @@ def compute_unique(graph_list, is_use_ray=False, batch_size=100000, num_max_spli
 
     if not is_use_ray:
         for idx1, idx2 in tqdm(check_pairs):
-            is_identical = is_graph_identical(graph_list[idx1], graph_list[idx2])
+            is_identical = is_graph_identical(graph_list[idx1], graph_list[idx2], atol=atol)
             if is_identical:
                 unique_graph_idx.remove(idx2) if idx2 in unique_graph_idx else None
     else:
@@ -162,7 +62,7 @@ def compute_unique(graph_list, is_use_ray=False, batch_size=100000, num_max_spli
         for i in tqdm(range(N_batch)):
             batch_pairs = check_pairs[i * batch_size: (i + 1) * batch_size]
             batch_graph_pair = [(graph_list[idx1], graph_list[idx2]) for idx1, idx2 in batch_pairs]
-            futures.append(is_graph_identical_remote.remote(batch_graph_pair))
+            futures.append(is_graph_identical_remote.remote(batch_graph_pair, atol))
         results = ray.get(futures)
 
         for batch_idx in tqdm(range(N_batch)):
@@ -175,20 +75,6 @@ def compute_unique(graph_list, is_use_ray=False, batch_size=100000, num_max_spli
                 identical_pairs.append((idx1, idx2))
 
     return unique_graph_idx, identical_pairs
-
-
-def is_graph_identical_list(graph1, graph2_path_list):
-    """Check if two shapes are identical."""
-    # Check if the two graphs are isomorphic considering node attributes
-    graph2_list, graph2_prefix_list = load_and_build_graph(graph2_path_list)
-    for graph2 in graph2_list:
-        if nx.is_isomorphic(graph1, graph2,
-                            node_match=lambda n1, n2: np.array_equal(n1['shape_geometry'], n2['shape_geometry'])):
-            return True
-    return False
-
-
-is_graph_identical_list_remote = ray.remote(is_graph_identical_list)
 
 
 def test_check():
@@ -244,40 +130,35 @@ def load_data_from_npz(data_npz_file):
     return face_points, faces_adj_pair
 
 
-def load_and_build_graph(data_npz_file_list, check_folders=None, n_bit=4):
-    graph_list = []
-    prefix_list = []
-    for data_npz_file in data_npz_file_list:
-        folder_name = os.path.basename(os.path.dirname(data_npz_file))
-        if check_folders and folder_name not in check_folders:
-            continue
-        prefix_list.append(folder_name)
-        faces, faces_adj_pair = load_data_from_npz(data_npz_file)
-        graph = build_graph(faces, faces_adj_pair, n_bit)
-        graph_list.append(graph)
-    return graph_list, prefix_list
-
-
-load_and_build_graph_remote = ray.remote(load_and_build_graph)
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--train_root", type=str, required=True)
-    parser.add_argument("--n_bit", type=int, default=6)
+    parser.add_argument("--n_bit", type=int)
+    parser.add_argument("--atol", type=float)
     parser.add_argument("--use_ray", action='store_true')
-    parser.add_argument("--load_batch_size", type=int, default=400)
-    parser.add_argument("--compute_batch_size", type=int, default=100000)
+    parser.add_argument("--load_batch_size", type=int, default=100)
+    parser.add_argument("--compute_batch_size", type=int, default=10000)
     parser.add_argument("--txt", type=str, default=None)
     parser.add_argument("--num_cpus", type=int, default=32)
     args = parser.parse_args()
     train_data_root = args.train_root
     is_use_ray = args.use_ray
     n_bit = args.n_bit
+    atol = args.atol
     load_batch_size = args.load_batch_size
     compute_batch_size = args.compute_batch_size
     folder_list_txt = args.txt
     num_cpus = args.num_cpus
+
+    if not n_bit and not atol:
+        raise ValueError("Must set either n_bit or atol")
+    if n_bit and atol:
+        raise ValueError("Cannot set both n_bit and atol")
+
+    if n_bit:
+        atol = None
+    if atol:
+        n_bit = -1
 
     if folder_list_txt:
         with open(folder_list_txt, "r") as f:
@@ -319,10 +200,11 @@ def main():
     fp_novel.close()
 
     if is_use_ray:
-        ray.init(_temp_dir=r"E:\temp_ray")
+        ray.init(_temp_dir=r"/mnt/d/img2brep/ray_temp")
     unique_graph_idx_list = []
     pbar = tqdm(range(3, 31))
     for num_face in pbar:
+        print(f"Processing {num_face}")
         pbar.set_description(f"Processing {num_face}")
         fp_identical_pairs = open(identical_pairs_txt, "a")
         fp_novel = open(novel_txt, "a")
@@ -333,7 +215,7 @@ def main():
         hits_graph_prefix = [prefix_list[idx] for idx in hits_graph_idx]
 
         if len(hits_graph) != 0:
-            local_unique_graph_idx_list, identical_pairs = compute_unique(hits_graph, is_use_ray, compute_batch_size)
+            local_unique_graph_idx_list, identical_pairs = compute_unique(hits_graph, atol, is_use_ray, compute_batch_size)
             for unique_graph_idx in local_unique_graph_idx_list:
                 print(f"{hits_graph_prefix[unique_graph_idx]}", file=fp_novel)
 

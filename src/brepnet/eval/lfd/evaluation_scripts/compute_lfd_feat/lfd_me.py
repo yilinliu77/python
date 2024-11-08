@@ -23,7 +23,7 @@ import trimesh
 
 SIMILARITY_TAG = b"SIMILARITY:"
 CURRENT_DIR = Path(__file__).parent
-CURRENT_DIR = '/root/xdt/light-field-distance/lfd/Executable'
+CURRENT_DIR = '/root/repo/python/thirdparty/light-field-distance/lfd/Executable'
 
 GENERATED_FILES_NAMES = [
     "all_q4_v1.8.art",

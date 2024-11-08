@@ -164,9 +164,7 @@ class TrainDiffusion(pl.LightningModule):
             results = []
             for i in range(10):
                 results.append(time_loss[np.logical_and(time_loss[:,0]>=i*100, time_loss[:,0]<(i+1)*100), 1].mean())
-                self.logger.experiment.add_scalars('tloss', 
-                                           {f'tloss_{i}': results[-1]}, 
-                                           global_step=self.global_step)
+                self.log(f'tloss/{i}', results[-1], prog_bar=False, logger=True, on_step=False, on_epoch=True, sync_dist=True)
         if "recon_faces" in self.viz:
             recon_faces = self.viz["recon_faces"]
             trimesh.PointCloud(recon_faces.reshape(-1, 3)).export(str(self.log_root / "{}_faces.ply".format(self.current_epoch)))
@@ -249,7 +247,7 @@ def main(v_cfg: DictConfig):
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
 
-    mc = ModelCheckpoint(monitor="Validation_Loss", save_top_k=3, save_last=True)
+    mc = ModelCheckpoint(monitor="Validation_Loss", save_top_k=3, save_last=True, every_n_train_steps=300000)
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
     model = TrainDiffusion(v_cfg)

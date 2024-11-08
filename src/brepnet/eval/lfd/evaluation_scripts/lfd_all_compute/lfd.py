@@ -78,7 +78,8 @@ class LightFieldDistanceFunction(torch.autograd.Function):
         m = tgt_ArtCoeff.shape[0]
         ##############
         # This is only calculating one pair of distance
-
+        print(f"src_size: {n}")
+        print(f"tgt_size: {m}")
         all_dist = []
         with torch.no_grad():
             for i in tqdm(range(n)):
@@ -99,7 +100,7 @@ class LightFieldDistanceFunction(torch.autograd.Function):
                         tgt_FdCoeff_q8[start_idx:end_idx],
                         tgt_CirCoeff_q8[start_idx:end_idx],
                         tgt_EccCoeff_q8[start_idx:end_idx])
-                    start_idx += end_idx
+                    start_idx = end_idx
                     one_run_d.append(d)
                 d = torch.cat(one_run_d, dim=0)
                 all_dist.append(d.unsqueeze(dim=0))

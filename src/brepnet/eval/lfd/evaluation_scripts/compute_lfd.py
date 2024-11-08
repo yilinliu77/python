@@ -7,6 +7,7 @@
 # license agreement from NVIDIA CORPORATION & AFFILIATES is strictly prohibited.
 
 import numpy as np
+import ray
 import torch
 import os
 from tqdm import tqdm
@@ -16,7 +17,7 @@ from load_data.interface import LoadData
 def read_all_data(folder_list, load_data, add_model_str=True, add_ori_name=False):
     all_data = []
 
-    for f in tqdm(folder_list):
+    for f in folder_list:
         if add_model_str:
             result = load_data.run(os.path.join(f, 'model', 'mesh'))
         elif add_ori_name:
@@ -46,19 +47,8 @@ def read_all_data(folder_list, load_data, add_model_str=True, add_ori_name=False
     return q8_table.contiguous(), align_10.contiguous(), dest_ArtCoeff.contiguous(), \
            dest_FdCoeff_q8.contiguous(), dest_CirCoeff_q8.contiguous(), dest_EccCoeff_q8.contiguous()
 
-
-def compute_lfd_all(src_dir, tgt_dir, split_path, debug=False, save_name=None):
+def compute_lfd_all(src_folder_list, tgt_folder_list, split_path, debug=False, save_name=None):
     load_data = LoadData()
-    src_folder_list = sorted(os.listdir(src_dir))
-    tgt_folder_list = sorted(os.listdir(tgt_dir))
-    src_folder_list = [os.path.join(src_dir, f) for f in src_folder_list]
-    tgt_folder_list = [os.path.join(tgt_dir, f) for f in tgt_folder_list]
-    if split_path is not None:
-        with open(args.split_path) as f:
-            split_models = f.readlines()
-            split_models = [model.rstrip() for model in split_models]
-        # new_tgt_folder_list = []
-        tgt_folder_list = [os.path.join(tgt_dir, f) for f in split_models]
     if debug:
         import ipdb
         ipdb.set_trace()
@@ -68,6 +58,13 @@ def compute_lfd_all(src_dir, tgt_dir, split_path, debug=False, save_name=None):
 
     add_ori_name = False
     add_model_str = False
+    src_folder_list.sort()
+    tgt_folder_list.sort()
+    # src_folder_list = src_folder_list[0:3000]
+
+    print("==> Reading data")
+    print(f"len of src_folder_list: {len(src_folder_list)}")
+    print(f"len of tgt_folder_list: {len(tgt_folder_list)}")
 
     q8_table, align_10, src_ArtCoeff, src_FdCoeff_q8, src_CirCoeff_q8, src_EccCoeff_q8 = read_all_data(src_folder_list, load_data, add_model_str=False)
     q8_table, align_10, tgt_ArtCoeff, tgt_FdCoeff_q8, tgt_CirCoeff_q8, tgt_EccCoeff_q8 = read_all_data(tgt_folder_list, load_data, add_model_str=add_model_str, add_ori_name=add_ori_name)  ###
@@ -77,16 +74,14 @@ def compute_lfd_all(src_dir, tgt_dir, split_path, debug=False, save_name=None):
     lfd_matrix = lfd.forward(
         q8_table, align_10, src_ArtCoeff, src_FdCoeff_q8, src_CirCoeff_q8, src_EccCoeff_q8,
         tgt_ArtCoeff, tgt_FdCoeff_q8, tgt_CirCoeff_q8, tgt_EccCoeff_q8)
-    print(lfd_matrix)
+    # print(lfd_matrix)
+    # print(lfd_matrix.shape)
     mmd = lfd_matrix.float().min(dim=0)[0].mean()
     mmd_swp = lfd_matrix.float().min(dim=1)[0].mean()
-    print(mmd)
-    print(mmd_swp)
-    import pickle
-    if save_name is None:
-        save_name = 'tmp.pkl'
-    pickle.dump(lfd_matrix.data.cpu().numpy(), open(save_name, 'wb'))
-    print(f"pkl is saved to {save_name}")
+    # print(mmd)
+    # print(mmd_swp)
+    return lfd_matrix.data.cpu().numpy()
+
 
 
 if __name__ == '__main__':
@@ -97,12 +92,44 @@ if __name__ == '__main__':
     parser.add_argument("--split_path", type=str, required=False, help="path to the split shapenet dataset")
     parser.add_argument("--dataset_path", type=str, required=True, help="path to the preprocessed shapenet dataset")
     parser.add_argument("--gen_path", type=str, required=True, help="path to the generated models")
+    parser.add_argument("--num_workers", type=int, default=1, help="number of workers to run in parallel")
+    parser.add_argument("--list", type=str, default=None, help="list file in the training set")
     args = parser.parse_args()
     save_path = '/'.join(args.save_name.split('/')[:-1])
     os.makedirs(save_path, exist_ok=True)
-    compute_lfd_all(
-        args.gen_path,
-        args.dataset_path,
-        args.split_path,
-        debug=False,
-        save_name=args.save_name)
+    num_workers = args.num_workers
+    listfile = args.list
+    ray.init(
+        num_cpus=os.cpu_count(),
+        num_gpus=num_workers,
+    )
+
+    tgt_folder_list = sorted(os.listdir(args.dataset_path))
+    if listfile is not None:
+        valid_folders = [item.strip() for item in open(listfile, 'r').readlines()]
+        tgt_folder_list = sorted(list(set(valid_folders) & set(tgt_folder_list)))
+        tgt_folder_list = [os.path.join(args.dataset_path, f) for f in tgt_folder_list]
+
+    src_folder_list = sorted(os.listdir(args.gen_path))[:80]
+    src_folder_list = [os.path.join(args.gen_path, f) for f in src_folder_list]
+
+    compute_lfd_all_remote = ray.remote(num_gpus=1, num_cpus=os.cpu_count() // num_workers)(compute_lfd_all)
+
+    results = []
+    for i in range(num_workers):
+        i_start = i * len(src_folder_list) // num_workers
+        i_end = (i + 1) * len(src_folder_list) // num_workers
+        results.append(compute_lfd_all_remote.remote(
+            src_folder_list[i_start:i_end],
+            tgt_folder_list,
+            args.split_path,
+            debug=False,
+            save_name=args.save_name))
+
+    lfd_matrix = ray.get(results)
+    lfd_matrix = np.concatenate(lfd_matrix, axis=0)
+    import pickle
+    save_name = args.save_name
+    nearest_name = [tgt_folder_list[idx].split("/")[-1] for idx in lfd_matrix.argmin(axis=1)]
+    pickle.dump([nearest_name, lfd_matrix], open(save_name, 'wb'))
+    print(f"pkl is saved to {save_name}")

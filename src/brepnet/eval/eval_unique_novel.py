@@ -31,8 +31,6 @@ def build_graph(faces, faces_adj, n_bit=4):
     """Build a graph from a shape."""
     G = nx.Graph()
     for face_idx, face_bit in enumerate(faces_bits):
-        # face_bit = face_bit.reshape(-1, 3)
-        # face_bit_ordered = face_bit[np.lexsort((face_bit[:, 0], face_bit[:, 1], face_bit[:, 2]))]
         G.add_node(face_idx, shape_geometry=face_bit)
     for pair in faces_adj:
         G.add_edge(pair[0], pair[1])

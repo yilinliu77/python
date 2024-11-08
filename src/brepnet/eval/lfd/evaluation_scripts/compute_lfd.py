@@ -133,5 +133,6 @@ if __name__ == '__main__':
     import pickle
     save_name = args.save_name
     nearest_name = [tgt_folder_list[idx].split("/")[-1] for idx in lfd_matrix.argmin(axis=1)]
-    pickle.dump([nearest_name, lfd_matrix], open(save_name, 'wb'))
+    src_folder_list = [src_folder_list[idx].split("/")[-1] for idx in range(len(src_folder_list))]
+    pickle.dump([src_folder_list, nearest_name, lfd_matrix], open(save_name, 'wb'))
     print(f"pkl is saved to {save_name}")

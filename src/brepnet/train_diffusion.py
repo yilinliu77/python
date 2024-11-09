@@ -13,7 +13,6 @@ import numpy as np
 import open3d as o3d
 
 from src.brepnet.dataset import Diffusion_dataset
-from src.brepnet.post.construct_brep import construct_brep_item
 from src.brepnet.post.utils import triangulate_shape, triangulate_face, export_edges
 
 sys.path.append('../../../')

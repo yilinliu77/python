@@ -1,11 +1,11 @@
 cache_str="trainer.evaluate=true dataset.name=Diffusion_dataset dataset.test_dataset=/mnt/d/deepcad_test_v6 trainer.batch_size=64 trainer.num_worker=4 trainer.gpu=1 trainer.accelerator="bf16-mixed" trainer.check_val_every_n_epoch=1 model.name=Diffusion_condition model.autoencoder_weights=/mnt/d/0925_gaussian_7m.ckpt model.autoencoder=AutoEncoder_0925 model.dim_shape=768 model.dim_latent=8 model.gaussian_weights=1e-6 trainer.exp_name=test dataset.deduplicate_list=1 dataset.pad_method=random model.pad_method=random model.diffusion_latent=768 model.num_max_faces=30 dataset.cached_condition=false dataset.num_max_faces=30"
 
-arr=("1108_30_li_900k" "1108_730_li_900k" "1108_730_sq_600k" "1108_30_li_bb_470k")
+arr=("1108_30_li_900k" "1108_730_li_900k" "1108_30_sq_900k" "1108_30_li_bb_550k")
 
 scp -P 16999 root@172.31.233.19:"/root/repo/python/outputs_brepnet_diffusion/1108_li_30/24-11-08-13-49-58/lightning_logs/version_0/checkpoints/epoch=2866-step=900000.ckpt" /mnt/d/uncond_ckpt/${arr[1]}.ckpt
 scp -P 16999 root@172.31.233.19:"/root/repo/python/outputs_brepnet_diffusion/1108_li_730/24-11-08-13-50-27/lightning_logs/version_0/checkpoints/epoch=4285-step=900000.ckpt" /mnt/d/uncond_ckpt/${arr[2]}.ckpt
 scp -P 16999 root@172.31.233.19:"/root/repo/python/outputs_brepnet_diffusion/1108_sq_30/24-11-08-13-51-18/lightning_logs/version_0/checkpoints/epoch=2866-step=900000.ckpt" /mnt/d/uncond_ckpt/${arr[3]}.ckpt
-scp -P 16999 root@172.31.233.19:"/root/repo/python/outputs_brepnet_diffusion/1108_li_30_512/24-11-08-13-51-58/lightning_logs/version_0/checkpoints/last.ckpt" /mnt/d/uncond_ckpt/${arr[3]}.ckpt
+scp -P 16999 root@172.31.233.19:"/root/repo/python/outputs_brepnet_diffusion/1108_li_30_512/24-11-08-13-51-58/lightning_logs/version_0/checkpoints/last.ckpt" /mnt/d/uncond_ckpt/${arr[4]}.ckpt
 
 item=1108_30_li_900k
 python -m src.brepnet.train_diffusion trainer.evaluate=true dataset.name=Dummy_dataset dataset.length=8000 trainer.batch_size=1000 trainer.num_worker=2 trainer.gpu=8 trainer.accelerator="32-true" model.name=Diffusion_condition model.autoencoder_weights=/mnt/d/0925_gaussian_7m.ckpt model.autoencoder=AutoEncoder_0925 model.dim_shape=768 model.dim_latent=8 model.gaussian_weights=1e-6 trainer.exp_name=test model.pad_method=random model.diffusion_latent=768 model.diffusion_type=epsilon model.gaussian_weights=1e-6 trainer.test_output_dir=/mnt/d/uncond_results/1108/${item} trainer.resume_from_checkpoint=/mnt/d/uncond_ckpt/${item}.ckpt model.num_max_faces=30 model.beta_schedule=linear model.addition_tag=false

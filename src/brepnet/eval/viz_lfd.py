@@ -17,9 +17,9 @@ if __name__ == "__main__":
     src_folder_list, nearest_name, data_ori = pickle.load(open(pkl, "rb"))
     data = data_ori.min(axis=1)
 
-    his, bin_edges = np.histogram(data, bins=20, range=(0, 4000))
-    plt.xlim(0, 200)
-    plt.barh(bin_edges[:-1], his, height=150)
+    his, bin_edges = np.histogram(data, bins=45, range=(0, 4500))
+    plt.xlim(0, 100)
+    plt.barh(bin_edges[:-1], his, height=50)
     plt.title("Light Field Distance (LFD) Distribution of the Generated Shapes")
     plt.xlabel("Frequency")
     plt.ylabel("Light Field Distance (LFD)")

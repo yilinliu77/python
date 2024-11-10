@@ -121,14 +121,14 @@ if __name__ == '__main__':
     print("Check data")
     print(f"len of src_folder_list: {len(src_folder_list)}")
     print(f"len of tgt_folder_list: {len(tgt_folder_list)}")
-    print(src_folder_list[0])
-    print(tgt_folder_list[0])
+    # print(src_folder_list[0])
+    # print(tgt_folder_list[0])
 
     results = []
     for i in range(num_workers):
         i_start = i * len(src_folder_list) // num_workers
         i_end = (i + 1) * len(src_folder_list) // num_workers
-        print(i, i_start, i_end)
+        # print(i, i_start, i_end)
         results.append(compute_lfd_all_remote.remote(
             src_folder_list[i_start:i_end],
             tgt_folder_list,

@@ -69,7 +69,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     timer = time.time()
     if not from_scratch and os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
         return time_records
-    print(folder_name)
+    # print(folder_name)
 
     if os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
         os.remove(os.path.join(out_root, folder_name + "/success.txt"))
@@ -310,7 +310,7 @@ if __name__ == '__main__':
                                         use_cuda=use_cuda, from_scratch=from_scratch,
                                         is_save_data=True, is_log=False, is_optimize_geom=True, is_ray=False, )
     else:
-        num_total_cpus = os.cpu_count()
+        num_total_cpus = 20
         num_gpus = 8
         num_task_per_gpu = 0.1
         ray.init(
@@ -321,7 +321,7 @@ if __name__ == '__main__':
                 num_gpus=num_gpus,
                 # local_mode=True
         )
-        construct_brep_from_datanpz_ray = ray.remote(num_cpus=num_total_cpus//(num_gpus/num_task_per_gpu), num_gpus=num_task_per_gpu)(construct_brep_from_datanpz)
+        construct_brep_from_datanpz_ray = ray.remote(num_cpus=0.25, num_gpus=num_task_per_gpu)(construct_brep_from_datanpz)
 
         tasks = []
         for i in range(len(all_folders)):
@@ -331,8 +331,9 @@ if __name__ == '__main__':
                     use_cuda=use_cuda, from_scratch=from_scratch,
                     is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False, 
                     ))
-            
-        results = ray.get(tasks)
+        results = []
+        for i in tqdm(range(len(all_folders))):
+            results.append(ray.get(tasks[i]))
         results = [item for item in results if item is not None]
         print(len(results))
         results = np.array(results)

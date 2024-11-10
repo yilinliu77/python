@@ -39,7 +39,12 @@ def load_mesh_v(mesh_name, normalized_scale=0.9):
     elif mesh_name.endswith('ply'):
         vertices, mesh_f1 = pcu.load_mesh_vf(mesh_name)
     elif mesh_name.endswith('stl'):
-        mesh = trimesh.load_mesh(mesh_name)
+        mesh = trimesh.load_mesh(mesh_name, force='mesh')
+        if isinstance(mesh, trimesh.Scene):
+            # we lose texture information here
+            mesh = trimesh.util.concatenate(
+                tuple(trimesh.Trimesh(vertices=g.vertices, faces=g.faces)
+                    for g in mesh.geometry.values()))
         vertices = np.asarray(mesh.vertices)
         mesh_f1 = np.asarray(mesh.faces)
     else:

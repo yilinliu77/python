@@ -66,10 +66,10 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
                                 is_ray=False, is_log=True,
                                 is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=True, is_save_data=False):
     time_records = [0, 0, 0, 0, 0, 0]
-    # print(folder_name)
     timer = time.time()
     if not from_scratch and os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
         return time_records
+    print(folder_name)
 
     if os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
         os.remove(os.path.join(out_root, folder_name + "/success.txt"))
@@ -306,11 +306,12 @@ if __name__ == '__main__':
     if not is_use_ray:
         # random.shuffle(all_folders)
         for i in tqdm(range(len(all_folders))):
-            construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i], use_cuda=use_cuda, from_scratch=from_scratch,
-                                        is_save_data=True, is_log=False)
+            construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i], 
+                                        use_cuda=use_cuda, from_scratch=from_scratch,
+                                        is_save_data=True, is_log=False, is_optimize_geom=True, is_ray=False, )
     else:
         num_total_cpus = os.cpu_count()
-        num_gpus = 6
+        num_gpus = 8
         num_task_per_gpu = 0.1
         ray.init(
                 dashboard_host="0.0.0.0",

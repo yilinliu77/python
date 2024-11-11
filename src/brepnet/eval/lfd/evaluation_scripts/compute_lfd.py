@@ -48,14 +48,8 @@ def read_all_data(folder_list, load_data, add_model_str=True, add_ori_name=False
     return q8_table.contiguous(), align_10.contiguous(), dest_ArtCoeff.contiguous(), \
            dest_FdCoeff_q8.contiguous(), dest_CirCoeff_q8.contiguous(), dest_EccCoeff_q8.contiguous()
 
-def compute_lfd_all(src_folder_list, tgt_folder_list, split_path, debug=False, save_name=None):
+def compute_lfd_all(src_folder_list, tgt_folder_list, log):
     load_data = LoadData()
-    if debug:
-        import ipdb
-        ipdb.set_trace()
-        import pickle
-        src_folder_list = src_folder_list[:100]
-        tgt_folder_list = tgt_folder_list[:100]
 
     add_ori_name = False
     add_model_str = False
@@ -69,7 +63,7 @@ def compute_lfd_all(src_folder_list, tgt_folder_list, split_path, debug=False, s
     lfd = LFD()
     lfd_matrix = lfd.forward(
         q8_table, align_10, src_ArtCoeff, src_FdCoeff_q8, src_CirCoeff_q8, src_EccCoeff_q8,
-        tgt_ArtCoeff, tgt_FdCoeff_q8, tgt_CirCoeff_q8, tgt_EccCoeff_q8)
+        tgt_ArtCoeff, tgt_FdCoeff_q8, tgt_CirCoeff_q8, tgt_EccCoeff_q8, log)
     # print(lfd_matrix)
     # print(lfd_matrix.shape)
     mmd = lfd_matrix.float().min(dim=0)[0].mean()
@@ -85,7 +79,6 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--save_name", type=str, required=True, help="path to the save resules shapenet dataset")
-    parser.add_argument("--split_path", type=str, required=False, help="path to the split shapenet dataset")
     parser.add_argument("--dataset_path", type=str, required=True, help="path to the preprocessed shapenet dataset")
     parser.add_argument("--gen_path", type=str, required=True, help="path to the generated models")
     parser.add_argument("--num_workers", type=int, default=1, help="number of workers to run in parallel")
@@ -99,7 +92,6 @@ if __name__ == '__main__':
         num_cpus=os.cpu_count(),
         num_gpus=num_workers,
     )
-
     print(f"dataset_path: {args.dataset_path}")
     print(f"gen_path: {args.gen_path}")
 
@@ -132,9 +124,7 @@ if __name__ == '__main__':
         results.append(compute_lfd_all_remote.remote(
             src_folder_list[i_start:i_end],
             tgt_folder_list,
-            args.split_path,
-            debug=False,
-            save_name=args.save_name))
+            i==0))
 
     lfd_matrix = ray.get(results)
     lfd_matrix = np.concatenate(lfd_matrix, axis=0)

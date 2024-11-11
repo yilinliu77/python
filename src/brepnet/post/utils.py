@@ -1169,7 +1169,8 @@ def construct_brep(v_shape, connected_tolerance, isdebug=False):
             trimmed_faces.append(trimmed_face)
 
     result = [is_face_success_list, None, None]
-    if len(trimmed_faces) > 2:
+    # if len(trimmed_faces) > 2:
+    if len(trimmed_faces) == len(recon_geom_faces):
         v, f = get_separated_surface(trimmed_faces, v_precision1=0.1, v_precision2=0.2)
         separated_surface = trimesh.Trimesh(vertices=v, faces=f)
         result[1] = separated_surface

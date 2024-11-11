@@ -54,7 +54,7 @@ def load_mesh_v(mesh_name, normalized_scale=0.9):
         return None, None
 
     scale = (vertices.max(axis=0) - vertices.min(axis=0)).max()
-    mesh_v1 = vertices / scale * normalized_scale
+    mesh_v1 = vertices / (scale+1e-6) * normalized_scale
     return mesh_v1, mesh_f1
 
 

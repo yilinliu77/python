@@ -310,7 +310,7 @@ if __name__ == '__main__':
                                         use_cuda=use_cuda, from_scratch=from_scratch,
                                         is_save_data=True, is_log=False, is_optimize_geom=True, is_ray=False, )
     else:
-        num_gpus = 8
+        num_gpus = 0
         ray.init(
                 dashboard_host="0.0.0.0",
                 dashboard_port=8080,
@@ -318,7 +318,7 @@ if __name__ == '__main__':
                 num_gpus=num_gpus,
                 # local_mode=True
         )
-        construct_brep_from_datanpz_ray = ray.remote(num_gpus=num_gpus//num_cpus)(construct_brep_from_datanpz)
+        construct_brep_from_datanpz_ray = ray.remote(num_cpus=1)(construct_brep_from_datanpz)
 
         tasks = []
         for i in range(len(all_folders)):

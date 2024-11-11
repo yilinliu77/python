@@ -9,11 +9,12 @@ scp -P 16999 root@172.31.233.19:"/root/repo/python/outputs_brepnet_diffusion/110
 
 item=1108_30_li_900k
 python -m src.brepnet.train_diffusion trainer.evaluate=true dataset.name=Dummy_dataset dataset.length=8000 trainer.batch_size=1000 trainer.num_worker=2 trainer.gpu=8 trainer.accelerator="32-true" model.name=Diffusion_condition model.autoencoder_weights=/mnt/d/0925_gaussian_7m.ckpt model.autoencoder=AutoEncoder_0925 model.dim_shape=768 model.dim_latent=8 model.gaussian_weights=1e-6 trainer.exp_name=test model.pad_method=random model.diffusion_latent=768 model.diffusion_type=epsilon model.gaussian_weights=1e-6 trainer.test_output_dir=/mnt/d/uncond_results/1108/${item} trainer.resume_from_checkpoint=/mnt/d/uncond_ckpt/${item}.ckpt model.num_max_faces=30 model.beta_schedule=linear model.addition_tag=false
-python -m src.brepnet.post.construct_brep --data_root /mnt/d/uncond_results/1108/${item} --out_root /mnt/d/uncond_results/1108/${item}_post --use_ray --use_cuda
+python -m src.brepnet.post.construct_brep --data_root /mnt/d/uncond_results/1108/${item} --out_root /mnt/d/uncond_results/1108/${item}_post --use_ray --num_cpus 80
 python -m src.brepnet.viz.sort_and_merge --data_root /mnt/d/uncond_results/1108/${item}_post --out_root /mnt/d/uncond_results/1108/${item}_choose --sort --valid --index --use_ray
 python -m src.brepnet.eval.sample_points --data_root /mnt/d/uncond_results/1108/${item}_post --out_root /mnt/d/uncond_results/1108/${item}_pcd --valid
 python -m src.brepnet.eval.eval_brepgen --real /mnt/d/deepcad_test_pcd --fake /mnt/d/uncond_results/1108/${item}_pcd
 python -m src.brepnet.eval.eval_unique_novel --fake_root /mnt/d/uncond_results/1108/${item} --fake_post /mnt/d/uncond_results/1108/${item}_post --train_root /mnt/d/brepgen_train --use_ray --min_face 0 --only_unique --atol 0.05
+python -m src.brepnet.eval.check_valid --data_root /mnt/d/uncond_results/1108/${item}_post
 
 # 30
 python -m src.brepnet.viz.find_nearest_pc_cd --fake_post /mnt/d/uncond_results/1108/${item}_post --fake_pcd_root /mnt/d/uncond_results/1108/${item}_pcd --train_root /mnt/d/brepgen_train --txt ./src/brepnet/data/list/deduplicated_deepcad_training_30.txt  --num_gpus 8

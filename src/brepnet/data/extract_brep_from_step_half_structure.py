@@ -219,7 +219,7 @@ def get_brep(v_root, output_root, v_folder):
             # Check face range
             points = np.stack(points, axis=0)
             face_center = np.mean(points[:, :3], axis=0)
-            face_scale = np.max(np.linalg.norm(points[:, :3] - face_center, axis=1))
+            face_scale = np.min(np.linalg.norm(points[:, :3] - face_center, axis=1))
             if face_scale < face_scale_threshold:
                 raise ValueError("Face scale too small: {}".format(face_scale))
             face_sample_points.append(points.reshape(sample_resolution, sample_resolution, -1))
@@ -251,7 +251,7 @@ def get_brep(v_root, output_root, v_folder):
             # Check edge range
             points = np.stack(points, axis=0)
             edge_center = np.mean(points[:, :3], axis=0)
-            edge_scale = np.max(np.linalg.norm(points[:, :3] - edge_center, axis=1))
+            edge_scale = np.min(np.linalg.norm(points[:, :3] - edge_center, axis=1))
             if edge_scale < edge_scale_threshold:
                 raise ValueError("Edge scale too small: {}".format(edge_scale))
             edge_sample_points.append(np.stack(points, axis=0))

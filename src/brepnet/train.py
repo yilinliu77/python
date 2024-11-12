@@ -261,8 +261,6 @@ class TrainAutoEncoder(pl.LightningModule):
 def main(v_cfg: DictConfig):
     seed_everything(0)
     torch.backends.cudnn.benchmark = False
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
     torch.set_float32_matmul_precision("medium")
     print(OmegaConf.to_yaml(v_cfg))
 

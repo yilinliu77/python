@@ -489,7 +489,7 @@ class Diffusion_condition(nn.Module):
 
         self.with_img = False
         self.with_pc = False
-        if v_conf["condition"] == "single_img" or v_conf["condition"] == "multi_img":
+        if v_conf["condition"] == "single_img" or v_conf["condition"] == "multi_img" or v_conf["condition"] == "sketch":
             self.with_img = True
             self.img_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
             for param in self.img_model.parameters():
@@ -503,11 +503,11 @@ class Diffusion_condition(nn.Module):
                     nn.Linear(1024, self.dim_condition),
             )
             self.camera_embedding = nn.Sequential(
-                    nn.Embedding(24, 256),
-                    nn.Linear(256, 256),
-                    nn.LayerNorm(256),
-                    nn.SiLU(),
-                    nn.Linear(256, self.dim_condition),
+                nn.Embedding(32, 256),
+                nn.Linear(256, 256),
+                nn.LayerNorm(256),
+                nn.SiLU(),
+                nn.Linear(256, self.dim_condition),
             )
         elif v_conf["condition"] == "pc":
             self.with_pc = True
@@ -692,7 +692,7 @@ class Diffusion_condition(nn.Module):
         time_embeds = self.time_embed(sincos_embedding(v_timesteps, self.dim_total)).unsqueeze(1)
         noise_features = self.p_embed(v_feature)
         v_condition = torch.zeros((bs, 1, self.dim_condition), device=de, dtype=dt) if v_condition is None else v_condition
-        v_condition = v_condition.repeat(1, self.num_max_faces, 1)
+        v_condition = v_condition.repeat(1, v_feature.shape[1], 1)
         noise_features = torch.cat([noise_features, v_condition], dim=-1)
         noise_features = noise_features + time_embeds
 
@@ -712,9 +712,12 @@ class Diffusion_condition(nn.Module):
                 imgs = imgs.reshape(-1, 3, 224, 224)
                 img_feature = self.img_model(imgs)
             img_idx = v_data["conditions"]["img_id"]
-            camera_embedding = self.camera_embedding(img_idx)
             img_feature = self.img_fc(img_feature)
-            img_feature = (img_feature.reshape(-1, num_imgs, self.dim_condition) + camera_embedding).mean(dim=1)
+            if img_idx.shape[-1] > 1:
+                camera_embedding = self.camera_embedding(img_idx)
+                img_feature = (img_feature.reshape(-1, num_imgs, self.dim_condition) + camera_embedding).mean(dim=1)
+            else:
+                img_feature = (img_feature.reshape(-1, num_imgs, self.dim_condition)).mean(dim=1)
             condition = img_feature[:, None]
         elif self.with_pc:
             pc = v_data["conditions"]["points"]

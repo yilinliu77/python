@@ -9,6 +9,7 @@ outputs/
 lightning_logs*/
 *.pth
 .hydra
+*.o
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

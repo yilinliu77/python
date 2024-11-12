@@ -13,7 +13,6 @@ import numpy as np
 import open3d as o3d
 
 from src.brepnet.dataset import Diffusion_dataset
-from src.brepnet.post.construct_brep import construct_brep_item
 from src.brepnet.post.utils import triangulate_shape, triangulate_face, export_edges
 
 sys.path.append('../../../')
@@ -164,9 +163,7 @@ class TrainDiffusion(pl.LightningModule):
             results = []
             for i in range(10):
                 results.append(time_loss[np.logical_and(time_loss[:,0]>=i*100, time_loss[:,0]<(i+1)*100), 1].mean())
-                self.logger.experiment.add_scalars('tloss', 
-                                           {f'tloss_{i}': results[-1]}, 
-                                           global_step=self.global_step)
+                self.log(f'tloss/{i}', results[-1], prog_bar=False, logger=True, on_step=False, on_epoch=True, sync_dist=True)
         if "recon_faces" in self.viz:
             recon_faces = self.viz["recon_faces"]
             trimesh.PointCloud(recon_faces.reshape(-1, 3)).export(str(self.log_root / "{}_faces.ply".format(self.current_epoch)))
@@ -183,6 +180,9 @@ class TrainDiffusion(pl.LightningModule):
                           )
 
     def test_step(self, batch, batch_idx):
+        if batch_idx == 0:
+            seed_everything(self.global_rank)
+            
         # if batch_idx != 147:
         #     return
         data = batch
@@ -246,7 +246,7 @@ def main(v_cfg: DictConfig):
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
 
-    mc = ModelCheckpoint(monitor="Validation_Loss", save_top_k=3, save_last=True)
+    mc = ModelCheckpoint(monitor="Validation_Loss", save_last=True, every_n_train_steps=300000)
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
     model = TrainDiffusion(v_cfg)
@@ -273,7 +273,7 @@ def main(v_cfg: DictConfig):
 
     if v_cfg["trainer"].evaluate:
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
-        weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, weights_only=False)["state_dict"]
+        weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, weights_only=False, map_location="cpu")["state_dict"]
         # weights = {k.replace("model.", ""): v for k, v in weights.items()}
         model.load_state_dict(weights)
         trainer.test(model)

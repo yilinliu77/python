@@ -588,26 +588,21 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         self.conf = v_conf
         scale_factor = int(v_conf["scale_factor"])
         self.max_intersection = 500
-        self.face_z_dataset = v_conf['face_z']
+        self.latent_root = Path(v_conf['face_z'])
         if v_training_mode == "testing":
-            self.dataset_path = Path(v_conf['test_dataset'])
+            self.data_split = Path(v_conf['test_dataset'])
             scale_factor = 1
         elif v_training_mode == "training":
-            self.dataset_path = Path(v_conf['train_dataset'])
+            self.data_split = Path(v_conf['train_dataset'])
         elif v_training_mode == "validation":
-            self.dataset_path = Path(v_conf['val_dataset'])
+            self.data_split = Path(v_conf['val_dataset'])
             scale_factor = 1
         else:
             raise
 
         self.max_faces = v_conf["num_max_faces"]
-        self.deduplicate_list = v_conf["deduplicate_list"]
-        if self.deduplicate_list == 0:
-            deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}_7_30.txt".format(v_training_mode)
-        elif self.deduplicate_list == 1:
-            deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}_30.txt".format(v_training_mode)
-        print("Use deduplicate list ", deduplicate_file)
-        filelist = [item.strip() for item in open(deduplicate_file).readlines()]
+        print("Use deduplicate list ", self.data_split)
+        filelist = [item.strip() for item in open(self.data_split).readlines()]
         filelist.sort()
 
         self.condition = v_conf["condition"]
@@ -636,7 +631,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         # idx = 0
         folder_path = self.data_folders[idx]
-        data_npz = np.load(os.path.join(self.face_z_dataset, folder_path + "/features.npy"))
+        data_npz = np.load(os.path.join(self.latent_root, folder_path + "/features.npy"))
         face_features = torch.from_numpy(data_npz)
 
         if self.pad_method == "zero":
@@ -663,17 +658,17 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         if self.condition == "single_img" or self.condition == "multi_img" or self.condition == "sketch":
             cache_data = self.cached_condition
             if self.condition == "single_img":
-                idx = np.random.choice(np.arange(24), 1, replace=False)
-            # elif self.condition == "sketch":
-            # idx = np.random.choice(np.arange(24,48), 1, replace=False)
+                idx = np.random.choice(np.arange(32), 1, replace=False)
+            elif self.condition == "sketch":
+                idx = np.random.choice(np.arange(32, 64), 1, replace=False)
             else:
-                idx = np.random.choice(np.arange(24), 4, replace=False)
+                idx = np.random.choice(np.arange(32), 4, replace=False)
             if cache_data:
-                ori_data = np.load(self.dataset_path / folder_path / "img_feature_dinov2.npy")
+                ori_data = np.load(self.latent_root / folder_path / "img_feature_dinov2.npy")
                 img_features = torch.from_numpy(ori_data[idx]).float()
                 condition["img_features"] = img_features
             else:
-                ori_data = np.load(self.dataset_path / folder_path / "data.npz")["imgs"]
+                ori_data = np.load(self.latent_root / folder_path / "imgs.npz")["imgs"]
                 imgs = ori_data[idx]
                 transformed_imgs = []
                 for id in range(imgs.shape[0]):
@@ -683,7 +678,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
                 condition["imgs"] = transformed_imgs
             condition["img_id"] = torch.from_numpy(idx)
         elif self.condition == "pc":
-            pc = o3d.io.read_point_cloud(str(self.dataset_path / folder_path / "pc.ply"))
+            pc = o3d.io.read_point_cloud(str(self.latent_root / folder_path / "pc.ply"))
             points = np.asarray(pc.points)
             normals = np.asarray(pc.normals)
             condition["points"] = torch.from_numpy(np.concatenate((points, normals), axis=-1)).float()[None,]

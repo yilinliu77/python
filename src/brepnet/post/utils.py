@@ -554,7 +554,7 @@ def optimize(
     # optimizer = torch.optim.SGD([edge_st, face_t], lr=5e-4)
 
     init_max_iter = 200
-    final_max_iter = init_max_iter * 5
+    final_max_iter = init_max_iter * 1
     init_loss = float('inf')
     best_loss = float('inf')
     is_optimization_diverged = False

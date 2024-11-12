@@ -36,7 +36,7 @@ from OCC.Extend.TopologyUtils import TopologyExplorer, WireExplorer
 from OCC.Extend.DataExchange import write_stl_file, write_step_file, read_step_file
 
 # xdt
-from OCC.Core.TopoDS import topods, TopoDS_Shell, TopoDS_Builder
+from OCC.Core.TopoDS import topods, TopoDS_Shell, TopoDS_Builder, TopoDS_Vertex
 from OCC.Core.TopExp import TopExp_Explorer, topexp
 from OCC.Core.TopAbs import TopAbs_EDGE, TopAbs_VERTEX
 from OCC.Core.BRep import BRep_Tool
@@ -1265,8 +1265,9 @@ def construct_brep(v_shape, connected_tolerance, isdebug=False):
             trimmed_faces.append(trimmed_face)
 
     result = [is_face_success_list, None, None]
-    if len(trimmed_faces) > 2:
-        v, f = get_separated_surface(trimmed_faces, v_precision2=0.2)
+    # if len(trimmed_faces) > 2:
+    if len(trimmed_faces) == len(recon_geom_faces):
+        v, f = get_separated_surface(trimmed_faces, v_precision1=0.1, v_precision2=0.2)
         separated_surface = trimesh.Trimesh(vertices=v, faces=f)
         result[1] = separated_surface
         result[2] = get_solid(trimmed_faces, connected_tolerance)

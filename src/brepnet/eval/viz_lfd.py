@@ -5,9 +5,9 @@ import sys, pickle
 import numpy as np
 import trimesh
 
-pkl = r"E:\data\img2brep\v7\1107_730_li_15m_30_lfd.pkl"
+pkl = r"/mnt/d/uncond_results/1108/1108_30_li_900k_302_lfd.pkl"
 # pkl = r"/mnt/d/uncond_results/1106/1108_730_li_600k_30_lfd.pkl"
-output_path = r"lfd.png"
+output_path = r"/mnt/d/uncond_results/1108/1108_30_li_900k_302_lfd.png"
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
@@ -17,9 +17,9 @@ if __name__ == "__main__":
     src_folder_list, nearest_name, data_ori = pickle.load(open(pkl, "rb"))
     data = data_ori.min(axis=1)
 
-    his, bin_edges = np.histogram(data, bins=20, range=(0, 4000))
-    plt.xlim(0, 200)
-    plt.barh(bin_edges[:-1], his, height=150)
+    his, bin_edges = np.histogram(data, bins=45, range=(0, 4500))
+    plt.xlim(0, 100)
+    plt.barh(bin_edges[:-1], his, height=50)
     plt.title("Light Field Distance (LFD) Distribution of the Generated Shapes")
     plt.xlabel("Frequency")
     plt.ylabel("Light Field Distance (LFD)")

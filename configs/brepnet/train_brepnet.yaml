@@ -41,6 +41,7 @@ model:
   in_channels: 3
   dim_latent: 8
   dim_shape: 256
+  stage: 0
   
   with_intersection: false
   sigmoid: false

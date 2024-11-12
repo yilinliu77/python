@@ -102,11 +102,9 @@ class TrainAutoEncoder(pl.LightningModule):
             if key == "total_loss":
                 continue
             self.log(f"Training/{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
-                     sync_dist=True, batch_size=self.batch_size)
+                     sync_dist=True ,batch_size=self.batch_size)
         self.log("Training/Loss", total_loss, prog_bar=True, logger=True, on_step=True, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
-        if torch.isnan(total_loss).any():
-            print("NAN Loss")
         return total_loss
 
     def validation_step(self, batch, batch_idx):
@@ -262,6 +260,7 @@ class TrainAutoEncoder(pl.LightningModule):
 @hydra.main(config_name="train_brepnet.yaml", config_path="../../configs/brepnet/", version_base="1.1")
 def main(v_cfg: DictConfig):
     seed_everything(0)
+    torch.backends.cudnn.benchmark = False
     torch.set_float32_matmul_precision("medium")
     print(OmegaConf.to_yaml(v_cfg))
 
@@ -278,15 +277,15 @@ def main(v_cfg: DictConfig):
 
     model = TrainAutoEncoder(v_cfg)
 
-    if v_cfg["trainer"]["evaluate"] is False:
+    if v_cfg["trainer"]["evaluate"] is True or exp_name=="test":
+        logger = TensorBoardLogger(log_dir)
+    else:
         logger = WandbLogger(
             project='BRepNet++',
             save_dir=log_dir,
             name=exp_name,
         )
         logger.watch(model)
-    else:
-        logger = TensorBoardLogger(log_dir)
 
     trainer = Trainer(
         default_root_dir=log_dir,

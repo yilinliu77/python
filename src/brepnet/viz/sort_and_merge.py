@@ -44,9 +44,9 @@ def normalize_mesh(mesh):
 def arrange_meshes(files, out_path, intervals=0.5, color_mode="index"):
     assert color_mode in ["random", "index"]
     if type(files[0]) == str:
-        meshes = [normalize_mesh(trimesh.load(file)) for file in files]
+        meshes = [trimesh.load(file) for file in files]
     elif type(files[0]) == trimesh.Trimesh:
-        meshes = [normalize_mesh(mesh) for mesh in files]
+        meshes = [mesh for mesh in files]
     else:
         raise ValueError("Invalid input type")
     num_meshes = len(meshes)

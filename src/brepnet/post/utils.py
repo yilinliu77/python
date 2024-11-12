@@ -36,7 +36,7 @@ from OCC.Extend.TopologyUtils import TopologyExplorer, WireExplorer
 from OCC.Extend.DataExchange import write_stl_file, write_step_file, read_step_file
 
 # xdt
-from OCC.Core.TopoDS import topods, TopoDS_Shell, TopoDS_Builder
+from OCC.Core.TopoDS import topods, TopoDS_Shell, TopoDS_Builder, TopoDS_Vertex
 from OCC.Core.TopExp import TopExp_Explorer, topexp
 from OCC.Core.TopAbs import TopAbs_EDGE, TopAbs_VERTEX
 from OCC.Core.BRep import BRep_Tool
@@ -95,15 +95,19 @@ from shared.occ_utils import get_primitives
 
 EDGE_FITTING_TOLERANCE = [1e-3, 5e-3, 8e-3, 5e-2, ]
 FACE_FITTING_TOLERANCE = [1e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]
+
+face_fiting_deg_min, face_fiting_deg_max = 3, 8
+edge_fitting_deg_min, edge_fitting_deg_max = 0, 8
+
 ROUGH_FITTING_TOLERANCE = 1e-1
 
 FIX_TOLERANCE = 1e-2
 FIX_PRECISION = 1e-2
-# CONNECT_TOLERANCE = [2e-2]
+# CONNECT_TOLERANCE = [0.01, ]
 CONNECT_TOLERANCE = [2e-3, 6e-3, 1e-2, 1.5e-2, 2e-2, 2.5e-2, 5e-2, 8e-2, ]
-SEWING_TOLERANCE = 5e-2
+SEWING_TOLERANCE = 1e-1
 REMOVE_EDGE_TOLERANCE = 1e-3
-TRANSFER_PRECISION = 1e-3
+TRANSFER_PRECISION = 1e-6
 MAX_DISTANCE_THRESHOLD = 1e-1
 USE_VARIATIONAL_SMOOTHING = True
 FIX_CLOSE_TOLERANCE = 1
@@ -128,23 +132,24 @@ CONTINUITY = GeomAbs_C2
 # IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, True
 # CONTINUITY = GeomAbs_C2
 
-def interpolation_face_points(face, density=None, is_use_cuda=False, density_scale=10):
+def interpolation_face_points(face, is_use_cuda=False, density_scale=10, precision=0.0005):
     if type(face) is np.ndarray:
         if is_use_cuda:
             face = torch.from_numpy(face).cuda()
         else:
             face = torch.from_numpy(face)
-    if density is None:
-        res = face.shape[0]
-        density = (torch.linalg.norm(face[0, 0] - face[res // 2, res // 2], dim=-1) * density_scale).to(torch.long)
-        density = torch.clamp(density, min=1, max=200) * res
 
-    x = torch.linspace(-1., 1., density).to(face.device)
-    y = torch.linspace(-1, 1, density).to(face.device)
+    res = face.shape[0]
+    x_density = (torch.linalg.norm(face[0, 0] - face[0, 1], dim=-1) / precision).to(torch.long)
+    # x_density = torch.clamp(x_density, min=1, max=200) * res
+    y_density = (torch.linalg.norm(face[0, 0] - face[1, 0], dim=-1) / precision).to(torch.long)
+    # y_density = torch.clamp(y_density, min=1, max=200) * res
+    x = torch.linspace(-1., 1., x_density).to(face.device)
+    y = torch.linspace(-1, 1, y_density).to(face.device)
     x, y = torch.meshgrid(x, y, indexing='ij')
     coords = torch.stack([x, y], dim=-1).reshape(1, -1, 1, 2)
-    face = torch.nn.functional.grid_sample(face[None].permute(0, 3, 1, 2), coords, align_corners=True)[0, :, :,
-           0].permute(1, 0)
+    face = torch.nn.functional.grid_sample(face[None].permute(0, 3, 1, 2), coords, align_corners=True)[0, :, :, 0].permute(1, 0)
+    # trimesh.PointCloud(face.cpu().numpy()).export(r'E:\data\img2brep\debug.ply')
     return face
 
 
@@ -169,7 +174,7 @@ class Shape:
 
         pass
 
-    def remove_half_edges(self, edge2face_threshold=2e-1, is_check_intersection=False, face2face_threshold=0.06):
+    def remove_half_edges(self, edge2face_threshold=0.3, is_check_intersection=False, face2face_threshold=0.06):
         edge_face_connectivity = self.edge_face_connectivity
         cache_dict = {}
         edge_face_connectivity = edge_face_connectivity.astype(np.int64)
@@ -454,19 +459,49 @@ class Shape:
                     self.face_edge_adj[face_idx2].remove(edge_idx)
         self.remove_edge_idx_new.extend(np.unique(remove_edges_idx_real))
 
-    def build_geom(self):
+    def build_geom(self, is_replace_edge=False, connected_tolerance=0.1):
         self.recon_geom_faces = [create_surface(points) for points in self.recon_face_points]
-        self.recon_topo_faces = [BRepBuilderAPI_MakeFace(geom_face, 1e-1).Face() for geom_face in self.recon_geom_faces]
+        self.recon_topo_faces = [BRepBuilderAPI_MakeFace(geom_face, TRANSFER_PRECISION).Face() for geom_face in self.recon_geom_faces]
         self.recon_curves = [create_edge(points) for points in self.recon_edge_points]
         self.recon_edge = [BRepBuilderAPI_MakeEdge(curve).Edge() for curve in self.recon_curves]
+
+        self.clinder_face_idx = []
+        self.replace_edge_idx = []
+        if not is_replace_edge:
+            return
+
+        for face_idx, geom_face in enumerate(self.recon_geom_faces):
+            face_edges_idx_list = self.face_edge_adj[face_idx]
+            # face_edges = [self.recon_edge[edge_idx] for edge_idx in face_edges_idx_list]
+            # connected_wire = create_wire_from_unordered_edges(face_edges, connected_tolerance)
+            topo_face = self.recon_topo_faces[face_idx]
+            if ((geom_face.IsUPeriodic() or geom_face.IsVPeriodic()) and len(face_edges_idx_list) == 2
+                    and len(get_primitives(topo_face, TopAbs_WIRE)) == 1):
+                self.clinder_face_idx.append(face_idx)
+                face_edge_from_geom_face = get_primitives(topo_face, TopAbs_EDGE)
+                for edge_idx in face_edges_idx_list:
+                    recon_topo_edge = self.recon_edge[edge_idx]
+                    near_edge_from_geom_face = []
+                    for edge_from_geom_face in face_edge_from_geom_face:
+                        is_similar, dis = check_edges_similarity(recon_topo_edge, edge_from_geom_face)
+                        if is_similar:
+                            near_edge_from_geom_face.append((edge_from_geom_face, dis))
+                    # assert len(near_edge_from_geom_face) == 1
+                    if len(near_edge_from_geom_face) == 0:
+                        continue
+                    if len(near_edge_from_geom_face) > 1:
+                        near_edge_from_geom_face = sorted(near_edge_from_geom_face, key=lambda x: x[1])
+                    self.recon_edge[edge_idx] = near_edge_from_geom_face[0][0]
+                    self.replace_edge_idx.append(edge_idx)
+        pass
 
 
 def apply_transform_batch(tensor, transform):
     src_shape = tensor.shape
     if len(src_shape) > 3:
         tensor = tensor.reshape(tensor.shape[0], -1, 3)
-    scales = transform[:, 0].view(-1, 1, 1)
-    offsets = transform[:, 1:].view(-1, 1, 3)
+    scales = transform[:, :3].view(-1, 1, 3)
+    offsets = transform[:, 3:].view(-1, 1, 3)
     centers = tensor.mean(dim=1, keepdim=True)
     scaled_tensor = (tensor - centers) * scales + centers + offsets
     if len(src_shape) > 3:
@@ -474,10 +509,22 @@ def apply_transform_batch(tensor, transform):
     return scaled_tensor
 
 
+def apply_offset_batch(tensor, offsets):
+    src_shape = tensor.shape
+    if len(src_shape) > 3:
+        tensor = tensor.reshape(tensor.shape[0], -1, 3)
+    offsets = offsets.view(-1, 1, 3)
+    scaled_tensor = tensor + offsets
+    if len(src_shape) > 3:
+        scaled_tensor = scaled_tensor.reshape(*src_shape)
+    return scaled_tensor
+
+
 def optimize(
-        v_interpolation_face, recon_edge_points,
+        v_interpolation_face, recon_edge_points, recon_face_points,
         edge_face_connectivity, is_end_point, pair1,
         face_edge_adj, v_islog=True, v_max_iter=1000):
+    global pbar
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     interpolation_face = []
     for item in v_interpolation_face:
@@ -485,6 +532,7 @@ def optimize(
         interpolation_face.append(item.to(device))
     padded_points = pad_sequence(interpolation_face, batch_first=True, padding_value=10)
     edge_points = torch.from_numpy(recon_edge_points.copy()).to(device)
+    face_points = torch.from_numpy(recon_face_points.copy()).to(device)
     edge_face_connectivity = torch.from_numpy(edge_face_connectivity.copy()).to(device)
     if pair1 is not None:
         pair1 = torch.from_numpy(pair1.copy()).to(device)
@@ -492,26 +540,40 @@ def optimize(
     idx[is_end_point] = 15
     idx = torch.from_numpy(idx).to(device)
 
-    src_st = torch.tensor([1, 0, 0, 0], dtype=torch.float32, device=device).unsqueeze(0).repeat(edge_points.shape[0], 1)
-    edge_st = nn.Parameter(torch.tensor([1, 0, 0, 0], dtype=torch.float32, device=device).unsqueeze(0).repeat(edge_points.shape[0], 1))
-    edge_st.requires_grad = True
-    optimizer = torch.optim.Adam([edge_st], lr=5e-4, betas=(0.95, 0.999), eps=1e-08, )
+    edge_st = nn.Parameter(
+            torch.tensor([1, 1, 1, 0, 0, 0], dtype=torch.float32, device=device).unsqueeze(0).repeat(edge_points.shape[0], 1))
+    face_t = nn.Parameter(
+            torch.tensor([0, 0, 0], dtype=torch.float32, device=device).unsqueeze(0).repeat(face_points.shape[0], 1))
 
-    prev_loss = float('inf')
+    edge_src_st = torch.tensor([1, 1, 1, 0, 0, 0], dtype=torch.float32, device=device).unsqueeze(0).repeat(edge_points.shape[0], 1)
+    face_src_t = torch.tensor([0, 0, 0], dtype=torch.float32, device=device).unsqueeze(0).repeat(face_points.shape[0], 1)
+
+    edge_st.requires_grad = True
+    face_t.requires_grad = True
+    optimizer = torch.optim.AdamW([edge_st, face_t], lr=1e-3, betas=(0.95, 0.999), eps=1e-08)
+    # optimizer = torch.optim.SGD([edge_st, face_t], lr=5e-4)
+
+    init_max_iter = 200
+    final_max_iter = init_max_iter * 5
+    init_loss = float('inf')
+    best_loss = float('inf')
+    is_optimization_diverged = False
     if v_islog:
         pbar = tqdm(total=v_max_iter, desc='Geom Optimization', unit='iter')
     chamferdist = ChamferDistance()
-    for iter in range(v_max_iter):
+    iter = 0
+    while iter < v_max_iter:
         transformed_edges = apply_transform_batch(edge_points, edge_st)
+        transformed_padded_points = apply_offset_batch(padded_points, face_t)
         dis_matrix1 = chamferdist(
                 transformed_edges[edge_face_connectivity[:, 0]],
-                padded_points[edge_face_connectivity[:, 1]],
-                batch_reduction=None, point_reduction="mean", bidirectional=False)
+                transformed_padded_points[edge_face_connectivity[:, 1]],
+                batch_reduction=None, point_reduction="sum", bidirectional=False)
         dis_matrix2 = chamferdist(
                 transformed_edges[edge_face_connectivity[:, 0]],
-                padded_points[edge_face_connectivity[:, 2]],
-                batch_reduction=None, point_reduction="mean", bidirectional=False)
-        adj_distance_loss = ((dis_matrix1 + dis_matrix2) / 2).sum() + (dis_matrix1 - dis_matrix2).abs().sum()
+                transformed_padded_points[edge_face_connectivity[:, 2]],
+                batch_reduction=None, point_reduction="sum", bidirectional=False)
+        adj_distance_loss = (dis_matrix1 + dis_matrix2 + 1e-2 * (dis_matrix1 - dis_matrix2).abs()).mean()
 
         # For loop version
         # for edge_idx, face_idx1, face_idx2 in self.edge_face_connectivity:
@@ -550,31 +612,45 @@ def optimize(
             connected_loss = dist_matrix.min(dim=-1)[0]
             wire_connected_loss = connected_loss[connected_loss < 100].mean()
 
-        loss = adj_distance_loss + corners_loss + wire_connected_loss + 1e-6 * (edge_st - src_st).norm(p=1, dim=1).sum()
+        loss = (adj_distance_loss + corners_loss + wire_connected_loss +
+                1e-8 * (edge_st - edge_src_st).norm(p=1, dim=1).sum() + 1e-8 * (face_t - face_src_t).norm(p=1, dim=1).sum())
+
+        if iter == 0:
+            init_loss = loss.item()
+        if loss.item() < best_loss:
+            best_loss = loss.item()
+
+        if iter > 30 and best_loss > init_loss:
+            is_optimization_diverged = True
+            print(f'Optimization diverged, best loss: {best_loss}, init loss: {init_loss}')
 
         optimizer.zero_grad()
-        # if abs(prev_loss - loss.item()) < 1e-4 and False:
-        if loss.item() < 1e-4:
-            pass
-            # if v_islog:
-            #     print(f'Early stop at iter {iter}')
-            # break
         loss.backward()
         optimizer.step()
-        prev_loss = loss.item()
+        if iter == v_max_iter - 2 and corners_loss.item() > 0.001:
+            v_max_iter += init_max_iter
+            if v_islog:
+                pbar.total += init_max_iter
         if v_islog:
             pbar.set_postfix(loss=loss.item(),
                              adj=adj_distance_loss.cpu().item(),
                              corner=corners_loss.cpu().item(),
                              connect=wire_connected_loss.cpu().item())
             pbar.update(1)
+        iter += 1
+        if iter >= final_max_iter:
+            break
 
     if v_islog:
         print('Optimization finished!')
         pbar.close()
 
+    if is_optimization_diverged:
+        return recon_face_points, recon_edge_points
+
     transformed_edges = apply_transform_batch(edge_points, edge_st).detach().cpu().numpy()
-    return transformed_edges
+    transformed_faces = apply_offset_batch(face_points, face_t).detach().cpu().numpy()
+    return transformed_faces, transformed_edges
 
 
 # @ray.remote(num_gpus=0.05)
@@ -604,8 +680,24 @@ def explore_edges(shape):
     return edges
 
 
-def check_edges_similarity(edge1, edge2, dis_threshold=1e-1):
-    def sample_edge(edge, sample_num=16):
+def get_edge_length(edge, NUM_SEGMENTS=100):
+    curve_data = BRep_Tool.Curve(edge)
+    if curve_data and len(curve_data) == 3:
+        curve_handle, first, last = curve_data
+        segment_length = (last - first) / NUM_SEGMENTS
+        edge_length = 0
+        for i in range(NUM_SEGMENTS):
+            u1 = first + segment_length * i
+            u2 = first + segment_length * (i + 1)
+            edge_length += np.linalg.norm(np.array(curve_handle.Value(u1).Coord()) - np.array(curve_handle.Value(u2).Coord()))
+        return edge_length
+    else:
+        return 0
+
+
+def check_edges_similarity(edge1, edge2, dis_threshold=1e-1, unit_sample_num=1000):
+    def sample_edge(edge):
+        sample_num = min(int(unit_sample_num * get_edge_length(edge)), 1000)
         curve_data = BRep_Tool.Curve(edge)
         if curve_data and len(curve_data) == 3:
             curve_handle, first, last = curve_data
@@ -687,13 +779,13 @@ class Colors:
 
 def create_surface(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
     def fit_face(uv_points_array, precision, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
-        deg_min, deg_max = 3, 8
         if use_variational_smoothing:
             # weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
             return GeomAPI_PointsToBSplineSurface(uv_points_array, weight_CurveLength, weight_Curvature, weight_Torsion,
-                                                  deg_max, CONTINUITY, precision).Surface()
+                                                  face_fiting_deg_max, CONTINUITY, precision).Surface()
         else:
-            return GeomAPI_PointsToBSplineSurface(uv_points_array, deg_min, deg_max, CONTINUITY, precision).Surface()
+            return GeomAPI_PointsToBSplineSurface(uv_points_array, face_fiting_deg_min, face_fiting_deg_max, CONTINUITY,
+                                                  precision).Surface()
 
     def set_face_uv_periodic(geom_face, points, tol=2e-3):
         u_intervals = np.sqrt(np.sum((points - np.roll(points, axis=0, shift=1)) ** 2, axis=2)).mean(axis=1)
@@ -757,13 +849,12 @@ def create_surface(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
 
 def create_edge(points, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
     def fit_edge(u_points_array, precision, use_variational_smoothing=USE_VARIATIONAL_SMOOTHING):
-        deg_min, deg_max = 0, 8
         if use_variational_smoothing:
             # weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
             return GeomAPI_PointsToBSpline(u_points_array, weight_CurveLength, weight_Curvature, weight_Torsion,
-                                           deg_max, CONTINUITY, precision).Curve()
+                                           edge_fitting_deg_max, CONTINUITY, precision).Curve()
         else:
-            return GeomAPI_PointsToBSpline(u_points_array, deg_min, deg_max, CONTINUITY, precision).Curve()
+            return GeomAPI_PointsToBSpline(u_points_array, edge_fitting_deg_min, edge_fitting_deg_max, CONTINUITY, precision).Curve()
 
     def eval_fitting_edge(approx_edge, u_points_array):
         errors = []
@@ -842,19 +933,21 @@ def create_wire_from_unordered_edges(face_edges, connected_tolerance, max_retry_
 
     return wire_list
 
+
 def set_tolerance(v_item, v_precision):
     tolorancer = ShapeFix_ShapeTolerance()
     tolorancer.SetTolerance(v_item, v_precision)
     return v_item
 
-def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
+
+def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_tolerance):
     face_fixer = ShapeFix_Face()
-    topo_face = BRepBuilderAPI_MakeFace(geom_face, connected_tolerance).Face()
+    topo_face = BRepBuilderAPI_MakeFace(geom_face, 1e-6).Face()
     is_debug = False
     if len(wire_list) == 6:
         # is_debug=True
         pass
-    if (geom_face.IsUPeriodic() or geom_face.IsVPeriodic()) and len(wire_list) == 2 and len(get_primitives(topo_face, TopAbs_WIRE)) == 1:
+    if (geom_face.IsUPeriodic() or geom_face.IsVPeriodic()) and len(face_edges) == 2 and len(get_primitives(topo_face, TopAbs_WIRE)) == 1:
         final_wire = get_primitives(topo_face, TopAbs_WIRE)[0]
         final_wire = set_tolerance(final_wire, connected_tolerance)
         wire_list = [final_wire]
@@ -891,7 +984,7 @@ def create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance):
             continue
 
         fixed_wire = set_tolerance(fixed_wire, connected_tolerance)
-        face_fixer.Add(fixed_wire)
+        face_fixer.Add(wire)
         fixed_wire_list.append(fixed_wire)
 
     if len(fixed_wire_list) == 0:
@@ -985,7 +1078,7 @@ def create_trimmed_face1(geom_face, face_edges, connected_tolerance, face_edges_
         wire_list = create_wire_from_unordered_edges(face_edges, connected_tolerance)
         if wire_list is None:
             continue
-        trimmed_face = create_trimmed_face_from_wire(geom_face, wire_list, connected_tolerance)
+        trimmed_face = create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_tolerance)
         if trimmed_face is None or trimmed_face.IsNull():
             continue
         shape_tol_setter = ShapeFix_ShapeTolerance()
@@ -1125,7 +1218,10 @@ def construct_brep(v_shape, connected_tolerance, isdebug=False):
     debug_idx = [8]
     if isdebug:
         print(f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
-    v_shape.build_geom()
+    v_shape.build_geom(is_replace_edge=True)
+    if isdebug:
+        print(f"{Colors.GREEN}{len(v_shape.replace_edge_idx)} edges are replace{Colors.RESET}")
+
     recon_edge_points = v_shape.recon_edge_points
     recon_geom_faces = v_shape.recon_geom_faces
     recon_topo_faces = v_shape.recon_topo_faces
@@ -1169,8 +1265,9 @@ def construct_brep(v_shape, connected_tolerance, isdebug=False):
             trimmed_faces.append(trimmed_face)
 
     result = [is_face_success_list, None, None]
-    if len(trimmed_faces) > 2:
-        v, f = get_separated_surface(trimmed_faces, v_precision2=0.2)
+    # if len(trimmed_faces) > 2:
+    if len(trimmed_faces) == len(recon_geom_faces):
+        v, f = get_separated_surface(trimmed_faces, v_precision1=0.1, v_precision2=0.2)
         separated_surface = trimesh.Trimesh(vertices=v, faces=f)
         result[1] = separated_surface
         result[2] = get_solid(trimmed_faces, connected_tolerance)

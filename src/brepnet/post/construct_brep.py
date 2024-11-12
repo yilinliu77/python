@@ -30,77 +30,6 @@ import trimesh
 import time
 
 
-def construct_brep_item(face_points, edge_points, edge_face_connectivity, ):
-    # face_edge_adj store the edge idx list of each face
-    face_edge_adj = [[] for _ in range(face_points.shape[0])]
-    for edge_face1_face2 in edge_face_connectivity:
-        edge, face1, face2 = edge_face1_face2
-        assert edge not in face_edge_adj[face1]
-        face_edge_adj[face1].append(edge)
-
-    if False:
-        with torch.set_grad_enabled(True):
-            face_points, edge_points, edge_face_connectivity, face_edge_adj, remove_edge_idx = optimize_geom(
-                    face_points, edge_points,
-                    edge_face_connectivity,
-                    face_edge_adj,
-                    is_use_cuda=True,
-                    max_iter=150)
-
-    connected_tolerances = copy.deepcopy(CONNECT_TOLERANCE)
-    solid = None
-    printers = Message.message.DefaultMessenger().Printers()
-    for idx in range(printers.Length()):
-        printers.Value(idx + 1).SetTraceLevel(Message_Alarm)
-    while len(connected_tolerances) > 0:
-        connected_tolerance = connected_tolerances.pop()
-        solid, faces_result = construct_brep(face_points, edge_points, face_edge_adj, connected_tolerance,
-                                             isdebug=False, is_save_face=False,
-                                             folder_path="1")
-        if solid is None:
-            continue
-
-        if solid.ShapeType() == TopAbs_COMPOUND:
-            continue
-
-        analyzer = BRepCheck_Analyzer(solid)
-        if not analyzer.IsValid():
-            continue
-
-        # Valid Solid
-        write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
-        write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'))
-        break
-
-    if solid is None:
-        print(f"solid is None {folder_name}")
-        return
-
-    if solid.ShapeType() == TopAbs_COMPOUND:
-        print(f"solid is TopAbs_COMPOUND {folder_name}")
-        # write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_compound.stl'))
-        # recon_face_dir = os.path.join(out_root, folder_name, 'recon_face')
-        # gen_mesh = trimesh.util.concatenate(
-        #         [trimesh.load(os.path.join(recon_face_dir, f)) for f in os.listdir(recon_face_dir) if f.endswith('.stl')])
-        # gen_mesh.export(os.path.join(out_root, folder_name, 'recon_brep_compound.stl'))
-        return
-
-    analyzer = BRepCheck_Analyzer(solid)
-    if not analyzer.IsValid():
-        print(f"solid is invalid {folder_name}")
-        # write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.stl'))
-        write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep_invalid.step'))
-        # recon_face_dir = os.path.join(out_root, folder_name, 'recon_face')
-        # gen_mesh = trimesh.util.concatenate(
-        #         [trimesh.load(os.path.join(recon_face_dir, f)) for f in os.listdir(recon_face_dir) if f.endswith('.stl')])
-        # gen_mesh.export(os.path.join(out_root, folder_name, 'recon_brep_invalid.stl'))
-        return
-
-    # Valid Solid
-    write_step_file(solid, os.path.join(out_root, folder_name, 'recon_brep.step'))
-    write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'))
-
-
 def get_data(v_filename):
     # specify the key to get the face points, edge points and edge_face_connectivity in data.npz
     # data_npz = np.load(os.path.join(data_root, folder_name, 'data.npz'), allow_pickle=True)['arr_0'].item()
@@ -140,6 +69,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     timer = time.time()
     if not from_scratch and os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
         return time_records
+    # print(folder_name)
 
     if os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
         os.remove(os.path.join(out_root, folder_name + "/success.txt"))
@@ -220,13 +150,13 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             interpolation_face.append(item)
 
         if not is_ray:
-            shape.recon_edge_points = optimize(
-                    interpolation_face, shape.recon_edge_points,
+            shape.recon_face_points, shape.recon_edge_points = optimize(
+                    interpolation_face, shape.recon_edge_points, shape.recon_face_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
                     shape.face_edge_adj, v_islog=isdebug, v_max_iter=200)
         else:
-            shape.recon_edge_points = optimize(
-                    shape.interpolation_face, shape.recon_edge_points,
+            shape.recon_face_points, shape.recon_edge_points = optimize(
+                    shape.interpolation_face, shape.recon_edge_points, shape.recon_face_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
                     shape.face_edge_adj, v_islog=False, v_max_iter=200)
             # shape.recon_edge_points = ray.get(task)
@@ -272,17 +202,17 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         if solid.ShapeType() == TopAbs_COMPOUND:
             continue
 
-        shape_tol_setter = ShapeFix_ShapeTolerance()
-        shape_tol_setter.SetTolerance(solid, 1e-1)
-        analyzer = BRepCheck_Analyzer(solid)
-        if not analyzer.IsValid():
-            result = analyzer.Result(solid)
-            continue
-
-        if solid.ShapeType() == TopAbs_SOLID and analyzer.IsValid():
-            is_successful = True
-        else:
-            is_successful = False
+        # shape_tol_setter = ShapeFix_ShapeTolerance()
+        # shape_tol_setter.SetTolerance(solid, 1e-1)
+        # analyzer = BRepCheck_Analyzer(solid)
+        # if not analyzer.IsValid():
+        #     result = analyzer.Result(solid)
+        #     continue
+        #
+        # if solid.ShapeType() == TopAbs_SOLID and analyzer.IsValid():
+        #     is_successful = True
+        # else:
+        #     is_successful = False
 
         save_step_file(os.path.join(out_root, folder_name, 'recon_brep.step'), solid)
         if not check_step_valid_soild(os.path.join(out_root, folder_name, 'recon_brep.step')):
@@ -310,34 +240,6 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     return time_records
     # if not is_successful:
     #     shutil.rmtree(os.path.join(out_root, folder_name))
-
-
-def construct_brep_from_datanpz_batch(data_root, out_root, folder_name_list,
-                                      use_cuda=False,
-                                      is_optimize_geom=True,
-                                      from_scratch=False,
-                                      ):
-    for folder_name in folder_name_list:
-        try:
-            result = construct_brep_from_datanpz(data_root, out_root, folder_name,
-                                                 is_log=False,
-                                                 is_ray=True, is_optimize_geom=is_optimize_geom,
-                                                 isdebug=False, use_cuda=use_cuda, from_scratch=from_scratch)
-            return result
-        except Exception as e:
-            with open(os.path.join(out_root, "error.txt"), "a") as f:
-                tb_list = traceback.extract_tb(sys.exc_info()[2])
-                last_traceback = tb_list[-1]
-                f.write(folder_name + ": " + str(e) + "\n")
-                f.write(f"An error occurred on line {last_traceback.lineno} in {last_traceback.name}\n\n")
-                print(folder_name + ": " + str(e))
-                print(e)
-                print(f"An error occurred on line {last_traceback.lineno} in {last_traceback.name}\n\n")
-                shutil.rmtree(os.path.join(out_root, folder_name))
-            return None
-
-
-construct_brep_from_datanpz_batch_ray = ray.remote(num_cpus=1, num_gpus=0.2)(construct_brep_from_datanpz_batch)
 
 
 def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda):
@@ -404,25 +306,31 @@ if __name__ == '__main__':
     if not is_use_ray:
         # random.shuffle(all_folders)
         for i in tqdm(range(len(all_folders))):
-            construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i], use_cuda=use_cuda, from_scratch=from_scratch,
-                                        is_save_data=True, is_log=False)
+            construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i], 
+                                        use_cuda=use_cuda, from_scratch=from_scratch,
+                                        is_save_data=True, is_log=False, is_optimize_geom=True, is_ray=False, )
     else:
+        num_gpus = 0
         ray.init(
                 dashboard_host="0.0.0.0",
                 dashboard_port=8080,
-                # num_cpus=1,
                 num_cpus=num_cpus,
+                num_gpus=num_gpus,
                 # local_mode=True
         )
-        batch_size = 1
-        num_batches = len(all_folders) // batch_size + 1
+        construct_brep_from_datanpz_ray = ray.remote(num_cpus=1)(construct_brep_from_datanpz)
+
         tasks = []
-        for i in range(num_batches):
-            tasks.append(construct_brep_from_datanpz_batch_ray.remote(
+        for i in range(len(all_folders)):
+            tasks.append(construct_brep_from_datanpz_ray.remote(
                     v_data_root, v_out_root,
-                    all_folders[i * batch_size:(i + 1) * batch_size],
-                    use_cuda=use_cuda, from_scratch=from_scratch))
-        results = ray.get(tasks)
+                    all_folders[i],
+                    use_cuda=use_cuda, from_scratch=from_scratch,
+                    is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False, 
+                    ))
+        results = []
+        for i in tqdm(range(len(all_folders))):
+            results.append(ray.get(tasks[i]))
         results = [item for item in results if item is not None]
         print(len(results))
         results = np.array(results)

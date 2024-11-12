@@ -220,13 +220,13 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             interpolation_face.append(item)
 
         if not is_ray:
-            shape.recon_edge_points = optimize(
-                    interpolation_face, shape.recon_edge_points,
+            shape.recon_face_points, shape.recon_edge_points = optimize(
+                    interpolation_face, shape.recon_edge_points, shape.recon_face_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
                     shape.face_edge_adj, v_islog=isdebug, v_max_iter=200)
         else:
-            shape.recon_edge_points = optimize(
-                    shape.interpolation_face, shape.recon_edge_points,
+            shape.recon_face_points, shape.recon_edge_points = optimize(
+                    shape.interpolation_face, shape.recon_edge_points, shape.recon_face_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
                     shape.face_edge_adj, v_islog=False, v_max_iter=200)
             # shape.recon_edge_points = ray.get(task)
@@ -272,17 +272,17 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         if solid.ShapeType() == TopAbs_COMPOUND:
             continue
 
-        shape_tol_setter = ShapeFix_ShapeTolerance()
-        shape_tol_setter.SetTolerance(solid, 1e-1)
-        analyzer = BRepCheck_Analyzer(solid)
-        if not analyzer.IsValid():
-            result = analyzer.Result(solid)
-            continue
-
-        if solid.ShapeType() == TopAbs_SOLID and analyzer.IsValid():
-            is_successful = True
-        else:
-            is_successful = False
+        # shape_tol_setter = ShapeFix_ShapeTolerance()
+        # shape_tol_setter.SetTolerance(solid, 1e-1)
+        # analyzer = BRepCheck_Analyzer(solid)
+        # if not analyzer.IsValid():
+        #     result = analyzer.Result(solid)
+        #     continue
+        #
+        # if solid.ShapeType() == TopAbs_SOLID and analyzer.IsValid():
+        #     is_successful = True
+        # else:
+        #     is_successful = False
 
         save_step_file(os.path.join(out_root, folder_name, 'recon_brep.step'), solid)
         if not check_step_valid_soild(os.path.join(out_root, folder_name, 'recon_brep.step')):

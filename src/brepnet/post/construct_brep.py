@@ -321,7 +321,7 @@ if __name__ == '__main__':
                 # num_gpus=num_gpus,
                 # local_mode=True
         )
-        construct_brep_from_datanpz_ray = ray.remote(num_cpus=1)(construct_brep_from_datanpz)
+        construct_brep_from_datanpz_ray = ray.remote(num_gpus=0.1)(construct_brep_from_datanpz)
 
         tasks = []
         for i in range(len(all_folders)):

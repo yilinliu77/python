@@ -312,14 +312,13 @@ if __name__ == '__main__':
         for i in tqdm(range(len(all_folders))):
             construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i],
                                         use_cuda=use_cuda, from_scratch=from_scratch,
-                                        is_save_data=True, is_log=False, is_optimize_geom=True, is_ray=False, )
+                                        is_save_data=False, is_log=False, is_optimize_geom=True, is_ray=False, )
     else:
-        num_gpus = 0
         ray.init(
                 dashboard_host="0.0.0.0",
                 dashboard_port=8080,
                 num_cpus=num_cpus,
-                num_gpus=num_gpus,
+                # num_gpus=num_gpus,
                 # local_mode=True
         )
         construct_brep_from_datanpz_ray = ray.remote(num_cpus=1)(construct_brep_from_datanpz)

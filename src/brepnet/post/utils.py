@@ -524,7 +524,6 @@ def optimize(
         v_interpolation_face, recon_edge_points, recon_face_points,
         edge_face_connectivity, is_end_point, pair1,
         face_edge_adj, v_islog=True, v_max_iter=1000):
-    global pbar
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     interpolation_face = []
     for item in v_interpolation_face:

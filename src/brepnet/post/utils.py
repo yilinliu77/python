@@ -554,7 +554,7 @@ def optimize(
     # optimizer = torch.optim.SGD([edge_st, face_t], lr=5e-4)
 
     init_max_iter = 200
-    final_max_iter = init_max_iter * 5
+    final_max_iter = init_max_iter * 3
     init_loss = float('inf')
     best_loss = float('inf')
     is_optimization_diverged = False
@@ -1218,9 +1218,9 @@ def construct_brep(v_shape, connected_tolerance, isdebug=False):
     debug_idx = [8]
     if isdebug:
         print(f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
-    v_shape.build_geom(is_replace_edge=True)
-    if isdebug:
-        print(f"{Colors.GREEN}{len(v_shape.replace_edge_idx)} edges are replace{Colors.RESET}")
+    # v_shape.build_geom(is_replace_edge=True)
+    # if isdebug:
+    #     print(f"{Colors.GREEN}{len(v_shape.replace_edge_idx)} edges are replace{Colors.RESET}")
 
     recon_edge_points = v_shape.recon_edge_points
     recon_geom_faces = v_shape.recon_geom_faces

@@ -110,6 +110,10 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     # if isdebug:
     #     export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge_after_drop1.obj'))
 
+    shape.build_geom(is_replace_edge=True)
+    if isdebug:
+        print(f"{Colors.GREEN}{len(shape.replace_edge_idx)} edges are replace{Colors.RESET}")
+
     if not shape.have_data:
         if is_log:
             print(f"{Colors.RED}No data in {folder_name}{Colors.RESET}")
@@ -306,7 +310,7 @@ if __name__ == '__main__':
     if not is_use_ray:
         # random.shuffle(all_folders)
         for i in tqdm(range(len(all_folders))):
-            construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i], 
+            construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i],
                                         use_cuda=use_cuda, from_scratch=from_scratch,
                                         is_save_data=True, is_log=False, is_optimize_geom=True, is_ray=False, )
     else:
@@ -326,8 +330,8 @@ if __name__ == '__main__':
                     v_data_root, v_out_root,
                     all_folders[i],
                     use_cuda=use_cuda, from_scratch=from_scratch,
-                    is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False, 
-                    ))
+                    is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False,
+            ))
         results = []
         for i in tqdm(range(len(all_folders))):
             results.append(ray.get(tasks[i]))

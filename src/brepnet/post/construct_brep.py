@@ -110,6 +110,10 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     # if isdebug:
     #     export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge_after_drop1.obj'))
 
+    shape.build_geom(is_replace_edge=True)
+    if isdebug:
+        print(f"{Colors.GREEN}{len(shape.replace_edge_idx)} edges are replace{Colors.RESET}")
+
     if not shape.have_data:
         if is_log:
             print(f"{Colors.RED}No data in {folder_name}{Colors.RESET}")
@@ -150,13 +154,13 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             interpolation_face.append(item)
 
         if not is_ray:
-            shape.recon_edge_points = optimize(
-                    interpolation_face, shape.recon_edge_points,
+            shape.recon_face_points, shape.recon_edge_points = optimize(
+                    interpolation_face, shape.recon_edge_points, shape.recon_face_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
                     shape.face_edge_adj, v_islog=isdebug, v_max_iter=200)
         else:
-            shape.recon_edge_points = optimize(
-                    shape.interpolation_face, shape.recon_edge_points,
+            shape.recon_face_points, shape.recon_edge_points = optimize(
+                    shape.interpolation_face, shape.recon_edge_points, shape.recon_face_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
                     shape.face_edge_adj, v_islog=False, v_max_iter=200)
             # shape.recon_edge_points = ray.get(task)
@@ -202,17 +206,17 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         if solid.ShapeType() == TopAbs_COMPOUND:
             continue
 
-        shape_tol_setter = ShapeFix_ShapeTolerance()
-        shape_tol_setter.SetTolerance(solid, 1e-1)
-        analyzer = BRepCheck_Analyzer(solid)
-        if not analyzer.IsValid():
-            result = analyzer.Result(solid)
-            continue
-
-        if solid.ShapeType() == TopAbs_SOLID and analyzer.IsValid():
-            is_successful = True
-        else:
-            is_successful = False
+        # shape_tol_setter = ShapeFix_ShapeTolerance()
+        # shape_tol_setter.SetTolerance(solid, 1e-1)
+        # analyzer = BRepCheck_Analyzer(solid)
+        # if not analyzer.IsValid():
+        #     result = analyzer.Result(solid)
+        #     continue
+        #
+        # if solid.ShapeType() == TopAbs_SOLID and analyzer.IsValid():
+        #     is_successful = True
+        # else:
+        #     is_successful = False
 
         save_step_file(os.path.join(out_root, folder_name, 'recon_brep.step'), solid)
         if not check_step_valid_soild(os.path.join(out_root, folder_name, 'recon_brep.step')):
@@ -306,19 +310,18 @@ if __name__ == '__main__':
     if not is_use_ray:
         # random.shuffle(all_folders)
         for i in tqdm(range(len(all_folders))):
-            construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i], 
+            construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i],
                                         use_cuda=use_cuda, from_scratch=from_scratch,
-                                        is_save_data=True, is_log=False, is_optimize_geom=True, is_ray=False, )
+                                        is_save_data=False, is_log=False, is_optimize_geom=True, is_ray=False, )
     else:
-        num_gpus = 0
         ray.init(
                 dashboard_host="0.0.0.0",
                 dashboard_port=8080,
                 num_cpus=num_cpus,
-                num_gpus=num_gpus,
+                # num_gpus=num_gpus,
                 # local_mode=True
         )
-        construct_brep_from_datanpz_ray = ray.remote(num_cpus=1)(construct_brep_from_datanpz)
+        construct_brep_from_datanpz_ray = ray.remote(num_gpus=0.1)(construct_brep_from_datanpz)
 
         tasks = []
         for i in range(len(all_folders)):
@@ -326,8 +329,8 @@ if __name__ == '__main__':
                     v_data_root, v_out_root,
                     all_folders[i],
                     use_cuda=use_cuda, from_scratch=from_scratch,
-                    is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False, 
-                    ))
+                    is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False,
+            ))
         results = []
         for i in tqdm(range(len(all_folders))):
             results.append(ray.get(tasks[i]))

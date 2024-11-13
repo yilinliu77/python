@@ -13,7 +13,7 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         pkl = sys.argv[1]
         output_path = sys.argv[2]
-    
+
     src_folder_list, nearest_name, data_ori = pickle.load(open(pkl, "rb"))
     data = data_ori.min(axis=1)
 
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     print(data.mean())
 
     if True:
-        small_ids = np.where(data<100)
+        small_ids = np.where(data < 100)
         data_root = Path("/mnt/d/brepgen_train")
         # data_root = Path("/mnt/d/deepcad_train_v6")
         pkl = Path(pkl)
@@ -50,4 +50,3 @@ if __name__ == "__main__":
         mesh.export(str(dst_file))
         print(f"{small_ids[0].shape[0]} shapes' LFD is less than 100")
     pass
-

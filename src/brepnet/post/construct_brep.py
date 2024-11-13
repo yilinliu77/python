@@ -110,10 +110,6 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     # if isdebug:
     #     export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge_after_drop1.obj'))
 
-    shape.build_geom(is_replace_edge=True)
-    if isdebug:
-        print(f"{Colors.GREEN}{len(shape.replace_edge_idx)} edges are replace{Colors.RESET}")
-
     if not shape.have_data:
         if is_log:
             print(f"{Colors.RED}No data in {folder_name}{Colors.RESET}")
@@ -186,6 +182,10 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
 
     time_records[1] = time.time() - timer
     timer = time.time()
+
+    shape.build_geom(is_replace_edge=True)
+    if isdebug:
+        print(f"{Colors.GREEN}{len(shape.replace_edge_idx)} edges are replace{Colors.RESET}")
 
     # Construct Brep from face_points, edge_points, face_edge_adj
     solid = None

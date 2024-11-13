@@ -26,8 +26,8 @@ Interface_Static.SetIVal("read.surfacecurve.mode", 3)
 def save_step_file(step_file, shape):
     Interface_Static.SetCVal("write.step.schema", "DIS")
     Interface_Static.SetIVal("write.precision.mode", 2)
-    Interface_Static.SetRVal("write.precision.val", 1e-1)
-    # Interface_Static.SetIVal("write.surfacecurve.mode", 0)
+    Interface_Static.SetRVal("write.precision.val", 1e-3)
+    # Interface_Static.SetIVal("write.surfacecurve.mode", 1)
     step_writer = STEPControl_Writer()
     step_writer.SetTolerance(1e-1)
     step_writer.Model(True)
@@ -37,10 +37,10 @@ def save_step_file(step_file, shape):
 
 def check_step_valid_soild(step_file, precision=1e-1):
     try:
-        Interface_Static.SetIVal("read.precision.mode", 1)
+        Interface_Static.SetIVal("read.precision.mode", 2)
         Interface_Static.SetRVal("read.precision.val", 1e-1)
         Interface_Static.SetIVal("read.stdsameparameter.mode", 1)
-        Interface_Static.SetIVal("read.surfacecurve.mode", 3)
+        Interface_Static.SetIVal("read.surfacecurve.mode", 1)
         shape = read_step_file(step_file, as_compound=False, verbosity=False)
     except:
         return False

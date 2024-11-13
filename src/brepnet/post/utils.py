@@ -968,8 +968,8 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
         wire_fixer.SetMaxTolerance(connected_tolerance)
         wire_fixer.SetPrecision(connected_tolerance)
         wire_fixer.FixGaps3d()
-        wire_fixer.FixGaps2d()
-        wire_fixer.Perform()
+        # wire_fixer.FixGaps2d()
+        # wire_fixer.Perform()
 
         # when only one edge, and being gap fixing, but still not closed, skip
         if wire_fixer.Wire().NbChildren() == 1 and not wire_fixer.Wire().Closed():
@@ -989,7 +989,7 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
             continue
 
         fixed_wire = set_tolerance(fixed_wire, connected_tolerance)
-        face_fixer.Add(wire)
+        face_fixer.Add(fixed_wire)
         fixed_wire_list.append(fixed_wire)
 
     if len(fixed_wire_list) == 0:

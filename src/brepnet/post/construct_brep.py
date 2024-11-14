@@ -112,101 +112,103 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
             f"{Colors.GREEN}############################# Processing {folder_name} #############################{Colors.RESET}")
 
     # Prepare the data
-    ori_shape = get_data(os.path.join(data_root, folder_name, 'data.npz'))
+    shape = get_data(os.path.join(data_root, folder_name, 'data.npz'))
+    if isdebug:
+        export_edges(shape.recon_edge_points, debug_face_save_path / 'edge_ori.obj')
+    shape.remove_half_edges()
+    shape.check_openness()
+    shape.build_fe()
+    shape.build_vertices(0.2)
+
+    if isdebug:
+        print(
+            f"{Colors.GREEN}Remove {len(shape.remove_edge_idx_src) + len(shape.remove_edge_idx_new)} edges{Colors.RESET}")
+
+    if is_save_data:
+        export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), shape.recon_face_points.reshape(-1, 3))
+        updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx_new, axis=0)
+        export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'edge.obj'))
+        for face_idx in range(len(shape.face_edge_adj)):
+            export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}.ply"),
+                               shape.recon_face_points[face_idx].reshape(-1, 3))
+            for edge_idx in shape.face_edge_adj[face_idx]:
+                idx = np.where(shape.edge_face_connectivity[:, 0] == edge_idx)[0][0]
+                adj_face = shape.edge_face_connectivity[idx][1:]
+                export_point_cloud(
+                    os.path.join(debug_face_save_path, f"face{face_idx}_edge_idx{edge_idx}_face{adj_face}.ply"),
+                    shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                    np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+        for edge_idx in range(len(shape.recon_edge_points)):
+            if edge_idx in shape.remove_edge_idx_new:
+                continue
+            export_point_cloud(os.path.join(
+                debug_face_save_path, f'edge{edge_idx}.ply'),
+                shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+
+    # Optimize data
+    if is_optimize_geom:
+        interpolation_face = []
+        for item in shape.interpolation_face:
+            interpolation_face.append(item)
+
+        if not is_ray:
+            shape.recon_face_points, shape.recon_edge_points = optimize(
+                interpolation_face, shape.recon_edge_points, shape.recon_face_points,
+                shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
+                shape.face_edge_adj, v_islog=isdebug, v_max_iter=200, use_cuda=use_cuda)
+        else:
+            shape.recon_face_points, shape.recon_edge_points = optimize(
+                shape.interpolation_face, shape.recon_edge_points, shape.recon_face_points,
+                shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
+                shape.face_edge_adj, v_islog=False, v_max_iter=200, use_cuda=use_cuda)
+
+        if is_save_data:
+            updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx_new, axis=0)
+            export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'optimized_edge.obj'))
+            for face_idx in range(len(shape.face_edge_adj)):
+                for edge_idx in shape.face_edge_adj[face_idx]:
+                    idx = np.where(shape.edge_face_connectivity[:, 0] == edge_idx)[0][0]
+                    adj_face = shape.edge_face_connectivity[idx][1:]
+                    export_point_cloud(
+                        os.path.join(debug_face_save_path,
+                                     f"face{face_idx}_optim_edge_idx{edge_idx}_face{adj_face}.ply"),
+                        shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                        np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+            for edge_idx in range(len(shape.recon_edge_points)):
+                if edge_idx in shape.remove_edge_idx_new:
+                    continue
+                export_point_cloud(
+                    os.path.join(debug_face_save_path, f'optim_edge{edge_idx}.ply'),
+                    shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                    np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+
+    ori_shape = copy.deepcopy(shape)
+
+    shape.build_geom(is_replace_edge=True)
+    # Write separate faces
+    v, f = get_separated_surface(shape.recon_topo_faces, v_precision1=0.1, v_precision2=0.2)
+    trimesh.Trimesh(vertices=v, faces=f).export(out_root / folder_name / "separate_faces.ply")
+
     num_max_drop = min(v_drop_num, math.ceil(0.2 * len(ori_shape.recon_face_points)))
     is_success = False
     for num_drop in range(num_max_drop + 1):
         candidate_shapes = get_candidate_shapes(ori_shape, num_drop)
         for shape in candidate_shapes:
-            if isdebug:
-                export_edges(shape.recon_edge_points, debug_face_save_path / 'edge_ori.obj')
-            shape.remove_half_edges()
-            shape.check_openness()
-            shape.build_fe()
-            shape.build_vertices(0.2)
-
             if not shape.have_data:
                 if is_log:
                     print(f"{Colors.RED}No data in {folder_name}{Colors.RESET}")
                 # shutil.rmtree(os.path.join(out_root, folder_name))
                 return [0, 0, 0, 0, 0, 0]
 
-            if isdebug:
-                print(
-                    f"{Colors.GREEN}Remove {len(shape.remove_edge_idx_src) + len(shape.remove_edge_idx_new)} edges{Colors.RESET}")
-
-            time_records[0] = time.time() - timer
-            timer = time.time()
-
-            if is_save_data:
-                export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), shape.recon_face_points.reshape(-1, 3))
-                updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx_new, axis=0)
-                export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'edge.obj'))
-                for face_idx in range(len(shape.face_edge_adj)):
-                    export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}.ply"),
-                                       shape.recon_face_points[face_idx].reshape(-1, 3))
-                    for edge_idx in shape.face_edge_adj[face_idx]:
-                        idx = np.where(shape.edge_face_connectivity[:, 0] == edge_idx)[0][0]
-                        adj_face = shape.edge_face_connectivity[idx][1:]
-                        export_point_cloud(
-                            os.path.join(debug_face_save_path, f"face{face_idx}_edge_idx{edge_idx}_face{adj_face}.ply"),
-                            shape.recon_edge_points[edge_idx].reshape(-1, 3),
-                            np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
-                for edge_idx in range(len(shape.recon_edge_points)):
-                    if edge_idx in shape.remove_edge_idx_new:
-                        continue
-                    export_point_cloud(os.path.join(
-                        debug_face_save_path, f'edge{edge_idx}.ply'),
-                        shape.recon_edge_points[edge_idx].reshape(-1, 3),
-                        np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
-
-            # Optimize data before sewing
-            if is_optimize_geom:
-                interpolation_face = []
-                for item in shape.interpolation_face:
-                    interpolation_face.append(item)
-
-                if not is_ray:
-                    shape.recon_face_points, shape.recon_edge_points = optimize(
-                        interpolation_face, shape.recon_edge_points, shape.recon_face_points,
-                        shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                        shape.face_edge_adj, v_islog=isdebug, v_max_iter=200, use_cuda=use_cuda)
-                else:
-                    shape.recon_face_points, shape.recon_edge_points = optimize(
-                        shape.interpolation_face, shape.recon_edge_points, shape.recon_face_points,
-                        shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                        shape.face_edge_adj, v_islog=False, v_max_iter=200, use_cuda=use_cuda)
-
-                if is_save_data:
-                    updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx_new, axis=0)
-                    export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'optimized_edge.obj'))
-                    for face_idx in range(len(shape.face_edge_adj)):
-                        for edge_idx in shape.face_edge_adj[face_idx]:
-                            idx = np.where(shape.edge_face_connectivity[:, 0] == edge_idx)[0][0]
-                            adj_face = shape.edge_face_connectivity[idx][1:]
-                            export_point_cloud(
-                                os.path.join(debug_face_save_path,
-                                             f"face{face_idx}_optim_edge_idx{edge_idx}_face{adj_face}.ply"),
-                                shape.recon_edge_points[edge_idx].reshape(-1, 3),
-                                np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
-                    for edge_idx in range(len(shape.recon_edge_points)):
-                        if edge_idx in shape.remove_edge_idx_new:
-                            continue
-                        export_point_cloud(
-                            os.path.join(debug_face_save_path, f'optim_edge{edge_idx}.ply'),
-                            shape.recon_edge_points[edge_idx].reshape(-1, 3),
-                            np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
-
-            time_records[1] = time.time() - timer
-            timer = time.time()
+            shape.remove_half_edges()
+            shape.check_openness()
+            shape.build_fe()
+            shape.build_vertices(0.2)
 
             shape.build_geom(is_replace_edge=True)
             if isdebug:
                 print(f"{Colors.GREEN}{len(shape.replace_edge_idx)} edges are replace{Colors.RESET}")
-
-            # Write separate faces
-            v, f = get_separated_surface(shape.recon_topo_faces, v_precision1=0.1, v_precision2=0.2)
-            trimesh.Trimesh(vertices=v, faces=f).export(out_root / folder_name / "separate_faces.ply")
 
             # Construct trimmed surface
             num_faces = len(shape.recon_topo_faces)
@@ -315,6 +317,7 @@ if __name__ == '__main__':
         construct_brep_from_datanpz(v_data_root, v_out_root, args.prefix,
                                     v_drop_num=drop_num,
                                     use_cuda=use_cuda, is_optimize_geom=True, isdebug=True, is_save_data=True, )
+        exit()
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
     if filter_list != "":
         print(f"Use filter_list {filter_list}")
@@ -329,7 +332,7 @@ if __name__ == '__main__':
         all_folders = list(set(all_folders) & set(valid_prefies))
 
     all_folders.sort()
-    all_folders = all_folders
+    all_folders = all_folders[:100]
 
     print(f"Total {len(all_folders)} folders")
 

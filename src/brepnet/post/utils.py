@@ -1190,7 +1190,13 @@ def get_solid(trimmed_faces, connected_tolerance):
         # sewing.Dump()
         sewn_shell = sewing.SewedShape()
         if sewn_shell.ShapeType() == TopAbs_COMPOUND:
-            sewn_shell = get_primitives(sewn_shell, TopAbs_SHELL)[0]
+            best_shell = None
+            best_num = 0
+            for shell in get_primitives(sewn_shell, TopAbs_SHELL):
+                if best_shell is None or len(get_primitives(shell, TopAbs_FACE)) > best_num:
+                    best_shell = shell
+                    best_num = len(get_primitives(shell, TopAbs_FACE))
+            sewn_shell = best_shell
         shape_tol_setter = ShapeFix_ShapeTolerance()
         shape_tol_setter.SetTolerance(sewn_shell, connected_tolerance)
 

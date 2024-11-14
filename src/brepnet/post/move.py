@@ -2,7 +2,6 @@ import os, shutil
 from tqdm import tqdm
 import argparse, sys
 
-from src.brepnet.eval.check_valid import check_step_valid_soild
 from src.brepnet.post.utils import *
 
 from OCC.Extend.DataExchange import read_step_file, write_step_file, write_stl_file
@@ -10,6 +9,8 @@ from OCC.Extend.DataExchange import read_step_file, write_step_file, write_stl_f
 from OCC.Core.BRepCheck import BRepCheck_Analyzer
 from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core.TopAbs import TopAbs_FACE
+
+from src.brepnet.eval.check_valid import check_step_valid_soild
 
 data_root = r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test_out"
 
@@ -79,47 +80,52 @@ def calculate_valid_percentage(shape):
     return 0
 
 
-def check_invalid(data_root):
+def check_invalid(data_root, post_root):
     all_files = [item for item in os.listdir(data_root) if os.path.isdir(os.path.join(data_root, item))]
     all_files.sort()
-
     exception_save_root = data_root + "_exception"
     failed_save_root = data_root + "_failed"
+    if os.path.exists(exception_save_root):
+        shutil.rmtree(exception_save_root)
+    if os.path.exists(failed_save_root):
+        shutil.rmtree(failed_save_root)
+
     os.makedirs(exception_save_root, exist_ok=True)
+    os.makedirs(failed_save_root, exist_ok=True)
 
     exception_folder = []
     exception_folder_validity_percentage = []
     failed_folder = []
 
     for filename in tqdm(all_files):
-        if os.path.exists(os.path.join(data_root, filename, "recon_brep.step")):
-            try:
-                is_valid = check_step_valid_soild(os.path.join(data_root, filename, "recon_brep.step"))
-                if not is_valid:
-                    gen_shape = read_step_file(os.path.join(data_root, filename, "recon_brep.step"), verbosity=False)
+        if os.path.exists(os.path.join(post_root, filename, "recon_brep.step")):
+            is_valid = os.path.exists(os.path.join(post_root, filename, "success.txt"))
+            # is_valid = check_step_valid_soild(os.path.join(post_root, filename, "recon_brep.step"))
+            if not is_valid:
+                try:
+                    gen_shape = read_step_file(os.path.join(post_root, filename, "recon_brep.step"), verbosity=False)
                     validity_percentage = calculate_valid_percentage(gen_shape)
                     exception_folder_validity_percentage.append(validity_percentage)
-                    exception_folder.append(filename)
-                    if os.path.exists(os.path.join(exception_save_root, filename)):
-                        continue
-                    shutil.copytree(os.path.join(data_root, filename), os.path.join(exception_save_root, filename))
-            except:
-                print(f"Error in {filename}")
+                except:
+                    pass
                 exception_folder.append(filename)
+                shutil.copytree(os.path.join(data_root, filename), os.path.join(exception_save_root, filename), dirs_exist_ok=True)
+                shutil.copytree(os.path.join(post_root, filename), os.path.join(exception_save_root, filename), dirs_exist_ok=True)
         else:
             failed_folder.append(filename)
-            if os.path.exists(os.path.join(failed_save_root, filename)):
-                continue
-            shutil.copytree(os.path.join(data_root, filename), os.path.join(failed_save_root, filename))
+            shutil.copytree(os.path.join(data_root, filename), os.path.join(failed_save_root, filename), dirs_exist_ok=True)
+            shutil.copytree(os.path.join(post_root, filename), os.path.join(failed_save_root, filename), dirs_exist_ok=True)
 
-    print(f"Total {len(exception_folder)} invalid folders")
+    print(f"Total {len(exception_folder)} exception folders")
+    print(f"Total {len(failed_folder)} failed folders")
     print(exception_folder)
     print(exception_folder_validity_percentage)
-    with open(os.path.join(exception_save_root, "exception.txt"), "w") as f:
-        for except_folder, val_per in zip(exception_folder, exception_folder_validity_percentage):
-            f.write(f"{except_folder} {val_per}\n")
-        f.write(f"Average validity percentage: {sum(exception_folder_validity_percentage) / len(exception_folder_validity_percentage)}")
-    print(f"Average validity percentage: {sum(exception_folder_validity_percentage) / len(exception_folder_validity_percentage)}")
+    if len(exception_folder_validity_percentage) > 0:
+        with open(os.path.join(exception_save_root, "exception.txt"), "w") as f:
+            for except_folder, val_per in zip(exception_folder, exception_folder_validity_percentage):
+                f.write(f"{except_folder} {val_per}\n")
+            f.write(f"Average validity percentage: {sum(exception_folder_validity_percentage) / len(exception_folder_validity_percentage)}")
+        print(f"Average validity percentage: {sum(exception_folder_validity_percentage) / len(exception_folder_validity_percentage)}")
 
 
 def seg_by_face_num(data_root):
@@ -167,6 +173,6 @@ if __name__ == '__main__':
     elif sys.argv[1] == "seg":
         seg_by_face_num(sys.argv[2])
     else:
-        check_invalid(sys.argv[2])
+        check_invalid(sys.argv[2], sys.argv[3])
     # count_success(data_root)
     # check_eval(data_root)

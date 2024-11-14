@@ -87,6 +87,44 @@ def denormalize_coord2(points, bbox):
     return points
 
 
+def normalize_coord1112(v_points):
+    points = v_points[..., :3]
+    normals = v_points[..., 3:]
+    shape = points.shape
+    num_items = shape[0]
+    points = points.reshape(num_items, -1, 3)
+    target_points = points + normals.reshape(num_items, -1, 3)
+
+    center = points.mean(dim=1, keepdim=True)
+    scale = (torch.linalg.norm(points - center, dim=-1)).max(dim=1, keepdims=True)[0]
+    assert scale.min() > 1e-3
+    points = (points - center) / (scale[:, None] + 1e-6)
+    target_points = (target_points - center) / (scale[:, None] + 1e-6)
+    normals = target_points - points
+    normals = normals / (1e-6 + torch.linalg.norm(normals, dim=-1, keepdim=True))
+
+    points = points.reshape(shape)
+    normals = normals.reshape(shape)
+
+    return points, normals, center[:, 0], scale
+
+def denormalize_coord1112(points, bbox):
+    normal = points[..., 3:]
+    points = points[..., :3]
+    target_points = points + normal
+    center = bbox[..., :3]
+    scale = bbox[..., 3:4]
+    while len(points.shape) > len(center.shape):
+        center = center.unsqueeze(1)
+        scale = scale.unsqueeze(1)
+    points = points * scale + center
+    target_points = target_points * scale + center
+    normal = target_points - points
+    normal = normal / (1e-6 + torch.linalg.norm(normal, dim=-1, keepdim=True))
+    points = torch.cat((points, normal), dim=-1)
+    return points
+
+
 def discrete_coord(points, center, scale, v_dim):
     points = torch.round((points + 0.5) * v_dim)
     points = torch.clamp(points, 0, v_dim - 1).to(torch.long)
@@ -377,6 +415,171 @@ def rotate_matrix(angle_degrees, axis):
         raise ValueError("Invalid axis. Must be 'x', 'y', or 'z'.")
 
     return rotation_matrix
+
+
+class AutoEncoder_dataset3(torch.utils.data.Dataset):
+    def __init__(self, v_training_mode, v_conf):
+        super(AutoEncoder_dataset3, self).__init__()
+        self.mode = v_training_mode
+        self.conf = v_conf
+        self.max_intersection = 500
+        if v_training_mode == "testing":
+            listfile = v_conf['test_dataset']
+        elif v_training_mode == "training":
+            listfile = v_conf['train_dataset']
+        elif v_training_mode == "validation":
+            listfile = v_conf['val_dataset']
+        else:
+            raise
+
+        self.data_folders = [item.strip() for item in open(listfile).readlines()]
+        self.root = Path(v_conf["data_root"])
+        self.is_aug = v_conf["is_aug"]
+
+        if v_conf["is_overfit"]:
+            self.data_folders = self.data_folders[:100]
+            if v_training_mode == "training":
+                self.data_folders = self.data_folders * 100
+        print(len(self.data_folders))
+
+    def __len__(self):
+        return len(self.data_folders)
+
+    def __getitem__(self, idx):
+        # idx = 0
+        prefix = self.data_folders[idx]
+        data_npz = np.load(str(self.root / prefix / "data.npz"))
+
+        face_points = torch.from_numpy(data_npz['sample_points_faces'])
+        edge_points = torch.from_numpy(data_npz['sample_points_lines'])
+
+        if self.is_aug == 0:
+            matrix = np.identity(3)
+        if self.is_aug == 1:
+            matrix = Rotation.from_euler('xyz', np.random.randint(0, 3, 3) * np.pi / 2).as_matrix()
+        elif self.is_aug == 2:
+            matrix = Rotation.from_euler('xyz', np.random.rand(3) * np.pi * 2).as_matrix()
+        if self.is_aug != 0:
+            matrix = torch.from_numpy(matrix).float()
+            fp = face_points[..., :3].reshape(-1, 3)
+            lp = edge_points[..., :3].reshape(-1, 3)
+            fp1 = (matrix @ fp.T).T
+            lp1 = (matrix @ lp.T).T
+
+            if face_points.shape[1] > 3:
+                fn = face_points[..., 3:].reshape(-1, 3)
+                ln = edge_points[..., 3:].reshape(-1, 3)
+                ft = fp + fn
+                lt = lp + ln
+                ft1 = (matrix @ ft.T).T
+                lt1 = (matrix @ lt.T).T
+
+                fn1 = ft1 - fp1
+                ln1 = lt1 - lp1
+
+                fn1 = fn1 / (1e-6 + torch.linalg.norm(fn, dim=-1, keepdim=True))
+                ln1 = ln1 / (1e-6 + torch.linalg.norm(ln, dim=-1, keepdim=True))
+                face_points[..., 3:] = fn1.reshape(face_points[..., 3:].shape)
+                edge_points[..., 3:] = ln1.reshape(edge_points[..., 3:].shape)
+
+            face_points[..., :3] = fp1.reshape(face_points[..., :3].shape)
+            edge_points[..., :3] = lp1.reshape(edge_points[..., :3].shape)
+
+        num_faces = face_points.shape[0]
+        num_edges = edge_points.shape[0]
+
+        face_adj = torch.from_numpy(data_npz['face_adj'])
+        edge_face_connectivity = torch.from_numpy(data_npz['edge_face_connectivity'])
+        edge_face_connectivity = edge_face_connectivity[edge_face_connectivity[:, 1] != edge_face_connectivity[:, 2]]
+
+        zero_positions = torch.from_numpy(data_npz['zero_positions'])
+        if zero_positions.shape[0] > edge_face_connectivity.shape[0]:
+            index = np.random.choice(zero_positions.shape[0], edge_face_connectivity.shape[0], replace=False)
+            zero_positions = zero_positions[index]
+
+        face_points_norm, face_normal_norm, face_center, face_scale = normalize_coord1112(face_points)
+        edge_points_norm, edge_normal_norm, edge_center, edge_scale = normalize_coord1112(edge_points)
+
+        face_norm = torch.cat((face_points_norm, face_normal_norm), dim=-1)
+        edge_norm = torch.cat((edge_points_norm, edge_normal_norm), dim=-1)
+
+        face_bbox = torch.cat((face_center, face_scale), dim=-1)
+        edge_bbox = torch.cat((edge_center, edge_scale), dim=-1)
+
+        return (
+            prefix,
+            face_points, edge_points,
+            face_norm, edge_norm,
+            face_bbox, edge_bbox,
+            edge_face_connectivity, zero_positions, face_adj
+        )
+
+    @staticmethod
+    def collate_fn(batch):
+        (
+            prefix,
+            face_points, edge_points,
+            face_norm, edge_norm,
+            face_bbox, edge_bbox,
+            edge_face_connectivity, zero_positions, face_adj
+        ) = zip(*batch)
+        bs = len(prefix)
+
+        flat_zero_positions = []
+        num_face_record = []
+
+        num_faces = 0
+        num_edges = 0
+        edge_conn_num = []
+        for i in range(bs):
+            edge_face_connectivity[i][:, 0] += num_edges
+            edge_face_connectivity[i][:, 1:] += num_faces
+            edge_conn_num.append(edge_face_connectivity[i].shape[0])
+            flat_zero_positions.append(zero_positions[i] + num_faces)
+            num_faces += face_norm[i].shape[0]
+            num_edges += edge_norm[i].shape[0]
+            num_face_record.append(face_norm[i].shape[0])
+        num_face_record = torch.tensor(num_face_record, dtype=torch.long)
+        num_sum_edges = sum(edge_conn_num)
+        edge_attn_mask = torch.ones((num_sum_edges, num_sum_edges), dtype=bool)
+        id_cur = 0
+        for i in range(bs):
+            edge_attn_mask[id_cur:id_cur + edge_conn_num[i], id_cur:id_cur + edge_conn_num[i]] = False
+            id_cur += edge_conn_num[i]
+
+        num_max_faces = num_face_record.max()
+        valid_mask = torch.zeros((bs, num_max_faces), dtype=bool)
+        for i in range(bs):
+            valid_mask[i, :num_face_record[i]] = True
+        attn_mask = torch.ones((num_faces, num_faces), dtype=bool)
+        id_cur = 0
+        for i in range(bs):
+            attn_mask[id_cur:id_cur + face_norm[i].shape[0], id_cur: id_cur + face_norm[i].shape[0]] = False
+            id_cur += face_norm[i].shape[0]
+
+        dtype = torch.float32
+        flat_zero_positions = torch.cat(flat_zero_positions, dim=0)
+
+        dtype = torch.float32
+
+        return {
+            "v_prefix"              : prefix,
+            "face_points"             : torch.cat(face_points, dim=0).to(dtype),
+            "face_norm"             : torch.cat(face_norm, dim=0).to(dtype),
+            "edge_points"             : torch.cat(edge_points, dim=0).to(dtype),
+            "edge_norm"             : torch.cat(edge_norm, dim=0).to(dtype),
+            "face_bbox"             : torch.cat(face_bbox, dim=0).to(dtype),
+            "edge_bbox"             : torch.cat(edge_bbox, dim=0).to(dtype),
+
+            "edge_face_connectivity": torch.cat(edge_face_connectivity, dim=0),
+            "zero_positions"        : flat_zero_positions,
+            "attn_mask"             : attn_mask,
+            "edge_attn_mask"        : edge_attn_mask,
+
+            "num_face_record"       : num_face_record,
+            "valid_mask"            : valid_mask,
+        }
+
 
 
 class AutoEncoder_dataset(torch.utils.data.Dataset):

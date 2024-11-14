@@ -86,7 +86,7 @@ def get_candidate_shapes(ori_shape, num_drop):
         candidate_shapes.append(shape)
     return candidate_shapes
 
-def construct_brep_from_datanpz(data_root, out_root, folder_name,
+def construct_brep_from_datanpz(data_root, out_root, folder_name, v_allow_drop=False,
                                 is_ray=False, is_log=True,
                                 is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=True,
                                 is_save_data=False):
@@ -113,10 +113,12 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
 
     # Prepare the data
     ori_shape = get_data(os.path.join(data_root, folder_name, 'data.npz'))
-    num_max_drop = min(2, math.ceil(0.2 * len(ori_shape.recon_face_points)))
-    # num_max_drop = 1
+    if v_allow_drop:
+        num_max_drop = min(2, math.ceil(0.2 * len(ori_shape.recon_face_points)))
+    else:
+        num_max_drop = 0
     is_success = False
-    for num_drop in range(num_max_drop):
+    for num_drop in range(num_max_drop + 1):
         candidate_shapes = get_candidate_shapes(ori_shape, num_drop)
         for shape in candidate_shapes:
             if isdebug:
@@ -277,7 +279,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             else:
                 save_step_file(out_root / folder_name / 'recon_brep.step', solid)
                 write_stl_file(solid, str(out_root / folder_name / "recon_brep.stl"), linear_deflection=0.1, angular_deflection=0.2)
-                if not check_step_valid_soild(out_root / folder_name / 'recon_brep.step'):
+                if not check_step_valid_soild(str(out_root / folder_name / 'recon_brep.step')):
                     print("Inconsistent solid check in {}".format(folder_name))
                 else:
                     open(out_root / folder_name / "success.txt", 'w').close()
@@ -286,15 +288,6 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
         if is_success:
             break
     return time_records
-
-
-def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda):
-    # debug_folder = os.listdir(v_out_root)
-    debug_folder = [v_prefix]
-    for folder in debug_folder:
-        construct_brep_from_datanpz(v_data_root, v_out_root, folder,
-                                    use_cuda=use_cuda, is_optimize_geom=True, isdebug=True, is_save_data=True, )
-    exit(0)
 
 
 if __name__ == '__main__':
@@ -307,6 +300,7 @@ if __name__ == '__main__':
     parser.add_argument('--prefix', type=str, default="")
     parser.add_argument('--use_cuda', action='store_true')
     parser.add_argument('--from_scratch', action='store_true')
+    parser.add_argument('--allow_drop', action='store_true')
     args = parser.parse_args()
     v_data_root = args.data_root
     v_out_root = args.out_root
@@ -315,12 +309,15 @@ if __name__ == '__main__':
     num_cpus = args.num_cpus
     use_cuda = args.use_cuda
     from_scratch = args.from_scratch
+    allow_drop = args.allow_drop
     safe_check_dir(v_out_root)
     if not os.path.exists(v_data_root):
         raise ValueError(f"Data root path {v_data_root} does not exist.")
 
     if args.prefix != "":
-        test_construct_brep(v_data_root, v_out_root, args.prefix, use_cuda)
+        construct_brep_from_datanpz(v_data_root, v_out_root, args.prefix,
+                                    v_allow_drop=allow_drop,
+                                    use_cuda=use_cuda, is_optimize_geom=True, isdebug=True, is_save_data=True, )
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
     if filter_list != "":
         print(f"Use filter_list {filter_list}")
@@ -343,6 +340,7 @@ if __name__ == '__main__':
         # random.shuffle(all_folders)
         for i in tqdm(range(len(all_folders))):
             construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i],
+                                        v_allow_drop=allow_drop,
                                         use_cuda=use_cuda, from_scratch=from_scratch,
                                         is_save_data=False, is_log=False, is_optimize_geom=True, is_ray=False, )
     else:
@@ -361,6 +359,7 @@ if __name__ == '__main__':
             tasks.append(construct_brep_from_datanpz_ray.remote(
                 v_data_root, v_out_root,
                 all_folders[i],
+                v_allow_drop=allow_drop,
                 use_cuda=use_cuda, from_scratch=from_scratch,
                 is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False,
             ))

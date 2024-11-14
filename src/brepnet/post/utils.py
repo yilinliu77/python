@@ -1001,7 +1001,7 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
         face_fixer.FixWireTool().SetPrecision(connected_tolerance)
         face_fixer.FixWireTool().SetFixShiftedMode(True)
         face_fixer.FixWireTool().SetClosedWireMode(True)
-        face_fixer.FixWireTool().Perform()
+        # face_fixer.FixWireTool().Perform()
 
         face_fixer.SetAutoCorrectPrecisionMode(False)
         face_fixer.SetPrecision(connected_tolerance)

@@ -246,7 +246,7 @@ def main(v_cfg: DictConfig):
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
 
-    mc = ModelCheckpoint(monitor="Validation_Loss", save_last=True, every_n_train_steps=300000)
+    mc = ModelCheckpoint(monitor="Validation_Loss", save_last=True, every_n_train_steps=300000, save_top_k=-1)
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
     model = TrainDiffusion(v_cfg)

@@ -153,12 +153,12 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             shape.recon_face_points, shape.recon_edge_points = optimize(
                     interpolation_face, shape.recon_edge_points, shape.recon_face_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                    shape.face_edge_adj, v_islog=isdebug, v_max_iter=200)
+                    shape.face_edge_adj, v_islog=isdebug, v_max_iter=200, use_cuda=use_cuda)
         else:
             shape.recon_face_points, shape.recon_edge_points = optimize(
                     shape.interpolation_face, shape.recon_edge_points, shape.recon_face_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                    shape.face_edge_adj, v_islog=False, v_max_iter=200)
+                    shape.face_edge_adj, v_islog=False, v_max_iter=200, use_cuda=use_cuda)
             # shape.recon_edge_points = ray.get(task)
 
         if is_save_data:
@@ -321,7 +321,7 @@ if __name__ == '__main__':
                 # num_gpus=num_gpus,
                 # local_mode=True
         )
-        construct_brep_from_datanpz_ray = ray.remote(num_gpus=0.1)(construct_brep_from_datanpz)
+        construct_brep_from_datanpz_ray = ray.remote(num_gpus=0.1 if use_cuda else 0, max_retries=0)(construct_brep_from_datanpz)
 
         tasks = []
         for i in range(len(all_folders)):

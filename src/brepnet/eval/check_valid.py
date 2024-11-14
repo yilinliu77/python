@@ -6,13 +6,15 @@ from OCC.Core.IGESControl import IGESControl_Reader
 from OCC.Core.Interface import Interface_Static
 from OCC.Core.STEPControl import STEPControl_Reader, STEPControl_Writer, STEPControl_AsIs
 from OCC.Core.StepData import StepData_StepModel
-from OCC.Core.TopAbs import TopAbs_SOLID, TopAbs_COMPOUND, TopAbs_SHELL, TopAbs_FACE
+from OCC.Core.TopAbs import TopAbs_SOLID, TopAbs_COMPOUND, TopAbs_SHELL, TopAbs_FACE, TopAbs_EDGE
 from OCC.Extend.DataExchange import read_step_file
 from OCC.Core.ShapeFix import ShapeFix_ShapeTolerance
 import os
 import argparse
 import glob
 from tqdm import tqdm
+from matplotlib import pyplot as plt
+import numpy as np
 
 from shared.occ_utils import get_primitives
 from src.brepnet.post.utils import solid_valid_check, viz_shapes, get_solid, CONNECT_TOLERANCE
@@ -35,7 +37,7 @@ def save_step_file(step_file, shape):
     status = step_writer.Write(step_file)
 
 
-def check_step_valid_soild(step_file, precision=1e-1):
+def check_step_valid_soild(step_file, precision=1e-1, return_shape=False):
     try:
         Interface_Static.SetIVal("read.precision.mode", 2)
         Interface_Static.SetRVal("read.precision.val", 1e-1)
@@ -43,13 +45,15 @@ def check_step_valid_soild(step_file, precision=1e-1):
         Interface_Static.SetIVal("read.surfacecurve.mode", 1)
         shape = read_step_file(step_file, as_compound=False, verbosity=False)
     except:
-        return False
+        return False, None
     if shape.ShapeType() != TopAbs_SOLID:
-        return False
+        return False, None
     shape_tol_setter = ShapeFix_ShapeTolerance()
     shape_tol_setter.SetTolerance(shape, precision)
     analyzer = BRepCheck_Analyzer(shape)
     is_valid = analyzer.IsValid()
+    if return_shape:
+        return is_valid, shape
     return is_valid
 
 
@@ -104,8 +108,10 @@ if __name__ == "__main__":
     # Load cad data
     valid_count = 0
     pbar = tqdm(step_file_list)
+    num_faces = []
+    num_edges = []
     for step_file in pbar:
-        is_valid = check_step_valid_soild(step_file)
+        is_valid, shape = check_step_valid_soild(step_file, return_shape=True)
         if os.path.exists(os.path.join(os.path.dirname(step_file), "success.txt")) and not is_valid:
             folder_name = os.path.basename(os.path.dirname(step_file))
             exception_folders.append(folder_name)
@@ -113,7 +119,23 @@ if __name__ == "__main__":
 
         if is_valid:
             valid_count += 1
+            num_faces.append(len(get_primitives(shape, TopAbs_FACE)))
+            num_edges.append(len(get_primitives(shape, TopAbs_EDGE)) // 2)
         pbar.set_postfix({"valid_count": valid_count})
+
+    fig, ax = plt.subplots(1, 2, layout="constrained")
+    ax[0].set_title("Num. faces")
+    ax[1].set_title("Num. edges")
+    hist_f, bin_f = np.histogram(num_faces, bins=5, range=(0, 30))
+    hist_e, bin_e = np.histogram(num_edges, bins=5, range=(0, 50))
+    # Normalize
+    hist_f = hist_f / np.sum(hist_f)
+    hist_e = hist_e / np.sum(hist_e)
+    ax[0].plot(bin_f[:-1], hist_f, "-")
+    ax[1].plot(bin_e[:-1], hist_e, "-")
+    ax[0].set_aspect(1./ax[0].get_data_ratio())
+    ax[1].set_aspect(1./ax[1].get_data_ratio())
+    plt.savefig(data_root+"_num_faces_edges.png", dpi=600)
 
     print(f"Number of valid CAD solids: {valid_count}")
     print(f"Valid rate: {valid_count / len(folders) * 100:.2f}%")

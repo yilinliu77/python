@@ -93,8 +93,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     shape = get_data(os.path.join(data_root, folder_name, 'data.npz'))
     num_faces = len(shape.recon_face_points)
     num_max_drop = math.ceil(0.2 * num_faces)
+    num_max_drop = 1
     for num_drop in range(num_max_drop):
-
         if isdebug:
             export_edges(shape.recon_edge_points, debug_face_save_path / 'edge_ori.obj')
         shape.remove_half_edges()

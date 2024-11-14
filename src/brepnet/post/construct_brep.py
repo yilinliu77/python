@@ -86,7 +86,7 @@ def get_candidate_shapes(ori_shape, num_drop):
         candidate_shapes.append(shape)
     return candidate_shapes
 
-def construct_brep_from_datanpz(data_root, out_root, folder_name, v_allow_drop=False,
+def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
                                 is_ray=False, is_log=True,
                                 is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=True,
                                 is_save_data=False):
@@ -113,10 +113,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_allow_drop=F
 
     # Prepare the data
     ori_shape = get_data(os.path.join(data_root, folder_name, 'data.npz'))
-    if v_allow_drop:
-        num_max_drop = min(2, math.ceil(0.2 * len(ori_shape.recon_face_points)))
-    else:
-        num_max_drop = 0
+    num_max_drop = min(v_drop_num, math.ceil(0.2 * len(ori_shape.recon_face_points)))
     is_success = False
     for num_drop in range(num_max_drop + 1):
         candidate_shapes = get_candidate_shapes(ori_shape, num_drop)
@@ -300,7 +297,7 @@ if __name__ == '__main__':
     parser.add_argument('--prefix', type=str, default="")
     parser.add_argument('--use_cuda', action='store_true')
     parser.add_argument('--from_scratch', action='store_true')
-    parser.add_argument('--allow_drop', action='store_true')
+    parser.add_argument('--drop_num', type=int, default=0)
     args = parser.parse_args()
     v_data_root = args.data_root
     v_out_root = args.out_root
@@ -309,14 +306,14 @@ if __name__ == '__main__':
     num_cpus = args.num_cpus
     use_cuda = args.use_cuda
     from_scratch = args.from_scratch
-    allow_drop = args.allow_drop
+    drop_num = args.drop_num
     safe_check_dir(v_out_root)
     if not os.path.exists(v_data_root):
         raise ValueError(f"Data root path {v_data_root} does not exist.")
 
     if args.prefix != "":
         construct_brep_from_datanpz(v_data_root, v_out_root, args.prefix,
-                                    v_allow_drop=allow_drop,
+                                    v_drop_num=drop_num,
                                     use_cuda=use_cuda, is_optimize_geom=True, isdebug=True, is_save_data=True, )
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
     if filter_list != "":
@@ -332,7 +329,7 @@ if __name__ == '__main__':
         all_folders = list(set(all_folders) & set(valid_prefies))
 
     all_folders.sort()
-    all_folders = all_folders[:100]
+    all_folders = all_folders[:500]
 
     print(f"Total {len(all_folders)} folders")
 
@@ -340,7 +337,7 @@ if __name__ == '__main__':
         # random.shuffle(all_folders)
         for i in tqdm(range(len(all_folders))):
             construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i],
-                                        v_allow_drop=allow_drop,
+                                        v_drop_num=drop_num,
                                         use_cuda=use_cuda, from_scratch=from_scratch,
                                         is_save_data=False, is_log=False, is_optimize_geom=True, is_ray=False, )
     else:
@@ -359,15 +356,16 @@ if __name__ == '__main__':
             tasks.append(construct_brep_from_datanpz_ray.remote(
                 v_data_root, v_out_root,
                 all_folders[i],
-                v_allow_drop=allow_drop,
+                v_drop_num=drop_num,
                 use_cuda=use_cuda, from_scratch=from_scratch,
                 is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False,
             ))
-        results = []
-        for i in tqdm(range(len(all_folders))):
-            results.append(ray.get(tasks[i]))
-        results = [item for item in results if item is not None]
-        print(len(results))
-        results = np.array(results)
-        print(results.mean(axis=0))
+        results = ray.get(tasks)
+        # results = []
+        # for i in tqdm(range(len(all_folders))):
+        #     results.append(ray.get(tasks[i]))
+        # # results = [item for item in results if item is not None]
+        # # print(len(results))
+        # # results = np.array(results)
+        # # print(results.mean(axis=0))
     print("Done")

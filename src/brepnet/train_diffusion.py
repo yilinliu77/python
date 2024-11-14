@@ -109,9 +109,9 @@ class TrainDiffusion(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = Adam(self.model.parameters(), lr=self.learning_rate)
-        # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[500000], gamma=0.1)
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[4000], gamma=0.1)
         # return [optimizer], [scheduler]
-        return [optimizer]
+        return optimizer
 
     def training_step(self, batch, batch_idx):
         data = batch
@@ -247,7 +247,7 @@ def main(v_cfg: DictConfig):
         torch.multiprocessing.set_start_method("spawn")
 
     mc = ModelCheckpoint(monitor="Validation_Loss", save_last=True, every_n_train_steps=300000, save_top_k=-1)
-    lr_monitor = LearningRateMonitor(logging_interval='step')
+    lr_monitor = LearningRateMonitor(logging_interval='epoch')
 
     model = TrainDiffusion(v_cfg)
     logger = TensorBoardLogger(log_dir)

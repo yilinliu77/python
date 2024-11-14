@@ -770,3 +770,28 @@ class Diffusion_condition(nn.Module):
             loss["l2"] = self.loss(pred, face_z)
             loss["diffusion_loss"] += loss["l2"]
         return loss
+
+
+class Diffusion_condition_beta005(Diffusion_condition):
+    def __init__(self, v_conf, ):
+        super().__init__(v_conf)
+        self.noise_scheduler = DDPMScheduler(
+            num_train_timesteps=1000,
+            beta_schedule="linear",
+            prediction_type=v_conf["diffusion_type"],
+            beta_start=0.0001,
+            beta_end=0.05,
+            clip_sample=False,
+        )
+
+class Diffusion_condition_beta01(Diffusion_condition):
+    def __init__(self, v_conf, ):
+        super().__init__(v_conf)
+        self.noise_scheduler = DDPMScheduler(
+            num_train_timesteps=1000,
+            beta_schedule="linear",
+            prediction_type=v_conf["diffusion_type"],
+            beta_start=0.0001,
+            beta_end=0.1,
+            clip_sample=False,
+        )

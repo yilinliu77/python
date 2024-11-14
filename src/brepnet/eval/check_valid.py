@@ -19,17 +19,17 @@ import numpy as np
 from shared.occ_utils import get_primitives
 from src.brepnet.post.utils import solid_valid_check, viz_shapes, get_solid, CONNECT_TOLERANCE
 
-Interface_Static.SetIVal("read.precision.mode", 1)
+Interface_Static.SetIVal("read.precision.mode", 2)
 Interface_Static.SetRVal("read.precision.val", 1e-1)
 Interface_Static.SetIVal("read.stdsameparameter.mode", 1)
 Interface_Static.SetIVal("read.surfacecurve.mode", 3)
 
+Interface_Static.SetCVal("write.step.schema", "DIS")
+Interface_Static.SetIVal("write.precision.mode", 2)
+Interface_Static.SetRVal("write.precision.val", 1e-1)
+Interface_Static.SetIVal("write.surfacecurve.mode", 1)
 
 def save_step_file(step_file, shape):
-    Interface_Static.SetCVal("write.step.schema", "DIS")
-    Interface_Static.SetIVal("write.precision.mode", 2)
-    Interface_Static.SetRVal("write.precision.val", 1e-1)
-    # Interface_Static.SetIVal("write.surfacecurve.mode", 1)
     step_writer = STEPControl_Writer()
     step_writer.SetTolerance(1e-1)
     step_writer.Model(True)
@@ -39,12 +39,7 @@ def save_step_file(step_file, shape):
 
 def check_step_valid_soild(step_file, precision=1e-1, return_shape=False, is_set_gloabl=False):
     try:
-        if not is_set_gloabl:
-            Interface_Static.SetIVal("read.precision.mode", 2)
-            Interface_Static.SetRVal("read.precision.val", 1e-1)
-            Interface_Static.SetIVal("read.stdsameparameter.mode", 1)
-            Interface_Static.SetIVal("read.surfacecurve.mode", 1)
-        shape = read_step_file(str(step_file), as_compound=False, verbosity=False)
+        shape = read_step_file(step_file, as_compound=False, verbosity=False)
     except:
         return False, None
     if shape.ShapeType() != TopAbs_SOLID:

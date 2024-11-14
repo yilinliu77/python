@@ -17,11 +17,17 @@ from tqdm import tqdm
 from shared.occ_utils import get_primitives
 from src.brepnet.post.utils import solid_valid_check, viz_shapes, get_solid, CONNECT_TOLERANCE
 
+Interface_Static.SetIVal("read.precision.mode", 1)
+Interface_Static.SetRVal("read.precision.val", 1e-1)
+Interface_Static.SetIVal("read.stdsameparameter.mode", 1)
+Interface_Static.SetIVal("read.surfacecurve.mode", 3)
+
+
 def save_step_file(step_file, shape):
     Interface_Static.SetCVal("write.step.schema", "DIS")
     Interface_Static.SetIVal("write.precision.mode", 2)
-    Interface_Static.SetRVal("write.precision.val", 1e-1)
-    # Interface_Static.SetIVal("write.surfacecurve.mode", 0)
+    Interface_Static.SetRVal("write.precision.val", 1e-3)
+    # Interface_Static.SetIVal("write.surfacecurve.mode", 1)
     step_writer = STEPControl_Writer()
     step_writer.SetTolerance(1e-1)
     step_writer.Model(True)
@@ -31,11 +37,10 @@ def save_step_file(step_file, shape):
 
 def check_step_valid_soild(step_file, precision=1e-1):
     try:
-        Interface_Static.SetIVal("read.precision.mode", 1)
-        Interface_Static.SetRVal("read.precision.val", precision)
+        Interface_Static.SetIVal("read.precision.mode", 2)
+        Interface_Static.SetRVal("read.precision.val", 1e-1)
         Interface_Static.SetIVal("read.stdsameparameter.mode", 1)
-        Interface_Static.SetIVal("read.surfacecurve.mode", 3)
-        # Interface_Static.SetRVal("read.encoderegularity.angle", 1)
+        Interface_Static.SetIVal("read.surfacecurve.mode", 1)
         shape = read_step_file(step_file, as_compound=False, verbosity=False)
     except:
         return False
@@ -73,7 +78,7 @@ if __name__ == "__main__":
     parser.add_argument("--prefix", type=str, required=False, default="")
     args = parser.parse_args()
     data_root = args.data_root
-    folders = os.listdir(data_root)
+    folders = [f for f in os.listdir(data_root) if os.path.isdir(os.path.join(data_root, f))]
 
     if args.prefix:
         step_file_list = load_data_with_prefix(os.path.join(data_root, args.prefix), ".step")

@@ -28,7 +28,7 @@ Interface_Static.SetIVal("read.surfacecurve.mode", 3)
 def save_step_file(step_file, shape):
     Interface_Static.SetCVal("write.step.schema", "DIS")
     Interface_Static.SetIVal("write.precision.mode", 2)
-    Interface_Static.SetRVal("write.precision.val", 1e-3)
+    Interface_Static.SetRVal("write.precision.val", 1e-1)
     # Interface_Static.SetIVal("write.surfacecurve.mode", 1)
     step_writer = STEPControl_Writer()
     step_writer.SetTolerance(1e-1)
@@ -37,12 +37,13 @@ def save_step_file(step_file, shape):
     status = step_writer.Write(step_file)
 
 
-def check_step_valid_soild(step_file, precision=1e-1, return_shape=False):
+def check_step_valid_soild(step_file, precision=1e-1, return_shape=False, is_set_gloabl=False):
     try:
-        Interface_Static.SetIVal("read.precision.mode", 2)
-        Interface_Static.SetRVal("read.precision.val", 1e-1)
-        Interface_Static.SetIVal("read.stdsameparameter.mode", 1)
-        Interface_Static.SetIVal("read.surfacecurve.mode", 1)
+        if not is_set_gloabl:
+            Interface_Static.SetIVal("read.precision.mode", 2)
+            Interface_Static.SetRVal("read.precision.val", 1e-1)
+            Interface_Static.SetIVal("read.stdsameparameter.mode", 1)
+            Interface_Static.SetIVal("read.surfacecurve.mode", 1)
         shape = read_step_file(step_file, as_compound=False, verbosity=False)
     except:
         return False, None
@@ -88,7 +89,7 @@ if __name__ == "__main__":
         step_file_list = load_data_with_prefix(os.path.join(data_root, args.prefix), ".step")
         assert len(step_file_list) > 0
         print(f"Checking CAD solids in {args.prefix}...")
-        isvalid = check_step_valid_soild(step_file_list[0])
+        isvalid = check_step_valid_soild(step_file_list[0], is_set_gloabl=True)
         print("Valid" if isvalid else "Invalid")
         exit(0)
 
@@ -111,7 +112,7 @@ if __name__ == "__main__":
     num_faces = []
     num_edges = []
     for step_file in pbar:
-        is_valid, shape = check_step_valid_soild(step_file, return_shape=True)
+        is_valid, shape = check_step_valid_soild(step_file, return_shape=True, is_set_gloabl=True)
         if os.path.exists(os.path.join(os.path.dirname(step_file), "success.txt")) and not is_valid:
             folder_name = os.path.basename(os.path.dirname(step_file))
             exception_folders.append(folder_name)
@@ -133,9 +134,9 @@ if __name__ == "__main__":
     hist_e = hist_e / np.sum(hist_e)
     ax[0].plot(bin_f[:-1], hist_f, "-")
     ax[1].plot(bin_e[:-1], hist_e, "-")
-    ax[0].set_aspect(1./ax[0].get_data_ratio())
-    ax[1].set_aspect(1./ax[1].get_data_ratio())
-    plt.savefig(data_root+"_num_faces_edges.png", dpi=600)
+    ax[0].set_aspect(1. / ax[0].get_data_ratio())
+    ax[1].set_aspect(1. / ax[1].get_data_ratio())
+    plt.savefig(data_root + "_num_faces_edges.png", dpi=600)
 
     print(f"Number of valid CAD solids: {valid_count}")
     print(f"Valid rate: {valid_count / len(folders) * 100:.2f}%")

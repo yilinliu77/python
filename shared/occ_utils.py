@@ -9,7 +9,7 @@ from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.gp import gp_Vec, gp_Trsf
 
-def diable_occ_log():
+def disable_occ_log():
     from OCC.Core.Message import Message_Alarm, message
     printers = message.DefaultMessenger().Printers()
     for idx in range(printers.Length()):

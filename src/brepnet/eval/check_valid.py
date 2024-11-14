@@ -34,7 +34,7 @@ def save_step_file(step_file, shape):
     step_writer.SetTolerance(1e-1)
     step_writer.Model(True)
     step_writer.Transfer(shape, STEPControl_AsIs)
-    status = step_writer.Write(step_file)
+    status = step_writer.Write(str(step_file))
 
 
 def check_step_valid_soild(step_file, precision=1e-1, return_shape=False, is_set_gloabl=False):
@@ -44,7 +44,7 @@ def check_step_valid_soild(step_file, precision=1e-1, return_shape=False, is_set
             Interface_Static.SetRVal("read.precision.val", 1e-1)
             Interface_Static.SetIVal("read.stdsameparameter.mode", 1)
             Interface_Static.SetIVal("read.surfacecurve.mode", 1)
-        shape = read_step_file(step_file, as_compound=False, verbosity=False)
+        shape = read_step_file(str(step_file), as_compound=False, verbosity=False)
     except:
         return False, None
     if shape.ShapeType() != TopAbs_SOLID:

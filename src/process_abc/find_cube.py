@@ -8,11 +8,11 @@ from OCC.Core.TopAbs import TopAbs_SOLID, TopAbs_FACE
 from OCC.Core.BRep import BRep_Tool
 from tqdm import tqdm
 
-from shared.occ_utils import diable_occ_log, get_primitives
+from shared.occ_utils import disable_occ_log, get_primitives
 
 root = Path("/mnt/e/yilin/data_step/")
 output_root = Path("/mnt/e/yilin/data_flag/")
-diable_occ_log()
+disable_occ_log()
 
 @ray.remote
 def process_file(v_id):

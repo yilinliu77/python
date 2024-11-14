@@ -10,11 +10,11 @@ from tqdm import tqdm
 from OCC.Core.BRepAdaptor import BRepAdaptor_Surface, BRepAdaptor_Curve
 from OCC.Core.GeomAbs import GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BSplineSurface, GeomAbs_Circle, GeomAbs_Line, GeomAbs_Ellipse, GeomAbs_BSplineCurve
             
-from shared.occ_utils import diable_occ_log, get_primitives
+from shared.occ_utils import disable_occ_log, get_primitives
 
 root = Path("/mnt/e/yilin/data_step/")
 output_root = Path("/mnt/e/yilin/data_flag/")
-diable_occ_log()
+disable_occ_log()
 
 @ray.remote
 def process_file(v_id):

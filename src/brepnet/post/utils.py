@@ -20,7 +20,7 @@ from OCC.Core.BRepTools import breptools
 
 from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface, GeomAPI_PointsToBSpline
 from OCC.Core.GeomAbs import GeomAbs_C0, GeomAbs_C1, GeomAbs_C2, GeomAbs_C3, GeomAbs_G1
-from OCC.Core.ShapeAnalysis import ShapeAnalysis_Wire, ShapeAnalysis_Shell
+from OCC.Core.ShapeAnalysis import ShapeAnalysis_Wire, ShapeAnalysis_Shell, ShapeAnalysis_ShapeTolerance
 from OCC.Core.ShapeExtend import ShapeExtend_WireData
 from OCC.Core.ShapeFix import ShapeFix_Face, ShapeFix_Wire, ShapeFix_Edge, ShapeFix_Shell, ShapeFix_Solid, \
     ShapeFix_ComposeShell, ShapeFix_ShapeTolerance
@@ -941,9 +941,11 @@ def set_tolerance(v_item, v_precision):
     tolorancer.SetTolerance(v_item, v_precision)
     return v_item
 
+def get_tolerance(v_item, v_type):
+    tolorancer = ShapeAnalysis_ShapeTolerance()
+    return tolorancer.Tolerance(v_item, v_type)
 
 def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_tolerance):
-    face_fixer = ShapeFix_Face()
     topo_face = BRepBuilderAPI_MakeFace(geom_face, 1e-6).Face()
     is_debug = False
     if len(wire_list) == 6:
@@ -958,6 +960,7 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
             wire_list = [final_wire]
             # is_debug=True
             pass
+    face_fixer = ShapeFix_Face()
     face_fixer.Init(geom_face, connected_tolerance, True)
     fixed_wire_list = []
     for wire in wire_list:
@@ -1015,7 +1018,7 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
         face_fixer.SetFixSmallAreaWireMode(False)
         face_fixer.Perform()
 
-        face_fixer.FixAddNaturalBound()
+        # face_fixer.FixAddNaturalBound()
         face_fixer.FixOrientation()
         face_fixer.FixMissingSeam()
         # face_fixer.FixWiresTwoCoincEdges()
@@ -1029,9 +1032,15 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
 
     face_occ = face_fixer.Face()
     face_occ = set_tolerance(face_occ, connected_tolerance)
+
     if is_debug:
         viz_shapes([face_occ])
-    return face_occ
+
+    face_analyzer = BRepCheck_Analyzer(face_occ)
+    if face_analyzer.IsValid():
+        return face_occ
+    else:
+        return None
 
 
 def drop_edges(face_edges_np, is_edge_closed, drop_edge_num=0, accepted_connected_loss=0.2):
@@ -1126,13 +1135,13 @@ def try_create_trimmed_face(geom_face, topo_face, face_edges, connected_toleranc
 
     if trimmed_face1 is None:
         return wire_list1, trimmed_face1, False
-
-    wire_list2, trimmed_face2, is_face_valid2 = create_trimmed_face2(geom_face, topo_face, face_edges,
-                                                                     connected_tolerance)
-    if is_face_valid2:
-        return wire_list2, trimmed_face2, True
-
-    return wire_list2, trimmed_face2, False
+    #
+    # wire_list2, trimmed_face2, is_face_valid2 = create_trimmed_face2(geom_face, topo_face, face_edges,
+    #                                                                  connected_tolerance)
+    # if is_face_valid2:
+    #     return wire_list2, trimmed_face2, True
+    #
+    # return wire_list2, trimmed_face2, False
 
 
 def get_separated_surface(trimmed_faces, v_precision1=1e-3, v_precision2=1e-1):
@@ -1213,19 +1222,21 @@ def get_solid(trimmed_faces, connected_tolerance):
             fix_solid.SetCreateOpenSolidMode(False)
             fix_solid.Perform()
             solid = fix_solid.Solid()
-        return solid
 
-    except:
+        set_tolerance(solid, 1e-1)
+        if solid.ShapeType() == TopAbs_SOLID and BRepCheck_Analyzer(solid).IsValid():
+            return solid
+        else:
+            return None
+    except Exception as e:
+        print(e)
         return None
 
 
 def construct_brep(v_shape, connected_tolerance, isdebug=False):
-    debug_idx = [8]
+    debug_idx = []
     if isdebug:
         print(f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
-    # v_shape.build_geom(is_replace_edge=True)
-    # if isdebug:
-    #     print(f"{Colors.GREEN}{len(v_shape.replace_edge_idx)} edges are replace{Colors.RESET}")
 
     recon_edge_points = v_shape.recon_edge_points
     recon_geom_faces = v_shape.recon_geom_faces

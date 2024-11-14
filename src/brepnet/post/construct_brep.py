@@ -1,5 +1,7 @@
 import copy
+import math
 import os, sys, shutil, traceback
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -17,7 +19,7 @@ from OCC.Extend.DataExchange import read_step_file
 
 from shared.common_utils import safe_check_dir, check_dir
 from shared.common_utils import export_point_cloud
-from shared.occ_utils import get_primitives
+from shared.occ_utils import get_primitives, disable_occ_log
 from src.brepnet.eval.check_valid import check_step_valid_soild, save_step_file
 
 from src.brepnet.post.utils import *
@@ -64,186 +66,196 @@ def get_data(v_filename):
 
 def construct_brep_from_datanpz(data_root, out_root, folder_name,
                                 is_ray=False, is_log=True,
-                                is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=True, is_save_data=False):
+                                is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=True,
+                                is_save_data=False):
+    disable_occ_log()
     time_records = [0, 0, 0, 0, 0, 0]
     timer = time.time()
-    if not from_scratch and os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
+    data_root = Path(data_root)
+    out_root = Path(out_root)
+    if from_scratch:
+        check_dir(out_root / folder_name)
+
+    # Check if it is already processed
+    if (out_root / folder_name / "success.txt").exists():
         return time_records
-    # print(folder_name)
+    safe_check_dir(out_root / folder_name)
 
-    if os.path.exists(os.path.join(out_root, folder_name + "/success.txt")):
-        os.remove(os.path.join(out_root, folder_name + "/success.txt"))
-
-    printers = Message.message.DefaultMessenger().Printers()
-    for idx in range(printers.Length()):
-        printers.Value(idx + 1).SetTraceLevel(Message_Alarm)
-    if is_log:
-        print(f"{Colors.GREEN}############################# "
-              f"Processing {folder_name} #############################{Colors.RESET}")
-
-    debug_face_save_path = None
+    debug_face_save_path = out_root / folder_name / "debug_face_loop"
     if is_save_data:
-        debug_face_save_path = str(os.path.join(out_root, folder_name, "debug_face_loop"))
         safe_check_dir(debug_face_save_path)
 
-    if from_scratch:
-        safe_check_dir(os.path.join(out_root, folder_name))
-    else:
-        safe_check_dir(os.path.join(out_root, folder_name))
+    if is_log:
+        print(
+            f"{Colors.GREEN}############################# Processing {folder_name} #############################{Colors.RESET}")
 
+    # Prepare the data
     shape = get_data(os.path.join(data_root, folder_name, 'data.npz'))
+    num_faces = len(shape.recon_face_points)
+    num_max_drop = math.ceil(0.2 * num_faces)
+    for num_drop in range(num_max_drop):
 
-    # if shape.recon_face_points.shape[0] < 10:
-    #     shutil.rmtree(os.path.join(out_root, folder_name))
-    #     return
+        if isdebug:
+            export_edges(shape.recon_edge_points, debug_face_save_path / 'edge_ori.obj')
+        shape.remove_half_edges()
+        shape.check_openness()
+        shape.build_fe()
+        shape.build_vertices(0.2)
 
-    if isdebug:
-        export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge_ori.obj'))
-    shape.remove_half_edges()
-    shape.check_openness()
-    shape.build_fe()
-    shape.build_vertices(0.2)
-    # shape.remove_isolated_edges()
-    # if isdebug:
-    #     export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge_before_drop.obj'))
-    # shape.drop_edges(max_drop_num=2)
-    # if isdebug:
-    #     export_edges(shape.recon_edge_points, os.path.join(debug_face_save_path, 'edge_after_drop1.obj'))
+        if not shape.have_data:
+            if is_log:
+                print(f"{Colors.RED}No data in {folder_name}{Colors.RESET}")
+            # shutil.rmtree(os.path.join(out_root, folder_name))
+            return [0, 0, 0, 0, 0, 0]
 
-    if not shape.have_data:
-        if is_log:
-            print(f"{Colors.RED}No data in {folder_name}{Colors.RESET}")
-        # shutil.rmtree(os.path.join(out_root, folder_name))
-        return [0, 0, 0, 0, 0, 0]
+        if isdebug:
+            print(
+                f"{Colors.GREEN}Remove {len(shape.remove_edge_idx_src) + len(shape.remove_edge_idx_new)} edges{Colors.RESET}")
 
-    if isdebug:
-        print(f"{Colors.GREEN}Remove {len(shape.remove_edge_idx_src) + len(shape.remove_edge_idx_new)} edges{Colors.RESET}")
-
-    time_records[0] = time.time() - timer
-    timer = time.time()
-
-    if is_save_data:
-        export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), shape.recon_face_points.reshape(-1, 3))
-        updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx_new, axis=0)
-        export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'edge.obj'))
-        for face_idx in range(len(shape.face_edge_adj)):
-            export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}.ply"),
-                               shape.recon_face_points[face_idx].reshape(-1, 3))
-            for edge_idx in shape.face_edge_adj[face_idx]:
-                idx = np.where(shape.edge_face_connectivity[:, 0] == edge_idx)[0][0]
-                adj_face = shape.edge_face_connectivity[idx][1:]
-                export_point_cloud(
-                        os.path.join(debug_face_save_path, f"face{face_idx}_edge_idx{edge_idx}_face{adj_face}.ply"),
-                        shape.recon_edge_points[edge_idx].reshape(-1, 3),
-                        np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
-        for edge_idx in range(len(shape.recon_edge_points)):
-            if edge_idx in shape.remove_edge_idx_new:
-                continue
-            export_point_cloud(os.path.join(
-                    debug_face_save_path, f'edge{edge_idx}.ply'),
-                    shape.recon_edge_points[edge_idx].reshape(-1, 3),
-                    np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
-
-    if is_optimize_geom:
-        interpolation_face = []
-        for item in shape.interpolation_face:
-            interpolation_face.append(item)
-
-        if not is_ray:
-            shape.recon_face_points, shape.recon_edge_points = optimize(
-                    interpolation_face, shape.recon_edge_points, shape.recon_face_points,
-                    shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                    shape.face_edge_adj, v_islog=isdebug, v_max_iter=200, use_cuda=use_cuda)
-        else:
-            shape.recon_face_points, shape.recon_edge_points = optimize(
-                    shape.interpolation_face, shape.recon_edge_points, shape.recon_face_points,
-                    shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                    shape.face_edge_adj, v_islog=False, v_max_iter=200, use_cuda=use_cuda)
-            # shape.recon_edge_points = ray.get(task)
+        time_records[0] = time.time() - timer
+        timer = time.time()
 
         if is_save_data:
+            export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), shape.recon_face_points.reshape(-1, 3))
             updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx_new, axis=0)
-            export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'optimized_edge.obj'))
+            export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'edge.obj'))
             for face_idx in range(len(shape.face_edge_adj)):
+                export_point_cloud(os.path.join(debug_face_save_path, f"face{face_idx}.ply"),
+                                   shape.recon_face_points[face_idx].reshape(-1, 3))
                 for edge_idx in shape.face_edge_adj[face_idx]:
                     idx = np.where(shape.edge_face_connectivity[:, 0] == edge_idx)[0][0]
                     adj_face = shape.edge_face_connectivity[idx][1:]
                     export_point_cloud(
-                            os.path.join(debug_face_save_path, f"face{face_idx}_optim_edge_idx{edge_idx}_face{adj_face}.ply"),
-                            shape.recon_edge_points[edge_idx].reshape(-1, 3),
-                            np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+                        os.path.join(debug_face_save_path, f"face{face_idx}_edge_idx{edge_idx}_face{adj_face}.ply"),
+                        shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                        np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
             for edge_idx in range(len(shape.recon_edge_points)):
                 if edge_idx in shape.remove_edge_idx_new:
                     continue
-                export_point_cloud(
+                export_point_cloud(os.path.join(
+                    debug_face_save_path, f'edge{edge_idx}.ply'),
+                    shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                    np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+
+        # Optimize data before sewing
+        if is_optimize_geom:
+            interpolation_face = []
+            for item in shape.interpolation_face:
+                interpolation_face.append(item)
+
+            if not is_ray:
+                shape.recon_face_points, shape.recon_edge_points = optimize(
+                    interpolation_face, shape.recon_edge_points, shape.recon_face_points,
+                    shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
+                    shape.face_edge_adj, v_islog=isdebug, v_max_iter=200, use_cuda=use_cuda)
+            else:
+                shape.recon_face_points, shape.recon_edge_points = optimize(
+                    shape.interpolation_face, shape.recon_edge_points, shape.recon_face_points,
+                    shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
+                    shape.face_edge_adj, v_islog=False, v_max_iter=200, use_cuda=use_cuda)
+
+            if is_save_data:
+                updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx_new, axis=0)
+                export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'optimized_edge.obj'))
+                for face_idx in range(len(shape.face_edge_adj)):
+                    for edge_idx in shape.face_edge_adj[face_idx]:
+                        idx = np.where(shape.edge_face_connectivity[:, 0] == edge_idx)[0][0]
+                        adj_face = shape.edge_face_connectivity[idx][1:]
+                        export_point_cloud(
+                            os.path.join(debug_face_save_path,
+                                         f"face{face_idx}_optim_edge_idx{edge_idx}_face{adj_face}.ply"),
+                            shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                            np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+                for edge_idx in range(len(shape.recon_edge_points)):
+                    if edge_idx in shape.remove_edge_idx_new:
+                        continue
+                    export_point_cloud(
                         os.path.join(debug_face_save_path, f'optim_edge{edge_idx}.ply'),
                         shape.recon_edge_points[edge_idx].reshape(-1, 3),
                         np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
 
-    time_records[1] = time.time() - timer
-    timer = time.time()
+        time_records[1] = time.time() - timer
+        timer = time.time()
 
-    shape.build_geom(is_replace_edge=True)
-    if isdebug:
-        print(f"{Colors.GREEN}{len(shape.replace_edge_idx)} edges are replace{Colors.RESET}")
+        shape.build_geom(is_replace_edge=True)
+        if isdebug:
+            print(f"{Colors.GREEN}{len(shape.replace_edge_idx)} edges are replace{Colors.RESET}")
 
-    # Construct Brep from face_points, edge_points, face_edge_adj
-    solid = None
-    mesh = None
-    is_successful = False
-    for i in range(len(CONNECT_TOLERANCE)):
-        connected_tolerance = CONNECT_TOLERANCE[i]
-        if is_log:
-            print(f"Try connected_tolerance {connected_tolerance}")
-        # solid, faces_result = construct_brep(shape, connected_tolerance,
-        #                                      isdebug=isdebug, is_save_face=True,
-        #                                      folder_path=os.path.join(out_root, folder_name))
-        is_face_success_list, mesh, solid = construct_brep(shape, connected_tolerance, isdebug=isdebug)
+        # Write separate faces
+        v, f = get_separated_surface(shape.recon_topo_faces, v_precision1=0.1, v_precision2=0.2)
+        trimesh.Trimesh(vertices=v, faces=f).export(out_root / folder_name / "separate_faces.ply")
 
-        # Check
-        if mesh is None or solid is None:
-            continue
-        if solid.ShapeType() == TopAbs_COMPOUND:
-            continue
+        # Construct trimmed surface
+        num_faces = len(shape.recon_topo_faces)
+        trimmed_faces = []
+        for i_face in range(num_faces):
+            if len(shape.face_edge_adj[i_face]) == 0:
+                continue
+            face_edge_idx = shape.face_edge_adj[i_face]
+            geom_face = shape.recon_geom_faces[i_face]
+            topo_face = shape.recon_topo_faces[i_face]
+            face_edges = [shape.recon_edge[edge_idx] for edge_idx in face_edge_idx]
+            face_edges_numpy = shape.recon_edge_points[face_edge_idx]
+            is_edge_closed_c = [shape.openness[edge_idx] for edge_idx in face_edge_idx]
 
-        # shape_tol_setter = ShapeFix_ShapeTolerance()
-        # shape_tol_setter.SetTolerance(solid, 1e-1)
-        # analyzer = BRepCheck_Analyzer(solid)
-        # if not analyzer.IsValid():
-        #     result = analyzer.Result(solid)
-        #     continue
-        #
-        # if solid.ShapeType() == TopAbs_SOLID and analyzer.IsValid():
-        #     is_successful = True
-        # else:
-        #     is_successful = False
+            # Build wire
+            wire_list = None
+            for wire_threshold in CONNECT_TOLERANCE:
+                wire_list = create_wire_from_unordered_edges(face_edges, wire_threshold)
+                if wire_list is not None:
+                    break
 
-        save_step_file(os.path.join(out_root, folder_name, 'recon_brep.step'), solid)
-        if not check_step_valid_soild(os.path.join(out_root, folder_name, 'recon_brep.step')):
-            continue
-        break
+            if wire_list is None:
+                raise ValueError(f"Failed to create wire for face {i_face}")
 
-    time_records[2] = time.time() - timer
-    timer = time.time()
+            # Build surface
+            trimmed_face = None
+            for trim_threshold in CONNECT_TOLERANCE:
+                trimmed_face = create_trimmed_face_from_wire(geom_face, face_edges, wire_list, trim_threshold)
+                if trimmed_face is not None:
+                    break
 
-    if mesh is not None:
-        mesh.export(os.path.join(out_root, folder_name, 'recon_brep.ply'))
+            trimmed_faces.append(trimmed_face)
 
-    if solid is not None:
-        try:
-            save_step_file(os.path.join(out_root, folder_name, 'recon_brep.step'), solid)
-            if check_step_valid_soild(os.path.join(out_root, folder_name, 'recon_brep.step')):
-                open(os.path.join(out_root, folder_name, 'success.txt'), 'w').close()
-                write_stl_file(solid, os.path.join(out_root, folder_name, 'recon_brep.stl'), linear_deflection=0.01,
-                               angular_deflection=0.1)
-        except:
+        # Write trimmed faces
+        mixed_faces = []
+        for i_face in range(num_faces):
+            if trimmed_faces[i_face] is None:
+                face = BRepBuilderAPI_MakeFace(shape.recon_geom_faces[i_face], 1e-6).Face()
+                mixed_faces.append(face)
+            else:
+                mixed_faces.append(trimmed_faces[i_face])
+        v, f = get_separated_surface(mixed_faces, v_precision1=0.1, v_precision2=0.2)
+        trimesh.Trimesh(vertices=v, faces=f).export(out_root / folder_name / "recon_brep.ply")
+
+        time_records[2] = time.time() - timer
+        timer = time.time()
+
+        trimmed_faces = [face for face in trimmed_faces if face is not None]
+        if len(trimmed_faces) < 0.8 * num_faces:
+            return time_records
+
+        # Construct Solid
+        solid = None
+        for connected_tolerance in CONNECT_TOLERANCE:
+            if is_log:
+                print(f"Try connected_tolerance {connected_tolerance}")
+            solid = get_solid(trimmed_faces, connected_tolerance)
+            if solid is not None:
+                break
+
+        if solid is None: # Build failed
             pass
+        else:
+            open(out_root / folder_name / "success.txt", 'w').close()
+            write_stl_file(solid, str(out_root / folder_name / "recon_brep.stl"), linear_deflection=0.1, angular_deflection=0.2)
+            save_step_file(out_root / folder_name / 'recon_brep.step', solid)
+            if not check_step_valid_soild(out_root / folder_name / 'recon_brep.step'):
+                print(f"Inconsistent solid check in {folder_name}")
 
-    time_records[3] = time.time() - timer
-    timer = time.time()
+        time_records[3] = time.time() - timer
+        timer = time.time()
     return time_records
-    # if not is_successful:
-    #     shutil.rmtree(os.path.join(out_root, folder_name))
 
 
 def test_construct_brep(v_data_root, v_out_root, v_prefix, use_cuda):
@@ -260,7 +272,6 @@ if __name__ == '__main__':
     parser.add_argument('--data_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test")
     parser.add_argument('--list', type=str, default="")
     parser.add_argument('--out_root', type=str, default=r"E:\data\img2brep\0924_0914_dl8_ds256_context_kl_v5_test_out")
-    parser.add_argument('--is_cover', type=bool, default=False)
     parser.add_argument('--num_cpus', type=int, default=12)
     parser.add_argument('--use_ray', action='store_true')
     parser.add_argument('--prefix', type=str, default="")
@@ -269,7 +280,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     v_data_root = args.data_root
     v_out_root = args.out_root
-    is_cover = args.is_cover
     filter_list = args.list
     is_use_ray = args.use_ray
     num_cpus = args.num_cpus
@@ -293,17 +303,9 @@ if __name__ == '__main__':
         else:
             raise ValueError(f"Invalid list {filter_list}")
         all_folders = list(set(all_folders) & set(valid_prefies))
-    # all_folders = os.listdir(r"E:\data\img2brep\.43\2024_09_22_21_57_44_0921_pure_out3_failed")
-    # check_dir(v_out_root)
-
-    # print(f"Total {len(all_folders)} folders")
-    # if not is_cover:
-    # print(f"Skip existing folders")
-    # all_folders = [folder for folder in all_folders if not os.path.exists(os.path.join(v_out_root, folder))]
-    # print(f"Total {len(all_folders)} folders to process")
 
     all_folders.sort()
-    # all_folders = all_folders[:100]
+    all_folders = all_folders[:100]
 
     print(f"Total {len(all_folders)} folders")
 
@@ -315,21 +317,22 @@ if __name__ == '__main__':
                                         is_save_data=False, is_log=False, is_optimize_geom=True, is_ray=False, )
     else:
         ray.init(
-                dashboard_host="0.0.0.0",
-                dashboard_port=8080,
-                num_cpus=num_cpus,
-                # num_gpus=num_gpus,
-                # local_mode=True
+            dashboard_host="0.0.0.0",
+            dashboard_port=8080,
+            num_cpus=num_cpus,
+            # num_gpus=num_gpus,
+            # local_mode=True
         )
-        construct_brep_from_datanpz_ray = ray.remote(num_gpus=0.1 if use_cuda else 0, max_retries=0)(construct_brep_from_datanpz)
+        construct_brep_from_datanpz_ray = ray.remote(num_gpus=0.1 if use_cuda else 0, max_retries=0)(
+            construct_brep_from_datanpz)
 
         tasks = []
         for i in range(len(all_folders)):
             tasks.append(construct_brep_from_datanpz_ray.remote(
-                    v_data_root, v_out_root,
-                    all_folders[i],
-                    use_cuda=use_cuda, from_scratch=from_scratch,
-                    is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False,
+                v_data_root, v_out_root,
+                all_folders[i],
+                use_cuda=use_cuda, from_scratch=from_scratch,
+                is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False,
             ))
         results = []
         for i in tqdm(range(len(all_folders))):

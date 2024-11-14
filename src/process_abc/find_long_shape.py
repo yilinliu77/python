@@ -8,13 +8,13 @@ from OCC.Core.TopAbs import TopAbs_SOLID, TopAbs_FACE
 from OCC.Core import BRepBndLib, TopoDS
 from OCC.Core.Bnd import Bnd_Box
 
-from shared.occ_utils import diable_occ_log
+from shared.occ_utils import disable_occ_log
 
 ratio = 10
 
 root = Path("/mnt/e/yilin/data_step/")
 output_root = Path("/mnt/e/yilin/data_flag/")
-diable_occ_log()
+disable_occ_log()
 
 @ray.remote
 def process_file(v_id):

@@ -116,7 +116,7 @@ weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
 IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, False
 CONTINUITY = GeomAbs_C2
 
-INTERPOLATION_PRECISION = 0.001
+INTERPOLATION_PRECISION = 0.1
 
 
 # EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
@@ -142,17 +142,29 @@ def interpolation_face_points(face, is_use_cuda=False, precision=INTERPOLATION_P
             face = torch.from_numpy(face)
 
     res = face.shape[0]
-    x_density = (torch.linalg.norm(face[0, 0] - face[0, 1], dim=-1) / precision).to(torch.long)
-    # x_density = torch.clamp(x_density, min=1, max=200) * res
-    y_density = (torch.linalg.norm(face[0, 0] - face[1, 0], dim=-1) / precision).to(torch.long)
-    # y_density = torch.clamp(y_density, min=1, max=200) * res
+    x_density = (res * torch.linalg.norm(face[0, 0] - face[0, 1], dim=-1) / precision).to(torch.long)
+    y_density = (res * torch.linalg.norm(face[0, 0] - face[1, 0], dim=-1) / precision).to(torch.long)
+    x_density, y_density = max(x_density, res), max(y_density, res)
     x = torch.linspace(-1., 1., x_density).to(face.device)
     y = torch.linspace(-1, 1, y_density).to(face.device)
     x, y = torch.meshgrid(x, y, indexing='ij')
     coords = torch.stack([x, y], dim=-1).reshape(1, -1, 1, 2)
-    face = torch.nn.functional.grid_sample(face[None].permute(0, 3, 1, 2), coords, align_corners=True)[0, :, :, 0].permute(1, 0)
+    interpolation_face = torch.nn.functional.grid_sample(face[None].permute(0, 3, 1, 2),
+                                                         coords, align_corners=True)[0, :, :, 0].permute(1, 0)
     # trimesh.PointCloud(face.cpu().numpy()).export(r'E:\data\img2brep\debug.ply')
-    return face
+    assert interpolation_face.shape[0] >= res * res
+    return interpolation_face
+
+
+def interpolation_edge_points_batch(edges, num_points=100):
+    B, N, _ = edges.shape
+    num_segments = N - 1
+    t_values = torch.linspace(0, 1, num_points, device=edges.device).view(1, -1, 1)
+    start_points = edges[:, :-1].unsqueeze(2)  # Shape: (B, num_segments, 1, 3)
+    end_points = edges[:, 1:].unsqueeze(2)  # Shape: (B, num_segments, 1, 3)
+    interpolated_segments = (1 - t_values) * start_points + t_values * end_points
+    interpolated_points = interpolated_segments.view(B, -1, 3)
+    return interpolated_points
 
 
 class Shape:
@@ -497,6 +509,31 @@ class Shape:
                     self.replace_edge_idx.append(edge_idx)
         pass
 
+    def fix_missing_edges(self):
+        inv_edge_face_connectivity = {}
+        for edge_idx, face_idx1, face_idx2 in self.edge_face_connectivity:
+            inv_edge_face_connectivity[(face_idx1, face_idx2)] = edge_idx
+            inv_edge_face_connectivity[(face_idx2, face_idx1)] = edge_idx
+
+        face_num = len(self.recon_face_points)
+        for i in range(face_num):
+            for j in range(i + 1, face_num):
+                face1 = self.interpolation_face[i].to(self.device)
+                face2 = self.interpolation_face[j].to(self.device)
+                dist_face1_to_face2 = torch.sqrt(self.chamferdist(
+                        face1.reshape(1, -1, 3),
+                        self.interpolation_face[j][None], bidirectional=False, batch_reduction=None, point_reduction=None))
+                dist_face2_to_face1 = torch.sqrt(self.chamferdist(
+                        face2.reshape(1, -1, 3),
+                        self.interpolation_face[i][None], bidirectional=False, batch_reduction=None, point_reduction=None))
+                dis_face_to_face = torch.min(dist_face1_to_face2.min(), dist_face2_to_face1.min())
+                if dis_face_to_face > 0.001:
+                    continue
+                if not (i, j) in inv_edge_face_connectivity:
+                    # create edge
+                    pass
+        pass
+
 
 def apply_transform_batch(tensor, transform):
     src_shape = tensor.shape
@@ -652,7 +689,10 @@ def optimize(
 
     transformed_edges = apply_transform_batch(edge_points, edge_st).detach().cpu().numpy()
     transformed_faces = apply_offset_batch(face_points, face_t).detach().cpu().numpy()
-    return transformed_faces, transformed_edges
+    for idx in range(len(interpolation_face)):
+        interpolation_face[idx] = apply_offset_batch(interpolation_face[idx].unsqueeze(0),
+                                                     face_t[idx].unsqueeze(0)).squeeze(0).detach().cpu()
+    return transformed_faces, transformed_edges, interpolation_face
 
 
 # @ray.remote(num_gpus=0.05)

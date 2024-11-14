@@ -145,17 +145,13 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
                     np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
 
     if is_optimize_geom:
-        interpolation_face = []
-        for item in shape.interpolation_face:
-            interpolation_face.append(item)
-
         if not is_ray:
-            shape.recon_face_points, shape.recon_edge_points = optimize(
-                    interpolation_face, shape.recon_edge_points, shape.recon_face_points,
+            shape.recon_face_points, shape.recon_edge_points, shape.interpolation_face = optimize(
+                    shape.interpolation_face, shape.recon_edge_points, shape.recon_face_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
                     shape.face_edge_adj, v_islog=isdebug, v_max_iter=200, use_cuda=use_cuda)
         else:
-            shape.recon_face_points, shape.recon_edge_points = optimize(
+            shape.recon_face_points, shape.recon_edge_points, shape.interpolation_face = optimize(
                     shape.interpolation_face, shape.recon_edge_points, shape.recon_face_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
                     shape.face_edge_adj, v_islog=False, v_max_iter=200, use_cuda=use_cuda)
@@ -165,6 +161,10 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
             updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx_new, axis=0)
             export_edges(updated_edge_points, os.path.join(debug_face_save_path, 'optimized_edge.obj'))
             for face_idx in range(len(shape.face_edge_adj)):
+                export_point_cloud(os.path.join(debug_face_save_path, f"optimized_face{face_idx}.ply"),
+                                   shape.recon_face_points[face_idx].reshape(-1, 3))
+                export_point_cloud(os.path.join(debug_face_save_path, f"interpolation_face{face_idx}.ply"),
+                                   shape.interpolation_face[face_idx].numpy().reshape(-1, 3))
                 for edge_idx in shape.face_edge_adj[face_idx]:
                     idx = np.where(shape.edge_face_connectivity[:, 0] == edge_idx)[0][0]
                     adj_face = shape.edge_face_connectivity[idx][1:]
@@ -184,6 +184,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name,
     timer = time.time()
 
     shape.build_geom(is_replace_edge=True)
+    # shape.fix_missing_edges()
     if isdebug:
         print(f"{Colors.GREEN}{len(shape.replace_edge_idx)} edges are replace{Colors.RESET}")
 

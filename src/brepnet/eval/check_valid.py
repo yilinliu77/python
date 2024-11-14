@@ -39,15 +39,22 @@ def save_step_file(step_file, shape):
 
 def check_step_valid_soild(step_file, precision=1e-1, return_shape=False, is_set_gloabl=False):
     try:
-        Interface_Static.SetIVal("read.precision.mode", 2)
-        Interface_Static.SetRVal("read.precision.val", 1e-1)
-        Interface_Static.SetIVal("read.stdsameparameter.mode", 1)
-        Interface_Static.SetIVal("read.surfacecurve.mode", 3)
+        if not is_set_gloabl:
+            Interface_Static.SetIVal("read.precision.mode", 2)
+            Interface_Static.SetRVal("read.precision.val", 1e-1)
+            Interface_Static.SetIVal("read.stdsameparameter.mode", 1)
+            Interface_Static.SetIVal("read.surfacecurve.mode", 3)
         shape = read_step_file(step_file, as_compound=False, verbosity=False)
     except:
-        return False, None
+        if return_shape:
+            return False, None
+        else:
+            return False
     if shape.ShapeType() != TopAbs_SOLID:
-        return False, None
+        if return_shape:
+            return False, None
+        else:
+            return False
     shape_tol_setter = ShapeFix_ShapeTolerance()
     shape_tol_setter.SetTolerance(shape, precision)
     analyzer = BRepCheck_Analyzer(shape)

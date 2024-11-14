@@ -329,7 +329,7 @@ if __name__ == '__main__':
         all_folders = list(set(all_folders) & set(valid_prefies))
 
     all_folders.sort()
-    all_folders = all_folders[:500]
+    all_folders = all_folders
 
     print(f"Total {len(all_folders)} folders")
 
@@ -360,12 +360,14 @@ if __name__ == '__main__':
                 use_cuda=use_cuda, from_scratch=from_scratch,
                 is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False,
             ))
-        results = ray.get(tasks)
-        # results = []
-        # for i in tqdm(range(len(all_folders))):
-        #     results.append(ray.get(tasks[i]))
-        # # results = [item for item in results if item is not None]
-        # # print(len(results))
-        # # results = np.array(results)
-        # # print(results.mean(axis=0))
+        results = []
+        for i in tqdm(range(len(all_folders))):
+            try:
+                results.append(ray.get(tasks[i]))
+            except:
+                results.append(None)
+        results = [item for item in results if item is not None]
+        print(len(results))
+        results = np.array(results)
+        print(results.mean(axis=0))
     print("Done")

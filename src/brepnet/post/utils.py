@@ -1030,6 +1030,8 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
         return None
 
     face_occ = face_fixer.Face()
+    if face_occ.IsNull():
+        return None
     face_occ = set_tolerance(face_occ, connected_tolerance)
 
     if is_debug:

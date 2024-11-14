@@ -628,7 +628,7 @@ def optimize(
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        if iter == v_max_iter - 2 and corners_loss.item() > 0.0001:
+        if iter == v_max_iter - 2 and corners_loss.item() > 0.001:
             if v_max_iter + init_max_iter > final_max_iter:
                 v_max_iter = final_max_iter
             else:

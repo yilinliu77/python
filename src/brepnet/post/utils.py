@@ -143,9 +143,8 @@ def interpolation_face_points(face, is_use_cuda=False, precision=INTERPOLATION_P
 
     res = face.shape[0]
     x_density = (torch.linalg.norm(face[0, 0] - face[0, 1], dim=-1) / precision).to(torch.long)
-    # x_density = torch.clamp(x_density, min=1, max=200) * res
     y_density = (torch.linalg.norm(face[0, 0] - face[1, 0], dim=-1) / precision).to(torch.long)
-    # y_density = torch.clamp(y_density, min=1, max=200) * res
+    x_density, y_density = max(x_density, 2), max(y_density, 2)
     x = torch.linspace(-1., 1., x_density).to(face.device)
     y = torch.linspace(-1, 1, y_density).to(face.device)
     x, y = torch.meshgrid(x, y, indexing='ij')

@@ -5,20 +5,22 @@ import numpy as np
 
 from OCC.Core.STEPControl import STEPControl_Reader
 from OCC.Core.TopAbs import TopAbs_SOLID, TopAbs_FACE, TopAbs_EDGE
-from OCC.Core.BRepTools import BRep_Tool
-from OCC.Core import BRepBndLib, TopoDS
-from OCC.Core.Bnd import Bnd_Box
-
+from OCC.Core.BRep import BRep_Tool
+from tqdm import tqdm
+from OCC.Core.BRepAdaptor import BRepAdaptor_Surface, BRepAdaptor_Curve
+from OCC.Core.GeomAbs import GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BSplineSurface, GeomAbs_Circle, GeomAbs_Line, GeomAbs_Ellipse, GeomAbs_BSplineCurve
+            
 from shared.occ_utils import diable_occ_log, get_primitives
 
-ratio = 10
-
-root = Path("/mnt/e/data/")
+root = Path("/mnt/e/yilin/data_step/")
+output_root = Path("/mnt/e/yilin/data_flag/")
 diable_occ_log()
 
 @ray.remote
 def process_file(v_id):
     try:
+        if (output_root/(v_id+"_others")).exists():
+            return True
         # Take the ".step" file
         step_file = [item for item in os.listdir(root / v_id) if item.endswith(".step")][0]
         step_file = str(root / v_id / step_file)
@@ -36,20 +38,20 @@ def process_file(v_id):
 
         for face in faces:
             surface = BRepAdaptor_Surface(face)
-
             if surface.GetType() not in [GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone,
                                             GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BSplineSurface]:
+                open(output_root/(v_id+"_others"), "w").close()
                 return True
         for edge in edges:
             edge = BRepAdaptor_Curve(edge)
             if edge.GetType() not in [GeomAbs_Circle, GeomAbs_Line, GeomAbs_Ellipse, GeomAbs_BSplineCurve]:
+                open(output_root/(v_id+"_others"), "w").close()
                 return True
-
         return False
-
     except Exception as e:
         print(e)
-        return False
+        open(output_root/(v_id+"_others"), "w").close()
+        return True
 
 
 if __name__ == "__main__":
@@ -70,15 +72,16 @@ if __name__ == "__main__":
             process_file(id)
     else:
         ray.init(
-
+            # local_mode=True,
+            # num_cpus=1,
         )
 
         tasks = []
         for id in ids:
             tasks.append(process_file.remote(id))
         valid_ids = []
-        for i in range(num_tasks):
+        for i in tqdm(range(num_tasks)):
             if ray.get(tasks[i]):
                 valid_ids.append(ids[i])
         np.savetxt("src/process_abc/abc_others.txt", valid_ids, fmt="%s")
-        print("Found {} cubes".format(len(valid_ids)))
+        print("Found {} others".format(len(valid_ids)))

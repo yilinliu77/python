@@ -103,7 +103,7 @@ ROUGH_FITTING_TOLERANCE = 1e-1
 
 FIX_TOLERANCE = 1e-2
 FIX_PRECISION = 1e-2
-# CONNECT_TOLERANCE = [0.01, ]
+# CONNECT_TOLERANCE = [0.02, ]
 CONNECT_TOLERANCE = [2e-3, 6e-3, 1e-2, 1.5e-2, 2e-2, 2.5e-2, 5e-2, 8e-2, ]
 SEWING_TOLERANCE = 1e-1
 REMOVE_EDGE_TOLERANCE = 1e-3
@@ -115,6 +115,8 @@ FIX_GAP_TOLERANCE = 1e-1
 weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
 IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, False
 CONTINUITY = GeomAbs_C2
+
+INTERPOLATION_PRECISION = 0.001
 
 
 # EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
@@ -132,7 +134,7 @@ CONTINUITY = GeomAbs_C2
 # IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, True
 # CONTINUITY = GeomAbs_C2
 
-def interpolation_face_points(face, is_use_cuda=False, density_scale=10, precision=0.0005):
+def interpolation_face_points(face, is_use_cuda=False, precision=INTERPOLATION_PRECISION):
     if type(face) is np.ndarray:
         if is_use_cuda:
             face = torch.from_numpy(face).cuda()
@@ -523,8 +525,8 @@ def apply_offset_batch(tensor, offsets):
 def optimize(
         v_interpolation_face, recon_edge_points, recon_face_points,
         edge_face_connectivity, is_end_point, pair1,
-        face_edge_adj, v_islog=True, v_max_iter=1000):
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+        face_edge_adj, v_islog=True, v_max_iter=1000, use_cuda=True):
+    device = torch.device('cuda') if torch.cuda.is_available() and use_cuda else torch.device('cpu')
     interpolation_face = []
     for item in v_interpolation_face:
         # interpolation_face.append(torch.from_numpy(item.copy()).to(device))
@@ -552,7 +554,7 @@ def optimize(
     optimizer = torch.optim.AdamW([edge_st, face_t], lr=1e-3, betas=(0.95, 0.999), eps=1e-08)
     # optimizer = torch.optim.SGD([edge_st, face_t], lr=5e-4)
 
-    init_max_iter = 200
+    init_max_iter = v_max_iter
     final_max_iter = init_max_iter * 3
     init_loss = float('inf')
     best_loss = float('inf')
@@ -627,9 +629,12 @@ def optimize(
         loss.backward()
         optimizer.step()
         if iter == v_max_iter - 2 and corners_loss.item() > 0.001:
-            v_max_iter += init_max_iter
+            if v_max_iter + init_max_iter > final_max_iter:
+                v_max_iter = final_max_iter
+            else:
+                v_max_iter += init_max_iter
             if v_islog:
-                pbar.total += init_max_iter
+                pbar.total = v_max_iter
         if v_islog:
             pbar.set_postfix(loss=loss.item(),
                              adj=adj_distance_loss.cpu().item(),
@@ -637,8 +642,6 @@ def optimize(
                              connect=wire_connected_loss.cpu().item())
             pbar.update(1)
         iter += 1
-        if iter >= final_max_iter:
-            break
 
     if v_islog:
         print('Optimization finished!')
@@ -946,12 +949,15 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
     if len(wire_list) == 6:
         # is_debug=True
         pass
-    if (geom_face.IsUPeriodic() or geom_face.IsVPeriodic()) and len(face_edges) == 2 and len(get_primitives(topo_face, TopAbs_WIRE)) == 1:
-        final_wire = get_primitives(topo_face, TopAbs_WIRE)[0]
-        final_wire = set_tolerance(final_wire, connected_tolerance)
-        wire_list = [final_wire]
-        # is_debug=True
-        pass
+    if (geom_face.IsUPeriodic() or geom_face.IsVPeriodic()) and len(get_primitives(topo_face, TopAbs_WIRE)) == 1 and len(face_edges) == 2:
+        length_edge1 = get_edge_length(face_edges[0])
+        length_edge2 = get_edge_length(face_edges[1])
+        if abs(length_edge1 - length_edge2) < 0.01:
+            final_wire = get_primitives(topo_face, TopAbs_WIRE)[0]
+            final_wire = set_tolerance(final_wire, connected_tolerance)
+            wire_list = [final_wire]
+            # is_debug=True
+            pass
     face_fixer.Init(geom_face, connected_tolerance, True)
     fixed_wire_list = []
     for wire in wire_list:
@@ -962,8 +968,8 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
         wire_fixer.SetMaxTolerance(connected_tolerance)
         wire_fixer.SetPrecision(connected_tolerance)
         wire_fixer.FixGaps3d()
-        wire_fixer.FixGaps2d()
-        wire_fixer.Perform()
+        # wire_fixer.FixGaps2d()
+        # wire_fixer.Perform()
 
         # when only one edge, and being gap fixing, but still not closed, skip
         if wire_fixer.Wire().NbChildren() == 1 and not wire_fixer.Wire().Closed():
@@ -983,7 +989,7 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
             continue
 
         fixed_wire = set_tolerance(fixed_wire, connected_tolerance)
-        face_fixer.Add(wire)
+        face_fixer.Add(fixed_wire)
         fixed_wire_list.append(fixed_wire)
 
     if len(fixed_wire_list) == 0:
@@ -1265,7 +1271,7 @@ def construct_brep(v_shape, connected_tolerance, isdebug=False):
 
     result = [is_face_success_list, None, None]
     # if len(trimmed_faces) > 2:
-    if len(trimmed_faces) == len(recon_geom_faces):
+    if len(trimmed_faces) > int(0.8 * len(recon_geom_faces)):
         v, f = get_separated_surface(trimmed_faces, v_precision1=0.1, v_precision2=0.2)
         separated_surface = trimesh.Trimesh(vertices=v, faces=f)
         result[1] = separated_surface

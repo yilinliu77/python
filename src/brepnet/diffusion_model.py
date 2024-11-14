@@ -770,3 +770,80 @@ class Diffusion_condition(nn.Module):
             loss["l2"] = self.loss(pred, face_z)
             loss["diffusion_loss"] += loss["l2"]
         return loss
+
+
+class Diffusion_condition_beta005(Diffusion_condition):
+    def __init__(self, v_conf, ):
+        super().__init__(v_conf)
+        self.noise_scheduler = DDPMScheduler(
+            num_train_timesteps=1000,
+            beta_schedule="linear",
+            prediction_type=v_conf["diffusion_type"],
+            beta_start=0.0001,
+            beta_end=0.05,
+            clip_sample=False,
+        )
+
+class Diffusion_condition_beta01(Diffusion_condition):
+    def __init__(self, v_conf, ):
+        super().__init__(v_conf)
+        self.noise_scheduler = DDPMScheduler(
+            num_train_timesteps=1000,
+            beta_schedule="linear",
+            prediction_type=v_conf["diffusion_type"],
+            beta_start=0.0001,
+            beta_end=0.1,
+            clip_sample=False,
+        )
+
+class Diffusion_condition_vel(Diffusion_condition):
+    def __init__(self, v_conf, ):
+        super().__init__(v_conf)
+        self.noise_scheduler = DDPMScheduler(
+            num_train_timesteps=1000,
+            beta_schedule="linear",
+            prediction_type="v_prediction",
+            beta_start=0.0001,
+            beta_end=0.02,
+            clip_sample=False,
+        )
+
+    def forward(self, v_data, v_test=False, **kwargs):
+        encoding_result = self.get_z(v_data, v_test)
+        face_z = encoding_result["padded_face_z"]
+        device = face_z.device
+        bs = face_z.size(0)
+        timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bs,), device=device).long()
+
+        condition = self.extract_condition(v_data)
+        noise = torch.randn(face_z.shape, device=device)
+        noise_input = self.noise_scheduler.add_noise(face_z, noise, timesteps)
+
+        # Model
+        pred = self.diffuse(noise_input, timesteps, condition)
+        
+        loss = {}
+        gt_velocity = self.noise_scheduler.get_velocity(face_z, noise, timesteps)
+        loss_item = self.loss(pred, gt_velocity, reduction="none")
+        loss["diffusion_loss"] = loss_item.mean()
+        if self.pad_method == "zero":
+            mask = torch.logical_not((face_z.abs() < 1e-4).all(dim=-1))
+            label = self.classifier(pred)
+            classification_loss = nn.functional.binary_cross_entropy_with_logits(label[..., 0], mask.float())
+            if self.loss == nn.functional.l1_loss:
+                classification_loss = classification_loss * 1e-1
+            else:
+                classification_loss = classification_loss * 1e-4
+            loss["classification"] = classification_loss
+        loss["total_loss"] = sum(loss.values())
+        loss["t"] = torch.stack((timesteps, loss_item.mean(dim=1).mean(dim=1)), dim=1)
+
+        if self.is_train_decoder:
+            raise
+            pred_face_z = pred[encoding_result["mask"]]
+            encoding_result["face_z"] = pred_face_z
+            loss, recon_data = self.ae_model.loss(v_data, encoding_result)
+            loss["l2"] = self.loss(pred, face_z)
+            loss["diffusion_loss"] += loss["l2"]
+        return loss
+

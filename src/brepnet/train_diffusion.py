@@ -31,7 +31,7 @@ from pytorch_lightning.callbacks import LearningRateMonitor
 from lightning_fabric import seed_everything
 
 from torch.utils.data.dataloader import DataLoader
-from torch.optim import Adam
+from torch.optim import Adam, AdamW
 from torchmetrics.classification import BinaryPrecision, BinaryRecall, BinaryAveragePrecision, BinaryF1Score
 from torchmetrics import MetricCollection
 
@@ -109,9 +109,9 @@ class TrainDiffusion(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = Adam(self.model.parameters(), lr=self.learning_rate)
-        return {
-            'optimizer': optimizer,
-        }
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[4000], gamma=0.1)
+        # return [optimizer], [scheduler]
+        return optimizer
 
     def training_step(self, batch, batch_idx):
         data = batch
@@ -246,8 +246,8 @@ def main(v_cfg: DictConfig):
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
 
-    mc = ModelCheckpoint(monitor="Validation_Loss", save_last=True, every_n_train_steps=300000)
-    lr_monitor = LearningRateMonitor(logging_interval='step')
+    mc = ModelCheckpoint(monitor="Validation_Loss", save_last=True, every_n_train_steps=300000, save_top_k=-1)
+    lr_monitor = LearningRateMonitor(logging_interval='epoch')
 
     model = TrainDiffusion(v_cfg)
     logger = TensorBoardLogger(log_dir)

@@ -116,7 +116,7 @@ weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
 IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, False
 CONTINUITY = GeomAbs_C2
 
-INTERPOLATION_PRECISION = 0.001
+INTERPOLATION_PRECISION = 0.05
 
 
 # EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
@@ -142,16 +142,18 @@ def interpolation_face_points(face, is_use_cuda=False, precision=INTERPOLATION_P
             face = torch.from_numpy(face)
 
     res = face.shape[0]
-    x_density = (torch.linalg.norm(face[0, 0] - face[0, 1], dim=-1) / precision).to(torch.long)
-    y_density = (torch.linalg.norm(face[0, 0] - face[1, 0], dim=-1) / precision).to(torch.long)
-    x_density, y_density = max(x_density, 2), max(y_density, 2)
+    x_density = (res * torch.linalg.norm(face[0, 0] - face[0, 1], dim=-1) / precision).to(torch.long)
+    y_density = (res * torch.linalg.norm(face[0, 0] - face[1, 0], dim=-1) / precision).to(torch.long)
+    x_density, y_density = max(x_density, res), max(y_density, res)
     x = torch.linspace(-1., 1., x_density).to(face.device)
     y = torch.linspace(-1, 1, y_density).to(face.device)
     x, y = torch.meshgrid(x, y, indexing='ij')
     coords = torch.stack([x, y], dim=-1).reshape(1, -1, 1, 2)
-    face = torch.nn.functional.grid_sample(face[None].permute(0, 3, 1, 2), coords, align_corners=True)[0, :, :, 0].permute(1, 0)
+    interpolation_face = torch.nn.functional.grid_sample(face[None].permute(0, 3, 1, 2),
+                                                         coords, align_corners=True)[0, :, :, 0].permute(1, 0)
     # trimesh.PointCloud(face.cpu().numpy()).export(r'E:\data\img2brep\debug.ply')
-    return face
+    assert interpolation_face.shape[0] >= res * res
+    return interpolation_face
 
 
 class Shape:

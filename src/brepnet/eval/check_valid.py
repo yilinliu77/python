@@ -17,7 +17,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 from shared.occ_utils import get_primitives
-from src.brepnet.post.utils import solid_valid_check, viz_shapes, get_solid, CONNECT_TOLERANCE
+from src.brepnet.post.utils import solid_valid_check, viz_shapes, get_solid, CONNECT_TOLERANCE, get_tolerance
 
 Interface_Static.SetIVal("read.precision.mode", 1)
 Interface_Static.SetRVal("read.precision.val", 1e-1)
@@ -31,7 +31,8 @@ Interface_Static.SetRVal("write.precision.val", 1e-1)
 
 def save_step_file(step_file, shape):
     step_writer = STEPControl_Writer()
-    step_writer.SetTolerance(1e-1)
+    tol = get_tolerance(shape, TopAbs_SOLID)
+    step_writer.SetTolerance(tol)
     step_writer.Model(True)
     step_writer.Transfer(shape, STEPControl_AsIs)
     status = step_writer.Write(str(step_file))

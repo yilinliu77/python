@@ -1233,7 +1233,7 @@ def get_solid(trimmed_faces, connected_tolerance):
             fix_solid.Perform()
             solid = fix_solid.Solid()
 
-        set_tolerance(solid, 1e-1)
+        set_tolerance(solid, connected_tolerance)
         if solid.ShapeType() == TopAbs_SOLID and BRepCheck_Analyzer(solid).IsValid():
             return solid
         else:

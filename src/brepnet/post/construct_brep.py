@@ -175,6 +175,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
                                      f"face{face_idx}_optim_edge_idx{edge_idx}_face{adj_face}.ply"),
                         shape.recon_edge_points[edge_idx].reshape(-1, 3),
                         np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+                export_point_cloud(debug_face_save_path / 'optim_face.ply',
+                                   shape.recon_face_points[face_idx].reshape(-1, 3))
             for edge_idx in range(len(shape.recon_edge_points)):
                 if edge_idx in shape.remove_edge_idx_new:
                     continue
@@ -225,19 +227,13 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
                 is_edge_closed_c = [shape.openness[edge_idx] for edge_idx in face_edge_idx]
 
                 # Build wire
-                wire_list = None
-                for wire_threshold in CONNECT_TOLERANCE:
-                    wire_list = create_wire_from_unordered_edges(face_edges, wire_threshold)
-                    if wire_list is not None:
-                        break
-
-                if wire_list is None:
-                    raise ValueError(f"Failed to create wire for face {i_face}")
-
-                # Build surface
                 trimmed_face = None
-                for trim_threshold in CONNECT_TOLERANCE:
-                    trimmed_face = create_trimmed_face_from_wire(geom_face, face_edges, wire_list, trim_threshold)
+                for threshold in CONNECT_TOLERANCE:
+                    wire_list = create_wire_from_unordered_edges(face_edges, threshold)
+                    if wire_list is None:
+                        continue
+
+                    trimmed_face = create_trimmed_face_from_wire(geom_face, face_edges, wire_list, threshold)
                     if trimmed_face is not None:
                         break
 
@@ -332,7 +328,7 @@ if __name__ == '__main__':
         all_folders = list(set(all_folders) & set(valid_prefies))
 
     all_folders.sort()
-    all_folders = all_folders
+    all_folders = all_folders[:500]
 
     print(f"Total {len(all_folders)} folders")
 

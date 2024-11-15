@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import random
 
 from tqdm import tqdm
@@ -228,10 +229,12 @@ if __name__ == "__main__":
         ray.shutdown()
         mesh_path_list = glob.glob(os.path.join(out_root, "**", "*.stl"), recursive=True)
         mesh_path_list.sort()
+        prefix = Path(data_root).name
+        name = os.path.join(out_root, "{}.ply".format(prefix))
         if args.index:
-            arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"), color_mode="index")
+            arrange_meshes(mesh_path_list, name, color_mode="index")
         else:
-            arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"), color_mode="random")
-        print(f"arranged mesh is saved to {os.path.join(out_root, 'arranged.ply')}")
+            arrange_meshes(mesh_path_list, name, color_mode="random")
+        print(f"arranged mesh is saved to {name}")
 
     print("Done")

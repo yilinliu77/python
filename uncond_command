@@ -30,11 +30,12 @@ cd /root/repo/python/src/brepnet/eval/lfd/evaluation_scripts/compute_lfd_feat &&
 python -m src.brepnet.eval.viz_lfd /mnt/d/uncond_results/1111/${item}_lfd.pkl /mnt/d/uncond_results/1111/${item}_lfd.png
 
 # Short
-item=1111_adamw_600k
-python -m src.brepnet.post.construct_brep --data_root /mnt/d/uncond_results/1111/${item} --out_root /mnt/d/uncond_results/1111/${item}_post --use_ray --num_cpus 160
+item=1111_adamw_1m
+python -m src.brepnet.train_diffusion trainer.evaluate=true dataset.name=Dummy_dataset dataset.length=2000 trainer.batch_size=250 trainer.num_worker=2 trainer.gpu=8 trainer.accelerator="32-true" model.name=Diffusion_condition model.autoencoder_weights=/mnt/d/0925_gaussian_7m.ckpt model.autoencoder=AutoEncoder_0925 model.dim_shape=768 model.dim_latent=8 model.gaussian_weights=1e-6 trainer.exp_name=test model.pad_method=random model.diffusion_latent=768 model.diffusion_type=epsilon model.gaussian_weights=1e-6 trainer.test_output_dir=/mnt/d/uncond_results/1115/${item} trainer.resume_from_checkpoint=/mnt/d/uncond_ckpt/${item}.ckpt model.num_max_faces=30 model.beta_schedule=linear model.addition_tag=false model.name=Diffusion_condition
+python -m src.brepnet.post.construct_brep --data_root /mnt/d/uncond_results/1115/${item} --out_root /mnt/d/uncond_results/1115/${item}_post --use_ray --num_cpus 160 --drop_num 3
 
-python -m src.brepnet.eval.eval_unique_novel --fake_root /mnt/d/uncond_results/1111/${item} --fake_post /mnt/d/uncond_results/1111/${item}_post --train_root /mnt/d/brepgen_train --use_ray --min_face 0 --only_unique --atol 0.05
-cd /root/repo/python/src/brepnet/eval/lfd/evaluation_scripts/compute_lfd_feat && python -m compute_lfd_feat_multiprocess --gen_path /mnt/d/uncond_results/1111/${item}_post --save_path /mnt/d/uncond_results/1111/${item}_lfd --prefix recon_brep.stl && cd /root/repo/python/src/brepnet/eval/lfd/evaluation_scripts && python -m compute_lfd --dataset_path /mnt/d/brepgen_train_lfd_feat --gen_path /mnt/d/uncond_results/1111/${item}_lfd --save_name /mnt/d/uncond_results/1111/${item}_lfd.pkl --num_workers 8 --list /root/repo/python/src/brepnet/data/list/deduplicated_deepcad_training_7_30.txt && cd /root/repo/python/
-python -m src.brepnet.eval.viz_lfd /mnt/d/uncond_results/1111/${item}_lfd.pkl /mnt/d/uncond_results/1111/${item}_lfd.png
-python -m src.brepnet.eval.check_valid --data_root /mnt/d/uncond_results/1111/${item}_post
-python -m src.brepnet.viz.sort_and_merge --data_root /mnt/d/uncond_results/1111/${item}_post --out_root /mnt/d/uncond_results/1111/${item}_choose --sort --valid --index --use_ray
+python -m src.brepnet.eval.eval_unique_novel --fake_root /mnt/d/uncond_results/1115/${item} --fake_post /mnt/d/uncond_results/1115/${item}_post --train_root /mnt/d/brepgen_train --use_ray --min_face 0 --only_unique --atol 0.05
+cd /root/repo/python/src/brepnet/eval/lfd/evaluation_scripts/compute_lfd_feat && python -m compute_lfd_feat_multiprocess --gen_path /mnt/d/uncond_results/1115/${item}_post --save_path /mnt/d/uncond_results/1115/${item}_lfd --prefix recon_brep.stl && cd /root/repo/python/src/brepnet/eval/lfd/evaluation_scripts && python -m compute_lfd --dataset_path /mnt/d/brepgen_train_lfd_feat --gen_path /mnt/d/uncond_results/1115/${item}_lfd --save_name /mnt/d/uncond_results/1115/${item}_lfd.pkl --num_workers 8 --list /root/repo/python/src/brepnet/data/list/deduplicated_deepcad_training_7_30.txt && cd /root/repo/python/
+python -m src.brepnet.eval.viz_lfd /mnt/d/uncond_results/1115/${item}_lfd.pkl /mnt/d/uncond_results/1115/${item}_lfd.png
+python -m src.brepnet.eval.check_valid --data_root /mnt/d/uncond_results/1115/${item}_post
+python -m src.brepnet.viz.sort_and_merge --data_root /mnt/d/uncond_results/1115/${item}_post --out_root /mnt/d/uncond_results/1115/${item}_choose --sort --valid --index --use_ray

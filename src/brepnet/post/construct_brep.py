@@ -64,6 +64,7 @@ def get_data(v_filename):
     shape = Shape(face_points, edge_points, edge_face_connectivity, False)
     return shape
 
+
 def get_candidate_shapes(ori_shape, num_drop):
     if num_drop == 0:
         return [copy.deepcopy(ori_shape)]
@@ -85,6 +86,7 @@ def get_candidate_shapes(ori_shape, num_drop):
         shape.edge_face_connectivity = np.array(new_edge_face_connectivity)
         candidate_shapes.append(shape)
     return candidate_shapes
+
 
 def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
                                 is_ray=False, is_log=True,
@@ -109,7 +111,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
 
     if is_log:
         print(
-            f"{Colors.GREEN}############################# Processing {folder_name} #############################{Colors.RESET}")
+                f"{Colors.GREEN}############################# Processing {folder_name} #############################{Colors.RESET}")
 
     # Prepare the data
     shape = get_data(os.path.join(data_root, folder_name, 'data.npz'))
@@ -122,7 +124,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
 
     if isdebug:
         print(
-            f"{Colors.GREEN}Remove {len(shape.remove_edge_idx_src) + len(shape.remove_edge_idx_new)} edges{Colors.RESET}")
+                f"{Colors.GREEN}Remove {len(shape.remove_edge_idx_src) + len(shape.remove_edge_idx_new)} edges{Colors.RESET}")
 
     if is_save_data:
         export_point_cloud(os.path.join(debug_face_save_path, 'face.ply'), shape.recon_face_points.reshape(-1, 3))
@@ -135,16 +137,16 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
                 idx = np.where(shape.edge_face_connectivity[:, 0] == edge_idx)[0][0]
                 adj_face = shape.edge_face_connectivity[idx][1:]
                 export_point_cloud(
-                    os.path.join(debug_face_save_path, f"face{face_idx}_edge_idx{edge_idx}_face{adj_face}.ply"),
-                    shape.recon_edge_points[edge_idx].reshape(-1, 3),
-                    np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+                        os.path.join(debug_face_save_path, f"face{face_idx}_edge_idx{edge_idx}_face{adj_face}.ply"),
+                        shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                        np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
         for edge_idx in range(len(shape.recon_edge_points)):
             if edge_idx in shape.remove_edge_idx_new:
                 continue
             export_point_cloud(os.path.join(
-                debug_face_save_path, f'edge{edge_idx}.ply'),
-                shape.recon_edge_points[edge_idx].reshape(-1, 3),
-                np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+                    debug_face_save_path, f'edge{edge_idx}.ply'),
+                    shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                    np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
 
     # Optimize data
     if is_optimize_geom:
@@ -154,14 +156,14 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
 
         if not is_ray:
             shape.recon_face_points, shape.recon_edge_points = optimize(
-                interpolation_face, shape.recon_edge_points, shape.recon_face_points,
-                shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                shape.face_edge_adj, v_islog=isdebug, v_max_iter=200, use_cuda=use_cuda)
+                    interpolation_face, shape.recon_edge_points, shape.recon_face_points,
+                    shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
+                    shape.face_edge_adj, v_islog=isdebug, v_max_iter=200, use_cuda=use_cuda)
         else:
             shape.recon_face_points, shape.recon_edge_points = optimize(
-                shape.interpolation_face, shape.recon_edge_points, shape.recon_face_points,
-                shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                shape.face_edge_adj, v_islog=False, v_max_iter=200, use_cuda=use_cuda)
+                    shape.interpolation_face, shape.recon_edge_points, shape.recon_face_points,
+                    shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
+                    shape.face_edge_adj, v_islog=False, v_max_iter=200, use_cuda=use_cuda)
 
         if is_save_data:
             updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx_new, axis=0)
@@ -171,19 +173,19 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
                     idx = np.where(shape.edge_face_connectivity[:, 0] == edge_idx)[0][0]
                     adj_face = shape.edge_face_connectivity[idx][1:]
                     export_point_cloud(
-                        os.path.join(debug_face_save_path,
-                                     f"face{face_idx}_optim_edge_idx{edge_idx}_face{adj_face}.ply"),
-                        shape.recon_edge_points[edge_idx].reshape(-1, 3),
-                        np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
-                export_point_cloud(debug_face_save_path / 'optim_face.ply',
+                            os.path.join(debug_face_save_path,
+                                         f"face{face_idx}_optim_edge_idx{edge_idx}_face{adj_face}.ply"),
+                            shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                            np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+                export_point_cloud(debug_face_save_path / f'optim_face{face_idx}.ply',
                                    shape.recon_face_points[face_idx].reshape(-1, 3))
             for edge_idx in range(len(shape.recon_edge_points)):
                 if edge_idx in shape.remove_edge_idx_new:
                     continue
                 export_point_cloud(
-                    os.path.join(debug_face_save_path, f'optim_edge{edge_idx}.ply'),
-                    shape.recon_edge_points[edge_idx].reshape(-1, 3),
-                    np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
+                        os.path.join(debug_face_save_path, f'optim_edge{edge_idx}.ply'),
+                        shape.recon_edge_points[edge_idx].reshape(-1, 3),
+                        np.linspace([1, 0, 0], [0, 1, 0], shape.recon_edge_points[edge_idx].shape[0]))
 
     ori_shape = copy.deepcopy(shape)
 
@@ -269,7 +271,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
             time_records[3] = time.time() - timer
             timer = time.time()
 
-            if solid is None: # Build failed
+            if solid is None:  # Build failed
                 pass
             else:
                 save_step_file(out_root / folder_name / 'recon_brep.step', solid)
@@ -341,23 +343,23 @@ if __name__ == '__main__':
                                         is_save_data=False, is_log=False, is_optimize_geom=True, is_ray=False, )
     else:
         ray.init(
-            dashboard_host="0.0.0.0",
-            dashboard_port=8080,
-            num_cpus=num_cpus,
-            # num_gpus=num_gpus,
-            # local_mode=True
+                dashboard_host="0.0.0.0",
+                dashboard_port=8080,
+                num_cpus=num_cpus,
+                # num_gpus=num_gpus,
+                # local_mode=True
         )
         construct_brep_from_datanpz_ray = ray.remote(num_gpus=0.1 if use_cuda else 0, max_retries=0)(
-            construct_brep_from_datanpz)
+                construct_brep_from_datanpz)
 
         tasks = []
         for i in range(len(all_folders)):
             tasks.append(construct_brep_from_datanpz_ray.remote(
-                v_data_root, v_out_root,
-                all_folders[i],
-                v_drop_num=drop_num,
-                use_cuda=use_cuda, from_scratch=from_scratch,
-                is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False,
+                    v_data_root, v_out_root,
+                    all_folders[i],
+                    v_drop_num=drop_num,
+                    use_cuda=use_cuda, from_scratch=from_scratch,
+                    is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False,
             ))
         results = []
         for i in tqdm(range(len(all_folders))):

@@ -116,7 +116,7 @@ weight_CurveLength, weight_Curvature, weight_Torsion = 1, 1, 1
 IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, False
 CONTINUITY = GeomAbs_C2
 
-INTERPOLATION_PRECISION = 0.1
+INTERPOLATION_PRECISION = 0.05
 
 
 # EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
@@ -527,11 +527,8 @@ class Shape:
                         face2.reshape(1, -1, 3),
                         self.interpolation_face[i][None], bidirectional=False, batch_reduction=None, point_reduction=None))
                 dis_face_to_face = torch.min(dist_face1_to_face2.min(), dist_face2_to_face1.min())
-                if dis_face_to_face > 0.001:
+                if dis_face_to_face < 0.015 and (i, j) not in inv_edge_face_connectivity:
                     continue
-                if not (i, j) in inv_edge_face_connectivity:
-                    # create edge
-                    pass
         pass
 
 

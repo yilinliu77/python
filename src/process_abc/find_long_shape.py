@@ -5,20 +5,22 @@ import numpy as np
 
 from OCC.Core.STEPControl import STEPControl_Reader
 from OCC.Core.TopAbs import TopAbs_SOLID, TopAbs_FACE
-from OCC.Core.BRepTools import BRep_Tool
 from OCC.Core import BRepBndLib, TopoDS
 from OCC.Core.Bnd import Bnd_Box
 
-from shared.occ_utils import diable_occ_log
+from shared.occ_utils import disable_occ_log
 
 ratio = 10
 
-root = Path("/mnt/e/data/")
-diable_occ_log()
+root = Path("/mnt/e/yilin/data_step/")
+output_root = Path("/mnt/e/yilin/data_flag/")
+disable_occ_log()
 
 @ray.remote
 def process_file(v_id):
     try:
+        if (output_root/(v_id+"_long")).exists():
+            return True
         # Take the ".step" file
         step_file = [item for item in os.listdir(root / v_id) if item.endswith(".step")][0]
         step_file = str(root / v_id / step_file)
@@ -38,6 +40,7 @@ def process_file(v_id):
         dy = ymax - ymin
         dz = zmax - zmin
         if dx / dy > ratio and dx / dz > ratio or dy / dx > ratio and dy / dz > ratio or dz / dx > ratio and dz / dy > ratio:
+            open(output_root/(v_id+"_long"), "w").close()
             return True
         return False
 
@@ -64,7 +67,8 @@ if __name__ == "__main__":
             process_file(id)
     else:
         ray.init(
-
+            # local_mode=True,
+            # num_cpus=1,
         )
 
         tasks = []
@@ -75,4 +79,4 @@ if __name__ == "__main__":
             if ray.get(tasks[i]):
                 valid_ids.append(ids[i])
         np.savetxt("src/process_abc/abc_long_shape.txt", valid_ids, fmt="%s")
-        print("Found {} cubes".format(len(valid_ids)))
+        print("Found {} long shape".format(len(valid_ids)))

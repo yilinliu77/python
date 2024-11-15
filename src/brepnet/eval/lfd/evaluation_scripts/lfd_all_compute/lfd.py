@@ -82,8 +82,7 @@ class LightFieldDistanceFunction(torch.autograd.Function):
         print(f"tgt_size: {m}")
         all_dist = []
         with torch.no_grad():
-            if log:
-                bar = tqdm(range(n))
+            bar = tqdm(total=n, miniters=20, disable=not log)
             for i in range(n):
                 start_idx = 0
                 n_all_run = tgt_ArtCoeff.shape[0]
@@ -104,8 +103,7 @@ class LightFieldDistanceFunction(torch.autograd.Function):
                         tgt_EccCoeff_q8[start_idx:end_idx])
                     start_idx = end_idx
                     one_run_d.append(d)
-                if log:
-                    bar.update(1)
+                bar.update(1)
                 d = torch.cat(one_run_d, dim=0)
                 all_dist.append(d.unsqueeze(dim=0))
         dist = torch.cat(all_dist, dim=0)

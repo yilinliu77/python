@@ -5,16 +5,20 @@ import numpy as np
 
 from OCC.Core.STEPControl import STEPControl_Reader
 from OCC.Core.TopAbs import TopAbs_SOLID, TopAbs_FACE
-from OCC.Core.BRepTools import BRep_Tool
+from OCC.Core.BRep import BRep_Tool
+from tqdm import tqdm
 
-from shared.occ_utils import diable_occ_log, get_primitives
+from shared.occ_utils import disable_occ_log, get_primitives
 
-root = Path("/mnt/e/data/")
-diable_occ_log()
+root = Path("/mnt/e/yilin/data_step/")
+output_root = Path("/mnt/e/yilin/data_flag/")
+disable_occ_log()
 
 @ray.remote
 def process_file(v_id):
     try:
+        if (output_root/(v_id+"_cube")).exists():
+            return True
         # Take the ".step" file
         step_file = [item for item in os.listdir(root / v_id) if item.endswith(".step")][0]
         step_file = str(root / v_id / step_file)
@@ -32,12 +36,9 @@ def process_file(v_id):
         for face in faces:
             # Check if this face is a square
             geom_face = BRep_Tool.Surface(face)
-            if geom_face.GetType() != "Geom_Plane":
+            if geom_face.DynamicType().Name() != "Geom_Plane":
                 return False
-            # Check if this face is a square
-            u_min, u_max, v_min, v_max = geom_face.Bounds()
-            if abs(u_max - u_min) > 1e-3 or abs(v_max - v_min) > 1e-3:
-                return False
+        open(output_root/(v_id+"_cube"), "w").close()
         return True
     except Exception as e:
         print(e)
@@ -62,14 +63,15 @@ if __name__ == "__main__":
             process_file(id)
     else:
         ray.init(
-
+            # local_mode=True,
+            # num_cpus=1,
         )
 
         tasks = []
         for id in ids:
             tasks.append(process_file.remote(id))
         valid_ids = []
-        for i in range(num_tasks):
+        for i in tqdm(range(num_tasks)):
             if ray.get(tasks[i]):
                 valid_ids.append(ids[i])
         np.savetxt("src/process_abc/abc_cube.txt", valid_ids, fmt="%s")

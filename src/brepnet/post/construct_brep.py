@@ -61,6 +61,8 @@ def get_data(v_filename):
     else:
         raise ValueError(f"Unknown data npz format {v_filename}")
 
+    face_points = face_points[..., :3]
+    edge_points = edge_points[..., :3]
     shape = Shape(face_points, edge_points, edge_face_connectivity, False)
     return shape
 
@@ -330,7 +332,7 @@ if __name__ == '__main__':
         all_folders = list(set(all_folders) & set(valid_prefies))
 
     all_folders.sort()
-    all_folders = all_folders[:500]
+    # all_folders = all_folders[:100]
 
     print(f"Total {len(all_folders)} folders")
 
@@ -340,7 +342,7 @@ if __name__ == '__main__':
             construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i],
                                         v_drop_num=drop_num,
                                         use_cuda=use_cuda, from_scratch=from_scratch,
-                                        is_save_data=False, is_log=False, is_optimize_geom=True, is_ray=False, )
+                                        is_save_data=True, is_log=False, is_optimize_geom=True, is_ray=False, )
     else:
         ray.init(
                 dashboard_host="0.0.0.0",

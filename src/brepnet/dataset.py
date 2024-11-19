@@ -588,29 +588,23 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
         self.mode = v_training_mode
         self.conf = v_conf
         self.max_intersection = 500
+        self.dataset_path = Path(v_conf["data_root"])
         if v_training_mode == "testing":
-            self.dataset_path = v_conf['test_dataset']
+            listfile = v_conf['test_dataset']
         elif v_training_mode == "training":
-            self.dataset_path = v_conf['train_dataset']
+            listfile = v_conf['train_dataset']
         elif v_training_mode == "validation":
-            self.dataset_path = v_conf['val_dataset']
+            listfile = v_conf['val_dataset']
         else:
             raise
-
-        self.data_folders = [folder for folder in os.listdir(self.dataset_path) if os.path.isdir(os.path.join(self.dataset_path, folder))]
-        if True:
-            deduplicate_file = "src/brepnet/data/list/deduplicated_deepcad_{}.txt".format(v_training_mode)
-            print("Use deduplicate list ", deduplicate_file)
-            deduplicate_list = [item.strip() for item in open(deduplicate_file).readlines()]
-            self.data_folders = set(self.data_folders) & set(deduplicate_list)
-            self.data_folders = list(self.data_folders)
+        self.data_folders = [item.strip() for item in open(listfile).readlines()]
 
         self.data_folders.sort()
         self.data_folders = [os.path.join(self.dataset_path, item) for item in self.data_folders]
 
         self.src_data_sum = len(self.data_folders)
 
-        self.check_data(self.dataset_path, v_training_mode)
+        # self.check_data(self.dataset_path, v_training_mode)
 
         self.data_sum = len(self.data_folders)
 

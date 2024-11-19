@@ -208,7 +208,7 @@ class TrainAutoEncoder(pl.LightningModule):
             local_root = log_root / f"{data['v_prefix'][0]}"
             local_root.mkdir(parents=True, exist_ok=True)
             np.savez_compressed(str(local_root / f"data.npz"),
-                                pred_face_adj_prob=recon_data["pred_face_adj_prob"],
+                                # pred_face_adj_prob=recon_data["pred_face_adj_prob"],
                                 pred_face_adj=recon_data["pred_face_adj"].cpu().numpy(),
                                 pred_face=recon_data["pred_face"],
                                 pred_edge=recon_data["pred_edge"],

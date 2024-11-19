@@ -9451,10 +9451,7 @@ class AutoEncoder_1119(nn.Module):
         df = self.df
 
         self.in_channels = v_conf["in_channels"]
-        if "with_intersection" in v_conf:
-            self.with_intersection = v_conf["with_intersection"]
-        else:
-            self.with_intersection = True
+        self.with_intersection = v_conf["with_intersection"]
 
         self.face_coords = nn.Sequential(
             nn.Conv2d(self.in_channels, ds // 8, kernel_size=3, stride=1, padding=1),
@@ -9469,8 +9466,8 @@ class AutoEncoder_1119(nn.Module):
             res_block_xd(2, ds // 2, ds // 2, 3, 1, 1, v_norm_shape = (ds // 2, 4, 4)),
             res_block_xd(2, ds // 2, ds // 1, 3, 1, 1, v_norm_shape = (ds // 1, 4, 4)),
             nn.MaxPool2d(kernel_size=2, stride=2), # 2
-            res_block_xd(2, ds, ds, 1, 1, 0, v_norm_shape = (ds // 1, 2, 2)),
-            res_block_xd(2, ds, ds, 1, 1, 0, v_norm_shape = (ds // 1, 2, 2)),
+            res_block_xd(2, ds, ds, 3, 1, 1, v_norm_shape = (ds // 1, 2, 2)),
+            res_block_xd(2, ds, ds, 3, 1, 1, v_norm_shape = (ds // 1, 2, 2)),
             nn.Conv2d(ds, dl, kernel_size=1, stride=1, padding=0),
             Rearrange("b n h w -> b (n h w)")
         )
@@ -9487,14 +9484,14 @@ class AutoEncoder_1119(nn.Module):
             res_block_xd(1, ds // 2, ds // 2, 3, 1, 1, v_norm_shape = (ds // 2, 4,)),
             res_block_xd(1, ds // 2, ds, 3, 1, 1, v_norm_shape = (ds // 1, 4,)),
             nn.MaxPool1d(kernel_size=2, stride=2), # 2
-            res_block_xd(1, ds, ds, 1, 1, 0, v_norm_shape = (ds // 1, 2,)),
-            res_block_xd(1, ds, ds, 1, 1, 0, v_norm_shape = (ds // 1, 2,)),
+            res_block_xd(1, ds, ds, 3, 1, 1, v_norm_shape = (ds // 1, 2,)),
+            res_block_xd(1, ds, ds, 3, 1, 1, v_norm_shape = (ds // 1, 2,)),
             nn.Conv1d(ds, df, kernel_size=1, stride=1, padding=0),
             Rearrange("b n w -> b (n w)"),
         ) # b c 1
 
         self.graph_face_edge = nn.ModuleList()
-        for i in range(5):
+        for i in range(10):
             self.graph_face_edge.append(GATv2Conv(
                 df, df, 
                 heads=1, edge_dim=df * 2,
@@ -9505,7 +9502,7 @@ class AutoEncoder_1119(nn.Module):
         self.face_attn_proj_in = nn.Linear(df, bd)
         self.face_attn_proj_out = nn.Linear(bd, df)
         layer = nn.TransformerEncoderLayer(
-            bd, 8, dim_feedforward=2048, dropout=0.1, 
+            bd, 16, dim_feedforward=2048, dropout=0.1, 
             batch_first=True, norm_first=True)
         self.face_attn = nn.TransformerEncoder(layer, 12, nn.LayerNorm(bd))
 
@@ -9520,26 +9517,30 @@ class AutoEncoder_1119(nn.Module):
             nn.Linear(df, df),
         )
 
-        self.inter = AttnIntersection2(df, 512, 12, nn.LayerNorm(df))
+        self.inter = AttnIntersection3(df, 768, 12)
         self.classifier = nn.Linear(df*2, 1)
 
         self.face_attn_proj_in2 = nn.Linear(df, bd)
         self.face_attn_proj_out2 = nn.Linear(bd, df)
         layer2 = nn.TransformerEncoderLayer(
-            bd, 8, dim_feedforward=2048, dropout=0.1, 
+            bd, 16, dim_feedforward=2048, dropout=0.1, 
             batch_first=True, norm_first=True)
-        self.face_attn2 = nn.TransformerEncoder(layer2, 12, nn.LayerNorm(bd))
+        self.face_attn2 = nn.TransformerEncoder(layer2, 12)
 
         # Decoder
         self.face_points_decoder = nn.Sequential(
             Rearrange("b (n h w) -> b n h w", h=2, w=2),
-            res_block_xd(2, dl, ds, 3, 1, 1, v_norm_shape=(ds, 2,2)),
+            res_block_xd(2, dl, ds, 3, 1, 1, v_norm_shape=(ds, 2, 2)),
+            res_block_xd(2, ds, ds, 3, 1, 1, v_norm_shape=(ds, 2, 2)),
             nn.ConvTranspose2d(ds // 1, ds // 2, kernel_size=2, stride=2),
-            res_block_xd(2, ds // 2, ds // 2, 3, 1, 1, v_norm_shape=(ds // 2, 4,4)),
+            res_block_xd(2, ds // 2, ds // 2, 3, 1, 1, v_norm_shape=(ds // 2, 4, 4)),
+            res_block_xd(2, ds // 2, ds // 2, 3, 1, 1, v_norm_shape=(ds // 2, 4, 4)),
             nn.ConvTranspose2d(ds // 2, ds // 4, kernel_size=2, stride=2),
-            res_block_xd(2, ds // 4, ds // 4, 3, 1, 1, v_norm_shape=(ds // 4, 8,8)),
+            res_block_xd(2, ds // 4, ds // 4, 3, 1, 1, v_norm_shape=(ds // 4, 8, 8)),
+            res_block_xd(2, ds // 4, ds // 4, 3, 1, 1, v_norm_shape=(ds // 4, 8, 8)),
             nn.ConvTranspose2d(ds // 4, ds // 8, kernel_size=2, stride=2),
-            res_block_xd(2, ds // 8, ds // 8, 3, 1, 1, v_norm_shape=(ds // 8, 16,16)),
+            res_block_xd(2, ds // 8, ds // 8, 3, 1, 1, v_norm_shape=(ds // 8, 16, 16)),
+            res_block_xd(2, ds // 8, ds // 8, 3, 1, 1, v_norm_shape=(ds // 8, 16, 16)),
             nn.Conv2d(ds // 8, self.in_channels, kernel_size=1, stride=1, padding=0),
             Rearrange('... c w h -> ... w h c',c=self.in_channels),
         )
@@ -9557,11 +9558,15 @@ class AutoEncoder_1119(nn.Module):
         self.edge_points_decoder = nn.Sequential(
             Rearrange("b (n w)-> b n w", n=df, w=2),
             res_block_xd(1, df, ds, 3, 1, 1, v_norm_shape=(ds, 2,)),
+            res_block_xd(1, ds, ds, 3, 1, 1, v_norm_shape=(ds, 2,)),
             nn.ConvTranspose1d(ds, ds // 2, kernel_size=2, stride=2),
+            res_block_xd(1, ds // 2, ds // 2, 3, 1, 1, v_norm_shape=(ds // 2, 4,)),
             res_block_xd(1, ds // 2, ds // 2, 3, 1, 1, v_norm_shape=(ds // 2, 4,)),
             nn.ConvTranspose1d(ds // 2, ds // 4, kernel_size=2, stride=2),
             res_block_xd(1, ds // 4, ds // 4, 3, 1, 1, v_norm_shape=(ds // 4, 8,)),
+            res_block_xd(1, ds // 4, ds // 4, 3, 1, 1, v_norm_shape=(ds // 4, 8,)),
             nn.ConvTranspose1d(ds // 4, ds // 8, kernel_size=2, stride=2),
+            res_block_xd(1, ds // 8, ds // 8, 3, 1, 1, v_norm_shape=(ds // 8, 16,)),
             res_block_xd(1, ds // 8, ds // 8, 3, 1, 1, v_norm_shape=(ds // 8, 16,)),
             nn.Conv1d(ds // 8, self.in_channels, kernel_size=1, stride=1, padding=0),
             Rearrange('... c w -> ... w c',c=self.in_channels),
@@ -9714,7 +9719,7 @@ class AutoEncoder_1119(nn.Module):
 
             decoding_results["loss_edge_feature"] = self.loss_fn(
                 intersected_edge_feature,
-                v_encoding_result["edge_features"][edge_face_connectivity[:, 0]],
+                v_encoding_result["edge_features"][edge_face_connectivity[:, 0]].detach(),
             )
 
             decoding_results["loss_edge"] = loss_edge
@@ -9804,17 +9809,3 @@ class AutoEncoder_1119(nn.Module):
 
         return loss, data
 
-
-# Revised atten and 1112 new
-class AutoEncoder_1119_attn3(AutoEncoder_1119):
-    def __init__(self, v_conf):
-        super().__init__(v_conf)
-        self.dim_shape = v_conf["dim_shape"]
-        self.dim_latent = v_conf["dim_latent"]
-        norm = v_conf["norm"]
-        ds = self.dim_shape
-        dl = self.dim_latent
-        self.df = self.dim_latent * 2 * 2
-        df = self.df
-
-        self.inter = AttnIntersection3(df, 512, 12)

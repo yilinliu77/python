@@ -22,7 +22,7 @@ from pytorch_lightning.callbacks import LearningRateMonitor
 from lightning_fabric import seed_everything
 
 from torch.utils.data.dataloader import DataLoader
-from torch.optim import Adam
+from torch.optim import Adam, AdamW
 from torchmetrics.classification import BinaryPrecision, BinaryRecall, BinaryAveragePrecision, BinaryF1Score
 from torchmetrics import MetricCollection
 
@@ -89,7 +89,7 @@ class TrainAutoEncoder(pl.LightningModule):
                           )
 
     def configure_optimizers(self):
-        optimizer = Adam(self.model.parameters(), lr=self.learning_rate)
+        optimizer = AdamW(self.model.parameters(), lr=self.learning_rate)
         return {
             'optimizer': optimizer,
         }

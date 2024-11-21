@@ -1,3 +1,4 @@
+import random
 import shutil
 
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeSolid
@@ -19,6 +20,8 @@ import numpy as np
 from shared.occ_utils import get_primitives
 from src.brepnet.post.utils import solid_valid_check, viz_shapes, get_solid, CONNECT_TOLERANCE, get_tolerance
 
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 Interface_Static.SetIVal("read.precision.mode", 1)
 Interface_Static.SetRVal("read.precision.val", 1e-1)
 # Interface_Static.SetIVal("read.stdsameparameter.mode", 1)
@@ -27,6 +30,8 @@ Interface_Static.SetRVal("read.precision.val", 1e-1)
 # Interface_Static.SetCVal("write.step.schema", "DIS")
 Interface_Static.SetIVal("write.precision.mode", 2)
 Interface_Static.SetRVal("write.precision.val", 1e-1)
+
+
 # Interface_Static.SetIVal("write.surfacecurve.mode", 1)
 
 def save_step_file(step_file, shape):

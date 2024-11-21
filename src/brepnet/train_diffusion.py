@@ -195,7 +195,7 @@ class TrainDiffusion(pl.LightningModule):
                     sync_dist=True, batch_size=self.batch_size)
         
         # Generation
-        results = self.model.inference(batch_size, self.device, v_data=data)
+        results = self.model.inference(batch_size, self.device, v_data=data, v_log=self.global_rank == 0)
         log_root = Path(self.hydra_conf["trainer"]["test_output_dir"])
         for idx in range(batch_size):
             prefix = data["v_prefix"][idx]

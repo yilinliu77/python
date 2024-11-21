@@ -86,7 +86,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     save_path = '/'.join(args.save_name.split('/')[:-1])
     os.makedirs(save_path, exist_ok=True)
-    num_workers = args.num_workersgit
+    num_workers = args.num_workers
     listfile = args.list
     ray.init(
         num_cpus=os.cpu_count(),

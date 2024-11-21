@@ -36,20 +36,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_root", type=str, required=True)
     parser.add_argument("--out_root", type=str, required=True)
+    parser.add_argument("--list", type=str, default=None, help="list file in the training set")
     args = parser.parse_args()
     data_root = args.data_root
     out_root = args.out_root
+    if args.list is not None:
+        with open(args.list, "r") as f:
+            all_folders = f.read().splitlines()
+    else:
+        all_folders = [f for f in os.listdir(data_root) if os.path.isdir(os.path.join(data_root, f))]
 
     if os.path.exists(out_root):
         shutil.rmtree(out_root)
     if not os.path.exists(out_root):
         os.makedirs(out_root)
-
-    all_folders = os.listdir(data_root)
-    # for folder in tqdm(all_folders):
-    #     step_folder = os.path.join(data_root, folder)
-    #     output_folder = os.path.join(out_root, folder)
-    #     step2stl(step_folder, output_folder)
 
     ray.init(local_mode=False)
     futures = []

@@ -5,6 +5,7 @@ import ray
 import glob
 from tqdm import tqdm
 from OCC.Extend.DataExchange import read_step_file, write_stl_file
+from src.brepnet.post.utils import get_primitives
 import argparse
 
 
@@ -23,7 +24,7 @@ def step2stl(data_root, step_folders, output_root):
             shape = read_step_file(step_file, as_compound=False, verbosity=False)
             stl_file = os.path.join(output_folder, "mesh.stl")
             os.makedirs(output_folder, exist_ok=True)
-            write_stl_file(shape, stl_file, linear_deflection=0.01, angular_deflection=0.5)
+            write_stl_file(shape, stl_file, linear_deflection=0.9, angular_deflection=0.5)
         except Exception as e:
             if os.path.exists(output_folder):
                 shutil.rmtree(output_folder)

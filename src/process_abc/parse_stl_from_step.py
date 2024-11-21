@@ -51,7 +51,7 @@ if __name__ == "__main__":
     #     output_folder = os.path.join(out_root, folder)
     #     step2stl(step_folder, output_folder)
 
-    ray.init(local_mode=True)
+    ray.init(local_mode=False)
     futures = []
     batch_size = 10000
     for i in range(0, len(all_folders), batch_size):

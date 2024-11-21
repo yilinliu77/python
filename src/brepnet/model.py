@@ -9829,13 +9829,13 @@ class AutoEncoder_1119_light(AutoEncoder_1119):
             nn.Conv2d(self.in_channels, ds // 8, kernel_size=3, stride=1, padding=1),
             nn.LayerNorm((ds // 8, 16,16)),
             nn.LeakyReLU(),
-            res_block_xd(2, ds // 8, ds // 8, 3, 1, 1, v_norm_shape = (ds // 8, 16, 16)),
+            res_block_xd(2, ds // 8, ds // 4, 3, 1, 1, v_norm_shape = (ds // 8, 16, 16)),
             nn.MaxPool2d(kernel_size=2, stride=2), # 8
-            res_block_xd(2, ds // 4, ds // 4, 3, 1, 1, v_norm_shape = (ds // 4, 8, 8)),
+            res_block_xd(2, ds // 4, ds // 2, 3, 1, 1, v_norm_shape = (ds // 4, 8, 8)),
             nn.MaxPool2d(kernel_size=2, stride=2), # 4
-            res_block_xd(2, ds // 2, ds // 2, 3, 1, 1, v_norm_shape = (ds // 2, 4, 4)),
+            res_block_xd(2, ds // 2, ds // 1, 3, 1, 1, v_norm_shape = (ds // 2, 4, 4)),
             nn.MaxPool2d(kernel_size=2, stride=2), # 2
-            res_block_xd(2, ds, ds, 3, 1, 1, v_norm_shape = (ds // 1, 2, 2)),
+            res_block_xd(2, ds // 1, ds, 3, 1, 1, v_norm_shape = (ds // 1, 2, 2)),
             nn.Conv2d(ds, dl, kernel_size=1, stride=1, padding=0),
             Rearrange("b n h w -> b (n h w)")
         )

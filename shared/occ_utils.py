@@ -9,6 +9,7 @@ from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.gp import gp_Vec, gp_Trsf
 
+
 def disable_occ_log():
     from OCC.Core.Message import Message_Alarm, message
     printers = message.DefaultMessenger().Printers()
@@ -36,6 +37,7 @@ def normalize_shape(v_shape, v_bounding=1.):
     shape = transformer.Shape()
     return shape
 
+
 def get_triangulations(v_shape, v_resolution=0.001):
     if v_resolution > 0:
         mesh = BRepMesh_IncrementalMesh(v_shape, v_resolution)
@@ -61,13 +63,16 @@ def get_triangulations(v_shape, v_resolution=0.001):
         face_explorer.Next()
     return v, f
 
+
 def get_primitives(v_shape, v_type):
+    assert v_shape is not None
     explorer = TopExp_Explorer(v_shape, v_type)
     items = []
     while explorer.More():
         items.append(explorer.Current())
         explorer.Next()
     return items
+
 
 def get_ordered_edges(v_face):
     edges = []

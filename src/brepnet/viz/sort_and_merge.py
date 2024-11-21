@@ -14,6 +14,11 @@ from OCC.Core.BRepLProp import BRepLProp_SLProps
 from OCC.Core.TopAbs import TopAbs_SOLID
 import trimesh
 
+import numpy as np
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 
@@ -209,6 +214,44 @@ if __name__ == "__main__":
             folder_name = futures_folder_names[idx]
             result = ray.get(futures[idx])
             folder_scores[folder_name] = result
+
+    # viz the valid_ratio-face_num distribution (for all samples, not only valid)
+    result_dict = {}
+    for face_num in range(3, 31):
+        result_dict[face_num] = []
+    for folder, score in folder_scores.items():
+        face_num = score["num_faces"]
+        is_valid = score["is_valid_solid"]
+        if face_num not in result_dict:
+            continue
+        result_dict[face_num].append(is_valid)
+
+    plt.figure(figsize=(12, 6))
+    face_num = [str(i).zfill(2) for i in range(3, 31)]
+    sample_num = [len(result_dict[i]) for i in range(3, 31)]
+    sns.barplot(x=face_num, y=sample_num)
+    plt.title('Sample num by Faces num')
+    plt.xlabel('Faces num')
+    plt.xticks(rotation=45)
+    plt.ylabel('Sample num')
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_root, "sample_num_by_faces_num.png"))
+
+    plt.figure(figsize=(12, 6))
+    face_num = [str(i).zfill(2) for i in range(3, 31)]
+    valid_ratio = []
+    for i in range(3, 31):
+        if len(result_dict[i]) == 0:
+            face_num.remove(str(i).zfill(2))
+        else:
+            valid_ratio.append(np.sum(result_dict[i]) / len(result_dict[i]))
+    sns.barplot(x=face_num, y=valid_ratio)
+    plt.title('Valid ratio by Faces num')
+    plt.xlabel('Faces num')
+    plt.xticks(rotation=45)
+    plt.ylabel('Valid ratio')
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_root, "valid_ratio_by_faces_num.png"))
 
     if onlyvalid:
         valid_folder_scores = {}

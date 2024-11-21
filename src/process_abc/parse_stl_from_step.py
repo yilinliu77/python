@@ -5,6 +5,7 @@ import ray
 import glob
 from tqdm import tqdm
 from OCC.Extend.DataExchange import read_step_file, write_stl_file
+from src.brepnet.post.utils import get_primitives
 import argparse
 
 

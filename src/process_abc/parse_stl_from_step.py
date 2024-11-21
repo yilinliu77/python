@@ -14,16 +14,17 @@ import argparse
 
 def step2stl(step_folder, output_folder):
     try:
-        os.makedirs(output_folder, exist_ok=True)
         step_files = glob.glob(os.path.join(step_folder, "*.step"))
         if len(step_files) == 0:
             return
         step_file = step_files[0]
         stl_file = os.path.join(output_folder, "mesh.stl")
         shape = read_step_file(step_file)
+        os.makedirs(output_folder, exist_ok=True)
         write_stl_file(shape, stl_file, linear_deflection=0.01, angular_deflection=0.5)
     except Exception as e:
-        print(e)
+        if os.path.exists(output_folder):
+            shutil.rmtree(output_folder)
         pass
 
 

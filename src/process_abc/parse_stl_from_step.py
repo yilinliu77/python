@@ -44,13 +44,17 @@ if __name__ == "__main__":
         os.makedirs(out_root)
 
     all_folders = os.listdir(data_root)
-
-    ray.init()
-    futures = []
     for folder in tqdm(all_folders):
         step_folder = os.path.join(data_root, folder)
         output_folder = os.path.join(out_root, folder)
-        futures.append(step2stl_remote.remote(step_folder, output_folder))
-    for f in tqdm(futures):
-        ray.get(f)
-    ray.shutdown()
+        step2stl(step_folder, output_folder)
+
+    # ray.init()
+    # futures = []
+    # for folder in tqdm(all_folders):
+    #     step_folder = os.path.join(data_root, folder)
+    #     output_folder = os.path.join(out_root, folder)
+    #     futures.append(step2stl_remote.remote(step_folder, output_folder))
+    # for f in tqdm(futures):
+    #     ray.get(f)
+    # ray.shutdown()

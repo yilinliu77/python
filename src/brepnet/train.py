@@ -309,7 +309,7 @@ def main(v_cfg: DictConfig):
 
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
-        model = TrainAutoEncoder.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint)
+        model = TrainAutoEncoder.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint, map_location="cpu")
         model.hydra_conf = v_cfg
     # model = torch.compile(model)
     if v_cfg["trainer"].evaluate:

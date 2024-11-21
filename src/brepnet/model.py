@@ -9894,7 +9894,7 @@ class AutoEncoder_1119_light(AutoEncoder_1119):
         # Decoder
         self.face_points_decoder = nn.Sequential(
             Rearrange("b (n h w) -> b n h w", h=2, w=2),
-            res_block_xd(2, ds, ds, 3, 1, 1, v_norm_shape=(ds, 2, 2)),
+            res_block_xd(2, dl, ds, 3, 1, 1, v_norm_shape=(ds, 2, 2)),
             nn.ConvTranspose2d(ds // 1, ds // 2, kernel_size=2, stride=2),
             res_block_xd(2, ds // 2, ds // 2, 3, 1, 1, v_norm_shape=(ds // 2, 4, 4)),
             nn.ConvTranspose2d(ds // 2, ds // 4, kernel_size=2, stride=2),

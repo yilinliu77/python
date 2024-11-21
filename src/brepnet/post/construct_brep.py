@@ -328,7 +328,7 @@ if __name__ == '__main__':
         all_folders = list(set(all_folders) & set(valid_prefies))
 
     all_folders.sort()
-    all_folders = all_folders[:500]
+    all_folders = all_folders
 
     print(f"Total {len(all_folders)} folders")
 

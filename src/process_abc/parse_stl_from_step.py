@@ -54,7 +54,7 @@ if __name__ == "__main__":
     ray.init(local_mode=False)
     futures = []
     batch_size = 10000
-    for i in range(0, len(all_folders), batch_size):
+    for i in tqdm(range(0, len(all_folders), batch_size)):
         step_folders = all_folders[i:i + batch_size]
         futures.append(step2stl_remote.remote(data_root, step_folders, out_root))
     for f in tqdm(futures):

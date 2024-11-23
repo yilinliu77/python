@@ -616,7 +616,7 @@ class Diffusion_condition(nn.Module):
                 param.requires_grad = False
             self.ae_model.eval()
 
-    def inference(self, bs, device, v_data=None, **kwargs):
+    def inference(self, bs, device, v_data=None, v_log=True, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
         condition = None
         if self.with_img or self.with_pc:

@@ -22,7 +22,8 @@ if __name__ == "__main__":
     print("others_list: ", len(others_list))
     print("long_list: ", len(long_list))
 
-    valid_list = (solid_list - cube_list - cylinder_list - less7_list - larger100_list - others_list - long_list) & less30_list
+    # valid_list = (solid_list - cube_list - cylinder_list - less7_list - larger100_list - others_list - long_list) & less30_list
+    valid_list = solid_list - cube_list - cylinder_list - less7_list
     print("\nvalid_list: ", len(valid_list))
     valid_list = sorted(list(valid_list))
-    np.savetxt("src/process_abc/abc_730.txt", valid_list, fmt="%s")
+    np.savetxt("src/process_abc/abc_complete.txt", valid_list, fmt="%s")

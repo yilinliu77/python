@@ -22,7 +22,7 @@ from pytorch_lightning.callbacks import LearningRateMonitor
 from lightning_fabric import seed_everything
 
 from torch.utils.data.dataloader import DataLoader
-from torch.optim import Adam
+from torch.optim import Adam, AdamW
 from torchmetrics.classification import BinaryPrecision, BinaryRecall, BinaryAveragePrecision, BinaryF1Score
 from torchmetrics import MetricCollection
 
@@ -89,7 +89,7 @@ class TrainAutoEncoder(pl.LightningModule):
                           )
 
     def configure_optimizers(self):
-        optimizer = Adam(self.model.parameters(), lr=self.learning_rate)
+        optimizer = AdamW(self.model.parameters(), lr=self.learning_rate)
         return {
             'optimizer': optimizer,
         }
@@ -208,7 +208,7 @@ class TrainAutoEncoder(pl.LightningModule):
             local_root = log_root / f"{data['v_prefix'][0]}"
             local_root.mkdir(parents=True, exist_ok=True)
             np.savez_compressed(str(local_root / f"data.npz"),
-                                pred_face_adj_prob=recon_data["pred_face_adj_prob"],
+                                # pred_face_adj_prob=recon_data["pred_face_adj_prob"],
                                 pred_face_adj=recon_data["pred_face_adj"].cpu().numpy(),
                                 pred_face=recon_data["pred_face"],
                                 pred_edge=recon_data["pred_edge"],
@@ -309,7 +309,7 @@ def main(v_cfg: DictConfig):
 
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
-        model = TrainAutoEncoder.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint)
+        model = TrainAutoEncoder.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint, map_location="cpu")
         model.hydra_conf = v_cfg
     # model = torch.compile(model)
     if v_cfg["trainer"].evaluate:

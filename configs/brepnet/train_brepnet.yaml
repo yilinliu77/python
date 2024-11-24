@@ -19,7 +19,7 @@ trainer:
 #  accelerator: "16-mixed"
   accelerator: "32-true"
 
-  # Evaluation
+  wandb: 
   compile: false
   evaluate: false
   test_output_dir:

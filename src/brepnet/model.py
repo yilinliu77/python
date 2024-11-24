@@ -9780,6 +9780,7 @@ class AutoEncoder_1119(nn.Module):
         decoding_results["edge_center_scale1"] = self.edge_center_scale_decoder(v_encoding_result["edge_features"])
         decoding_results["face_points_local"] = self.face_points_decoder(face_z)
         decoding_results["face_center_scale"] = self.face_center_scale_decoder(face_z)
+        decoding_results["face_features"] = v_encoding_result["face_z"]
         return decoding_results
 
     def loss(self, v_decoding_result, v_data):
@@ -9833,6 +9834,7 @@ class AutoEncoder_1119(nn.Module):
             face_adj = torch.zeros((num_faces, num_faces), dtype=bool, device=loss["total_loss"].device)
             conn = v_data["edge_face_connectivity"]
             face_adj[conn[:, 1], conn[:, 2]] = True
+            data["face_features"] = pred_data["face_features"].cpu().numpy()
             data["gt_face_adj"] = face_adj.reshape(-1)
             data["pred_face_adj"] = pred_data["pred_face_adj"].reshape(-1)
             data["gt_edge"] = v_data["edge_points"].detach().cpu().numpy()

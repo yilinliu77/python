@@ -436,6 +436,9 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         self.root = Path(v_conf["data_root"])
         self.is_aug = v_conf["is_aug"]
 
+        if v_training_mode == "testing" and self.is_aug==1:
+            self.data_folders = self.data_folders * 64
+
         if v_conf["is_overfit"]:
             self.data_folders = self.data_folders[:100]
             if v_training_mode == "training":
@@ -447,7 +450,7 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         # idx = 0
-        prefix = self.data_folders[idx]
+        prefix = self.data_folders[idx % len(self.data_folders)]
         data_npz = np.load(str(self.root / prefix / "data.npz"))
 
         face_points = torch.from_numpy(data_npz['sample_points_faces'])
@@ -456,7 +459,15 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         if self.is_aug == 0:
             matrix = np.identity(3)
         if self.is_aug == 1:
-            matrix = Rotation.from_euler('xyz', np.random.randint(0, 3, 3) * np.pi / 2).as_matrix()
+            if self.mode == "testing":
+                angles = np.array([
+                    idx // len(self.data_folders) % 4,
+                    idx // len(self.data_folders) // 4 % 4,
+                    idx // len(self.data_folders) // 16 % 4
+                ])
+                matrix = Rotation.from_euler('xyz', angles * np.pi / 2).as_matrix()
+            else:
+                matrix = Rotation.from_euler('xyz', np.random.randint(0, 3, 3) * np.pi / 2).as_matrix()
         elif self.is_aug == 2:
             matrix = Rotation.from_euler('xyz', np.random.rand(3) * np.pi * 2).as_matrix()
         if self.is_aug != 0:

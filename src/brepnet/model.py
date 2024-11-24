@@ -7877,6 +7877,56 @@ class res_block_xd(nn.Module):
         return out
 
 
+class res_block_xd_ins(res_block_xd):
+    def __init__(self, dim, dim_in, dim_out, kernel_size=3, stride=1, padding=1, v_norm_shape=None):
+        super(res_block_xd, self).__init__()
+        self.downsample = None
+        if dim == 0:
+            self.conv1 = nn.Linear(dim_in, dim_out)
+            self.norm1 = nn.LayerNorm(v_norm_shape)
+            self.relu = nn.ReLU(inplace=True)
+            self.conv2 = nn.Linear(dim_out, dim_out)
+            self.norm2 = nn.LayerNorm(v_norm_shape)
+            if dim_in != dim_out:
+                self.downsample = nn.Sequential(
+                    nn.Linear(dim_in, dim_out),
+                    nn.LayerNorm(v_norm_shape),
+                )
+        if dim == 1:
+            self.conv1 = nn.Conv1d(dim_in, dim_out, kernel_size=kernel_size, stride=stride, padding=padding)
+            self.norm1 = nn.InstanceNorm1d(v_norm_shape)
+            self.relu = nn.ReLU(inplace=True)
+            self.conv2 = nn.Conv1d(dim_out, dim_out, kernel_size=kernel_size, stride=stride, padding=padding)
+            self.norm2 = nn.InstanceNorm1d(v_norm_shape)
+            if dim_in != dim_out:
+                self.downsample = nn.Sequential(
+                    nn.Conv1d(dim_in, dim_out, kernel_size=1, stride=1, bias=False),
+                    nn.LayerNorm(v_norm_shape),
+                )
+        elif dim == 2:
+            self.conv1 = nn.Conv2d(dim_in, dim_out, kernel_size=kernel_size, stride=stride, padding=padding)
+            self.norm1 = nn.InstanceNorm2d(v_norm_shape)
+            self.relu = nn.ReLU(inplace=True)
+            self.conv2 = nn.Conv2d(dim_out, dim_out, kernel_size=kernel_size, stride=stride, padding=padding)
+            self.norm2 = nn.InstanceNorm2d(v_norm_shape)
+            if dim_in != dim_out:
+                self.downsample = nn.Sequential(
+                    nn.Conv2d(dim_in, dim_out, kernel_size=1, stride=1, bias=False),
+                    nn.LayerNorm(v_norm_shape),
+                )
+        elif dim == 3:
+            self.conv1 = nn.Conv3d(dim_in, dim_out, kernel_size=kernel_size, stride=stride, padding=padding)
+            self.norm1 = nn.InstanceNorm3d(v_norm_shape)
+            self.relu = nn.ReLU(inplace=True)
+            self.conv2 = nn.Conv3d(dim_out, dim_out, kernel_size=kernel_size, stride=stride, padding=padding)
+            self.norm2 = nn.InstanceNorm3d(v_norm_shape)
+            if dim_in != dim_out:
+                self.downsample = nn.Sequential(
+                    nn.Conv3d(dim_in, dim_out, kernel_size=1, stride=1, bias=False),
+                    nn.LayerNorm(v_norm_shape),
+                )
+
+
 class AutoEncoder_1112_new(nn.Module):
     def __init__(self, v_conf):
         super().__init__()
@@ -10141,7 +10191,6 @@ class AutoEncoder_1122_cleaned(nn.Module):
             "Loss": 0,
         }
 
-
     def sample(self, v_fused_face_features, v_is_test=False):
         if self.gaussian_weights <= 0:
             return self.gaussian_proj(v_fused_face_features), torch.zeros_like(v_fused_face_features[0,0])
@@ -10354,3 +10403,329 @@ class AutoEncoder_1122_cleaned(nn.Module):
 
         return loss, data
 
+
+# With ins
+class AutoEncoder_1122_cleaned_ins(AutoEncoder_1122_cleaned):
+    def __init__(self, v_conf):
+        super().__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        norm = v_conf["norm"]
+        ds = self.dim_shape
+        dl = self.dim_latent
+        self.df = self.dim_latent * 2 * 2
+        df = self.df
+
+        self.in_channels = v_conf["in_channels"]
+        self.stage = v_conf["stage"]
+
+        self.face_coords = nn.Sequential(
+            nn.Conv2d(self.in_channels, ds // 8, kernel_size=3, stride=1, padding=1),
+            nn.LeakyReLU(),
+            res_block_xd_ins(2, ds // 8, ds // 8, 3, 1, 1, v_norm_shape = ds // 8),
+            res_block_xd_ins(2, ds // 8, ds // 4, 3, 1, 1, v_norm_shape = ds // 4),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 8
+            res_block_xd_ins(2, ds // 4, ds // 4, 3, 1, 1, v_norm_shape = ds // 4),
+            res_block_xd_ins(2, ds // 4, ds // 2, 3, 1, 1, v_norm_shape = ds // 2),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 4
+            res_block_xd_ins(2, ds // 2, ds // 2, 3, 1, 1, v_norm_shape = ds // 2),
+            res_block_xd_ins(2, ds // 2, ds // 1, 3, 1, 1, v_norm_shape = ds // 1),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 2
+            res_block_xd_ins(2, ds, ds, 3, 1, 1, v_norm_shape = ds // 1),
+            res_block_xd_ins(2, ds, ds, 3, 1, 1, v_norm_shape = ds // 1),
+            nn.Conv2d(ds, dl, kernel_size=1, stride=1, padding=0),
+            Rearrange("b n h w -> b (n h w)")
+        )
+        self.edge_coords = nn.Sequential(
+            nn.Conv1d(self.in_channels, ds // 8, kernel_size=3, stride=1, padding=1),
+            nn.LeakyReLU(),
+            res_block_xd_ins(1, ds // 8, ds // 8, 3, 1, 1, v_norm_shape = ds // 8),
+            res_block_xd_ins(1, ds // 8, ds // 4, 3, 1, 1, v_norm_shape = ds // 4),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 8
+            res_block_xd_ins(1, ds // 4, ds // 4, 3, 1, 1, v_norm_shape = ds // 4),
+            res_block_xd_ins(1, ds // 4, ds // 2, 3, 1, 1, v_norm_shape = ds // 2),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 4
+            res_block_xd_ins(1, ds // 2, ds // 2, 3, 1, 1, v_norm_shape = ds // 2),
+            res_block_xd_ins(1, ds // 2, ds, 3, 1, 1, v_norm_shape = ds // 1),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 2
+            res_block_xd_ins(1, ds, ds, 3, 1, 1, v_norm_shape = ds // 1),
+            res_block_xd_ins(1, ds, ds, 3, 1, 1, v_norm_shape = ds // 1),
+            nn.Conv1d(ds, df, kernel_size=1, stride=1, padding=0),
+            Rearrange("b n w -> b (n w)"),
+        ) # b c 1
+
+        self.sigmoid = v_conf["sigmoid"]
+        self.loss_fn = nn.L1Loss() if v_conf["loss"] == "l1" else nn.MSELoss()
+
+        # Decoder
+        self.face_points_decoder = nn.Sequential(
+            Rearrange("b (n h w) -> b n h w", h=2, w=2),
+            res_block_xd_ins(2, dl, ds, 3, 1, 1, v_norm_shape=ds),
+            res_block_xd_ins(2, ds, ds, 3, 1, 1, v_norm_shape=ds),
+            nn.ConvTranspose2d(ds // 1, ds // 2, kernel_size=2, stride=2),
+            res_block_xd_ins(2, ds // 2, ds // 2, 3, 1, 1, v_norm_shape=ds // 2),
+            res_block_xd_ins(2, ds // 2, ds // 2, 3, 1, 1, v_norm_shape=ds // 2),
+            nn.ConvTranspose2d(ds // 2, ds // 4, kernel_size=2, stride=2),
+            res_block_xd_ins(2, ds // 4, ds // 4, 3, 1, 1, v_norm_shape=ds // 4),
+            res_block_xd_ins(2, ds // 4, ds // 4, 3, 1, 1, v_norm_shape=ds // 4),
+            nn.ConvTranspose2d(ds // 4, ds // 8, kernel_size=2, stride=2),
+            res_block_xd_ins(2, ds // 8, ds // 8, 3, 1, 1, v_norm_shape=ds // 8),
+            res_block_xd_ins(2, ds // 8, ds // 8, 3, 1, 1, v_norm_shape=ds // 8),
+            nn.Conv2d(ds // 8, self.in_channels, kernel_size=1, stride=1, padding=0),
+            Rearrange('... c w h -> ... w h c',c=self.in_channels),
+        )
+        self.face_center_scale_decoder = nn.Sequential(
+            res_block_xd_ins(0, dl * 2 * 2, ds, v_norm_shape=ds),
+            res_block_xd_ins(0, ds, ds, v_norm_shape=ds),
+            res_block_xd_ins(0, ds, ds, v_norm_shape=ds),
+            res_block_xd_ins(0, ds, ds, v_norm_shape=ds),
+            res_block_xd_ins(0, ds, ds, v_norm_shape=ds),
+            res_block_xd_ins(0, ds, ds, v_norm_shape=ds),
+            res_block_xd_ins(0, ds, ds, v_norm_shape=ds),
+            nn.Linear(ds, 4),
+        )
+        
+        self.edge_points_decoder = nn.Sequential(
+            Rearrange("b (n w)-> b n w", n=df, w=2),
+            res_block_xd_ins(1, df, ds, 3, 1, 1, v_norm_shape=ds),
+            res_block_xd_ins(1, ds, ds, 3, 1, 1, v_norm_shape=ds),
+            nn.ConvTranspose1d(ds, ds // 2, kernel_size=2, stride=2),
+            res_block_xd_ins(1, ds // 2, ds // 2, 3, 1, 1, v_norm_shape=ds // 2),
+            res_block_xd_ins(1, ds // 2, ds // 2, 3, 1, 1, v_norm_shape=ds // 2),
+            nn.ConvTranspose1d(ds // 2, ds // 4, kernel_size=2, stride=2),
+            res_block_xd_ins(1, ds // 4, ds // 4, 3, 1, 1, v_norm_shape=ds // 4),
+            res_block_xd_ins(1, ds // 4, ds // 4, 3, 1, 1, v_norm_shape=ds // 4),
+            nn.ConvTranspose1d(ds // 4, ds // 8, kernel_size=2, stride=2),
+            res_block_xd_ins(1, ds // 8, ds // 8, 3, 1, 1, v_norm_shape=ds // 8),
+            res_block_xd_ins(1, ds // 8, ds // 8, 3, 1, 1, v_norm_shape=ds // 8),
+            nn.Conv1d(ds // 8, self.in_channels, kernel_size=1, stride=1, padding=0),
+            Rearrange('... c w -> ... w c',c=self.in_channels),
+        )
+        self.edge_center_scale_decoder = nn.Sequential(
+            res_block_xd_ins(0, df * 2, ds, v_norm_shape=ds),
+            res_block_xd_ins(0, ds, ds, v_norm_shape=ds),
+            res_block_xd_ins(0, ds, ds, v_norm_shape=ds),
+            res_block_xd_ins(0, ds, ds, v_norm_shape=ds),
+            res_block_xd_ins(0, ds, ds, v_norm_shape=ds),
+            res_block_xd_ins(0, ds, ds, v_norm_shape=ds),
+            res_block_xd_ins(0, ds, ds, v_norm_shape=ds),
+            nn.Linear(ds, 4),
+        )
+
+        if self.stage == 1:
+            self.graph_face_edge = nn.ModuleList()
+            for i in range(10):
+                self.graph_face_edge.append(GATv2Conv(
+                    df, df, 
+                    heads=1, edge_dim=df * 2,
+                ))
+                self.graph_face_edge.append(nn.LeakyReLU())
+            
+            bd = 768 # bottlenek_dim
+            self.face_attn_proj_in = nn.Linear(df, bd)
+            self.face_attn_proj_out = nn.Linear(bd, df)
+            layer = nn.TransformerEncoderLayer(
+                bd, 16, dim_feedforward=2048, dropout=0.1, 
+                batch_first=True, norm_first=True)
+            self.face_attn = nn.TransformerEncoder(layer, 12, nn.LayerNorm(bd))
+
+            self.global_feature1 = nn.Sequential(
+                nn.Linear(df, df),
+                nn.LeakyReLU(),
+                nn.Linear(df, df),
+            )
+            self.global_feature2 = nn.Sequential(
+                nn.Linear(df * 2, df),
+                nn.LeakyReLU(),
+                nn.Linear(df, df),
+            )
+
+            self.inter = AttnIntersection3(df, 768, 12)
+            self.classifier = nn.Linear(df*2, 1)
+
+            self.face_attn_proj_in2 = nn.Linear(df, bd)
+            self.face_attn_proj_out2 = nn.Linear(bd, df)
+            layer2 = nn.TransformerEncoderLayer(
+                bd, 16, dim_feedforward=2048, dropout=0.1, 
+                batch_first=True, norm_first=True)
+            self.face_attn2 = nn.TransformerEncoder(layer2, 12)
+
+            self.gaussian_weights = v_conf["gaussian_weights"]
+            if self.gaussian_weights > 0:
+                self.gaussian_proj = nn.Sequential(
+                    nn.Linear(self.df, self.df*2),
+                    nn.LeakyReLU(),
+                    nn.Linear(self.df*2, self.df*2),
+                )
+            else:
+                self.gaussian_proj = nn.Sequential(
+                    nn.Linear(self.df, self.df),
+                    nn.LeakyReLU(),
+                    nn.Linear(self.df, self.df),
+                    nn.Identity() if not self.sigmoid else nn.Sigmoid(),
+                )
+
+        self.times = {
+            "Encoder": 0,
+            "Fuser": 0,
+            "Sample": 0,
+            "global": 0,
+            "Decoder": 0,
+            "Intersection": 0,
+            "Loss": 0,
+        }
+
+
+# Light version
+class AutoEncoder_1122_cleaned_light(AutoEncoder_1122_cleaned):
+    def __init__(self, v_conf):
+        super().__init__(v_conf)
+        self.dim_shape = v_conf["dim_shape"]
+        self.dim_latent = v_conf["dim_latent"]
+        norm = v_conf["norm"]
+        ds = self.dim_shape
+        dl = self.dim_latent
+        self.df = self.dim_latent * 2 * 2
+        df = self.df
+
+        self.in_channels = v_conf["in_channels"]
+        self.stage = v_conf["stage"]
+
+
+        self.face_coords = nn.Sequential(
+            nn.Conv2d(self.in_channels, ds // 8, kernel_size=3, stride=1, padding=1),
+            nn.LayerNorm((ds // 8, 16,16)),
+            nn.LeakyReLU(),
+            res_block_xd(2, ds // 8, ds // 4, 3, 1, 1, v_norm_shape = (ds // 4, 16, 16)),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 8
+            res_block_xd(2, ds // 4, ds // 2, 3, 1, 1, v_norm_shape = (ds // 2, 8, 8)),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 4
+            res_block_xd(2, ds // 2, ds // 1, 3, 1, 1, v_norm_shape = (ds // 1, 4, 4)),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 2
+            res_block_xd(2, ds, ds, 3, 1, 1, v_norm_shape = (ds // 1, 2, 2)),
+            nn.Conv2d(ds, dl, kernel_size=1, stride=1, padding=0),
+            Rearrange("b n h w -> b (n h w)")
+        )
+        self.edge_coords = nn.Sequential(
+            nn.Conv1d(self.in_channels, ds // 8, kernel_size=3, stride=1, padding=1),
+            nn.LayerNorm((ds // 8, 16,)),
+            nn.LeakyReLU(),
+            res_block_xd(1, ds // 8, ds // 4, 3, 1, 1, v_norm_shape = (ds // 4, 16,)),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 8
+            res_block_xd(1, ds // 4, ds // 2, 3, 1, 1, v_norm_shape = (ds // 2, 8,)),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 4
+            res_block_xd(1, ds // 2, ds, 3, 1, 1, v_norm_shape = (ds // 1, 4,)),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 2
+            res_block_xd(1, ds, ds, 3, 1, 1, v_norm_shape = (ds // 1, 2,)),
+            nn.Conv1d(ds, df, kernel_size=1, stride=1, padding=0),
+            Rearrange("b n w -> b (n w)"),
+        ) # b c 1
+
+        self.sigmoid = v_conf["sigmoid"]
+        self.loss_fn = nn.L1Loss() if v_conf["loss"] == "l1" else nn.MSELoss()
+
+        # Decoder
+        self.face_points_decoder = nn.Sequential(
+            Rearrange("b (n h w) -> b n h w", h=2, w=2),
+            res_block_xd(2, dl, ds, 3, 1, 1, v_norm_shape=(ds, 2, 2)),
+            nn.ConvTranspose2d(ds // 1, ds // 2, kernel_size=2, stride=2),
+            res_block_xd(2, ds // 2, ds // 2, 3, 1, 1, v_norm_shape=(ds // 2, 4, 4)),
+            nn.ConvTranspose2d(ds // 2, ds // 4, kernel_size=2, stride=2),
+            res_block_xd(2, ds // 4, ds // 4, 3, 1, 1, v_norm_shape=(ds // 4, 8, 8)),
+            nn.ConvTranspose2d(ds // 4, ds // 8, kernel_size=2, stride=2),
+            res_block_xd(2, ds // 8, ds // 8, 3, 1, 1, v_norm_shape=(ds // 8, 16, 16)),
+            nn.Conv2d(ds // 8, self.in_channels, kernel_size=1, stride=1, padding=0),
+            Rearrange('... c w h -> ... w h c',c=self.in_channels),
+        )
+        self.face_center_scale_decoder = nn.Sequential(
+            res_block_xd(0, dl * 2 * 2, ds, v_norm_shape=(ds,)),
+            res_block_xd(0, ds, ds, v_norm_shape=(ds,)),
+            res_block_xd(0, ds, ds, v_norm_shape=(ds,)),
+            res_block_xd(0, ds, ds, v_norm_shape=(ds,)),
+            res_block_xd(0, ds, ds, v_norm_shape=(ds,)),
+            nn.Linear(ds, 4),
+        )
+        
+        self.edge_points_decoder = nn.Sequential(
+            Rearrange("b (n w)-> b n w", n=df, w=2),
+            res_block_xd(1, df, ds, 3, 1, 1, v_norm_shape=(ds, 2,)),
+            nn.ConvTranspose1d(ds, ds // 2, kernel_size=2, stride=2),
+            res_block_xd(1, ds // 2, ds // 2, 3, 1, 1, v_norm_shape=(ds // 2, 4,)),
+            nn.ConvTranspose1d(ds // 2, ds // 4, kernel_size=2, stride=2),
+            res_block_xd(1, ds // 4, ds // 4, 3, 1, 1, v_norm_shape=(ds // 4, 8,)),
+            nn.ConvTranspose1d(ds // 4, ds // 8, kernel_size=2, stride=2),
+            res_block_xd(1, ds // 8, ds // 8, 3, 1, 1, v_norm_shape=(ds // 8, 16,)),
+            nn.Conv1d(ds // 8, self.in_channels, kernel_size=1, stride=1, padding=0),
+            Rearrange('... c w -> ... w c',c=self.in_channels),
+        )
+        self.edge_center_scale_decoder = nn.Sequential(
+            res_block_xd(0, df * 2, ds, v_norm_shape=(ds,)),
+            res_block_xd(0, ds, ds, v_norm_shape=(ds,)),
+            res_block_xd(0, ds, ds, v_norm_shape=(ds,)),
+            res_block_xd(0, ds, ds, v_norm_shape=(ds,)),
+            res_block_xd(0, ds, ds, v_norm_shape=(ds,)),
+            nn.Linear(ds, 4),
+        )
+
+        if self.stage == 1:
+            self.graph_face_edge = nn.ModuleList()
+            for i in range(10):
+                self.graph_face_edge.append(GATv2Conv(
+                    df, df, 
+                    heads=1, edge_dim=df * 2,
+                ))
+                self.graph_face_edge.append(nn.LeakyReLU())
+            
+            bd = 768 # bottlenek_dim
+            self.face_attn_proj_in = nn.Linear(df, bd)
+            self.face_attn_proj_out = nn.Linear(bd, df)
+            layer = nn.TransformerEncoderLayer(
+                bd, 16, dim_feedforward=2048, dropout=0.1, 
+                batch_first=True, norm_first=True)
+            self.face_attn = nn.TransformerEncoder(layer, 12, nn.LayerNorm(bd))
+
+            self.global_feature1 = nn.Sequential(
+                nn.Linear(df, df),
+                nn.LeakyReLU(),
+                nn.Linear(df, df),
+            )
+            self.global_feature2 = nn.Sequential(
+                nn.Linear(df * 2, df),
+                nn.LeakyReLU(),
+                nn.Linear(df, df),
+            )
+
+            self.inter = AttnIntersection3(df, 768, 12)
+            self.classifier = nn.Linear(df*2, 1)
+
+            self.face_attn_proj_in2 = nn.Linear(df, bd)
+            self.face_attn_proj_out2 = nn.Linear(bd, df)
+            layer2 = nn.TransformerEncoderLayer(
+                bd, 16, dim_feedforward=2048, dropout=0.1, 
+                batch_first=True, norm_first=True)
+            self.face_attn2 = nn.TransformerEncoder(layer2, 12)
+
+            self.gaussian_weights = v_conf["gaussian_weights"]
+            if self.gaussian_weights > 0:
+                self.gaussian_proj = nn.Sequential(
+                    nn.Linear(self.df, self.df*2),
+                    nn.LeakyReLU(),
+                    nn.Linear(self.df*2, self.df*2),
+                )
+            else:
+                self.gaussian_proj = nn.Sequential(
+                    nn.Linear(self.df, self.df),
+                    nn.LeakyReLU(),
+                    nn.Linear(self.df, self.df),
+                    nn.Identity() if not self.sigmoid else nn.Sigmoid(),
+                )
+
+        self.times = {
+            "Encoder": 0,
+            "Fuser": 0,
+            "Sample": 0,
+            "global": 0,
+            "Decoder": 0,
+            "Intersection": 0,
+            "Loss": 0,
+        }

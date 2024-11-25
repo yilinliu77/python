@@ -119,7 +119,7 @@ if __name__ == "__main__":
     num_faces = []
     num_edges = []
     for step_file in pbar:
-        is_valid, shape = check_step_valid_soild(step_file, return_shape=True, is_set_gloabl=True)
+        is_valid, shape = check_step_valid_soild(step_file, return_shape=True)
         if os.path.exists(os.path.join(os.path.dirname(step_file), "success.txt")) and not is_valid:
             folder_name = os.path.basename(os.path.dirname(step_file))
             exception_folders.append(folder_name)

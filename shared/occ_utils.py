@@ -102,11 +102,15 @@ def get_points_along_edge(edge, v_num=100):
 
 
 
-def get_primitives(v_shape, v_type):
+def get_primitives(v_shape, v_type, v_remove_half=False):
     assert v_shape is not None
     explorer = TopExp_Explorer(v_shape, v_type)
     items = []
     while explorer.More():
+        if v_remove_half:
+            if explorer.Current() in items or explorer.Current().Reversed() in items:
+                explorer.Next()
+                continue
         items.append(explorer.Current())
         explorer.Next()
     return items

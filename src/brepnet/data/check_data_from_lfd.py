@@ -4,6 +4,8 @@ import pickle
 import numpy as np
 from tqdm import tqdm
 
+from src.brepnet.viz.sort_and_merge import arrange_meshes
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Construct Brep From Data')
     parser.add_argument('--pkl_root', type=str, required=True)
@@ -16,6 +18,7 @@ if __name__ == '__main__':
     all_pkl_files = os.listdir(pkl_root)
     folder_list = []
     unique_folder_list = []
+    removed_folder_list = []
     for pkl_file in tqdm(all_pkl_files):
         if not pkl_file.endswith(".pkl"):
             continue
@@ -30,6 +33,8 @@ if __name__ == '__main__':
             if i < j:
                 if j in local_unique_idx_list:
                     local_unique_idx_list.remove(j)
+                    removed_folder_list.append(local_folder_list[i])
+                    removed_folder_list.append(local_folder_list[j])
 
         local_unique_folder_list = [local_folder_list[i] for i in local_unique_idx_list]
         print(f"Local Unique ratio: {len(local_unique_folder_list) / len(local_folder_list)}")
@@ -38,6 +43,21 @@ if __name__ == '__main__':
 
     unique_folder_list.sort()
     print(f"Unique ratio: {len(unique_folder_list) / len(folder_list)}")
+
+    # Sample deduplicated
+    existing_items = set(os.listdir("D:/brepnet/deepcad_v6"))
+    unique_folder_list = list(set(unique_folder_list) & existing_items)
+    unique_folder_list = np.random.choice(unique_folder_list, 2500, replace=False)
+    unique_folder_list = [os.path.join("D:/brepnet/deepcad_v6",item,"mesh.ply") for item in unique_folder_list]
+    arrange_meshes(unique_folder_list, "D:/brepnet/deepcad_v6/test.ply")
+
+    # Sample duplicated
+    unique_folder_list = list(set(unique_folder_list) & existing_items)
+    unique_folder_list = np.random.choice(unique_folder_list, 2500, replace=False)
+    unique_folder_list = [os.path.join("D:/brepnet/deepcad_v6",item,"mesh.ply") for item in unique_folder_list]
+    arrange_meshes(unique_folder_list, "D:/brepnet/deepcad_v6/test.ply")
+
+
     with open(out_txt_path, "w") as f:
         for folder in unique_folder_list:
             f.write(f"{folder}\n")

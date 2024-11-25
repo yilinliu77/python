@@ -1,4 +1,6 @@
 import time, os, random, traceback, sys
+from pathlib import Path
+
 import torch
 import numpy as np
 
@@ -24,6 +26,9 @@ import shutil
 
 from OCC.Core.TopoDS import TopoDS_Solid, TopoDS_Shell
 from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_SHELL, TopAbs_SOLID
+
+from shared.occ_utils import get_primitives, get_triangulations, get_points_along_edge, get_curve_length
+from src.brepnet.eval.check_valid import check_step_valid_soild
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -117,175 +122,6 @@ def read_step_and_get_data(step_file_path, NUM_SAMPLE_EDGE_UNIT=100, save_data=F
             vertexes.append(vertex)
 
     return faces, vertexes, edge_points
-
-
-def eval_one(eval_root, gt_root, folder_name, SAMPLE_NUM=10000):
-    if os.path.exists(os.path.join(eval_root, folder_name, 'error.txt')):
-        os.remove(os.path.join(eval_root, folder_name, 'error.txt'))
-    if os.path.exists(os.path.join(eval_root, folder_name, 'eval.npz')):
-        os.remove(os.path.join(eval_root, folder_name, 'eval.npz'))
-
-    if not os.path.exists(os.path.join(eval_root, folder_name, 'success.txt')):
-        return
-
-    result = {
-        'num_recon_face'  : 0,
-        'num_gt_face'     : 0,
-        'face_acc_cd'     : [],
-        'face_com_cd'     : [],
-        'face_cd'         : [],
-
-        'num_recon_edge'  : 0,
-        'num_gt_edge'     : 0,
-        'edge_acc_cd'     : [],
-        'edge_com_cd'     : [],
-        'edge_cd'         : [],
-
-        'num_recon_vertex': 0,
-        'num_gt_vertex'   : 0,
-        'vertex_acc_cd'   : [],
-        'vertex_com_cd'   : [],
-        'vertex_cd'       : [],
-
-        'stl_type'        : -1,
-        'stl_acc_cd'      : 0,
-        'stl_com_cd'      : 0,
-        'stl_cd'          : 0,
-    }
-    device = torch.device('cuda')
-    chamfer_distance = ChamferDistance()
-
-    # gt info
-    gt_mesh_path = os.path.join(gt_root, folder_name, 'mesh.ply')
-    gt_mesh = trimesh.load(gt_mesh_path)
-    gt_pc, _ = trimesh.sample.sample_surface(gt_mesh, SAMPLE_NUM)
-    gt_pc_tensor = torch.from_numpy(gt_pc).float().to(device)
-
-    data_npz = np.load(os.path.join(gt_root, folder_name, 'data.npz'))
-    result['num_gt_face'] = data_npz['sample_points_faces'].shape[0]
-    # result['num_gt_edge'] = data_npz['sample_points_lines'].shape[0]
-    # result['num_gt_vertex'] = data_npz['sample_points_vertices'].shape[0]
-
-    gt_step_path = os.path.join(gt_root, folder_name, 'normalized_shape.step')
-    gt_faces, gt_vertexes, gt_edge_points = read_step_and_get_data(gt_step_path)
-    result['num_gt_edge'] = len(gt_edge_points)
-    result['num_gt_vertex'] = len(gt_vertexes)
-    gt_edge_points = np.concatenate(gt_edge_points, axis=0)
-
-    gt_edge_tensor = torch.from_numpy(gt_edge_points).float().to(device)
-
-    gen_step_name = [f for f in os.listdir(os.path.join(eval_root, folder_name)) if f.endswith('.step')]
-
-    # read the edge and vertex from gen step file
-    if os.path.exists(os.path.join(eval_root, folder_name, 'recon_brep.step')):
-        step_file_path = os.path.join(eval_root, folder_name, 'recon_brep.step')
-        gen_face, gen_vertexes, gen_edge_points = read_step_and_get_data(step_file_path, save_data=True)
-    else:
-        gen_face, gen_vertexes, gen_edge_points = None, None
-
-    gen_stl_name = [f for f in os.listdir(os.path.join(eval_root, folder_name)) if f.endswith('.stl')]
-    gen_face_name = [f for f in os.listdir(os.path.join(eval_root, folder_name)) if f.endswith('.ply')]
-
-    # face
-    if len(gen_face_name) != 0:
-        result['num_recon_face'] = len(gen_face)
-        recon_face_mesh = trimesh.load(os.path.join(eval_root, folder_name, gen_face_name[0]))
-        recon_face_pc, _ = trimesh.sample.sample_surface(recon_face_mesh, SAMPLE_NUM)
-        recon_face_pc_tensor = torch.from_numpy(recon_face_pc).float().to(device)
-        acc_cd = chamfer_distance(recon_face_pc_tensor.unsqueeze(0), gt_pc_tensor.unsqueeze(0),
-                                  bidirectional=False, point_reduction='mean').cpu().item()
-        com_cd = chamfer_distance(gt_pc_tensor.unsqueeze(0), recon_face_pc_tensor.unsqueeze(0),
-                                  bidirectional=False, point_reduction='mean').cpu().item()
-        cd = (acc_cd + com_cd) / 2
-        result['face_acc_cd'].append(acc_cd)
-        result['face_com_cd'].append(com_cd)
-        result['face_cd'].append(cd)
-
-    # edge
-    if gen_edge_points is not None:
-        result['num_recon_edge'] = len(gen_edge_points)
-        gen_edge_points = np.concatenate(gen_edge_points, axis=0)
-        recon_edge_pc_tensor = torch.from_numpy(gen_edge_points).float().to(device)
-        acc_cd = chamfer_distance(recon_edge_pc_tensor.unsqueeze(0), gt_edge_tensor.unsqueeze(0),
-                                  bidirectional=False, point_reduction='mean').cpu().item()
-        com_cd = chamfer_distance(gt_edge_tensor.unsqueeze(0), recon_edge_pc_tensor.unsqueeze(0),
-                                  bidirectional=False, point_reduction='mean').cpu().item()
-        cd = (acc_cd + com_cd) / 2
-        result['edge_acc_cd'].append(acc_cd)
-        result['edge_com_cd'].append(com_cd)
-        result['edge_cd'].append(cd)
-
-    # vertex
-    if gen_vertexes is not None:
-        result['num_recon_vertex'] = len(gen_vertexes)
-        if len(gen_vertexes) != 0 and len(gt_vertexes) != 0:
-            gen_vertexes = np.stack(gen_vertexes, axis=0)
-            gt_vertexes = np.stack(gt_vertexes, axis=0)
-            gt_vertex_tensor = torch.from_numpy(gt_vertexes).float().to(device)
-            recon_vertex_pc_tensor = torch.from_numpy(gen_vertexes).float().to(device)
-            acc_cd = chamfer_distance(recon_vertex_pc_tensor.unsqueeze(0), gt_vertex_tensor.unsqueeze(0),
-                                      bidirectional=False, point_reduction='mean').cpu().item()
-            com_cd = chamfer_distance(gt_vertex_tensor.unsqueeze(0), recon_vertex_pc_tensor.unsqueeze(0),
-                                      bidirectional=False, point_reduction='mean').cpu().item()
-            cd = (acc_cd + com_cd) / 2
-            result['vertex_acc_cd'].append(acc_cd)
-            result['vertex_com_cd'].append(com_cd)
-            result['vertex_cd'].append(cd)
-
-    # check the vaildity of the step file
-    if len(gen_step_name) != 0:
-        try:
-            gen_shape = read_step_file(os.path.join(eval_root, folder_name, gen_step_name[0]), as_compound=False, verbosity=False)
-            shape_analyzer = BRepCheck_Analyzer(gen_shape)
-            if gen_shape.ShapeType() == TopAbs_SOLID:
-                if shape_analyzer.IsValid():
-                    result['stl_type'] = shape_type[0]
-                else:
-                    result['stl_type'] = shape_type[1]
-            elif gen_shape.ShapeType() == TopoDS_Shell:
-                result['stl_type'] = shape_type[2]
-            elif gen_shape.ShapeType() == TopAbs_COMPOUND:
-                result['stl_type'] = shape_type[3]
-            else:
-                result['stl_type'] = shape_type[4]
-        except Exception as e:
-            result['stl_type'] = shape_type[4]
-    else:
-        result['stl_type'] = shape_type[4]
-
-    # compute the chamfer distance between the stl and gt mesh
-    gen_mesh = trimesh.load(str(os.path.join(eval_root, folder_name, gen_stl_name[0])))
-
-    if gen_mesh is not None:
-        gen_pc, _ = trimesh.sample.sample_surface(gen_mesh, SAMPLE_NUM)
-        gen_pc_tensor = torch.from_numpy(gen_pc).float().to(device)
-        acc_cd = chamfer_distance(gen_pc_tensor.unsqueeze(0), gt_pc_tensor.unsqueeze(0),
-                                  bidirectional=False, point_reduction='mean').cpu().item()
-        com_cd = chamfer_distance(gt_pc_tensor.unsqueeze(0), gen_pc_tensor.unsqueeze(0),
-                                  bidirectional=False, point_reduction='mean').cpu().item()
-        result['stl_acc_cd'] = acc_cd
-        result['stl_com_cd'] = com_cd
-        result['stl_cd'] = (acc_cd + com_cd) / 2
-
-    np.savez_compressed(os.path.join(eval_root, folder_name, 'eval.npz'), result=result, allow_pickle=True)
-
-
-def eval_batch(eval_root, gt_root, folder_name_list, SAMPLE_NUM=10000):
-    for folder_name in folder_name_list:
-        try:
-            eval_one(eval_root, gt_root, folder_name, SAMPLE_NUM)
-        except Exception as e:
-            with open(os.path.join(eval_root, "error.txt"), "a") as f:
-                tb_list = traceback.extract_tb(sys.exc_info()[2])
-                last_traceback = tb_list[-1]
-                f.write(folder_name + ": " + str(e) + "\n")
-                f.write(f"An error occurred on line {last_traceback.lineno} in {last_traceback.name}\n\n")
-                print(folder_name + ": " + str(e))
-                print(e)
-                print(f"An error occurred on line {last_traceback.lineno} in {last_traceback.name}\n\n")
-
-
-eval_batch_remote = ray.remote(max_retries=3)(eval_batch)
 
 
 def compute_statistics(eval_root, txt_path):
@@ -493,10 +329,229 @@ def seg_by_face_num(eval_root):
     print(f"Seg by face num, saved in : {seg_root}")
 
 
-def test_eval_one(eval_root, gt_root):
-    folder_name = "00009559"
-    eval_one(eval_root, gt_root, folder_name)
-    exit(0)
+def get_data(v_shape, v_num_per_m=100):
+    faces, face_points, edges, edge_points, vertices, vertex_points = [], [], [], [], [], []
+    for face in get_primitives(v_shape, TopAbs_FACE):
+        v, f = get_triangulations(face, 0.1, 0.1)
+        mesh_item = trimesh.Trimesh(vertices=v, faces=f)
+        area = mesh_item.area
+        num_samples = min(max(int(v_num_per_m * v_num_per_m * area), 5), 10000)
+        pc_item, id_face = trimesh.sample.sample_surface(mesh_item, num_samples)
+        normals = mesh_item.face_normals[id_face]
+        faces.append(face)
+        face_points.append(np.concatenate((pc_item,normals), axis=1))
+    for edge in get_primitives(v_shape, TopAbs_EDGE):
+        length = get_curve_length(edge)
+        num_samples = min(max(int(v_num_per_m * length), 5), 10000)
+        v = get_points_along_edge(edge, num_samples)
+        edges.append(edge)
+        edge_points.append(v)
+    for vertex in get_primitives(v_shape, TopAbs_VERTEX):
+        vertices.append(vertex)
+        vertex_points.append(np.asarray([BRep_Tool.Pnt(vertex).Coord()]))
+    vertex_points = np.concatenate(vertex_points, axis=0)
+    return faces, face_points, edges, edge_points, vertices, vertex_points
+
+def get_chamfer(v_recon_points, v_gt_points):
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    chamfer_distance = ChamferDistance()
+    recon_fp = torch.from_numpy(np.concatenate(v_recon_points, axis=0)).float().to(device)
+    gt_fp = torch.from_numpy(np.concatenate(v_gt_points, axis=0)).float().to(device)
+    fp_acc_cd = chamfer_distance(recon_fp.unsqueeze(0), gt_fp.unsqueeze(0),
+                              bidirectional=False, point_reduction='mean').cpu().item()
+    fp_com_cd = chamfer_distance(gt_fp.unsqueeze(0), recon_fp.unsqueeze(0),
+                              bidirectional=False, point_reduction='mean').cpu().item()
+    fp_cd = (fp_acc_cd + fp_com_cd) / 2
+    return fp_acc_cd, fp_com_cd, fp_cd
+
+def get_detection(v_recon_points, v_gt_points):
+    return 0
+
+def eval_one(eval_root, gt_root, folder_name, SAMPLE_NUM=100):
+    if os.path.exists(eval_root / folder_name / 'error.txt'):
+        os.remove(eval_root / folder_name / 'error.txt')
+    if os.path.exists(eval_root / folder_name / 'eval.npz'):
+        os.remove(eval_root / folder_name / 'eval.npz')
+
+    # At least have fall_back_mesh
+    step_name = "recon_brep.step"
+    fall_back_mesh = "recon_brep.ply"
+    if not os.path.exists(eval_root / folder_name / fall_back_mesh):
+        raise ValueError(f"Cannot find the {fall_back_mesh} in {eval_root / folder_name}")
+
+    result = {
+        'num_recon_face'  : 0,
+        'num_gt_face'     : 0,
+        'face_acc_cd'     : [],
+        'face_com_cd'     : [],
+        'face_cd'         : [],
+
+        'num_recon_edge'  : 0,
+        'num_gt_edge'     : 0,
+        'edge_acc_cd'     : [],
+        'edge_com_cd'     : [],
+        'edge_cd'         : [],
+
+        'num_recon_vertex': 0,
+        'num_gt_vertex'   : 0,
+        'vertex_acc_cd'   : [],
+        'vertex_com_cd'   : [],
+        'vertex_cd'       : [],
+
+        'stl_type'        : -1,
+        'stl_acc_cd'      : 0,
+        'stl_com_cd'      : 0,
+        'stl_cd'          : 0,
+    }
+
+
+    # Face chamfer distance
+    if (eval_root / folder_name / step_name).exists():
+        valid, recon_shape = check_step_valid_soild(eval_root / folder_name / step_name, return_shape=True)
+    elif (eval_root / folder_name / fall_back_mesh).exists():
+        valid, recon_shape = False, trimesh.load(eval_root / folder_name / fall_back_mesh)
+    else:
+        raise
+
+    # GT
+    _, gt_shape = check_step_valid_soild(gt_root / folder_name / "normalized_shape.step", return_shape=True)
+
+    # Get data
+    recon_faces, recon_face_points, recon_edges, recon_edge_points, recon_vertices, recon_vertex_points = get_data(
+        recon_shape, SAMPLE_NUM)
+    gt_faces, gt_face_points, gt_edges, gt_edge_points, gt_vertices, gt_vertex_points = get_data(gt_shape, SAMPLE_NUM)
+
+    # Chamfer
+    face_acc_cd, face_com_cd, face_cd = get_chamfer(recon_face_points, gt_face_points)
+    edge_acc_cd, edge_com_cd, edge_cd = get_chamfer(recon_edge_points, gt_edge_points)
+    vertex_acc_cd, vertex_com_cd, vertex_cd = get_chamfer(recon_vertex_points, gt_vertex_points)
+
+    # Detection
+    face_fscore = get_detection(recon_face_points, gt_face_points)
+    edge_fscore = get_detection(recon_edge_points, gt_edge_points)
+    vertex_fscore = get_detection(recon_vertex_points, gt_vertex_points)
+
+    # Topology
+    face_edge_dict = {}
+    for face in get_primitives(shape, TopAbs_FACE):
+        edges = []
+        for edge in get_primitives(face, TopAbs_EDGE):
+            edges.append(edge)
+        face_edge_dict[face] = edges
+
+    # gt info
+    gt_mesh_path = gt_root / folder_name / 'mesh.ply'
+    gt_mesh = trimesh.load(gt_mesh_path)
+    gt_pc, _ = trimesh.sample.sample_surface(gt_mesh, SAMPLE_NUM)
+    gt_pc_tensor = torch.from_numpy(gt_pc).float().to(device)
+
+    data_npz = np.load(os.path.join(gt_root, folder_name, 'data.npz'))
+    result['num_gt_face'] = data_npz['sample_points_faces'].shape[0]
+    # result['num_gt_edge'] = data_npz['sample_points_lines'].shape[0]
+    # result['num_gt_vertex'] = data_npz['sample_points_vertices'].shape[0]
+
+    gt_step_path = os.path.join(gt_root, folder_name, 'normalized_shape.step')
+    gt_faces, gt_vertexes, gt_edge_points = read_step_and_get_data(gt_step_path)
+    result['num_gt_edge'] = len(gt_edge_points)
+    result['num_gt_vertex'] = len(gt_vertexes)
+    gt_edge_points = np.concatenate(gt_edge_points, axis=0)
+
+    gt_edge_tensor = torch.from_numpy(gt_edge_points).float().to(device)
+
+    gen_step_name = [f for f in os.listdir(os.path.join(eval_root, folder_name)) if f.endswith('.step')]
+
+    # read the edge and vertex from gen step file
+    if os.path.exists(os.path.join(eval_root, folder_name, 'recon_brep.step')):
+        step_file_path = os.path.join(eval_root, folder_name, 'recon_brep.step')
+        gen_face, gen_vertexes, gen_edge_points = read_step_and_get_data(step_file_path, save_data=True)
+    else:
+        gen_face, gen_vertexes, gen_edge_points = None, None
+
+    gen_stl_name = [f for f in os.listdir(os.path.join(eval_root, folder_name)) if f.endswith('.stl')]
+    gen_face_name = [f for f in os.listdir(os.path.join(eval_root, folder_name)) if f.endswith('.ply')]
+
+    # face
+    if len(gen_face_name) != 0:
+        result['num_recon_face'] = len(gen_face)
+        recon_face_mesh = trimesh.load(os.path.join(eval_root, folder_name, gen_face_name[0]))
+        recon_face_pc, _ = trimesh.sample.sample_surface(recon_face_mesh, SAMPLE_NUM)
+        recon_face_pc_tensor = torch.from_numpy(recon_face_pc).float().to(device)
+        acc_cd = chamfer_distance(recon_face_pc_tensor.unsqueeze(0), gt_pc_tensor.unsqueeze(0),
+                                  bidirectional=False, point_reduction='mean').cpu().item()
+        com_cd = chamfer_distance(gt_pc_tensor.unsqueeze(0), recon_face_pc_tensor.unsqueeze(0),
+                                  bidirectional=False, point_reduction='mean').cpu().item()
+        cd = (acc_cd + com_cd) / 2
+        result['face_acc_cd'].append(acc_cd)
+        result['face_com_cd'].append(com_cd)
+        result['face_cd'].append(cd)
+
+    # edge
+    if gen_edge_points is not None:
+        result['num_recon_edge'] = len(gen_edge_points)
+        gen_edge_points = np.concatenate(gen_edge_points, axis=0)
+        recon_edge_pc_tensor = torch.from_numpy(gen_edge_points).float().to(device)
+        acc_cd = chamfer_distance(recon_edge_pc_tensor.unsqueeze(0), gt_edge_tensor.unsqueeze(0),
+                                  bidirectional=False, point_reduction='mean').cpu().item()
+        com_cd = chamfer_distance(gt_edge_tensor.unsqueeze(0), recon_edge_pc_tensor.unsqueeze(0),
+                                  bidirectional=False, point_reduction='mean').cpu().item()
+        cd = (acc_cd + com_cd) / 2
+        result['edge_acc_cd'].append(acc_cd)
+        result['edge_com_cd'].append(com_cd)
+        result['edge_cd'].append(cd)
+
+    # vertex
+    if gen_vertexes is not None:
+        result['num_recon_vertex'] = len(gen_vertexes)
+        if len(gen_vertexes) != 0 and len(gt_vertexes) != 0:
+            gen_vertexes = np.stack(gen_vertexes, axis=0)
+            gt_vertexes = np.stack(gt_vertexes, axis=0)
+            gt_vertex_tensor = torch.from_numpy(gt_vertexes).float().to(device)
+            recon_vertex_pc_tensor = torch.from_numpy(gen_vertexes).float().to(device)
+            acc_cd = chamfer_distance(recon_vertex_pc_tensor.unsqueeze(0), gt_vertex_tensor.unsqueeze(0),
+                                      bidirectional=False, point_reduction='mean').cpu().item()
+            com_cd = chamfer_distance(gt_vertex_tensor.unsqueeze(0), recon_vertex_pc_tensor.unsqueeze(0),
+                                      bidirectional=False, point_reduction='mean').cpu().item()
+            cd = (acc_cd + com_cd) / 2
+            result['vertex_acc_cd'].append(acc_cd)
+            result['vertex_com_cd'].append(com_cd)
+            result['vertex_cd'].append(cd)
+
+    # check the vaildity of the step file
+    if len(gen_step_name) != 0:
+        try:
+            gen_shape = read_step_file(os.path.join(eval_root, folder_name, gen_step_name[0]), as_compound=False, verbosity=False)
+            shape_analyzer = BRepCheck_Analyzer(gen_shape)
+            if gen_shape.ShapeType() == TopAbs_SOLID:
+                if shape_analyzer.IsValid():
+                    result['stl_type'] = shape_type[0]
+                else:
+                    result['stl_type'] = shape_type[1]
+            elif gen_shape.ShapeType() == TopoDS_Shell:
+                result['stl_type'] = shape_type[2]
+            elif gen_shape.ShapeType() == TopAbs_COMPOUND:
+                result['stl_type'] = shape_type[3]
+            else:
+                result['stl_type'] = shape_type[4]
+        except Exception as e:
+            result['stl_type'] = shape_type[4]
+    else:
+        result['stl_type'] = shape_type[4]
+
+    # compute the chamfer distance between the stl and gt mesh
+    gen_mesh = trimesh.load(str(os.path.join(eval_root, folder_name, gen_stl_name[0])))
+
+    if gen_mesh is not None:
+        gen_pc, _ = trimesh.sample.sample_surface(gen_mesh, SAMPLE_NUM)
+        gen_pc_tensor = torch.from_numpy(gen_pc).float().to(device)
+        acc_cd = chamfer_distance(gen_pc_tensor.unsqueeze(0), gt_pc_tensor.unsqueeze(0),
+                                  bidirectional=False, point_reduction='mean').cpu().item()
+        com_cd = chamfer_distance(gt_pc_tensor.unsqueeze(0), gen_pc_tensor.unsqueeze(0),
+                                  bidirectional=False, point_reduction='mean').cpu().item()
+        result['stl_acc_cd'] = acc_cd
+        result['stl_com_cd'] = com_cd
+        result['stl_cd'] = (acc_cd + com_cd) / 2
+
+    np.savez_compressed(os.path.join(eval_root, folder_name, 'eval.npz'), result=result, allow_pickle=True)
 
 
 if __name__ == '__main__':
@@ -507,12 +562,14 @@ if __name__ == '__main__':
     parser.add_argument('--is_cover', type=bool, default=True)
     parser.add_argument('--num_cpus', type=int, default=16)
     parser.add_argument('--prefix', type=str, default='')
+    parser.add_argument('--list', type=str, default='')
     args = parser.parse_args()
-    eval_root = args.eval_root
-    gt_root = args.gt_root
+    eval_root = Path(args.eval_root)
+    gt_root = Path(args.gt_root)
     is_use_ray = args.use_ray
     is_cover = args.is_cover
     num_cpus = args.num_cpus
+    listfile = args.list
 
     if not os.path.exists(eval_root):
         raise ValueError(f"Data root path {eval_root} does not exist.")
@@ -521,13 +578,19 @@ if __name__ == '__main__':
 
     # test_eval_one(eval_root, gt_root)
 
-    all_folders = [folder for folder in os.listdir(eval_root) if os.path.isdir(os.path.join(eval_root, folder))]
-    print(f"Total {len(all_folders)} folders to evaluate")
+
+    all_folders = [folder for folder in os.listdir(eval_root) if os.path.isdir(eval_root/folder)]
+    ori_length = len(all_folders)
+    if listfile != '':
+        valid_names = [item.strip() for item in open(listfile, 'r').readlines()]
+        all_folders = list(set(all_folders) & set(valid_names))
+        all_folders.sort()
+    print(f"Total {len(all_folders)}/{ori_length} folders to evaluate")
 
     if not is_cover:
         print("Filtering the folders that have eval.npz")
-        all_folders = [folder for folder in all_folders if not os.path.exists(os.path.join(eval_root, folder, 'eval.npz'))]
-        print(f"Total {len(all_folders)} folders to evaluate")
+        all_folders = [folder for folder in all_folders if not os.path.exists(eval_root / folder / 'eval.npz')]
+        print(f"Total {len(all_folders)} folders to evaluate after caching")
 
     if args.prefix != '':
         eval_one(eval_root, gt_root, args.prefix)
@@ -543,11 +606,10 @@ if __name__ == '__main__':
                 # num_cpus=num_cpus,
                 # local_mode=True
         )
-        batch_size = 1
-        num_batches = len(all_folders) // batch_size + 1
+        eval_one_remote = ray.remote(max_retries=0)(eval_one)
         tasks = []
-        for i in range(num_batches):
-            tasks.append(eval_batch_remote.remote(eval_root, gt_root, all_folders[i * batch_size:(i + 1) * batch_size]))
+        for i in range(len(all_folders)):
+            tasks.append(eval_one_remote.remote(eval_root, gt_root, all_folders[i]))
         ray.get(tasks)
 
     print("Computing statistics...")

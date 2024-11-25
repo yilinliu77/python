@@ -1,5 +1,7 @@
+import numpy as np
 from OCC.Core import BRepBndLib, TopoDS
 from OCC.Core.BRep import BRep_Tool
+from OCC.Core.BRepAdaptor import BRepAdaptor_Curve
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 from OCC.Core.BRepTools import BRepTools_WireExplorer
@@ -38,9 +40,9 @@ def normalize_shape(v_shape, v_bounding=1.):
     return shape
 
 
-def get_triangulations(v_shape, v_resolution=0.001):
-    if v_resolution > 0:
-        mesh = BRepMesh_IncrementalMesh(v_shape, v_resolution)
+def get_triangulations(v_shape, v_resolution1=0.1, v_resolution2=0.1):
+    if v_resolution1 > 0:
+        mesh = BRepMesh_IncrementalMesh(v_shape, v_resolution1, False, v_resolution2)
     v = []
     f = []
     face_explorer = TopExp_Explorer(v_shape, TopAbs_FACE)
@@ -62,6 +64,42 @@ def get_triangulations(v_shape, v_resolution=0.001):
                           t.Value(3) + cur_vertex_size - 1])
         face_explorer.Next()
     return v, f
+
+
+def get_curve_length(edge, num=100):
+    curve = BRepAdaptor_Curve(edge)
+    range_start = curve.FirstParameter() if edge.Orientation() == 0 else curve.LastParameter()
+    range_end = curve.LastParameter() if edge.Orientation() == 0 else curve.FirstParameter()
+
+    sample_u = np.linspace(range_start, range_end, num=num)
+    last_point = None
+    length = 0
+    for u in sample_u:
+        pnt = curve.Value(u)
+        if last_point is not None:
+            length += np.linalg.norm(np.array([pnt.X(), pnt.Y(), pnt.Z()]) - last_point)
+            last_point = np.array([pnt.X(), pnt.Y(), pnt.Z()])
+        else:
+            last_point = np.array([pnt.X(), pnt.Y(), pnt.Z()])
+    return length
+
+
+def get_points_along_edge(edge, v_num=100):
+    curve = BRepAdaptor_Curve(edge)
+    range_start = curve.FirstParameter() if edge.Orientation() == 0 else curve.LastParameter()
+    range_end = curve.LastParameter() if edge.Orientation() == 0 else curve.FirstParameter()
+
+    sample_u = np.linspace(range_start, range_end, num=v_num)
+    points = []
+    for u in sample_u:
+        pnt = curve.Value(u)
+        v1 = gp_Vec()
+        curve.D1(u, pnt, v1)
+        v1 = v1.Normalized()
+        points.append(np.array([pnt.X(), pnt.Y(), pnt.Z(), v1.X(), v1.Y(), v1.Z()], dtype=np.float32))
+    points = np.array(points, dtype=np.float32)
+    return points
+
 
 
 def get_primitives(v_shape, v_type):

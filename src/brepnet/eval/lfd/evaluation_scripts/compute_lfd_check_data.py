@@ -114,17 +114,18 @@ if __name__ == '__main__':
 
     all_folders = os.listdir(mesh_folder_path)
     all_folders.sort()
-    all_folders = all_folders[0:1000]
     print("Get mesh_size")
     mesh_folder_list = []
     mesh_path_list = []
+    mesh_size_list = []
     for mesh_folder in tqdm(all_folders):
         mesh_path = os.path.join(mesh_folder_path, mesh_folder, "mesh.stl")
         mesh_folder_list.append(mesh_folder)
         mesh_path_list.append(mesh_path)
+        mesh_size_list.append(int(os.path.getsize(mesh_path) / 1024))
 
-    with Pool(processes=cpu_count()) as pool:
-        mesh_size_list = list(tqdm(pool.imap(get_file_size_kb, mesh_path_list), total=len(mesh_path_list)))
+    # with Pool(processes=cpu_count()) as pool:
+    #     mesh_size_list = list(tqdm(pool.imap(get_file_size_kb, mesh_path_list), total=len(mesh_path_list)))
 
     # sort according to the size of the mesh file
     assert len(mesh_size_list) == len(mesh_folder_list)
@@ -156,7 +157,6 @@ if __name__ == '__main__':
 
     batch_size = 1
     offset = 2
-    assert batch_size % 2 == 0
 
     for size_start in tqdm(range(mesh_size_list.min(), mesh_size_list.max(), batch_size)):
         size_end = size_start + offset
@@ -170,8 +170,8 @@ if __name__ == '__main__':
         local_src_folder_list = local_tgt_folder_list
         results = []
         for i in range(num_workers):
-            local_i_start = i * len(src_folder_list) // num_workers
-            local_i_end = (i + 1) * len(src_folder_list) // num_workers
+            local_i_start = i * len(local_src_folder_list) // num_workers
+            local_i_end = (i + 1) * len(local_src_folder_list) // num_workers
             results.append(compute_lfd_all_remote.remote(
                     local_src_folder_list[local_i_start:local_i_end],
                     local_tgt_folder_list,
@@ -179,6 +179,6 @@ if __name__ == '__main__':
         lfd_matrix = ray.get(results)
         lfd_matrix = np.concatenate(lfd_matrix, axis=0)
 
-        save_name = os.path.join(save_root, f"lfd_{size_start}kb_{size_end}kb.pkl")
+        save_name = os.path.join(save_root, f"lfd_{size_start:07d}kb_{size_end:07d}kb.pkl")
         pickle.dump([local_tgt_folder_list, lfd_matrix], open(save_name, 'wb'))
-        print(f"pkl is saved to {save_name}")
+        print(f"pkl is saved to {save_name}\n\n")

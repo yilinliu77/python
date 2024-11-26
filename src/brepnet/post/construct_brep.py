@@ -198,6 +198,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
 
     num_max_drop = min(v_drop_num, math.ceil(0.2 * len(ori_shape.recon_face_points)))
     is_success = False
+
     for num_drop in range(num_max_drop + 1):
         candidate_shapes = get_candidate_shapes(ori_shape, num_drop)
         for shape in candidate_shapes:
@@ -243,49 +244,94 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
 
                 trimmed_faces.append(trimmed_face)
 
-            # Write trimmed faces
-            mixed_faces = []
-            for i_face in range(num_faces):
-                if trimmed_faces[i_face] is None:
-                    face = BRepBuilderAPI_MakeFace(shape.recon_geom_faces[i_face], 1e-6).Face()
-                    mixed_faces.append(face)
-                else:
-                    mixed_faces.append(trimmed_faces[i_face])
-            v, f = get_separated_surface(mixed_faces, v_precision1=0.1, v_precision2=0.2)
-            trimesh.Trimesh(vertices=v, faces=f).export(out_root / folder_name / "recon_brep.ply")
-
-            time_records[2] = time.time() - timer
-            timer = time.time()
-
             trimmed_faces = [face for face in trimmed_faces if face is not None]
             if len(trimmed_faces) < 0.8 * num_faces:
                 continue
 
-            # Construct Solid
+            # Try construct solid from trimmed faces only
             solid = None
-            for connected_tolerance in CONNECT_TOLERANCE:
-                if is_log:
-                    print(f"Try connected_tolerance {connected_tolerance}")
-                solid = get_solid(trimmed_faces, connected_tolerance)
-                if solid is not None:
-                    break
+            if len(trimmed_faces) > 0.8 * num_faces:
+                for connected_tolerance in CONNECT_TOLERANCE:
+                    if is_log:
+                        print(f"Try construct solid with {connected_tolerance}")
+                    solid = get_solid(trimmed_faces, connected_tolerance)
+                    if solid is not None:
+                        break
 
-            time_records[3] = time.time() - timer
-            timer = time.time()
-
-            if solid is None:  # Build failed
-                pass
-            else:
+            # Check solid
+            if solid is not None:
                 save_step_file(out_root / folder_name / 'recon_brep.step', solid)
-                write_stl_file(solid, str(out_root / folder_name / "recon_brep.stl"), linear_deflection=0.1, angular_deflection=0.2)
                 if not check_step_valid_soild(str(out_root / folder_name / 'recon_brep.step')):
                     print("Inconsistent solid check in {}".format(folder_name))
+                    shutil.rmtree(out_root / folder_name / 'recon_brep.step')
                 else:
+                    write_stl_file(solid, str(out_root / folder_name / "recon_brep.stl"),
+                                   linear_deflection=0.1, angular_deflection=0.2)
                     open(out_root / folder_name / "success.txt", 'w').close()
                     is_success = True
                     break
-        if is_success:
-            break
+
+    # If solid is None, then try to obtain step file with all faces
+    if not is_success:
+        shape = copy.deepcopy(ori_shape)
+        shape.remove_half_edges()
+        shape.check_openness()
+        shape.build_fe()
+        shape.build_vertices(0.2)
+
+        shape.build_geom(is_replace_edge=True)
+        if isdebug:
+            print(f"{Colors.GREEN}{len(shape.replace_edge_idx)} edges are replace{Colors.RESET}")
+
+        # Construct trimmed surface
+        num_faces = len(shape.recon_topo_faces)
+        trimmed_faces = []
+        for i_face in range(num_faces):
+            if len(shape.face_edge_adj[i_face]) == 0:
+                trimmed_faces.append(None)
+                continue
+            face_edge_idx = shape.face_edge_adj[i_face]
+            geom_face = shape.recon_geom_faces[i_face]
+            topo_face = shape.recon_topo_faces[i_face]
+            face_edges = [shape.recon_edge[edge_idx] for edge_idx in face_edge_idx]
+            face_edges_numpy = shape.recon_edge_points[face_edge_idx]
+            is_edge_closed_c = [shape.openness[edge_idx] for edge_idx in face_edge_idx]
+
+            # Build wire
+            trimmed_face = None
+            for threshold in CONNECT_TOLERANCE:
+                wire_list = create_wire_from_unordered_edges(face_edges, threshold)
+                if wire_list is None:
+                    continue
+
+                trimmed_face = create_trimmed_face_from_wire(geom_face, face_edges, wire_list, threshold)
+                if trimmed_face is not None:
+                    break
+
+            trimmed_faces.append(trimmed_face)
+
+        mixed_faces = []
+        for i_face in range(num_faces):
+            if trimmed_faces[i_face] is None:
+                face = BRepBuilderAPI_MakeFace(shape.recon_geom_faces[i_face], 1e-6).Face()
+                mixed_faces.append(face)
+            else:
+                mixed_faces.append(trimmed_faces[i_face])
+
+        # trimmed_faces = [face for face in trimmed_faces if face is not None]
+        # if len(trimmed_faces) < 0.8 * num_faces:
+        #     continue
+
+        compound = None
+        for connected_tolerance in CONNECT_TOLERANCE:
+            compound = get_compound(mixed_faces, connected_tolerance)
+            if compound is not None:
+                break
+
+        if compound is not None:
+            save_step_file(out_root / folder_name / 'recon_brep.step', compound)
+        else:
+            print(f"Failed to construct solid in {folder_name}")
     return time_records
 
 

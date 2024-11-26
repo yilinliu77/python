@@ -25,7 +25,7 @@ def process_pkl(pkl_file):
                 local_removed_folder_list.append(local_folder_list[j])
                 local_deduplicated_folder_pair_list.append((local_folder_list[i], local_folder_list[j]))
     local_unique_folder_list = [local_folder_list[i] for i in local_unique_idx_list]
-    # print(f"Pkl file path: {os.path.basename(pkl_file)}, Local Unique ratio: {len(local_unique_folder_list) / len(local_folder_list)}")
+    print(f"Pkl file path: {os.path.basename(pkl_file)}, Local Unique ratio: {len(local_unique_folder_list) / len(local_folder_list)}")
     return local_folder_list, local_removed_folder_list, local_deduplicated_folder_pair_list
 
 
@@ -52,8 +52,8 @@ if __name__ == '__main__':
         if not pkl_file.endswith(".pkl"):
             continue
         futures.append(process_pkl_remote.remote(os.path.join(pkl_root, pkl_file)))
-    results = ray.get(futures)
-    for local_folder_list, local_removed_folder_list, local_deduplicated_folder_pair_list in results:
+    for future in tqdm(futures):
+        local_folder_list, local_removed_folder_list, local_deduplicated_folder_pair_list = ray.get(future)
         folder_list.extend(local_folder_list)
         removed_folder_list.extend(local_removed_folder_list)
         deduplicated_folder_pair_list.extend(local_deduplicated_folder_pair_list)

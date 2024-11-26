@@ -52,8 +52,8 @@ if __name__ == '__main__':
         if not pkl_file.endswith(".pkl"):
             continue
         futures.append(process_pkl_remote.remote(os.path.join(pkl_root, pkl_file)))
-    for future in tqdm(futures):
-        local_folder_list, local_removed_folder_list, local_deduplicated_folder_pair_list = ray.get(future)
+    results = ray.get(futures)
+    for local_folder_list, local_removed_folder_list, local_deduplicated_folder_pair_list in results:
         folder_list.extend(local_folder_list)
         removed_folder_list.extend(local_removed_folder_list)
         deduplicated_folder_pair_list.extend(local_deduplicated_folder_pair_list)

@@ -75,8 +75,8 @@ if __name__ == '__main__':
 
     deduplicated_txt_path = pkl_root + f"brepgen_train_deduplicated_lfd_{lfd_threshold}.txt"
     with open(deduplicated_txt_path, "w") as f:
-        for folder in removed_folder_list:
-            f.write(f"{folder[0]} {folder[1]}\n")
+        for folder_pair in deduplicated_folder_pair_list:
+            f.write(f"{folder_pair[0]} {folder_pair[1]}\n")
 
     with open(out_txt_path, "w") as f:
         for folder in unique_folder_list:

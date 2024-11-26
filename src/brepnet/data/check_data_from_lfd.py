@@ -25,7 +25,7 @@ def process_pkl(pkl_file):
                 local_removed_folder_list.append(local_folder_list[j])
                 local_deduplicated_folder_pair_list.append((local_folder_list[i], local_folder_list[j]))
     local_unique_folder_list = [local_folder_list[i] for i in local_unique_idx_list]
-    print(f"Pkl file path: {os.path.basename(pkl_file)}, Local Unique ratio: {len(local_unique_folder_list) / len(local_folder_list)}")
+    # print(f"Pkl file path: {os.path.basename(pkl_file)}, Local Unique ratio: {len(local_unique_folder_list) / len(local_folder_list)}")
     return local_folder_list, local_removed_folder_list, local_deduplicated_folder_pair_list
 
 

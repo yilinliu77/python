@@ -270,6 +270,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
                     open(out_root / folder_name / "success.txt", 'w').close()
                     is_success = True
                     break
+        if is_success:
+            break
 
     # If solid is None, then try to obtain step file with all faces
     if not is_success:

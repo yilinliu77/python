@@ -41,7 +41,6 @@ if __name__ == '__main__':
     out_txt_path = pkl_root + f"brepgen_train_novel_lfd_{lfd_threshold}.txt"
 
     all_pkl_files = os.listdir(pkl_root)
-    all_pkl_files = all_pkl_files[0:3]
     folder_list = []
     unique_folder_list = []
     removed_folder_list = []

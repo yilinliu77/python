@@ -89,6 +89,10 @@ def get_points_along_edge(edge, v_num=100):
     range_start = curve.FirstParameter() if edge.Orientation() == 0 else curve.LastParameter()
     range_end = curve.LastParameter() if edge.Orientation() == 0 else curve.FirstParameter()
 
+    # A little offset to prevent overflow
+    range_start += 1e-4
+    range_end -= 1e-4
+
     sample_u = np.linspace(range_start, range_end, num=v_num)
     points = []
     for u in sample_u:

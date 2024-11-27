@@ -268,6 +268,7 @@ def main(v_cfg: DictConfig):
     torch.set_float32_matmul_precision("medium")
     print(OmegaConf.to_yaml(v_cfg))
 
+    use_wandb = v_cfg["trainer"]["wandb"] if "wandb" in v_cfg["trainer"] else False
     exp_name = v_cfg["trainer"]["exp_name"]
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name
@@ -281,15 +282,15 @@ def main(v_cfg: DictConfig):
 
     model = TrainAutoEncoder(v_cfg)
 
-    if v_cfg["trainer"]["evaluate"] is True or exp_name=="test":
-        logger = TensorBoardLogger(log_dir)
-    else:
+    if v_cfg["trainer"]["evaluate"] is not True and exp_name!="test" and use_wandb:
         logger = WandbLogger(
             project='BRepNet++',
             save_dir=log_dir,
             name=exp_name,
         )
         logger.watch(model)
+    else:
+        logger = TensorBoardLogger(log_dir)
 
     trainer = Trainer(
         default_root_dir=log_dir,

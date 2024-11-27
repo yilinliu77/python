@@ -19,7 +19,7 @@ trainer:
 #  accelerator: "16-mixed"
   accelerator: "32-true"
 
-  # Evaluation
+  wandb: 
   compile: false
   evaluate: false
   test_output_dir:
@@ -40,10 +40,10 @@ model:
   encoder_decoder_sigmoid: false
   in_channels: 3
   dim_latent: 8
-  dim_shape: 256
-  stage: 0
+  dim_shape: 768
   
   with_intersection: false
+  stage: 0
   sigmoid: false
   gaussian_weights: 1e-6
 

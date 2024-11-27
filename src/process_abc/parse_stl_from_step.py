@@ -47,14 +47,16 @@ if __name__ == "__main__":
     else:
         all_folders = [f for f in os.listdir(data_root) if os.path.isdir(os.path.join(data_root, f))]
 
-    if os.path.exists(out_root):
-        shutil.rmtree(out_root)
-    if not os.path.exists(out_root):
-        os.makedirs(out_root)
+    os.makedirs(out_root, exist_ok=True)
 
+    if True:
+        all_folders = list(set(all_folders) - set(os.listdir(out_root)))
+
+    print(f"Total {len(all_folders)} folders to process")
+    
     ray.init(local_mode=False)
     futures = []
-    batch_size = 10000
+    batch_size = 1
     for i in tqdm(range(0, len(all_folders), batch_size)):
         step_folders = all_folders[i:i + batch_size]
         futures.append(step2stl_remote.remote(data_root, step_folders, out_root))

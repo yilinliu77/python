@@ -43,9 +43,9 @@ def save_step_file(step_file, shape):
     status = step_writer.Write(str(step_file))
 
 
-def check_step_valid_soild(step_file, precision=1e-1, return_shape=False, is_set_gloabl=False):
+def check_step_valid_soild(step_file, precision=1e-1, return_shape=False):
     try:
-        shape = read_step_file(step_file, as_compound=False, verbosity=False)
+        shape = read_step_file(str(step_file), as_compound=False, verbosity=False)
     except:
         if return_shape:
             return False, None
@@ -53,7 +53,7 @@ def check_step_valid_soild(step_file, precision=1e-1, return_shape=False, is_set
             return False
     if shape.ShapeType() != TopAbs_SOLID:
         if return_shape:
-            return False, None
+            return False, shape
         else:
             return False
     shape_tol_setter = ShapeFix_ShapeTolerance()
@@ -75,12 +75,16 @@ def load_data_with_prefix(root_folder, prefix, folder_list_txt=None):
     for root, dirs, files in os.walk(root_folder):
         if folder_list_txt is not None and os.path.basename(root) not in folder_list:
             continue
+        is_found = False
         for filename in files:
             # Check if the file ends with the specified prefix
             if filename.endswith(prefix):
                 file_path = os.path.join(root, filename)
+                is_found = True
                 data_files.append(file_path)
-
+        if not is_found:
+            print(f"No {prefix} file found in {root}")
+        
     return data_files
 
 
@@ -119,7 +123,7 @@ if __name__ == "__main__":
     num_faces = []
     num_edges = []
     for step_file in pbar:
-        is_valid, shape = check_step_valid_soild(step_file, return_shape=True, is_set_gloabl=True)
+        is_valid, shape = check_step_valid_soild(step_file, return_shape=True)
         if os.path.exists(os.path.join(os.path.dirname(step_file), "success.txt")) and not is_valid:
             folder_name = os.path.basename(os.path.dirname(step_file))
             exception_folders.append(folder_name)

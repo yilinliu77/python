@@ -1245,6 +1245,26 @@ def get_solid(trimmed_faces, connected_tolerance):
         return None
 
 
+def get_compound(trimmed_faces, connected_tolerance):
+    try:
+        # Sew shells
+        random.shuffle(trimmed_faces)
+        sewing = BRepBuilderAPI_Sewing()
+        sewing.SetTolerance(connected_tolerance)
+        for face in trimmed_faces:
+            sewing.Add(face)
+        sewing.Perform()
+        # sewing.Dump()
+        sewn_shell = sewing.SewedShape()
+        if sewn_shell is not None:
+            return sewn_shell
+        else:
+            return None
+    except Exception as e:
+        print(e)
+        return None
+
+
 def construct_brep(v_shape, connected_tolerance, isdebug=False):
     debug_idx = []
     if isdebug:

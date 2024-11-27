@@ -436,6 +436,10 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         self.root = Path(v_conf["data_root"])
         self.is_aug = v_conf["is_aug"]
 
+        if v_training_mode == "testing" and self.is_aug==1:
+            self.ori_length = len(self.data_folders)
+            self.data_folders = self.data_folders * 64
+
         if v_conf["is_overfit"]:
             self.data_folders = self.data_folders[:100]
             if v_training_mode == "training":
@@ -449,14 +453,23 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         # idx = 0
         prefix = self.data_folders[idx]
         data_npz = np.load(str(self.root / prefix / "data.npz"))
-
+        if self.mode == "testing" and self.is_aug==1:
+            prefix += "_{}".format(idx // self.ori_length)
         face_points = torch.from_numpy(data_npz['sample_points_faces'])
         edge_points = torch.from_numpy(data_npz['sample_points_lines'])
 
         if self.is_aug == 0:
             matrix = np.identity(3)
         if self.is_aug == 1:
-            matrix = Rotation.from_euler('xyz', np.random.randint(0, 3, 3) * np.pi / 2).as_matrix()
+            if self.mode == "testing":
+                angles = np.array([
+                    idx // len(self.data_folders) % 4,
+                    idx // len(self.data_folders) // 4 % 4,
+                    idx // len(self.data_folders) // 16 % 4
+                ])
+                matrix = Rotation.from_euler('xyz', angles * np.pi / 2).as_matrix()
+            else:
+                matrix = Rotation.from_euler('xyz', np.random.randint(0, 3, 3) * np.pi / 2).as_matrix()
         elif self.is_aug == 2:
             matrix = Rotation.from_euler('xyz', np.random.rand(3) * np.pi * 2).as_matrix()
         if self.is_aug != 0:
@@ -819,6 +832,9 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         self.cached_condition = v_conf["cached_condition"]
         self.pad_method = v_conf["pad_method"]
         self.addition_tag = v_conf["addition_tag"]
+
+        if self.is_aug:
+            self.data_folders = [item+f"_{i}" for item in self.data_folders for i in range(64)]
 
         return
 

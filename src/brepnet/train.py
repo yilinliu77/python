@@ -120,6 +120,13 @@ class TrainAutoEncoder(pl.LightningModule):
         self.log("Validation/Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
 
+        if "gt_face_adj" in recon_data:
+            self.pr_computer.update(recon_data["pred_face_adj"], recon_data["gt_face_adj"])
+
+        # Rank zero only
+        if self.global_rank != 0:
+            return total_loss
+        
         if batch_idx == 0:
             if "pred_face" in recon_data:
                 self.viz["gt_face"] = recon_data["gt_face"]
@@ -127,13 +134,10 @@ class TrainAutoEncoder(pl.LightningModule):
             if "pred_edge" in recon_data:
                 self.viz["gt_edge"] = recon_data["gt_edge"]
                 self.viz["pred_edge"] = recon_data["pred_edge"]
-        if "gt_face_adj" in recon_data:
-            self.pr_computer.update(recon_data["pred_face_adj"], recon_data["gt_face_adj"])
+        
         return total_loss
 
     def on_validation_epoch_end(self):
-        # if self.trainer.sanity_checking:
-        #     return
         if "pred_edge" in self.viz:
             self.log_dict(self.pr_computer.compute(), prog_bar=False, logger=True, on_step=False, on_epoch=True,
                         sync_dist=True)

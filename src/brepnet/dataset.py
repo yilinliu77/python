@@ -833,6 +833,9 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         self.pad_method = v_conf["pad_method"]
         self.addition_tag = v_conf["addition_tag"]
 
+        if self.is_aug:
+            self.data_folders = [item+f"_{i}" for item in self.data_folders for i in range(64)]
+
         return
 
     def __len__(self):

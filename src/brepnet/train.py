@@ -138,10 +138,9 @@ class TrainAutoEncoder(pl.LightningModule):
         return total_loss
 
     def on_validation_epoch_end(self):
-        if "pred_edge" in self.viz:
-            self.log_dict(self.pr_computer.compute(), prog_bar=False, logger=True, on_step=False, on_epoch=True,
-                        sync_dist=True)
-            self.pr_computer.reset()
+        self.log_dict(self.pr_computer.compute(), prog_bar=False, logger=True, on_step=False, on_epoch=True,
+                    sync_dist=True)
+        self.pr_computer.reset()
 
         if self.global_rank != 0:
             return

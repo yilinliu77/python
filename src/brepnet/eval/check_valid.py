@@ -75,12 +75,16 @@ def load_data_with_prefix(root_folder, prefix, folder_list_txt=None):
     for root, dirs, files in os.walk(root_folder):
         if folder_list_txt is not None and os.path.basename(root) not in folder_list:
             continue
+        is_found = False
         for filename in files:
             # Check if the file ends with the specified prefix
             if filename.endswith(prefix):
                 file_path = os.path.join(root, filename)
+                is_found = True
                 data_files.append(file_path)
-
+        if not is_found:
+            print(f"No {prefix} file found in {root}")
+        
     return data_files
 
 

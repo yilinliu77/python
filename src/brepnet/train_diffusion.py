@@ -162,7 +162,7 @@ class TrainDiffusion(pl.LightningModule):
             results = []
             for i in range(10):
                 results.append(time_loss[np.logical_and(time_loss[:,0]>=i*100, time_loss[:,0]<(i+1)*100), 1].mean())
-                self.log(f'tloss/{i}', results[-1], prog_bar=False, logger=True, on_step=False, on_epoch=True, sync_dist=False)
+                self.log(f'tloss/{i}', results[-1], prog_bar=False, logger=True, on_step=False, on_epoch=True, sync_dist=True)
         
         if self.global_rank != 0:
             return

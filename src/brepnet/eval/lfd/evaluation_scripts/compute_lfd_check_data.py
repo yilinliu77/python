@@ -105,10 +105,7 @@ if __name__ == '__main__':
     save_root = args.save_root
     os.makedirs(save_root, exist_ok=True)
 
-    ray.init(
-            num_cpus=os.cpu_count(),
-            num_gpus=num_workers,
-    )
+
     print(f"mesh_path: {mesh_folder_path}")
     print(f"lfd_feat_path: {lfd_feat_path}")
 
@@ -117,15 +114,15 @@ if __name__ == '__main__':
     print("Get mesh_size")
     mesh_folder_list = []
     mesh_path_list = []
-    mesh_size_list = []
+    # mesh_size_list = []
     for mesh_folder in tqdm(all_folders):
         mesh_path = os.path.join(mesh_folder_path, mesh_folder, "mesh.stl")
         mesh_folder_list.append(mesh_folder)
         mesh_path_list.append(mesh_path)
-        mesh_size_list.append(int(os.path.getsize(mesh_path) / 1024))
+        # mesh_size_list.append(int(os.path.getsize(mesh_path) / 1024))
 
-    # with Pool(processes=cpu_count()) as pool:
-    #     mesh_size_list = list(tqdm(pool.imap(get_file_size_kb, mesh_path_list), total=len(mesh_path_list)))
+    with Pool(processes=cpu_count()) as pool:
+        mesh_size_list = list(tqdm(pool.imap(get_file_size_kb, mesh_path_list), total=len(mesh_path_list)))
 
     # sort according to the size of the mesh file
     assert len(mesh_size_list) == len(mesh_folder_list)
@@ -134,7 +131,7 @@ if __name__ == '__main__':
     mesh_size_list = np.array(mesh_size_list)
     print(f"Max size: {mesh_size_list.max()}")
     print(f"Min size: {mesh_size_list.min()}")
-    print(f"Total {len(mesh_folder_list)} mesh_folder to process")
+    print(f"Total {mesh_size_list.shape} mesh_folder to process")
 
     tgt_folder_list = mesh_folder_list
 
@@ -146,6 +143,15 @@ if __name__ == '__main__':
         tgt_folder_list = [os.path.join(lfd_feat_path, f) for f in tgt_folder_list]
 
     src_folder_list = tgt_folder_list
+
+    start_from_size_end = 0
+    print(f"Start from size_end: {start_from_size_end}")
+    print((mesh_size_list>start_from_size_end).sum()/mesh_size_list.shape[0])
+
+    ray.init(
+            num_cpus=os.cpu_count(),
+            num_gpus=num_workers,
+    )
 
     compute_lfd_all_remote = ray.remote(num_gpus=1, num_cpus=os.cpu_count() // num_workers)(compute_lfd_all)
 
@@ -161,17 +167,20 @@ if __name__ == '__main__':
     for size_start in tqdm(range(mesh_size_list.min(), mesh_size_list.max(), batch_size)):
         size_end = size_start + offset
         print(f"size_start: {size_start}, size_end: {size_end}, max_size: {mesh_size_list.max()}")
+        if size_end <= start_from_size_end:
+            continue
         # get the folder list for the current batch
         hitted_idx = np.where((mesh_size_list >= size_start) & (mesh_size_list <= size_end))[0]
         print(f"len of hitted folder: {len(hitted_idx)}")
         if len(hitted_idx) == 0:
             continue
+        local_num_workers = min(num_workers, len(hitted_idx))
         local_tgt_folder_list = [tgt_folder_list[i] for i in hitted_idx]
         local_src_folder_list = local_tgt_folder_list
         results = []
-        for i in range(num_workers):
-            local_i_start = i * len(local_src_folder_list) // num_workers
-            local_i_end = (i + 1) * len(local_src_folder_list) // num_workers
+        for i in range(local_num_workers):
+            local_i_start = i * len(local_src_folder_list) // local_num_workers
+            local_i_end = (i + 1) * len(local_src_folder_list) // local_num_workers
             results.append(compute_lfd_all_remote.remote(
                     local_src_folder_list[local_i_start:local_i_end],
                     local_tgt_folder_list,

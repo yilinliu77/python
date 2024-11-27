@@ -437,6 +437,7 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         self.is_aug = v_conf["is_aug"]
 
         if v_training_mode == "testing" and self.is_aug==1:
+            self.ori_length = len(self.data_folders)
             self.data_folders = self.data_folders * 64
 
         if v_conf["is_overfit"]:
@@ -450,9 +451,10 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         # idx = 0
-        prefix = self.data_folders[idx % len(self.data_folders)]
+        prefix = self.data_folders[idx]
         data_npz = np.load(str(self.root / prefix / "data.npz"))
-
+        if self.mode == "testing" and self.is_aug==1:
+            prefix += "_{}".format(idx // self.ori_length)
         face_points = torch.from_numpy(data_npz['sample_points_faces'])
         edge_points = torch.from_numpy(data_npz['sample_points_lines'])
 
@@ -830,6 +832,9 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         self.cached_condition = v_conf["cached_condition"]
         self.pad_method = v_conf["pad_method"]
         self.addition_tag = v_conf["addition_tag"]
+
+        if self.is_aug:
+            self.data_folders = [item+f"_{i}" for item in self.data_folders for i in range(64)]
 
         return
 

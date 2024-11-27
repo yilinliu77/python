@@ -13,3 +13,22 @@ python -m src.brepnet.train_diffusion trainer.evaluate=true dataset.name=Diffusi
 
 item=1111_730_li_mvr
 python -m src.brepnet.post.construct_brep --data_root /mnt/d/cond_results/${item} --out_root /mnt/d/cond_results/${item}_post --num_cpus 160 --use_ray --drop_num 3
+
+python -m src.brepnet.post.construct_brep --data_root /mnt/d/cond_results/1111_730_li_svr --out_root /mnt/d/cond_results/1111_730_li_svr_post2 --use_ray --num_cpus 160 --drop_num 0 --from_scratch
+python -m src.brepnet.post.construct_brep --data_root /mnt/d/cond_results/1111_730_li_pc --out_root /mnt/d/cond_results/1111_730_li_pc_post2 --use_ray --num_cpus 160 --drop_num 0 --from_scratch
+python -m src.brepnet.post.construct_brep --data_root /mnt/d/cond_results/1111_730_li_sketch --out_root /mnt/d/cond_results/1111_730_li_sketch_post2 --use_ray --num_cpus 160 --drop_num 0 --from_scratch
+
+python -m src.brepnet.post.construct_brep --data_root /mnt/d/cond_results/1111_730_sq_mvr --out_root /mnt/d/cond_results/1111_730_sq_mvr_post2 --use_ray --num_cpus 160 --drop_num 0 --from_scratch
+python -m src.brepnet.post.construct_brep --data_root /mnt/d/cond_results/1111_730_sq_svr --out_root /mnt/d/cond_results/1111_730_sq_svr_post2 --use_ray --num_cpus 160 --drop_num 0 --from_scratch
+python -m src.brepnet.post.construct_brep --data_root /mnt/d/cond_results/1111_730_sq_pc --out_root /mnt/d/cond_results/1111_730_sq_pc_post2 --use_ray --num_cpus 160 --drop_num 0 --from_scratch
+python -m src.brepnet.post.construct_brep --data_root /mnt/d/cond_results/1111_730_sq_sketch --out_root /mnt/d/cond_results/1111_730_sq_sketch_post2 --use_ray --num_cpus 160 --drop_num 0 --from_scratch
+
+python -m src.brepnet.eval.eval_condition --eval_root /mnt/d/cond_results/1111_730_li_mvr_post2 --gt_root /mnt/d/yilin/img2brep/deepcad_v6 --list src/brepnet/data/list/deduplicated_deepcad_testing_7_30.txt --use_ray --from_scratch --num_cpus 160
+python -m src.brepnet.eval.eval_condition --eval_root /mnt/d/cond_results/1111_730_li_svr_post2 --gt_root /mnt/d/yilin/img2brep/deepcad_v6 --list src/brepnet/data/list/deduplicated_deepcad_testing_7_30.txt --use_ray --from_scratch --num_cpus 160
+python -m src.brepnet.eval.eval_condition --eval_root /mnt/d/cond_results/1111_730_li_pc_post2 --gt_root /mnt/d/yilin/img2brep/deepcad_v6 --list src/brepnet/data/list/deduplicated_deepcad_testing_7_30.txt --use_ray --from_scratch --num_cpus 160
+python -m src.brepnet.eval.eval_condition --eval_root /mnt/d/cond_results/1111_730_li_sketch_post2 --gt_root /mnt/d/yilin/img2brep/deepcad_v6 --list src/brepnet/data/list/deduplicated_deepcad_testing_7_30.txt --use_ray --from_scratch --num_cpus 160
+
+python -m src.brepnet.eval.eval_condition --eval_root /mnt/d/cond_results/1111_730_sq_mvr_post2 --gt_root /mnt/d/yilin/img2brep/deepcad_v6 --list src/brepnet/data/list/deduplicated_deepcad_testing_7_30.txt --use_ray --from_scratch --num_cpus 160
+python -m src.brepnet.eval.eval_condition --eval_root /mnt/d/cond_results/1111_730_sq_svr_post2 --gt_root /mnt/d/yilin/img2brep/deepcad_v6 --list src/brepnet/data/list/deduplicated_deepcad_testing_7_30.txt --use_ray --from_scratch --num_cpus 160
+python -m src.brepnet.eval.eval_condition --eval_root /mnt/d/cond_results/1111_730_sq_pc_post2 --gt_root /mnt/d/yilin/img2brep/deepcad_v6 --list src/brepnet/data/list/deduplicated_deepcad_testing_7_30.txt --use_ray --from_scratch --num_cpus 160
+python -m src.brepnet.eval.eval_condition --eval_root /mnt/d/cond_results/1111_730_sq_sketch_post2 --gt_root /mnt/d/yilin/img2brep/deepcad_v6 --list src/brepnet/data/list/deduplicated_deepcad_testing_7_30.txt --use_ray --from_scratch --num_cpus 160

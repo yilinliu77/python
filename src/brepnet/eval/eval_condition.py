@@ -124,7 +124,7 @@ def compute_statistics(eval_root):
         ax.set_ylabel('Density')
         ax.legend()
         plt.savefig(str(eval_root) + "_face_chamfer.png", dpi=600)
-        plt.show()
+        # plt.show()
 
     draw()
     pass
@@ -247,7 +247,10 @@ def eval_one(eval_root, gt_root, folder_name, v_num_per_m=100):
     else:
         print(f"Error: {folder_name} does not have {step_name}")
         return
-
+    if recon_shape is None:
+        print(f"Error: {folder_name} 's {step_name} is not valid")
+        return
+        
     # GT
     _, gt_shape = check_step_valid_soild(gt_root / folder_name / "normalized_shape.step", return_shape=True)
 

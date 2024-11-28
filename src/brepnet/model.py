@@ -9677,7 +9677,7 @@ class AutoEncoder_1119(nn.Module):
             "edge_features": edge_features,
         }
 
-    def decode(self, v_encoding_result, v_data=None):
+    def decode(self, v_encoding_result, v_data=None, v_deduplicated=False):
         face_z = v_encoding_result["face_z"]
         face_feature = self.face_attn_proj_in2(face_z)
         if v_data is None:
@@ -9687,8 +9687,28 @@ class AutoEncoder_1119(nn.Module):
             attn_mask = v_data["attn_mask"]
         face_feature = self.face_attn2(face_feature, attn_mask)
         face_z = self.face_attn_proj_out2(face_feature)
-
+        
         decoding_results = {}
+        decoding_results["face_points_local"] = self.face_points_decoder(face_z)
+        decoding_results["face_center_scale"] = self.face_center_scale_decoder(face_z)
+        
+        if v_deduplicated: # Deduplicate
+            face_points_local = decoding_results["face_points_local"]
+            face_center_scale = decoding_results["face_center_scale"]
+            pred_face_points = denormalize_coord1112(face_points_local, face_center_scale)
+            num_faces = face_z.shape[0]
+
+            deduplicate_face_id = []
+            for i in range(num_faces):
+                is_duplicate = False
+                for j in deduplicate_face_id:
+                    if torch.sqrt(((pred_face_points[i]-pred_face_points[j])**2).sum(dim=-1)).mean() < 1e-3:
+                        is_duplicate=True
+                        break
+                if not is_duplicate:
+                    deduplicate_face_id.append(i)
+            face_z = face_z[deduplicate_face_id]
+
         if v_data is None:
             num_faces = face_z.shape[0]
             device = face_z.device
@@ -9731,10 +9751,10 @@ class AutoEncoder_1119(nn.Module):
 
         decoding_results["edge_points_local"] = self.edge_points_decoder(intersected_edge_feature)
         decoding_results["edge_center_scale"] = self.edge_center_scale_decoder(intersected_edge_feature)
-        decoding_results["edge_points_local1"] = self.edge_points_decoder(v_encoding_result["edge_features"])
-        decoding_results["edge_center_scale1"] = self.edge_center_scale_decoder(v_encoding_result["edge_features"])
-        decoding_results["face_points_local"] = self.face_points_decoder(face_z)
-        decoding_results["face_center_scale"] = self.face_center_scale_decoder(face_z)
+        if "edge_features" in v_encoding_result:
+            decoding_results["edge_points_local1"] = self.edge_points_decoder(v_encoding_result["edge_features"])
+            decoding_results["edge_center_scale1"] = self.edge_center_scale_decoder(v_encoding_result["edge_features"])
+        
         decoding_results["face_features"] = v_encoding_result["face_z"]
         return decoding_results
 
@@ -9815,6 +9835,17 @@ class AutoEncoder_1119(nn.Module):
             )
 
         return loss, data
+
+    def inference(self, v_face_features):
+        pred_data = self.decode({"face_z": v_face_features}, v_deduplicated=True)
+        return {
+            "face_features": v_face_features.to(torch.float32).cpu().numpy(),
+            "pred_face_adj": pred_data["pred_face_adj"],
+            "pred_face_adj_prob": pred_data["pred_edge_face_connectivity"].reshape(-1).to(torch.float32).cpu().numpy(),
+            "pred_edge_face_connectivity": pred_data["pred_edge_face_connectivity"].to(torch.float32).cpu().numpy(),
+            "pred_face": denormalize_coord1112(pred_data["face_points_local"], pred_data["face_center_scale"])[...,:3].to(torch.float32).cpu().numpy(),
+            "pred_edge": denormalize_coord1112(pred_data["edge_points_local"], pred_data["edge_center_scale"])[...,:3].to(torch.float32).cpu().numpy(),
+        }
 
 
 # Revised atten and 1112 new

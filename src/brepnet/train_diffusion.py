@@ -252,7 +252,7 @@ def main(v_cfg: DictConfig):
     callbacks.append(ModelCheckpoint(monitor="Validation_Loss", save_last=True, every_n_train_steps=100000, save_top_k=-1))
     callbacks.append(LearningRateMonitor(logging_interval='epoch'))
     if v_cfg["trainer"]["swa"]:
-        callbacks.append(StochasticWeightAveraging(swa_lrs=1e-2, swa_epoch_start=10))
+        callbacks.append(StochasticWeightAveraging(swa_lrs=v_cfg["trainer"]["learning_rate"], swa_epoch_start=10))
     callbacks.append(ModelSummary(max_depth=1))
     
     model = TrainDiffusion(v_cfg)

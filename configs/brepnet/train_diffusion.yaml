@@ -6,6 +6,7 @@ dataset:
   val_dataset: D:/img2brep/deepcad_whole_test_v5
   test_dataset: /mnt/d/deepcad_test_v6
 
+  data_root: D:/img2brep/deepcad_whole_test_v5
   deduplicate_list: 0
   pad_method: random
   cached_condition: true
@@ -13,6 +14,7 @@ dataset:
   scale_factor: 1
   condition:
   overfit: false
+  is_overfit: false
   is_aug: 0
   
   length: 1000
@@ -44,6 +46,7 @@ model:
   train_decoder: false
   stored_z: True
   condition:
+  use_mean: true
 
   diffusion_latent: 512
   diffusion_type: epsilon
@@ -54,6 +57,7 @@ model:
   addition_tag: false
 
   autoencoder: AutoEncoder_0925
+  with_intersection: true
   dim_latent: 8
   dim_shape: 768
   sigmoid: false

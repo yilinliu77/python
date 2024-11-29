@@ -10178,7 +10178,7 @@ class AutoEncoder_1122(nn.Module):
                 x = layer(x, edge_index, edge_attr) + x
             else:
                 x = layer(x)
-        fused_face_features = self.face_graph_proj_out(x)
+        fused_face_features = self.face_graph_proj_out(x) + fused_face_features
 
         # Global
         bs = v_data["num_face_record"].shape[0]
@@ -10368,26 +10368,21 @@ class AutoEncoder_1122_test(nn.Module):
         )
         
         bd = 768 # bottlenek_dim
-        self.sigmoid = v_conf["sigmoid"]
-        self.loss_fn = nn.L1Loss() if v_conf["loss"] == "l1" else nn.MSELoss()
+        self.bbox_fusing_proj_in = nn.Linear(4, bd)
+        self.face_fusing_proj_in = nn.Linear(df, bd)
+        layer = nn.TransformerDecoderLayer(
+            bd, 16, dim_feedforward=2048, dropout=0.1, 
+            batch_first=True, norm_first=True)
+        self.face_fusing = nn.TransformerDecoder(layer, 6, nn.LayerNorm(bd))
         
-        self.face_attn_proj_in = nn.Linear(df + 4, bd)
         layer = nn.TransformerEncoderLayer(
             bd, 16, dim_feedforward=2048, dropout=0.1, 
             batch_first=True, norm_first=True)
         self.face_attn = nn.TransformerEncoder(layer, 6, nn.LayerNorm(bd))
         self.face_attn_proj_out = nn.Linear(bd, df)
         
-        self.global_feature1 = nn.Sequential(
-            nn.Linear(df, df),
-            nn.LeakyReLU(),
-            nn.Linear(df, df),
-        )
-        self.global_feature2 = nn.Sequential(
-            nn.Linear(df * 2, df),
-            nn.LeakyReLU(),
-            nn.Linear(df, df),
-        )
+        self.sigmoid = v_conf["sigmoid"]
+        self.loss_fn = nn.L1Loss() if v_conf["loss"] == "l1" else nn.MSELoss()
         
         # Decoder
         self.face_points_decoder = nn.Sequential(
@@ -10415,7 +10410,7 @@ class AutoEncoder_1122_test(nn.Module):
         layer2 = nn.TransformerEncoderLayer(
             bd, 16, dim_feedforward=2048, dropout=0.1, 
             batch_first=True, norm_first=True)
-        self.face_attn2 = nn.TransformerEncoder(layer2, 8)
+        self.face_attn2 = nn.TransformerEncoder(layer2, 6)
         self.face_attn_proj_out2 = nn.Linear(bd, df)
 
         self.gaussian_weights = v_conf["gaussian_weights"]
@@ -10468,29 +10463,16 @@ class AutoEncoder_1122_test(nn.Module):
 
     def encode(self, v_data, v_test):
         face_points = rearrange(v_data["face_norm"][..., :self.in_channels], 'b h w n -> b n h w').contiguous()
-        face_features = self.face_coords(face_points)        
-
-        # Add bbox features
-        fused_face_features = torch.cat((face_features, v_data["face_bbox"]), dim=1)
-
-        # # Face attn
-        attn_x = self.face_attn_proj_in(fused_face_features)
-        attn_x = self.face_attn(attn_x, v_data["attn_mask"])
+        face_coords_features = self.face_coords(face_points)      
+        face_features = self.face_fusing_proj_in(face_coords_features)
+        face_bbox_features = self.bbox_fusing_proj_in(v_data["face_bbox"])
+        
+        fused_face_features = self.face_fusing(face_features, face_bbox_features) + face_features + face_bbox_features
+        attn_x = self.face_attn(fused_face_features, v_data["attn_mask"]) + fused_face_features
         attn_x = self.face_attn_proj_out(attn_x)
-        fused_face_features = attn_x
-
-        # Global
-        bs = v_data["num_face_record"].shape[0]
-        index = torch.arange(bs, device=fused_face_features.device).repeat_interleave(v_data["num_face_record"])
-        face_z = fused_face_features
-        gf = scatter_mean(fused_face_features, index, dim=0)
-        gf = self.global_feature1(gf)
-        gf = gf.repeat_interleave(v_data["num_face_record"], dim=0)
-        face_z = torch.cat((fused_face_features, gf), dim=1)
-        face_z = self.global_feature2(face_z) + fused_face_features
 
         return {
-            "face_features": face_z,
+            "face_features": attn_x,
         }
 
     def decode(self, v_encoding_result, v_data=None, v_test=False):
@@ -10504,7 +10486,7 @@ class AutoEncoder_1122_test(nn.Module):
         else:
             attn_mask = v_data["attn_mask"]
         face_feature = self.face_attn2(face_feature, attn_mask)
-        face_z = self.face_attn_proj_out2(face_feature)
+        face_z = self.face_attn_proj_out2(face_feature) + face_z
         
         decoding_results = {}
         decoding_results["face_points_local"] = self.face_points_decoder(face_z)

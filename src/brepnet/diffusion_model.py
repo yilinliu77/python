@@ -606,6 +606,7 @@ class Diffusion_condition(nn.Module):
 
         self.is_pretrained = v_conf["autoencoder_weights"] is not None
         self.is_stored_z = v_conf["stored_z"]
+        self.use_mean = v_conf["use_mean"]
         self.is_train_decoder = v_conf["train_decoder"]
         if self.is_pretrained:
             checkpoint = torch.load(v_conf["autoencoder_weights"], weights_only=False)["state_dict"]
@@ -671,18 +672,24 @@ class Diffusion_condition(nn.Module):
             data["padded_face_z"] = face_features.reshape(bs, num_face, -1)
         else:
             encoding_result = self.ae_model.encode(v_data, True)
-            data.update(encoding_result)
-            face_features = encoding_result["face_z"]
+            face_features, _ = self.ae_model.sample(encoding_result["face_features"], v_is_test=self.use_mean)
             dim_latent = face_features.shape[-1]
             num_faces = v_data["num_face_record"]
             bs = num_faces.shape[0]
-            padded_face_z = torch.zeros(
-                    (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
             # Fill the face_z to the padded_face_z without forloop
-            mask = num_faces[:, None] > torch.arange(self.num_max_faces, device=num_faces.device)
-            padded_face_z[mask] = face_features
-            data["padded_face_z"] = padded_face_z
-            data["mask"] = mask
+            if self.pad_method == "zero":
+                padded_face_z = torch.zeros(
+                    (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
+                mask = num_faces[:, None] > torch.arange(self.num_max_faces, device=num_faces.device)
+                padded_face_z[mask] = face_features
+                data["padded_face_z"] = padded_face_z
+                data["mask"] = mask
+            else:
+                positions = torch.arange(self.num_max_faces, device=face_features.device).unsqueeze(0).repeat(bs, 1)
+                mandatory_mask = positions < num_faces[:,None]
+                random_indices = (torch.rand((bs, self.num_max_faces), device=face_features.device) * num_faces[:,None]).long()
+                indices = torch.where(mandatory_mask, positions, random_indices)
+                data["padded_face_z"] = face_features[indices]
         return data
 
     def diffuse(self, v_feature, v_timesteps, v_condition=None):

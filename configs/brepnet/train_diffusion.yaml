@@ -29,6 +29,7 @@ trainer:
   check_val_every_n_epoch: 1
   # accelerator: "16-mixed"
   accelerator: "32-true"
+  swa: false
 
   # Evaluation
   evaluate: false
@@ -65,6 +66,7 @@ model:
   gaussian_weights: 1e-6
   norm: "layer"
   autoencoder_weights: 
+  with_intersection: 
 
 hydra:
   run:

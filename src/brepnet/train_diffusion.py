@@ -28,6 +28,7 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import StochasticWeightAveraging, ModelSummary
 from lightning_fabric import seed_everything
 
 from torch.utils.data.dataloader import DataLoader
@@ -139,24 +140,22 @@ class TrainDiffusion(pl.LightningModule):
                      sync_dist=True, batch_size=self.batch_size)
         self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
-
-        if batch_idx == 0 and self.global_rank == 0:
-            result = self.model.inference(1, self.device, data)[0]
+        
+        if batch_idx == 0:
             self.viz = {
                 "time_loss": []
             }
+            self.viz["time_loss"].append(loss["t"])
+        
+        if batch_idx == 0 and self.global_rank == 0:
+            result = self.model.inference(1, self.device, data)[0]
             self.viz["recon_faces"] = result["pred_face"]
         
-        if self.global_rank == 0 and "t" in loss:
-            self.viz["time_loss"].append(loss["t"])
-
         return total_loss
 
     def on_validation_epoch_end(self):
         # if self.trainer.sanity_checking:
         #     return
-        if self.global_rank != 0:
-            return
 
         if "time_loss" in self.viz:
             time_loss = torch.cat(self.viz["time_loss"]).cpu().numpy()
@@ -164,6 +163,9 @@ class TrainDiffusion(pl.LightningModule):
             for i in range(10):
                 results.append(time_loss[np.logical_and(time_loss[:,0]>=i*100, time_loss[:,0]<(i+1)*100), 1].mean())
                 self.log(f'tloss/{i}', results[-1], prog_bar=False, logger=True, on_step=False, on_epoch=True, sync_dist=True)
+        
+        if self.global_rank != 0:
+            return
         if "recon_faces" in self.viz:
             recon_faces = self.viz["recon_faces"]
             trimesh.PointCloud(recon_faces.reshape(-1, 3)).export(str(self.log_root / "{}_faces.ply".format(self.current_epoch)))
@@ -246,9 +248,13 @@ def main(v_cfg: DictConfig):
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
 
-    mc = ModelCheckpoint(monitor="Validation_Loss", save_last=True, every_n_train_steps=300000, save_top_k=-1)
-    lr_monitor = LearningRateMonitor(logging_interval='epoch')
-
+    callbacks = []
+    callbacks.append(ModelCheckpoint(monitor="Validation_Loss", save_last=True, every_n_train_steps=100000, save_top_k=-1))
+    callbacks.append(LearningRateMonitor(logging_interval='epoch'))
+    if v_cfg["trainer"]["swa"]:
+        callbacks.append(StochasticWeightAveraging(swa_lrs=v_cfg["trainer"]["learning_rate"], swa_epoch_start=10))
+    callbacks.append(ModelSummary(max_depth=1))
+    
     model = TrainDiffusion(v_cfg)
     logger = TensorBoardLogger(log_dir)
 
@@ -259,7 +265,7 @@ def main(v_cfg: DictConfig):
             strategy="ddp_find_unused_parameters_true" if v_cfg["trainer"].gpu > 1 else "auto",
             devices=v_cfg["trainer"].gpu,
             enable_model_summary=True,
-            callbacks=[mc, lr_monitor],
+            callbacks=callbacks,
             max_epochs=int(v_cfg["trainer"]["max_epochs"]),
             max_steps=int(v_cfg["trainer"]["max_steps"]),
             # max_epochs=2,
@@ -274,8 +280,9 @@ def main(v_cfg: DictConfig):
     if v_cfg["trainer"].evaluate:
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
         weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, weights_only=False, map_location="cpu")["state_dict"]
+        weights = {k: v for k, v in weights.items() if "ae_model" not in k}
         # weights = {k.replace("model.", ""): v for k, v in weights.items()}
-        model.load_state_dict(weights)
+        model.load_state_dict(weights, strict=False)
         trainer.test(model)
 
     else:

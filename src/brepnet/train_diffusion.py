@@ -249,7 +249,7 @@ def main(v_cfg: DictConfig):
         torch.multiprocessing.set_start_method("spawn")
 
     callbacks = []
-    callbacks.append(ModelCheckpoint(monitor="Validation_Loss", save_last=True, every_n_train_steps=100000, save_top_k=-1))
+    callbacks.append(ModelCheckpoint(monitor="Validation_Loss", save_last=True, every_n_train_steps=50000, save_top_k=-1))
     callbacks.append(LearningRateMonitor(logging_interval='epoch'))
     if v_cfg["trainer"]["swa"]:
         callbacks.append(StochasticWeightAveraging(swa_lrs=v_cfg["trainer"]["learning_rate"], swa_epoch_start=10))

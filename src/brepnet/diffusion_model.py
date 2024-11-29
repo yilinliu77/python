@@ -576,15 +576,13 @@ class Diffusion_condition(nn.Module):
                 nn.SiLU(),
                 nn.Linear(self.dim_input, 1),
         )    
-        beta_schedule = "squaredcos_cap_v2"
-        if "beta_schedule" in v_conf:
-            beta_schedule = v_conf["beta_schedule"]
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=1000,
-            beta_schedule=beta_schedule,
+            beta_schedule=v_conf["beta_schedule"],
             prediction_type=v_conf["diffusion_type"],
-            beta_start=0.0001,
-            beta_end=0.02,
+            beta_start=v_conf["beta_start"],
+            beta_end=v_conf["beta_end"],
+            variance_type=v_conf["variance_type"],
             clip_sample=False,
         )
         self.time_embed = nn.Sequential(

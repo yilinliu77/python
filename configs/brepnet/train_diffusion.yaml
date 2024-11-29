@@ -55,6 +55,9 @@ model:
   pad_method: random
   num_max_faces: 64
   beta_schedule: squaredcos_cap_v2
+  beta_start: 0.0001
+  beta_end: 0.02
+  variance_type: fixed_small
   addition_tag: false
 
   autoencoder: AutoEncoder_0925
@@ -66,7 +69,6 @@ model:
   gaussian_weights: 1e-6
   norm: "layer"
   autoencoder_weights: 
-  with_intersection: 
 
 hydra:
   run:

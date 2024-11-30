@@ -423,6 +423,9 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         self.mode = v_training_mode
         self.conf = v_conf
         self.max_intersection = 500
+        self.scale_factor = 1
+        if "scale_factor" in v_conf:
+            self.scale_factor = int(v_conf["scale_factor"])
         if v_training_mode == "testing":
             listfile = v_conf['test_dataset']
         elif v_training_mode == "training":
@@ -444,14 +447,15 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
             self.data_folders = self.data_folders[:100]
             if v_training_mode == "training":
                 self.data_folders = self.data_folders * 100
+        self.data_folders = self.data_folders
         print(len(self.data_folders))
 
     def __len__(self):
-        return len(self.data_folders)
+        return len(self.data_folders) * self.scale_factor
 
     def __getitem__(self, idx):
         # idx = 0
-        prefix = self.data_folders[idx]
+        prefix = self.data_folders[idx%len(self.data_folders)]
         data_npz = np.load(str(self.root / prefix / "data.npz"))
         if self.mode == "testing" and self.is_aug==1:
             prefix += "_{}".format(idx // self.ori_length)

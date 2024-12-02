@@ -232,7 +232,7 @@ def get_topo_detection(recon_face_edge, gt_face_edge, id_recon_gt_face, id_recon
     return 2 * precision * recall / (precision + recall + 1e-6), precision, recall
 
 
-def eval_one(eval_root, gt_root, folder_name, v_num_per_m=100):
+def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, v_num_per_m=100):
     if os.path.exists(eval_root / folder_name / 'error.txt'):
         os.remove(eval_root / folder_name / 'error.txt')
     if os.path.exists(eval_root / folder_name / 'eval.npz'):
@@ -241,23 +241,74 @@ def eval_one(eval_root, gt_root, folder_name, v_num_per_m=100):
     # At least have fall_back_mesh
     step_name = "recon_brep.step"
 
-    # Face chamfer distance
-    if (eval_root / folder_name / step_name).exists():
-        valid, recon_shape = check_step_valid_soild(eval_root / folder_name / step_name, return_shape=True)
+    if is_point2cad:
+        mesh = trimesh.load(eval_root / folder_name / "clipped/mesh_transformed.ply")
+        color = np.stack((
+            [item[1] for item in mesh.metadata['_ply_raw']['face']['data']],
+            [item[2] for item in mesh.metadata['_ply_raw']['face']['data']],
+            [item[3] for item in mesh.metadata['_ply_raw']['face']['data']],
+        ), axis=1)
+        color_map = [list(map(lambda item:int(item),item.strip().split(" "))) for item in open("src/brepnet/eval/point2cad_color.txt").readlines()]
+        index = np.asarray([color_map.index(item.tolist()) for item in color])
+        recon_face_points = [None]*(index.max()+1)
+        for i in range(index.max() + 1):
+            item_faces = mesh.faces[index == i]
+            item_mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=item_faces)
+            num_samples = min(max(int(item_mesh.area * v_num_per_m * v_num_per_m), 5), 10000)
+            pc_item, id_face = trimesh.sample.sample_surface(item_mesh, num_samples)
+            normals = item_mesh.face_normals[id_face]
+            recon_face_points[i] = np.concatenate((pc_item, normals), axis=1)
+
+        curve_points = np.asarray([list(map(lambda item: float(item),item.strip().split(" "))) for item in open(eval_root / folder_name / "clipped/curve_points.xyzc").readlines()])
+        num_curves = int(curve_points.max(axis=0)[3]) + 1
+        recon_edge_points = [None]*num_curves
+        for i in range(num_curves):
+            item_points = curve_points[curve_points[:,3] == i][:,:3]
+            recon_edge_points[i] = item_points
+
+        if (eval_root / folder_name / "clipped/remove_duplicates_corners.ply").exists():
+            pc = trimesh.load(eval_root / folder_name / "clipped/remove_duplicates_corners.ply")
+            recon_vertex_points = pc.vertices[:,None]
+        else:
+            recon_vertex_points = np.asarray((0,0,0), dtype=np.float32)[None,None]
+
+        recon_face_edge = {}
+        recon_edge_vertex = {}
+        EV_mode = False
+        for items in open(eval_root / folder_name / 'topo/topo_fix.txt', 'r').readlines():
+            items = items.strip().split(" ")
+            if items[0] == "EV":
+                EV_mode = True
+                continue
+            if len(items) == 1:
+                continue
+            if not EV_mode:
+                recon_face_edge[int(items[0])] = list(map(lambda item: int(item), items[1:]))
+            else:
+                recon_edge_vertex[int(items[0])] = list(map(lambda item: int(item), items[1:]))
+        pass
     else:
-        print(f"Error: {folder_name} does not have {step_name}")
-        return
-    if recon_shape is None:
-        print(f"Error: {folder_name} 's {step_name} is not valid")
-        return
-        
+        # Face chamfer distance
+        if (eval_root / folder_name / step_name).exists():
+            valid, recon_shape = check_step_valid_soild(eval_root / folder_name / step_name, return_shape=True)
+        else:
+            print(f"Error: {folder_name} does not have {step_name}")
+            return
+        if recon_shape is None:
+            print(f"Error: {folder_name} 's {step_name} is not valid")
+            return
+
+        # Get data
+        recon_faces, recon_face_points, recon_edges, recon_edge_points, recon_vertices, recon_vertex_points = get_data(
+            recon_shape, v_num_per_m)
+
+        # Topology
+        recon_face_edge, recon_edge_vertex = get_topology(recon_faces, recon_edges, recon_vertices)
+
     # GT
     _, gt_shape = check_step_valid_soild(gt_root / folder_name / "normalized_shape.step", return_shape=True)
-
-    # Get data
-    recon_faces, recon_face_points, recon_edges, recon_edge_points, recon_vertices, recon_vertex_points = get_data(
-        recon_shape, v_num_per_m)
     gt_faces, gt_face_points, gt_edges, gt_edge_points, gt_vertices, gt_vertex_points = get_data(gt_shape, v_num_per_m)
+    gt_face_edge, gt_edge_vertex = get_topology(gt_faces, gt_edges, gt_vertices)
 
     # Chamfer
     face_acc_cd, face_com_cd, face_cd = get_chamfer(recon_face_points, gt_face_points)
@@ -272,10 +323,6 @@ def eval_one(eval_root, gt_root, folder_name, v_num_per_m=100):
     face_fscore, face_pre, face_rec = get_detection(id_recon_gt_face, id_gt_recon_face, cost_face)
     edge_fscore, edge_pre, edge_rec = get_detection(id_recon_gt_edge, id_gt_recon_edge, cost_edge)
     vertex_fscore, vertex_pre, vertex_rec = get_detection(id_recon_gt_vertex, id_gt_recon_vertex, cost_vertices)
-
-    # Topology
-    recon_face_edge, recon_edge_vertex = get_topology(recon_faces, recon_edges, recon_vertices)
-    gt_face_edge, gt_edge_vertex = get_topology(gt_faces, gt_edges, gt_vertices)
 
     fe_fscore, fe_pre, fe_rec = get_topo_detection(recon_face_edge, gt_face_edge, id_recon_gt_face, id_recon_gt_edge)
     ev_fscore, ev_pre, ev_rec = get_topo_detection(recon_edge_vertex, gt_edge_vertex, id_recon_gt_edge,
@@ -313,12 +360,12 @@ def eval_one(eval_root, gt_root, folder_name, v_num_per_m=100):
         "edge_rec": edge_rec,
         "face_rec": face_rec,
 
-        "num_recon_face": len(recon_faces),
-        "num_gt_face": len(gt_faces),
-        "num_recon_edge": len(recon_edges),
-        "num_gt_edge": len(gt_edges),
-        "num_recon_vertex": len(recon_vertices),
-        "num_gt_vertex": len(gt_vertices),
+        "num_recon_face": len(recon_face_points),
+        "num_gt_face": len(gt_face_points),
+        "num_recon_edge": len(recon_edge_points),
+        "num_gt_edge": len(gt_edge_points),
+        "num_recon_vertex": len(recon_vertex_points),
+        "num_gt_vertex": len(gt_vertex_points),
     }
     np.savez_compressed(eval_root / folder_name / 'eval.npz', results=results, allow_pickle=True)
 
@@ -332,6 +379,7 @@ if __name__ == '__main__':
     parser.add_argument('--prefix', type=str, default='')
     parser.add_argument('--list', type=str, default='')
     parser.add_argument('--from_scratch', action='store_true')
+    parser.add_argument('--is_point2cad', action='store_true')
     args = parser.parse_args()
     eval_root = Path(args.eval_root)
     gt_root = Path(args.gt_root)
@@ -339,6 +387,7 @@ if __name__ == '__main__':
     num_cpus = args.num_cpus
     listfile = args.list
     from_scratch = args.from_scratch
+    is_point2cad = args.is_point2cad
 
     if not os.path.exists(eval_root):
         raise ValueError(f"Data root path {eval_root} does not exist.")
@@ -346,7 +395,7 @@ if __name__ == '__main__':
         raise ValueError(f"Output root path {gt_root} does not exist.")
 
     if args.prefix != '':
-        eval_one(eval_root, gt_root, args.prefix)
+        eval_one(eval_root, gt_root, args.prefix, is_point2cad)
         exit()
 
     all_folders = [folder for folder in os.listdir(eval_root) if os.path.isdir(eval_root / folder)]
@@ -365,7 +414,7 @@ if __name__ == '__main__':
     if not is_use_ray:
         # random.shuffle(self.folder_names)
         for i in tqdm(range(len(all_folders))):
-            eval_one(eval_root, gt_root, all_folders[i])
+            eval_one(eval_root, gt_root, all_folders[i], is_point2cad)
     else:
         ray.init(
             dashboard_host="0.0.0.0",
@@ -376,7 +425,7 @@ if __name__ == '__main__':
         eval_one_remote = ray.remote(max_retries=0)(eval_one)
         tasks = []
         for i in range(len(all_folders)):
-            tasks.append(eval_one_remote.remote(eval_root, gt_root, all_folders[i]))
+            tasks.append(eval_one_remote.remote(eval_root, gt_root, all_folders[i], is_point2cad))
         for _ in tqdm(range(len(all_folders))):
             ray.get(tasks.pop(0))
 

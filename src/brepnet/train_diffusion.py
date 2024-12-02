@@ -63,6 +63,7 @@ def to_mesh(face_points):
 class TrainDiffusion(pl.LightningModule):
     def __init__(self, hparams):
         super(TrainDiffusion, self).__init__()
+        seed_everything(self.global_rank)
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
@@ -109,7 +110,7 @@ class TrainDiffusion(pl.LightningModule):
                           )
 
     def configure_optimizers(self):
-        optimizer = Adam(self.model.parameters(), lr=self.learning_rate)
+        optimizer = AdamW(self.model.parameters(), lr=self.learning_rate)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[4000], gamma=0.1)
         # return [optimizer], [scheduler]
         return optimizer
@@ -182,9 +183,7 @@ class TrainDiffusion(pl.LightningModule):
                           )
 
     def test_step(self, batch, batch_idx):
-        if batch_idx == 0:
-            seed_everything(self.global_rank)
-            
+           
         # if batch_idx != 147:
         #     return
         data = batch
@@ -236,7 +235,6 @@ class TrainDiffusion(pl.LightningModule):
 
 @hydra.main(config_name="train_diffusion.yaml", config_path="../../configs/brepnet/", version_base="1.1")
 def main(v_cfg: DictConfig):
-    seed_everything(0)
     torch.set_float32_matmul_precision("medium")
     print(OmegaConf.to_yaml(v_cfg))
 

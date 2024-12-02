@@ -687,6 +687,9 @@ class Diffusion_condition(nn.Module):
                 mandatory_mask = positions < num_faces[:,None]
                 random_indices = (torch.rand((bs, self.num_max_faces), device=face_features.device) * num_faces[:,None]).long()
                 indices = torch.where(mandatory_mask, positions, random_indices)
+                num_faces_cum = num_faces.cumsum(dim=0).roll(1)
+                num_faces_cum[0] = 0
+                indices += num_faces_cum[:,None]
                 data["padded_face_z"] = face_features[indices]
         return data
 

@@ -205,8 +205,8 @@ class TrainDiffusion(pl.LightningModule):
             item_root.mkdir(parents=True, exist_ok=True)
             recon_data = results[idx]
 
-            mesh = to_mesh(recon_data["pred_face"])
-            mesh.export(str(item_root / f"{prefix}_face.ply"))
+            # mesh = to_mesh(recon_data["pred_face"])
+            # mesh.export(str(item_root / f"{prefix}_face.ply"))
             export_edges(recon_data["pred_edge"], str(item_root / f"{prefix}_edge.obj"))
 
             np.savez_compressed(str(item_root / f"data.npz"),

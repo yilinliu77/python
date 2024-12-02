@@ -5,9 +5,9 @@ import sys, pickle
 import numpy as np
 import trimesh
 
-pkl = r"/mnt/d/uncond_results/1108/1108_30_li_900k_302_lfd.pkl"
+pkl = r"/mnt/d/uncond_results/1127/1127_730_li_120k_lfd.pkl"
 # pkl = r"/mnt/d/uncond_results/1106/1108_730_li_600k_30_lfd.pkl"
-output_path = r"/mnt/d/uncond_results/1108/1108_30_li_900k_302_lfd.png"
+output_path = r"/mnt/d/uncond_results/1127/1127_730_li_120k_lfd.png"
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
@@ -24,7 +24,13 @@ if __name__ == "__main__":
     plt.xlabel("Frequency")
     plt.ylabel("Light Field Distance (LFD)")
     plt.savefig(output_path, dpi=600)
-    print(data.mean())
+
+    print("Mean: ", data.mean())
+    print("Max: ", data.max())
+    print("Min: ", data.min())
+    print("Std: ", data.std())
+    print("Median: ", np.median(data))
+    print("25%: ", np.percentile(data, 25))
 
     if True:
         small_ids = np.where(data < 100)

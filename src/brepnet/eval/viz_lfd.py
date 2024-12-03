@@ -30,29 +30,35 @@ if __name__ == "__main__":
     print("Min: ", data.min())
     print("Std: ", data.std())
     print("Median: ", np.median(data))
+    print("1%: ", np.percentile(data, 1))
+    print("10%: ", np.percentile(data, 10))
     print("25%: ", np.percentile(data, 25))
+    print("50%: ", np.percentile(data, 50))
+    print("75%: ", np.percentile(data, 75))
+    print("90%: ", np.percentile(data, 90))
+    print("99%: ", np.percentile(data, 99))
 
     if True:
         small_ids = np.where(data < 100)
-        data_root = Path("/mnt/d/brepgen_train")
+        # data_root = Path("/mnt/d/brepgen_train")
         # data_root = Path("/mnt/d/deepcad_train_v6")
-        pkl = Path(pkl)
-        src_dir = pkl.parent / Path(pkl).name.replace("_lfd.pkl", "_post")
-        dst_file = pkl.parent / Path(pkl).name.replace("_lfd.pkl", "_lfd.ply")
-        mesh = trimesh.Trimesh(vertices=np.zeros((0, 3)), faces=np.zeros((0, 3)))
-        offset = 0
-        for id in tqdm(small_ids[0]):
-            item = trimesh.load(str(src_dir / src_folder_list[id] / "recon_brep.stl"))
-            delta_x = offset % 20 * 9
-            delta_y = offset // 20 * 3
-            item.vertices += [delta_x, delta_y, 0]
-            mesh = mesh + item
-            item = trimesh.load(str(data_root / nearest_name[id] / "mesh.ply"))
-            delta_x = offset % 20 * 9 + 3
-            delta_y = offset // 20 * 3
-            item.vertices += [delta_x, delta_y, 0]
-            mesh = mesh + item
-            offset += 1
-        mesh.export(str(dst_file))
+        # pkl = Path(pkl)
+        # src_dir = pkl.parent / Path(pkl).name.replace("_lfd.pkl", "_post")
+        # dst_file = pkl.parent / Path(pkl).name.replace("_lfd.pkl", "_lfd.ply")
+        # mesh = trimesh.Trimesh(vertices=np.zeros((0, 3)), faces=np.zeros((0, 3)))
+        # offset = 0
+        # for id in tqdm(small_ids[0]):
+        #     item = trimesh.load(str(src_dir / src_folder_list[id] / "recon_brep.stl"))
+        #     delta_x = offset % 20 * 9
+        #     delta_y = offset // 20 * 3
+        #     item.vertices += [delta_x, delta_y, 0]
+        #     mesh = mesh + item
+        #     item = trimesh.load(str(data_root / nearest_name[id] / "mesh.ply"))
+        #     delta_x = offset % 20 * 9 + 3
+        #     delta_y = offset // 20 * 3
+        #     item.vertices += [delta_x, delta_y, 0]
+        #     mesh = mesh + item
+        #     offset += 1
+        # mesh.export(str(dst_file))
         print(f"{small_ids[0].shape[0]} shapes' LFD is less than 100")
     pass

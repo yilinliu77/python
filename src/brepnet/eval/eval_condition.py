@@ -242,6 +242,9 @@ def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, v_num_per_m=10
     step_name = "recon_brep.step"
 
     if is_point2cad:
+        if not (eval_root / folder_name / "clipped/mesh_transformed.ply").exists():
+            print(f"Error: {folder_name} does not have mesh_transformed")
+            return
         mesh = trimesh.load(eval_root / folder_name / "clipped/mesh_transformed.ply")
         color = np.stack((
             [item[1] for item in mesh.metadata['_ply_raw']['face']['data']],
@@ -259,6 +262,9 @@ def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, v_num_per_m=10
             normals = item_mesh.face_normals[id_face]
             recon_face_points[i] = np.concatenate((pc_item, normals), axis=1)
 
+        if not (eval_root / folder_name / "clipped/curve_points.xyzc").exists():
+            print(f"Error: {folder_name} does not have curve_points")
+            return
         curve_points = np.asarray([list(map(lambda item: float(item),item.strip().split(" "))) for item in open(eval_root / folder_name / "clipped/curve_points.xyzc").readlines()])
         num_curves = int(curve_points.max(axis=0)[3]) + 1
         recon_edge_points = [None]*num_curves

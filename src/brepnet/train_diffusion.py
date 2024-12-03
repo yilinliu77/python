@@ -63,7 +63,6 @@ def to_mesh(face_points):
 class TrainDiffusion(pl.LightningModule):
     def __init__(self, hparams):
         super(TrainDiffusion, self).__init__()
-        seed_everything(self.global_rank)
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
@@ -183,7 +182,8 @@ class TrainDiffusion(pl.LightningModule):
                           )
 
     def test_step(self, batch, batch_idx):
-           
+        if batch_idx == 0:
+            seed_everything(self.global_rank)
         # if batch_idx != 147:
         #     return
         data = batch
@@ -235,8 +235,10 @@ class TrainDiffusion(pl.LightningModule):
 
 @hydra.main(config_name="train_diffusion.yaml", config_path="../../configs/brepnet/", version_base="1.1")
 def main(v_cfg: DictConfig):
+    # seed_everything(0)
     torch.set_float32_matmul_precision("medium")
-    print(OmegaConf.to_yaml(v_cfg))
+    if "LOCAL_RANK" not in os.environ:
+        print(OmegaConf.to_yaml(v_cfg))
 
     exp_name = v_cfg["trainer"]["exp_name"]
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()

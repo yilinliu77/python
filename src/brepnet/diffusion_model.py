@@ -2,7 +2,7 @@ import importlib
 import math
 import time
 import torch
-from torch import isnan, nn, Tensor, einsum
+from torch import autocast, isnan, nn, Tensor, einsum
 from torch.nn import Module, ModuleList
 import torch.nn.functional as F
 
@@ -669,8 +669,9 @@ class Diffusion_condition(nn.Module):
             num_face = face_features.shape[1]
             data["padded_face_z"] = face_features.reshape(bs, num_face, -1)
         else:
-            encoding_result = self.ae_model.encode(v_data, True)
-            face_features, _ = self.ae_model.sample(encoding_result["face_features"], v_is_test=self.use_mean)
+            with torch.no_grad() and autocast(device_type='cuda', dtype=torch.float32):
+                encoding_result = self.ae_model.encode(v_data, True)
+                face_features, _ = self.ae_model.sample(encoding_result["face_features"], v_is_test=self.use_mean)
             dim_latent = face_features.shape[-1]
             num_faces = v_data["num_face_record"]
             bs = num_faces.shape[0]
@@ -690,6 +691,9 @@ class Diffusion_condition(nn.Module):
                 num_faces_cum = num_faces.cumsum(dim=0).roll(1)
                 num_faces_cum[0] = 0
                 indices += num_faces_cum[:,None]
+                # Permute the indices
+                r_indices = torch.argsort(torch.rand((bs, self.num_max_faces), device=face_features.device), dim=1)
+                indices = indices.gather(1, r_indices)
                 data["padded_face_z"] = face_features[indices]
         return data
 

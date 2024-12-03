@@ -202,8 +202,8 @@ class TrainDiffusion(pl.LightningModule):
             item_root.mkdir(parents=True, exist_ok=True)
             recon_data = results[idx]
 
-            mesh = to_mesh(recon_data["pred_face"])
-            mesh.export(str(item_root / f"{prefix}_face.ply"))
+            # mesh = to_mesh(recon_data["pred_face"])
+            # mesh.export(str(item_root / f"{prefix}_face.ply"))
             export_edges(recon_data["pred_edge"], str(item_root / f"{prefix}_edge.obj"))
 
             np.savez_compressed(str(item_root / f"data.npz"),
@@ -235,7 +235,8 @@ class TrainDiffusion(pl.LightningModule):
 def main(v_cfg: DictConfig):
     torch.backends.cudnn.benchmark = False
     torch.set_float32_matmul_precision("medium")
-    print(OmegaConf.to_yaml(v_cfg))
+    if "LOCAL_RANK" not in os.environ:
+        print(OmegaConf.to_yaml(v_cfg))
 
     exp_name = v_cfg["trainer"]["exp_name"]
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()

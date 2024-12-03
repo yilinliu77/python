@@ -1364,7 +1364,7 @@ def triangulate_shape(v_shape):
 
         if triangulation is None:
             # Mesh
-            mesh = BRepMesh_IncrementalMesh(face, 0.01)
+            mesh = BRepMesh_IncrementalMesh(face, 0.1)
             triangulation = BRep_Tool.Triangulation(face, loc)
             if triangulation is None:
                 exp.Next()

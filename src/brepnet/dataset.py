@@ -447,7 +447,6 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
             self.data_folders = self.data_folders[:100]
             if v_training_mode == "training":
                 self.data_folders = self.data_folders * 100
-        self.data_folders = self.data_folders
         print(len(self.data_folders))
 
     def __len__(self):

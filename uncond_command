@@ -13,14 +13,15 @@ python -m src.brepnet.eval.sample_points --data_root ${item}_post --out_root ${i
 python -m src.brepnet.eval.eval_brepgen --real /mnt/d/deepcad_test_pcd --fake ${item}_pcd
 python -m src.brepnet.eval.eval_unique_novel --fake_root ${item} --fake_post ${item}_post --train_root /mnt/d/brepgen_train --use_ray --min_face 0 --only_unique --atol 0.05
 
+python -m src.brepnet.viz.find_nearest_pc_cd --fake_post ${item}_post --fake_pcd_root ${item}_pcd --train_root /mnt/d/brepgen_train --txt ./src/brepnet/data/list/deduplicated_deepcad_training_7_30.txt --num_gpus 8
+python -m src.brepnet.eval.eval_unique_novel --fake_root ${item} --fake_post ${item}_post --train_root /mnt/d/brepgen_train --use_ray --txt ./src/brepnet/data/list/deduplicated_deepcad_training_7_30.txt --min_face 0 --n_bit 4
+cd /root/repo/python/src/brepnet/eval/lfd/evaluation_scripts/compute_lfd_feat && python -m compute_lfd_feat_multiprocess --gen_path ${item}_post --save_path ${item}_lfd --prefix recon_brep.stl && cd /root/repo/python/src/brepnet/eval/lfd/evaluation_scripts && python -m compute_lfd --dataset_path /mnt/d/brepgen_train_lfd_feat --gen_path ${item}_lfd --save_name ${item}_lfd.pkl --num_workers 8 --list /root/repo/python/src/brepnet/data/list/deduplicated_deepcad_training_7_30.txt && cd /root/repo/python/
+python -m src.brepnet.eval.viz_lfd ${item}_lfd.pkl ${item}_lfd.png
+
 # 30
 python -m src.brepnet.viz.find_nearest_pc_cd --fake_post ${item}_post --fake_pcd_root ${item}_pcd --train_root /mnt/d/brepgen_train --txt ./src/brepnet/data/list/deduplicated_deepcad_training_30.txt  --num_gpus 8
 python -m src.brepnet.eval.eval_unique_novel --fake_root ${item} --fake_post ${item}_post --train_root /mnt/d/brepgen_train --use_ray --txt ./src/brepnet/data/list/deduplicated_deepcad_training_30.txt --min_face 0 --n_bit 4
 cd /root/repo/python/src/brepnet/eval/lfd/evaluation_scripts/compute_lfd_feat && python -m compute_lfd_feat_multiprocess --gen_path ${item}_post --save_path ${item}_lfd --prefix recon_brep.stl && cd /root/repo/python/src/brepnet/eval/lfd/evaluation_scripts && python -m compute_lfd --dataset_path /mnt/d/brepgen_train_lfd_feat --gen_path ${item}_lfd --save_name ${item}_lfd.pkl --num_workers 8 --list /root/repo/python/src/brepnet/data/list/deduplicated_deepcad_training_30.txt && cd /root/repo/python/
 python -m src.brepnet.eval.viz_lfd ${item}_lfd.pkl ${item}_lfd.png
 
-# 730
-python -m src.brepnet.viz.find_nearest_pc_cd --fake_post ${item}_post --fake_pcd_root ${item}_pcd --train_root /mnt/d/brepgen_train --txt ./src/brepnet/data/list/deduplicated_deepcad_training_7_30.txt --num_gpus 8
-python -m src.brepnet.eval.eval_unique_novel --fake_root ${item} --fake_post ${item}_post --train_root /mnt/d/brepgen_train --use_ray --txt ./src/brepnet/data/list/deduplicated_deepcad_training_7_30.txt --min_face 0 --n_bit 4
-cd /root/repo/python/src/brepnet/eval/lfd/evaluation_scripts/compute_lfd_feat && python -m compute_lfd_feat_multiprocess --gen_path ${item}_post --save_path ${item}_lfd --prefix recon_brep.stl && cd /root/repo/python/src/brepnet/eval/lfd/evaluation_scripts && python -m compute_lfd --dataset_path /mnt/d/brepgen_train_lfd_feat --gen_path ${item}_lfd --save_name ${item}_lfd.pkl --num_workers 8 --list /root/repo/python/src/brepnet/data/list/deduplicated_deepcad_training_7_30.txt && cd /root/repo/python/
-python -m src.brepnet.eval.viz_lfd ${item}_lfd.pkl ${item}_lfd.png
+

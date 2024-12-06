@@ -10,8 +10,8 @@ from OCC.Core.BRepAdaptor import BRepAdaptor_Curve
 
 from src.brepnet.post.utils import triangulate_shape
 
-brepgen_root = Path("/mnt/d/brepgen_results/brepgen_filtered")
-out_root = Path("/mnt/d/brepgen_results/brepgen_75")
+brepgen_root = Path("/mnt/d/uncond_results/1203/1127_730_li_270k_1gpu_post/")
+out_root = Path("/mnt/d/uncond_results/1203/1127_730_li_270k_1gpu_75")
 out_root.mkdir(exist_ok=True, parents=True)
 
 all_folders = list(brepgen_root.iterdir())
@@ -44,7 +44,10 @@ for item in tqdm(shapedir):
     if (item/"recon_brep.step").exists() and check_step_valid_soild(item/"recon_brep.step"):
         shutil.copy(item/"recon_brep.step", out_root/f"{idx}.step")
     else:
-        npz_data = np.load(item/"data_src.npz")
+        if False:
+            npz_data = np.load(item/"data_src.npz")
+        else:
+            npz_data = np.load(brepgen_root / "../" / brepgen_root.name[:-5] / idx / "data.npz")
         pred_face = npz_data["pred_face"]
         mesh_item = to_mesh(pred_face)
         (out_root/idx).mkdir(exist_ok=True, parents=True)

@@ -846,7 +846,6 @@ class Diffusion_dataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         # idx = 0
-        print(torch.randn(4))
         folder_path = self.data_folders[idx]
         data_npz = np.load(os.path.join(self.latent_root, folder_path + "/features.npy"))
         face_features = torch.from_numpy(data_npz)

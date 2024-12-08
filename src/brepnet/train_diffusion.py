@@ -62,7 +62,6 @@ def to_mesh(face_points):
     return mesh_total
 
 def seed_worker(worker_id, rank_id=0):
-    print(rank_id)
     random.seed(worker_id+rank_id*10000)
     np.random.seed(worker_id+rank_id*10000)
     torch.manual_seed(worker_id+rank_id*10000)

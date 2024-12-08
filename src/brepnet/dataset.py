@@ -597,7 +597,6 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         }
 
 
-
 class AutoEncoder_dataset(torch.utils.data.Dataset):
     def __init__(self, v_training_mode, v_conf):
         super(AutoEncoder_dataset, self).__init__()
@@ -819,6 +818,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         filelist.sort()
 
         self.condition = v_conf["condition"]
+        self.conditional_data_root = Path(v_conf["data_root"])
         self.transform = T.Compose([
             T.ToPILImage(),
             T.Resize((224, 224)),
@@ -836,9 +836,6 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         self.pad_method = v_conf["pad_method"]
         self.addition_tag = v_conf["addition_tag"]
 
-        if self.is_aug:
-            self.data_folders = [item+f"_{i}" for item in self.data_folders for i in range(64)]
-
         return
 
     def __len__(self):
@@ -847,7 +844,11 @@ class Diffusion_dataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         # idx = 0
         folder_path = self.data_folders[idx]
-        data_npz = np.load(os.path.join(self.latent_root, folder_path + "/features.npy"))
+        if self.is_aug:
+            id_latent = np.random.randint(0,63)
+            data_npz = np.load(self.latent_root / (folder_path+f"_{id_latent}") / "features.npy")
+        else:
+            data_npz = np.load(self.latent_root / folder_path / "features.npy")
         face_features = torch.from_numpy(data_npz)
 
         if self.pad_method == "zero":
@@ -889,11 +890,11 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             else:
                 idx = np.random.choice(np.arange(32), 4, replace=False)
             if cache_data:
-                ori_data = np.load(self.latent_root / folder_path / "img_feature_dinov2.npy")
+                ori_data = np.load(self.conditional_data_root / folder_path / "img_feature_dinov2.npy")
                 img_features = torch.from_numpy(ori_data[idx]).float()
                 condition["img_features"] = img_features
             else:
-                ori_data = np.load(self.latent_root / folder_path / "imgs.npz")["imgs"]
+                ori_data = np.load(self.conditional_data_root / folder_path / "imgs.npz")["imgs"]
                 imgs = ori_data[idx]
                 transformed_imgs = []
                 for id in range(imgs.shape[0]):
@@ -903,9 +904,29 @@ class Diffusion_dataset(torch.utils.data.Dataset):
                 condition["imgs"] = transformed_imgs
             condition["img_id"] = torch.from_numpy(idx)
         elif self.condition == "pc":
-            pc = o3d.io.read_point_cloud(str(self.latent_root / folder_path / "pc.ply"))
+            num_points = self.conf["num_points"]
+            point_aug = self.conf["point_aug"]
+            pc = o3d.io.read_point_cloud(str(self.conditional_data_root / folder_path / "pc.ply"))
             points = np.asarray(pc.points)
             normals = np.asarray(pc.normals)
+            if point_aug:
+                matrix = Rotation.from_euler('xyz', np.random.randint(0, 3, 3) * np.pi / 2).as_matrix()
+                matrix = torch.from_numpy(matrix).float()
+                points1 = (matrix @ points.T).T
+
+                ft = points + normals
+                ft1 = (matrix @ ft.T).T
+
+                fn1 = ft1 - points1
+
+                fn1 = fn1 / (1e-6 + torch.linalg.norm(fn1, dim=-1, keepdim=True))
+                points = points1
+                normals = fn1
+            if num_points != points.shape[0]:
+                index = np.arange(points.shape[0])
+                np.random.shuffle(index)
+                points = points[index[:num_points]]
+                normals = normals[index[:num_points]]
             condition["points"] = torch.from_numpy(np.concatenate((points, normals), axis=-1)).float()[None,]
         return (
             folder_path,

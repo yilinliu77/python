@@ -21,6 +21,9 @@ dataset:
   num_max_faces: 64
   addition_tag: false
 
+  num_points: 2048
+  point_aug: true
+
 trainer:
   gpu: 1
   num_worker: 0

@@ -796,7 +796,7 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
 
 class Diffusion_dataset(torch.utils.data.Dataset):
     def __init__(self, v_training_mode, v_conf):
-        super(Diffusion_dataset, self).__init__()
+        super(Diffusion_dataset, self).__init__()        
         self.mode = v_training_mode
         self.conf = v_conf
         scale_factor = int(v_conf["scale_factor"])
@@ -846,6 +846,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         # idx = 0
+        print(torch.randn(4))
         folder_path = self.data_folders[idx]
         data_npz = np.load(os.path.join(self.latent_root, folder_path + "/features.npy"))
         face_features = torch.from_numpy(data_npz)

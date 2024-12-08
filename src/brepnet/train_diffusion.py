@@ -1,3 +1,4 @@
+from functools import partial
 import importlib
 from datetime import datetime
 from pathlib import Path
@@ -60,10 +61,11 @@ def to_mesh(face_points):
         mesh_total += mesh_item
     return mesh_total
 
-def seed_worker(worker_id):
-    random.seed(worker_id)
-    np.random.seed(worker_id)
-    torch.manual_seed(worker_id)
+def seed_worker(worker_id, rank_id=0):
+    print(rank_id)
+    random.seed(worker_id+rank_id*10000)
+    np.random.seed(worker_id+rank_id*10000)
+    torch.manual_seed(worker_id+rank_id*10000)
 
 class TrainDiffusion(pl.LightningModule):
     def __init__(self, hparams):
@@ -105,7 +107,7 @@ class TrainDiffusion(pl.LightningModule):
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
-                          worker_init_fn=seed_worker,
+                          worker_init_fn=partial(seed_worker, rank_id=self.trainer.global_rank),
                           )
 
     def val_dataloader(self):
@@ -117,7 +119,7 @@ class TrainDiffusion(pl.LightningModule):
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
-                          worker_init_fn=seed_worker,
+                          worker_init_fn=partial(seed_worker, rank_id=self.trainer.global_rank),
                           )
 
     def configure_optimizers(self):

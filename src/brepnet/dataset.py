@@ -858,12 +858,21 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             add_flag[face_features.shape[0]:] = -1
             add_flag = add_flag[:,None]
 
-            index = torch.randperm(face_features.shape[0])
-            num_repeats = math.ceil(self.max_faces / index.shape[0])
-            index = index.repeat(num_repeats)[:self.max_faces]
-            index2 = torch.randperm(self.max_faces)
-            index = index[index2]
+            if False:
+                index = torch.randperm(face_features.shape[0])
+                num_repeats = math.ceil(self.max_faces / index.shape[0])
+                index = index.repeat(num_repeats)[:self.max_faces]
+                index2 = torch.randperm(self.max_faces)
+                index = index[index2]
+            else:
+                positions = torch.arange(self.max_faces, device=face_features.device)
+                mandatory_mask = positions < face_features.shape[0]
+                random_indices = (torch.rand((self.max_faces,), device=face_features.device) * face_features.shape[0]).long()
+                indices = torch.where(mandatory_mask, positions, random_indices)
+                r_indices = torch.argsort(torch.rand((self.max_faces,), device=face_features.device), dim=0)
+                index = indices.gather(0, r_indices)
             padded_face_features = face_features[index]
+
             if self.addition_tag:
                 padded_face_features = torch.cat((padded_face_features, add_flag[index2]), dim=-1)
         else:

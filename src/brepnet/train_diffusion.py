@@ -1,6 +1,7 @@
 import importlib
 from datetime import datetime
 from pathlib import Path
+import random
 import sys
 
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeFace
@@ -59,10 +60,19 @@ def to_mesh(face_points):
         mesh_total += mesh_item
     return mesh_total
 
+def seed_worker(worker_id):
+    random.seed(worker_id)
+    np.random.seed(worker_id)
+    torch.manual_seed(worker_id)
 
 class TrainDiffusion(pl.LightningModule):
     def __init__(self, hparams):
         super(TrainDiffusion, self).__init__()
+        
+        if "GLOBAL_RANK" in os.environ:
+            seed_everything(os.environ["GLOBAL_RANK"], True)
+            global_rank = os.environ['GLOBAL_RANK']
+            print(f"{global_rank}: {torch.initial_seed()}")
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
@@ -95,6 +105,7 @@ class TrainDiffusion(pl.LightningModule):
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
+                          worker_init_fn=seed_worker,
                           )
 
     def val_dataloader(self):
@@ -106,6 +117,7 @@ class TrainDiffusion(pl.LightningModule):
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
+                          worker_init_fn=seed_worker,
                           )
 
     def configure_optimizers(self):
@@ -246,34 +258,37 @@ def main(v_cfg: DictConfig):
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
 
+    v_cfg["dataset"]["num_max_faces"] == v_cfg["model"]["num_max_faces"]
+    v_cfg["dataset"]["pad_method"] == v_cfg["model"]["pad_method"]
+
     callbacks = []
     callbacks.append(ModelCheckpoint(monitor="Validation_Loss", save_last=True, every_n_train_steps=50000, save_top_k=-1))
     callbacks.append(LearningRateMonitor(logging_interval='epoch'))
     if v_cfg["trainer"]["swa"]:
         callbacks.append(StochasticWeightAveraging(swa_lrs=v_cfg["trainer"]["learning_rate"], swa_epoch_start=10))
-    callbacks.append(ModelSummary(max_depth=1))
     
     model = TrainDiffusion(v_cfg)
     logger = TensorBoardLogger(log_dir)
 
     trainer = Trainer(
-            default_root_dir=log_dir,
-            logger=logger,
-            accelerator='gpu',
-            strategy="ddp_find_unused_parameters_true" if v_cfg["trainer"].gpu > 1 else "auto",
-            devices=v_cfg["trainer"].gpu,
-            enable_model_summary=True,
-            callbacks=callbacks,
-            max_epochs=int(v_cfg["trainer"]["max_epochs"]),
-            max_steps=int(v_cfg["trainer"]["max_steps"]),
-            # max_epochs=2,
-            num_sanity_val_steps=2,
-            check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
-            precision=v_cfg["trainer"]["accelerator"],
+        default_root_dir=log_dir,
+        logger=logger,
+        accelerator='gpu',
+        strategy="ddp_find_unused_parameters_true" if v_cfg["trainer"].gpu > 1 else "auto",
+        devices=v_cfg["trainer"].gpu,
+        enable_model_summary=True,
+        callbacks=callbacks,
+        max_epochs=int(v_cfg["trainer"]["max_epochs"]),
+        max_steps=int(v_cfg["trainer"]["max_steps"]),
+        # max_epochs=2,
+        num_sanity_val_steps=2,
+        check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
+        precision=v_cfg["trainer"]["accelerator"],
 
-            gradient_clip_algorithm="norm",
-            gradient_clip_val=0.5,
+        gradient_clip_algorithm="norm",
+        gradient_clip_val=0.5,
     )
+    seed_everything(trainer.global_rank)
 
     if v_cfg["trainer"].evaluate:
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")

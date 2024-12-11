@@ -9630,7 +9630,8 @@ class AutoEncoder_1119(nn.Module):
         kl_loss = (-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())) * self.gaussian_weights
         if v_is_test:
             fused_face_features = mean
-        return fused_face_features, kl_loss
+        # return fused_face_features, kl_loss
+        return fused_face_features, kl_loss, torch.cat([mean, std], dim=1)
 
     def profile_time(self, timer, key):
         torch.cuda.synchronize()
@@ -9795,7 +9796,7 @@ class AutoEncoder_1119(nn.Module):
           
     def forward(self, v_data, v_test=False):
         encoding_result = self.encode(v_data, v_test)
-        face_z, kl_loss = self.sample(encoding_result["face_features"], v_is_test=v_test)
+        face_z, kl_loss, features = self.sample(encoding_result["face_features"], v_is_test=v_test)
         encoding_result["face_z"] = face_z
         decoding_result = self.decode(encoding_result, v_data)
         decoding_result["kl_loss"] = kl_loss
@@ -9809,7 +9810,7 @@ class AutoEncoder_1119(nn.Module):
             face_adj = torch.zeros((num_faces, num_faces), dtype=bool, device=loss["total_loss"].device)
             conn = v_data["edge_face_connectivity"]
             face_adj[conn[:, 1], conn[:, 2]] = True
-            data["face_features"] = pred_data["face_features"].cpu().numpy()
+            data["face_features"] = features.cpu().numpy()
             data["gt_face_adj"] = face_adj.reshape(-1)
             data["pred_face_adj"] = pred_data["pred_face_adj"].reshape(-1)
             data["gt_edge"] = v_data["edge_points"].detach().cpu().numpy()

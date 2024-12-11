@@ -914,10 +914,11 @@ class Diffusion_dataset(torch.utils.data.Dataset):
                     assert not self.is_aug
                     matrix = Rotation.from_euler('xyz', np.random.randint(0, 3, 3) * np.pi / 2).as_matrix()
                 elif point_aug==2: 
+                    assert self.is_aug
                     angles = np.array([
-                        idx // len(self.data_folders) % 4,
-                        idx // len(self.data_folders) // 4 % 4,
-                        idx // len(self.data_folders) // 16 % 4
+                        id_latent % 4,
+                        id_latent // 4 % 4,
+                        id_latent // 16
                     ])
                     matrix = Rotation.from_euler('xyz', angles * np.pi / 2).as_matrix()
                 matrix = torch.from_numpy(matrix).float()

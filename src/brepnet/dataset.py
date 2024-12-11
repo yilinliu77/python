@@ -466,9 +466,9 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         if self.is_aug == 1:
             if self.mode == "testing":
                 angles = np.array([
-                    idx // len(self.data_folders) % 4,
-                    idx // len(self.data_folders) // 4 % 4,
-                    idx // len(self.data_folders) // 16 % 4
+                    idx // self.ori_length % 4,
+                    idx // self.ori_length // 4 % 4,
+                    idx // self.ori_length // 16
                 ])
                 matrix = Rotation.from_euler('xyz', angles * np.pi / 2).as_matrix()
             else:

@@ -848,7 +848,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             id_latent = np.random.randint(0,63)
             data_npz = np.load(self.latent_root / (folder_path+f"_{id_latent}") / "features.npy")
         else:
-            data_npz = np.load(self.latent_root / folder_path / "features.npy")
+            data_npz = np.load(self.latent_root / (folder_path+f"_{0}") / "features.npy")
         face_features = torch.from_numpy(data_npz)
 
         if self.pad_method == "zero":
@@ -909,8 +909,17 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             pc = o3d.io.read_point_cloud(str(self.conditional_data_root / folder_path / "pc.ply"))
             points = np.asarray(pc.points)
             normals = np.asarray(pc.normals)
-            if point_aug:
-                matrix = Rotation.from_euler('xyz', np.random.randint(0, 3, 3) * np.pi / 2).as_matrix()
+            if point_aug==1 or point_aug==2:
+                if point_aug==1:
+                    assert not self.is_aug
+                    matrix = Rotation.from_euler('xyz', np.random.randint(0, 3, 3) * np.pi / 2).as_matrix()
+                elif point_aug==2: 
+                    angles = np.array([
+                        idx // len(self.data_folders) % 4,
+                        idx // len(self.data_folders) // 4 % 4,
+                        idx // len(self.data_folders) // 16 % 4
+                    ])
+                    matrix = Rotation.from_euler('xyz', angles * np.pi / 2).as_matrix()
                 matrix = torch.from_numpy(matrix).float()
                 points1 = (matrix @ points.T).T
 

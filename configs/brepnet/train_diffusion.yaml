@@ -22,7 +22,7 @@ dataset:
   addition_tag: false
 
   num_points: 2048
-  point_aug: true
+  point_aug: 0
 
 trainer:
   gpu: 1

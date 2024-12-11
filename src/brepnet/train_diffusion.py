@@ -1,9 +1,10 @@
+import sys
+sys.path.append('../../../')
 from functools import partial
 import importlib
 from datetime import datetime
 from pathlib import Path
 import random
-import sys
 
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeFace
 from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface
@@ -17,7 +18,6 @@ import open3d as o3d
 from src.brepnet.dataset import Diffusion_dataset
 from src.brepnet.post.utils import triangulate_shape, triangulate_face, export_edges
 
-sys.path.append('../../../')
 import os.path
 
 import hydra
@@ -39,6 +39,10 @@ from torchmetrics.classification import BinaryPrecision, BinaryRecall, BinaryAve
 from torchmetrics import MetricCollection
 
 import trimesh
+from pytorch_lightning.loggers import WandbLogger
+
+os.environ["HTTP_PROXY"] = "http://172.31.178.126:7890"
+os.environ["HTTPS_PROXY"] = "http://172.31.178.126:7890"
 
 
 def to_mesh(face_points):
@@ -251,9 +255,11 @@ def main(v_cfg: DictConfig):
     if "LOCAL_RANK" not in os.environ:
         print(OmegaConf.to_yaml(v_cfg))
 
-    exp_name = v_cfg["trainer"]["exp_name"]
+    use_wandb = v_cfg["trainer"]["wandb"] if "wandb" in v_cfg["trainer"] else False
+    exp_name = "Diffusion_" + v_cfg["trainer"]["exp_name"]
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
-    log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name + "/" + str(datetime.now().strftime("%y-%m-%d-%H-%M-%S"))
+    # log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name + "/" + str(datetime.now().strftime("%y-%m-%d-%H-%M-%S"))
+    log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name
     v_cfg["trainer"]["output"] = log_dir
     print("Log in {}".format(log_dir))
     if v_cfg["trainer"]["spawn"] is True:
@@ -270,7 +276,15 @@ def main(v_cfg: DictConfig):
         callbacks.append(StochasticWeightAveraging(swa_lrs=v_cfg["trainer"]["learning_rate"], swa_epoch_start=10))
     
     model = TrainDiffusion(v_cfg)
-    logger = TensorBoardLogger(log_dir)
+    if not v_cfg["trainer"]["evaluate"] and exp_name!="Diffusion_test" and use_wandb:
+        logger = WandbLogger(
+            project='BRepNet++',
+            save_dir=log_dir,
+            name=exp_name,
+        )
+        logger.watch(model)
+    else:
+        logger = TensorBoardLogger(log_dir)
 
     trainer = Trainer(
         default_root_dir=log_dir,

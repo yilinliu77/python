@@ -39,6 +39,7 @@ trainer:
   test_output_dir:
   max_steps: -1
   resume_from_checkpoint:
+  wandb: false
 
   max_epochs: 10000000
   spawn: false

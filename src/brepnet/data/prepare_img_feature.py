@@ -8,11 +8,10 @@ from tqdm import tqdm
 import torchvision.transforms as T
 import ray
 
-root = Path(r"/mnt/d/deepcad_730_v0")
+root = Path(r"/mnt/d/yilin/img2brep/abc_v1_cond")
 
 @ray.remote(num_gpus=1)
 def worker(folders):
-
     torch.set_float32_matmul_precision("medium")
     img_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
     img_model.eval()

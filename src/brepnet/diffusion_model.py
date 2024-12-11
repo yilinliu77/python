@@ -667,6 +667,12 @@ class Diffusion_condition(nn.Module):
             face_features = v_data["face_features"]
             bs = face_features.shape[0]
             num_face = face_features.shape[1]
+            mean = face_features[..., :32]
+            std = face_features[..., 32:]
+            if self.use_mean:
+                face_features = mean
+            else:
+                face_features = mean + std * torch.randn_like(mean)
             data["padded_face_z"] = face_features.reshape(bs, num_face, -1)
         else:
             with torch.no_grad() and autocast(device_type='cuda', dtype=torch.float32):

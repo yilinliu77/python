@@ -825,10 +825,19 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             T.ToTensor(),
             T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ])
+        if self.condition == "txt":
+            data_folders = []
+            for item in filelist:
+                if os.path.exists(self.conditional_data_root/item/"text_feat.npy"):
+                    data_folders.append(item)
+            print("Filter out {} folders without text_feat".format(len(filelist)-len(data_folders)))
+            filelist = data_folders
+        
         if v_conf["overfit"]:  # Overfitting mode
             self.data_folders = filelist[:100] * scale_factor
         else:
             self.data_folders = filelist * scale_factor
+
         print("Total data num:", len(self.data_folders))
 
         self.is_aug = v_conf["is_aug"]
@@ -937,6 +946,13 @@ class Diffusion_dataset(torch.utils.data.Dataset):
                 points = points[index[:num_points]]
                 normals = normals[index[:num_points]]
             condition["points"] = torch.from_numpy(np.concatenate((points, normals), axis=-1)).float()[None,]
+        elif self.condition == "txt":
+            cache_data = self.cached_condition
+            if cache_data:
+                ori_data = np.load(self.conditional_data_root / folder_path / "text_feat.npy")[0]
+                condition["txt_features"] = torch.from_numpy(ori_data).float()
+            else:
+                assert False
         return (
             folder_path,
             padded_face_features,

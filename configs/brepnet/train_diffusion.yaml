@@ -21,6 +21,9 @@ dataset:
   num_max_faces: 64
   addition_tag: false
 
+  num_points: 2048
+  point_aug: 0
+
 trainer:
   gpu: 1
   num_worker: 0
@@ -36,6 +39,7 @@ trainer:
   test_output_dir:
   max_steps: -1
   resume_from_checkpoint:
+  wandb: false
 
   max_epochs: 10000000
   spawn: false

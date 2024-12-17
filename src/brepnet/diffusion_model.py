@@ -489,6 +489,7 @@ class Diffusion_condition(nn.Module):
 
         self.with_img = False
         self.with_pc = False
+        self.with_txt = False
         if v_conf["condition"] == "single_img" or v_conf["condition"] == "multi_img" or v_conf["condition"] == "sketch":
             self.with_img = True
             self.img_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
@@ -497,10 +498,10 @@ class Diffusion_condition(nn.Module):
             self.img_model.eval()
 
             self.img_fc = nn.Sequential(
-                    nn.Linear(1024, 1024),
-                    nn.LayerNorm(1024),
-                    nn.SiLU(),
-                    nn.Linear(1024, self.dim_condition),
+                nn.Linear(1024, 1024),
+                nn.LayerNorm(1024),
+                nn.SiLU(),
+                nn.Linear(1024, self.dim_condition),
             )
             self.camera_embedding = nn.Sequential(
                 nn.Embedding(32, 256),
@@ -568,6 +569,14 @@ class Diffusion_condition(nn.Module):
                     nn.LayerNorm(1024),
                     nn.SiLU(),
                     nn.Linear(1024, self.dim_condition),
+            )
+        elif v_conf["condition"] == "txt":
+            self.with_txt = True
+            self.txt_fc = nn.Sequential(
+                nn.Linear(1024, 1024),
+                nn.LayerNorm(1024),
+                nn.SiLU(),
+                nn.Linear(1024, self.dim_condition),
             )
 
         self.classifier = nn.Sequential(
@@ -667,6 +676,12 @@ class Diffusion_condition(nn.Module):
             face_features = v_data["face_features"]
             bs = face_features.shape[0]
             num_face = face_features.shape[1]
+            mean = face_features[..., :32]
+            std = face_features[..., 32:]
+            if self.use_mean:
+                face_features = mean
+            else:
+                face_features = mean + std * torch.randn_like(mean)
             data["padded_face_z"] = face_features.reshape(bs, num_face, -1)
         else:
             with torch.no_grad() and autocast(device_type='cuda', dtype=torch.float32):
@@ -742,7 +757,9 @@ class Diffusion_condition(nn.Module):
                     l_features.append(li_features)
                 features = self.fc_lyaer(l_features[-1].mean(dim=-1))
                 condition = features[:, None]
-
+        elif self.with_txt:
+            txt_feat = v_data["conditions"]["txt_features"]
+            condition = self.txt_fc(txt_feat)[:, None]
         return condition
 
     def forward(self, v_data, v_test=False, **kwargs):

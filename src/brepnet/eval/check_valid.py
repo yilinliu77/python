@@ -92,8 +92,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_root", type=str, required=True)
     parser.add_argument("--prefix", type=str, required=False, default="")
+    parser.add_argument("--only_success", action="store_true", default=False)
     args = parser.parse_args()
     data_root = args.data_root
+    only_success = args.only_success
     folders = [f for f in os.listdir(data_root) if os.path.isdir(os.path.join(data_root, f))]
 
     if args.prefix:
@@ -130,10 +132,14 @@ if __name__ == "__main__":
             shutil.copytree(os.path.dirname(step_file), os.path.join(exception_out_root, folder_name))
 
         if is_valid:
+            if only_success and not os.path.exists(os.path.join(os.path.dirname(step_file), "success.txt")):
+                continue
             valid_count += 1
             num_faces.append(len(get_primitives(shape, TopAbs_FACE)))
             num_edges.append(len(get_primitives(shape, TopAbs_EDGE)) // 2)
-        pbar.set_postfix({"valid_count": valid_count})
+            pbar.set_postfix({"valid_count": valid_count})
+        # else:
+            # print(f"Invalid CAD solid: {step_file}")
 
     fig, ax = plt.subplots(1, 2, layout="constrained")
     ax[0].set_title("Num. faces")

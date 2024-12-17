@@ -463,10 +463,10 @@ class Shape:
         self.remove_edge_idx_new.extend(np.unique(remove_edges_idx_real))
 
     def build_geom(self, is_replace_edge=False, connected_tolerance=0.1):
-        self.recon_geom_faces = [create_surface(points) for points in self.recon_face_points]
-        self.recon_topo_faces = [BRepBuilderAPI_MakeFace(geom_face, TRANSFER_PRECISION).Face() for geom_face in self.recon_geom_faces]
-        self.recon_curves = [create_edge(points) for points in self.recon_edge_points]
-        self.recon_edge = [BRepBuilderAPI_MakeEdge(curve).Edge() for curve in self.recon_curves]
+        # self.recon_geom_faces = [create_surface(points) for points in self.recon_face_points]
+        # self.recon_curves = [create_edge(points) for points in self.recon_edge_points]
+        # self.recon_topo_faces = [BRepBuilderAPI_MakeFace(geom_face, TRANSFER_PRECISION).Face() for geom_face in self.recon_geom_faces]
+        # self.recon_edge = [BRepBuilderAPI_MakeEdge(curve).Edge() for curve in self.recon_curves]
 
         self.clinder_face_idx = []
         self.replace_edge_idx = []
@@ -483,7 +483,7 @@ class Shape:
                 self.clinder_face_idx.append(face_idx)
                 face_edge_from_geom_face = get_primitives(topo_face, TopAbs_EDGE)
                 for edge_idx in face_edges_idx_list:
-                    recon_topo_edge = self.recon_edge[edge_idx]
+                    recon_topo_edge = self.recon_topo_curves[edge_idx]
                     near_edge_from_geom_face = []
                     for edge_from_geom_face in face_edge_from_geom_face:
                         is_similar, dis = check_edges_similarity(recon_topo_edge, edge_from_geom_face)
@@ -494,7 +494,7 @@ class Shape:
                         continue
                     if len(near_edge_from_geom_face) > 1:
                         near_edge_from_geom_face = sorted(near_edge_from_geom_face, key=lambda x: x[1])
-                    self.recon_edge[edge_idx] = near_edge_from_geom_face[0][0]
+                    self.recon_topo_curves[edge_idx] = near_edge_from_geom_face[0][0]
                     self.replace_edge_idx.append(edge_idx)
         pass
 
@@ -1273,8 +1273,8 @@ def construct_brep(v_shape, connected_tolerance, isdebug=False):
     recon_edge_points = v_shape.recon_edge_points
     recon_geom_faces = v_shape.recon_geom_faces
     recon_topo_faces = v_shape.recon_topo_faces
-    recon_curves = v_shape.recon_curves
-    recon_edge = v_shape.recon_edge
+    recon_curves = v_shape.recon_geom_curves
+    recon_edge = v_shape.recon_topo_curves
     FaceEdgeAdj = v_shape.face_edge_adj
     is_edge_closed = v_shape.openness
 

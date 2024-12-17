@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from OCC.Core import Message
+from OCC.Core.Geom import Geom_BSplineSurface
 from OCC.Core.IFSelect import IFSelect_ReturnStatus
 from OCC.Core.IGESControl import IGESControl_Writer
 from OCC.Core.Interface import Interface_Static
@@ -67,26 +68,26 @@ def get_data(v_filename):
     return shape
 
 
-def get_candidate_shapes(ori_shape, num_drop):
+def get_candidate_shapes(num_drop, v_faces, v_curves, v_conn):
     if num_drop == 0:
-        return [copy.deepcopy(ori_shape)]
-    num_faces = len(ori_shape.recon_face_points)
+        new_faces = [item for item in v_faces]
+        new_curves = [item for item in v_curves]
+        new_edge_face_connectivity = [item for item in v_conn]
+        return [(new_faces, new_curves, new_edge_face_connectivity)]
+    num_faces = len(v_faces)
     candidate_shapes = []
     drop_ids = list(itertools.combinations(range(num_faces), num_drop))
 
     for drop_id in drop_ids:
         preserved_ids = np.array(list(set(range(num_faces)) - set(drop_id)))
         prev_id_to_new_id = {prev_id: new_id for new_id, prev_id in enumerate(preserved_ids)}
-        shape = copy.deepcopy(ori_shape)
-        shape.recon_face_points = shape.recon_face_points[preserved_ids]
-        shape.interpolation_face = [shape.interpolation_face[idx] for idx in preserved_ids]
+        new_faces = [v_faces[idx] for idx in preserved_ids]
+        new_curves = [item for item in v_curves]
         new_edge_face_connectivity = []
-        for connec in shape.edge_face_connectivity:
-            edge_id, face_id1, face_id2 = connec
+        for edge_id, face_id1, face_id2 in v_conn:
             if face_id1 in preserved_ids and face_id2 in preserved_ids:
                 new_edge_face_connectivity.append([edge_id, prev_id_to_new_id[face_id1], prev_id_to_new_id[face_id2]])
-        shape.edge_face_connectivity = np.array(new_edge_face_connectivity)
-        candidate_shapes.append(shape)
+        candidate_shapes.append((new_faces, new_curves, new_edge_face_connectivity))
     return candidate_shapes
 
 
@@ -95,6 +96,8 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
                                 is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=True,
                                 is_save_data=False):
     disable_occ_log()
+    # is_log = False
+    # isdebug = False
     time_records = [0, 0, 0, 0, 0, 0]
     timer = time.time()
     data_root = Path(data_root)
@@ -191,7 +194,19 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
 
     ori_shape = copy.deepcopy(shape)
 
+    recon_geom_faces = [create_surface(points) for points in shape.recon_face_points]
+    recon_topo_faces = [
+        BRepBuilderAPI_MakeFace(geom_face, TRANSFER_PRECISION).Face() for geom_face in recon_geom_faces]
+    recon_geom_curves = [create_edge(points) for points in shape.recon_edge_points]
+    recon_topo_curves = [BRepBuilderAPI_MakeEdge(curve).Edge() for curve in recon_geom_curves]
+
+    shape.recon_geom_faces = [item for item in recon_geom_faces]
+    shape.recon_topo_faces = [item for item in recon_topo_faces]
+    shape.recon_geom_curves = [item for item in recon_geom_curves]
+    shape.recon_topo_curves = [item for item in recon_topo_curves]
     shape.build_geom(is_replace_edge=True)
+    recon_topo_curves = [item for item in shape.recon_topo_curves]
+
     # Write separate faces
     v, f = get_separated_surface(shape.recon_topo_faces, v_precision1=0.1, v_precision2=0.2)
     trimesh.Trimesh(vertices=v, faces=f).export(out_root / folder_name / "separate_faces.ply")
@@ -200,36 +215,36 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
     is_success = False
 
     for num_drop in range(num_max_drop + 1):
-        candidate_shapes = get_candidate_shapes(ori_shape, num_drop)
-        for shape in candidate_shapes:
-            if not shape.have_data:
+        candidate_shapes = get_candidate_shapes(num_drop, recon_geom_faces, recon_topo_curves, ori_shape.edge_face_connectivity)
+
+        for (faces, curves, connectivity) in candidate_shapes:
+            if len(faces) == 0:
                 if is_log:
                     print(f"{Colors.RED}No data in {folder_name}{Colors.RESET}")
                 # shutil.rmtree(os.path.join(out_root, folder_name))
-                return [0, 0, 0, 0, 0, 0]
+                continue
 
-            shape.remove_half_edges()
-            shape.check_openness()
-            shape.build_fe()
-            shape.build_vertices(0.2)
-
-            shape.build_geom(is_replace_edge=True)
-            if isdebug:
-                print(f"{Colors.GREEN}{len(shape.replace_edge_idx)} edges are replace{Colors.RESET}")
+            num_faces = len(faces)
+            face_edge_adj = [[] for _ in range(num_faces)]
+            for edge_face1_face2 in connectivity:
+                edge, face1, face2 = edge_face1_face2
+                if face1 == face2:
+                    # raise ValueError("Face1 and Face2 should be different")
+                    print("Face1 and Face2 should be different")
+                    continue
+                assert edge not in face_edge_adj[face1]
+                face_edge_adj[face1].append(edge)
+                face_edge_adj[face2].append(edge)
 
             # Construct trimmed surface
-            num_faces = len(shape.recon_topo_faces)
             trimmed_faces = []
             for i_face in range(num_faces):
-                if len(shape.face_edge_adj[i_face]) == 0:
+                if len(face_edge_adj[i_face]) == 0:
                     trimmed_faces.append(None)
                     continue
-                face_edge_idx = shape.face_edge_adj[i_face]
-                geom_face = shape.recon_geom_faces[i_face]
-                topo_face = shape.recon_topo_faces[i_face]
-                face_edges = [shape.recon_edge[edge_idx] for edge_idx in face_edge_idx]
-                face_edges_numpy = shape.recon_edge_points[face_edge_idx]
-                is_edge_closed_c = [shape.openness[edge_idx] for edge_idx in face_edge_idx]
+                face_edge_idx = face_edge_adj[i_face]
+                geom_face = faces[i_face]
+                face_edges = [curves[edge_idx] for edge_idx in face_edge_idx]
 
                 # Build wire
                 trimmed_face = None
@@ -275,29 +290,27 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
 
     # If solid is None, then try to obtain step file with all faces
     if not is_success:
-        shape = copy.deepcopy(ori_shape)
-        shape.remove_half_edges()
-        shape.check_openness()
-        shape.build_fe()
-        shape.build_vertices(0.2)
-
-        shape.build_geom(is_replace_edge=True)
-        if isdebug:
-            print(f"{Colors.GREEN}{len(shape.replace_edge_idx)} edges are replace{Colors.RESET}")
-
         # Construct trimmed surface
-        num_faces = len(shape.recon_topo_faces)
+        num_faces = len(recon_topo_faces)
+        face_edge_adj = [[] for _ in range(num_faces)]
+        for edge_face1_face2 in ori_shape.edge_face_connectivity:
+            edge, face1, face2 = edge_face1_face2
+            if face1 == face2:
+                # raise ValueError("Face1 and Face2 should be different")
+                print("Face1 and Face2 should be different")
+                continue
+            assert edge not in face_edge_adj[face1]
+            face_edge_adj[face1].append(edge)
+            face_edge_adj[face2].append(edge)
+
         trimmed_faces = []
         for i_face in range(num_faces):
-            if len(shape.face_edge_adj[i_face]) == 0:
+            if len(face_edge_adj[i_face]) == 0:
                 trimmed_faces.append(None)
                 continue
-            face_edge_idx = shape.face_edge_adj[i_face]
-            geom_face = shape.recon_geom_faces[i_face]
-            topo_face = shape.recon_topo_faces[i_face]
-            face_edges = [shape.recon_edge[edge_idx] for edge_idx in face_edge_idx]
-            face_edges_numpy = shape.recon_edge_points[face_edge_idx]
-            is_edge_closed_c = [shape.openness[edge_idx] for edge_idx in face_edge_idx]
+            face_edge_idx = face_edge_adj[i_face]
+            geom_face = recon_geom_faces[i_face]
+            face_edges = [recon_topo_curves[edge_idx] for edge_idx in face_edge_idx]
 
             # Build wire
             trimmed_face = None
@@ -315,7 +328,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
         mixed_faces = []
         for i_face in range(num_faces):
             if trimmed_faces[i_face] is None:
-                face = BRepBuilderAPI_MakeFace(shape.recon_geom_faces[i_face], 1e-6).Face()
+                face = BRepBuilderAPI_MakeFace(recon_geom_faces[i_face], TRANSFER_PRECISION).Face()
                 mixed_faces.append(face)
             else:
                 mixed_faces.append(trimmed_faces[i_face])

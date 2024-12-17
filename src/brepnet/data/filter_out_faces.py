@@ -11,7 +11,7 @@ from tqdm import tqdm
 import open3d as o3d
 
 root_path = Path("/mnt/d/brepgen_train")
-input_list = Path("src/brepnet/data/list/deduplicated_deepcad_training.txt")
+input_list = Path("src/brepnet/data/list/deduplicated_abc_brepnet.txt")
 
 
 num_max = 30

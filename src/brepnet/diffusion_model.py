@@ -2,7 +2,7 @@ import importlib
 import math
 import time
 import torch
-from torch import isnan, nn, Tensor, einsum
+from torch import autocast, isnan, nn, Tensor, einsum
 from torch.nn import Module, ModuleList
 import torch.nn.functional as F
 
@@ -489,6 +489,7 @@ class Diffusion_condition(nn.Module):
 
         self.with_img = False
         self.with_pc = False
+        self.with_txt = False
         if v_conf["condition"] == "single_img" or v_conf["condition"] == "multi_img" or v_conf["condition"] == "sketch":
             self.with_img = True
             self.img_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
@@ -497,10 +498,10 @@ class Diffusion_condition(nn.Module):
             self.img_model.eval()
 
             self.img_fc = nn.Sequential(
-                    nn.Linear(1024, 1024),
-                    nn.LayerNorm(1024),
-                    nn.SiLU(),
-                    nn.Linear(1024, self.dim_condition),
+                nn.Linear(1024, 1024),
+                nn.LayerNorm(1024),
+                nn.SiLU(),
+                nn.Linear(1024, self.dim_condition),
             )
             self.camera_embedding = nn.Sequential(
                 nn.Embedding(32, 256),
@@ -569,6 +570,14 @@ class Diffusion_condition(nn.Module):
                     nn.SiLU(),
                     nn.Linear(1024, self.dim_condition),
             )
+        elif v_conf["condition"] == "txt":
+            self.with_txt = True
+            self.txt_fc = nn.Sequential(
+                nn.Linear(1024, 1024),
+                nn.LayerNorm(1024),
+                nn.SiLU(),
+                nn.Linear(1024, self.dim_condition),
+            )
 
         self.classifier = nn.Sequential(
                 nn.Linear(self.dim_input, self.dim_input),
@@ -576,15 +585,13 @@ class Diffusion_condition(nn.Module):
                 nn.SiLU(),
                 nn.Linear(self.dim_input, 1),
         )    
-        beta_schedule = "squaredcos_cap_v2"
-        if "beta_schedule" in v_conf:
-            beta_schedule = v_conf["beta_schedule"]
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=1000,
-            beta_schedule=beta_schedule,
+            beta_schedule=v_conf["beta_schedule"],
             prediction_type=v_conf["diffusion_type"],
-            beta_start=0.0001,
-            beta_end=0.02,
+            beta_start=v_conf["beta_start"],
+            beta_end=v_conf["beta_end"],
+            variance_type=v_conf["variance_type"],
             clip_sample=False,
         )
         self.time_embed = nn.Sequential(
@@ -606,6 +613,7 @@ class Diffusion_condition(nn.Module):
 
         self.is_pretrained = v_conf["autoencoder_weights"] is not None
         self.is_stored_z = v_conf["stored_z"]
+        self.use_mean = v_conf["use_mean"]
         self.is_train_decoder = v_conf["train_decoder"]
         if self.is_pretrained:
             checkpoint = torch.load(v_conf["autoencoder_weights"], weights_only=False)["state_dict"]
@@ -668,21 +676,40 @@ class Diffusion_condition(nn.Module):
             face_features = v_data["face_features"]
             bs = face_features.shape[0]
             num_face = face_features.shape[1]
+            mean = face_features[..., :32]
+            std = face_features[..., 32:]
+            if self.use_mean:
+                face_features = mean
+            else:
+                face_features = mean + std * torch.randn_like(mean)
             data["padded_face_z"] = face_features.reshape(bs, num_face, -1)
         else:
-            encoding_result = self.ae_model.encode(v_data, True)
-            data.update(encoding_result)
-            face_features = encoding_result["face_z"]
+            with torch.no_grad() and autocast(device_type='cuda', dtype=torch.float32):
+                encoding_result = self.ae_model.encode(v_data, True)
+                face_features, _ = self.ae_model.sample(encoding_result["face_features"], v_is_test=self.use_mean)
             dim_latent = face_features.shape[-1]
             num_faces = v_data["num_face_record"]
             bs = num_faces.shape[0]
-            padded_face_z = torch.zeros(
-                    (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
             # Fill the face_z to the padded_face_z without forloop
-            mask = num_faces[:, None] > torch.arange(self.num_max_faces, device=num_faces.device)
-            padded_face_z[mask] = face_features
-            data["padded_face_z"] = padded_face_z
-            data["mask"] = mask
+            if self.pad_method == "zero":
+                padded_face_z = torch.zeros(
+                    (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
+                mask = num_faces[:, None] > torch.arange(self.num_max_faces, device=num_faces.device)
+                padded_face_z[mask] = face_features
+                data["padded_face_z"] = padded_face_z
+                data["mask"] = mask
+            else:
+                positions = torch.arange(self.num_max_faces, device=face_features.device).unsqueeze(0).repeat(bs, 1)
+                mandatory_mask = positions < num_faces[:,None]
+                random_indices = (torch.rand((bs, self.num_max_faces), device=face_features.device) * num_faces[:,None]).long()
+                indices = torch.where(mandatory_mask, positions, random_indices)
+                num_faces_cum = num_faces.cumsum(dim=0).roll(1)
+                num_faces_cum[0] = 0
+                indices += num_faces_cum[:,None]
+                # Permute the indices
+                r_indices = torch.argsort(torch.rand((bs, self.num_max_faces), device=face_features.device), dim=1)
+                indices = indices.gather(1, r_indices)
+                data["padded_face_z"] = face_features[indices]
         return data
 
     def diffuse(self, v_feature, v_timesteps, v_condition=None):
@@ -730,7 +757,9 @@ class Diffusion_condition(nn.Module):
                     l_features.append(li_features)
                 features = self.fc_lyaer(l_features[-1].mean(dim=-1))
                 condition = features[:, None]
-
+        elif self.with_txt:
+            txt_feat = v_data["conditions"]["txt_features"]
+            condition = self.txt_fc(txt_feat)[:, None]
         return condition
 
     def forward(self, v_data, v_test=False, **kwargs):

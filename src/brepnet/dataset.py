@@ -423,6 +423,9 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         self.mode = v_training_mode
         self.conf = v_conf
         self.max_intersection = 500
+        self.scale_factor = 1
+        if "scale_factor" in v_conf:
+            self.scale_factor = int(v_conf["scale_factor"])
         if v_training_mode == "testing":
             listfile = v_conf['test_dataset']
         elif v_training_mode == "training":
@@ -447,11 +450,11 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         print(len(self.data_folders))
 
     def __len__(self):
-        return len(self.data_folders)
+        return len(self.data_folders) * self.scale_factor
 
     def __getitem__(self, idx):
         # idx = 0
-        prefix = self.data_folders[idx]
+        prefix = self.data_folders[idx%len(self.data_folders)]
         data_npz = np.load(str(self.root / prefix / "data.npz"))
         if self.mode == "testing" and self.is_aug==1:
             prefix += "_{}".format(idx // self.ori_length)
@@ -463,9 +466,9 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         if self.is_aug == 1:
             if self.mode == "testing":
                 angles = np.array([
-                    idx // len(self.data_folders) % 4,
-                    idx // len(self.data_folders) // 4 % 4,
-                    idx // len(self.data_folders) // 16 % 4
+                    idx // self.ori_length % 4,
+                    idx // self.ori_length // 4 % 4,
+                    idx // self.ori_length // 16
                 ])
                 matrix = Rotation.from_euler('xyz', angles * np.pi / 2).as_matrix()
             else:
@@ -592,7 +595,6 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
             "num_face_record"       : num_face_record,
             "valid_mask"            : valid_mask,
         }
-
 
 
 class AutoEncoder_dataset(torch.utils.data.Dataset):
@@ -793,7 +795,7 @@ class AutoEncoder_dataset(torch.utils.data.Dataset):
 
 class Diffusion_dataset(torch.utils.data.Dataset):
     def __init__(self, v_training_mode, v_conf):
-        super(Diffusion_dataset, self).__init__()
+        super(Diffusion_dataset, self).__init__()        
         self.mode = v_training_mode
         self.conf = v_conf
         scale_factor = int(v_conf["scale_factor"])
@@ -816,25 +818,32 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         filelist.sort()
 
         self.condition = v_conf["condition"]
+        self.conditional_data_root = Path(v_conf["data_root"])
         self.transform = T.Compose([
             T.ToPILImage(),
             T.Resize((224, 224)),
             T.ToTensor(),
             T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ])
+        if self.condition == "txt":
+            data_folders = []
+            for item in filelist:
+                if os.path.exists(self.conditional_data_root/item/"text_feat.npy"):
+                    data_folders.append(item)
+            print("Filter out {} folders without text_feat".format(len(filelist)-len(data_folders)))
+            filelist = data_folders
+        
         if v_conf["overfit"]:  # Overfitting mode
             self.data_folders = filelist[:100] * scale_factor
         else:
             self.data_folders = filelist * scale_factor
+
         print("Total data num:", len(self.data_folders))
 
         self.is_aug = v_conf["is_aug"]
         self.cached_condition = v_conf["cached_condition"]
         self.pad_method = v_conf["pad_method"]
         self.addition_tag = v_conf["addition_tag"]
-
-        if self.is_aug:
-            self.data_folders = [item+f"_{i}" for item in self.data_folders for i in range(64)]
 
         return
 
@@ -844,7 +853,11 @@ class Diffusion_dataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         # idx = 0
         folder_path = self.data_folders[idx]
-        data_npz = np.load(os.path.join(self.latent_root, folder_path + "/features.npy"))
+        if self.is_aug:
+            id_latent = np.random.randint(0,63)
+            data_npz = np.load(self.latent_root / (folder_path+f"_{id_latent}") / "features.npy")
+        else:
+            data_npz = np.load(self.latent_root / (folder_path+f"_{0}") / "features.npy")
         face_features = torch.from_numpy(data_npz)
 
         if self.pad_method == "zero":
@@ -855,12 +868,21 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             add_flag[face_features.shape[0]:] = -1
             add_flag = add_flag[:,None]
 
-            index = torch.randperm(face_features.shape[0])
-            num_repeats = math.ceil(self.max_faces / index.shape[0])
-            index = index.repeat(num_repeats)[:self.max_faces]
-            index2 = torch.randperm(self.max_faces)
-            index = index[index2]
+            if False:
+                index = torch.randperm(face_features.shape[0])
+                num_repeats = math.ceil(self.max_faces / index.shape[0])
+                index = index.repeat(num_repeats)[:self.max_faces]
+                index2 = torch.randperm(self.max_faces)
+                index = index[index2]
+            else:
+                positions = torch.arange(self.max_faces, device=face_features.device)
+                mandatory_mask = positions < face_features.shape[0]
+                random_indices = (torch.rand((self.max_faces,), device=face_features.device) * face_features.shape[0]).long()
+                indices = torch.where(mandatory_mask, positions, random_indices)
+                r_indices = torch.argsort(torch.rand((self.max_faces,), device=face_features.device), dim=0)
+                index = indices.gather(0, r_indices)
             padded_face_features = face_features[index]
+
             if self.addition_tag:
                 padded_face_features = torch.cat((padded_face_features, add_flag[index2]), dim=-1)
         else:
@@ -877,11 +899,11 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             else:
                 idx = np.random.choice(np.arange(32), 4, replace=False)
             if cache_data:
-                ori_data = np.load(self.latent_root / folder_path / "img_feature_dinov2.npy")
+                ori_data = np.load(self.conditional_data_root / folder_path / "img_feature_dinov2.npy")
                 img_features = torch.from_numpy(ori_data[idx]).float()
                 condition["img_features"] = img_features
             else:
-                ori_data = np.load(self.latent_root / folder_path / "imgs.npz")["imgs"]
+                ori_data = np.load(self.conditional_data_root / folder_path / "imgs.npz")["imgs"]
                 imgs = ori_data[idx]
                 transformed_imgs = []
                 for id in range(imgs.shape[0]):
@@ -891,10 +913,47 @@ class Diffusion_dataset(torch.utils.data.Dataset):
                 condition["imgs"] = transformed_imgs
             condition["img_id"] = torch.from_numpy(idx)
         elif self.condition == "pc":
-            pc = o3d.io.read_point_cloud(str(self.latent_root / folder_path / "pc.ply"))
+            num_points = self.conf["num_points"]
+            point_aug = self.conf["point_aug"]
+            pc = o3d.io.read_point_cloud(str(self.conditional_data_root / folder_path / "pc.ply"))
             points = np.asarray(pc.points)
             normals = np.asarray(pc.normals)
+            if point_aug==1 or point_aug==2:
+                if point_aug==1:
+                    assert not self.is_aug
+                    matrix = Rotation.from_euler('xyz', np.random.randint(0, 3, 3) * np.pi / 2).as_matrix()
+                elif point_aug==2: 
+                    assert self.is_aug
+                    angles = np.array([
+                        id_latent % 4,
+                        id_latent // 4 % 4,
+                        id_latent // 16
+                    ])
+                    matrix = Rotation.from_euler('xyz', angles * np.pi / 2).as_matrix()
+                matrix = torch.from_numpy(matrix).float()
+                points1 = (matrix @ points.T).T
+
+                ft = points + normals
+                ft1 = (matrix @ ft.T).T
+
+                fn1 = ft1 - points1
+
+                fn1 = fn1 / (1e-6 + torch.linalg.norm(fn1, dim=-1, keepdim=True))
+                points = points1
+                normals = fn1
+            if num_points != points.shape[0]:
+                index = np.arange(points.shape[0])
+                np.random.shuffle(index)
+                points = points[index[:num_points]]
+                normals = normals[index[:num_points]]
             condition["points"] = torch.from_numpy(np.concatenate((points, normals), axis=-1)).float()[None,]
+        elif self.condition == "txt":
+            cache_data = self.cached_condition
+            if cache_data:
+                ori_data = np.load(self.conditional_data_root / folder_path / "text_feat.npy")[0]
+                condition["txt_features"] = torch.from_numpy(ori_data).float()
+            else:
+                assert False
         return (
             folder_path,
             padded_face_features,

@@ -50,6 +50,10 @@ def get_triangulations(v_shape, v_resolution1=0.1, v_resolution2=0.1):
         face = face_explorer.Current()
         loc = TopLoc_Location()
         triangulation = BRep_Tool.Triangulation(face, loc)
+        if triangulation is None:
+            print("Ignore face without triangulation")
+            face_explorer.Next()
+            continue
         cur_vertex_size = len(v)
         for i in range(1, triangulation.NbNodes() + 1):
             pnt = triangulation.Node(i)

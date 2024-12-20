@@ -6,6 +6,7 @@ dataset:
   val_dataset: D:/img2brep/deepcad_whole_test_v5
   test_dataset: /mnt/d/deepcad_test_v6
 
+  data_root: D:/img2brep/deepcad_whole_test_v5
   deduplicate_list: 0
   pad_method: random
   cached_condition: true
@@ -13,11 +14,15 @@ dataset:
   scale_factor: 1
   condition:
   overfit: false
+  is_overfit: false
   is_aug: 0
   
   length: 1000
   num_max_faces: 64
   addition_tag: false
+
+  num_points: 2048
+  point_aug: 0
 
 trainer:
   gpu: 1
@@ -34,6 +39,7 @@ trainer:
   test_output_dir:
   max_steps: -1
   resume_from_checkpoint:
+  wandb: false
 
   max_epochs: 10000000
   spawn: false
@@ -45,6 +51,7 @@ model:
   train_decoder: false
   stored_z: True
   condition:
+  use_mean: true
 
   diffusion_latent: 512
   diffusion_type: epsilon
@@ -52,9 +59,13 @@ model:
   pad_method: random
   num_max_faces: 64
   beta_schedule: squaredcos_cap_v2
+  beta_start: 0.0001
+  beta_end: 0.02
+  variance_type: fixed_small
   addition_tag: false
 
   autoencoder: AutoEncoder_0925
+  with_intersection: true
   dim_latent: 8
   dim_shape: 768
   sigmoid: false
@@ -62,7 +73,6 @@ model:
   gaussian_weights: 1e-6
   norm: "layer"
   autoencoder_weights: 
-  with_intersection: 
 
 hydra:
   run:

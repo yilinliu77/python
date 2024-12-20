@@ -21,9 +21,9 @@ debug_id = None
 # debug_id = "00000003"
 
 data_root = Path(r"/mnt/e/yilin/data_step")
-output_root = Path(r"/mnt/d/img2brep/deepcad_730_imgs_npz")
-img_root = Path(r"/mnt/d/img2brep/deepcad_730_imgs_png")
-data_split = r"src/brepnet/data/list/deduplicated_deepcad_7_30.txt"
+output_root = Path(r"/mnt/d/yilin/img2brep/deduplicated_abc_imgs_npz")
+img_root = Path(r"/mnt/d/yilin/img2brep/deduplicated_abc_imgs_png")
+data_split = r"src/brepnet/data/list/deduplicated_abc_brepnet.txt"
 
 exception_files = [
 ]

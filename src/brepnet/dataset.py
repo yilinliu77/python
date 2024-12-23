@@ -421,6 +421,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             id_latent = np.random.randint(0,63)
             data_npz = np.load(self.latent_root / (folder_path+f"_{id_latent}") / "features.npy")
         else:
+            id_latent = 0
             data_npz = np.load(self.latent_root / (folder_path+f"_{0}") / "features.npy")
         face_features = torch.from_numpy(data_npz)
 
@@ -451,8 +452,8 @@ class Diffusion_dataset(torch.utils.data.Dataset):
                 padded_face_features = torch.cat((padded_face_features, add_flag[index2]), dim=-1)
         else:
             raise ValueError("Invalid pad method")
-        condition = prepare_condition(self.condition, self.conditional_data_root, folder_path, id_latent, self.is_aug,
-                                      self.cached_condition, self.transform, self.conf["num_points"], self.conf["point_aug"])
+        condition = prepare_condition(self.condition, self.conditional_data_root, folder_path, self.is_aug,
+                                      self.cached_condition, self.transform, self.conf["num_points"], self.conf["point_aug"], v_id_latent=id_latent)
         return (
             folder_path,
             padded_face_features,

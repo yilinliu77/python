@@ -7,7 +7,7 @@ import trimesh
 
 deepcad_pkl = r"D:/brepnet/paper/uncond_lfd/deepcad_filtered_lfd.pkl"
 brepgen_pkl = r"D:/brepnet/paper/uncond_lfd/brepgen_filtered_lfd.pkl"
-ours_pkl = r"D:/brepnet/paper/uncond_lfd/1127_730_li_270k_1gpu_lfd.pkl"
+ours_pkl = r"D:/brepnet/paper/uncond_lfd/1203_deepcad_730_li_0.0001_0.02_mean_11k_11m_lfd.pkl"
 
 if __name__ == "__main__":
     _, _, deepcad = pickle.load(open(deepcad_pkl, "rb"))

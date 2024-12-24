@@ -5,6 +5,7 @@ from pathlib import Path
 
 import ray, trimesh
 import numpy as np
+from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
 from OCC.Core.Graphic3d import Graphic3d_MaterialAspect, Graphic3d_NameOfMaterial_Silver, Graphic3d_TypeOfShadingModel, \
     Graphic3d_NameOfMaterial_Brass, Graphic3d_TypeOfReflection, Graphic3d_AspectLine3d
 from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB, Quantity_NOC_BLACK
@@ -14,15 +15,16 @@ from OCC.Extend.DataExchange import read_step_file, write_step_file
 import traceback, sys
 
 from PIL import Image
+from scipy.spatial.transform import Rotation
 
 from shared.occ_utils import normalize_shape, get_triangulations, get_primitives, get_ordered_edges
 
 debug_id = None
 # debug_id = "00000003"
 
-data_root = Path(r"/mnt/e/yilin/data_step")
-output_root = Path(r"/mnt/d/yilin/img2brep/deduplicated_abc_imgs_npz")
-img_root = Path(r"/mnt/d/yilin/img2brep/deduplicated_abc_imgs_png")
+data_root = Path(r"D:/Datasets/data_step")
+npz_root = Path(r"D:/Datasets/data_npz")
+img_root = Path(r"D:/Datasets/data_png")
 data_split = r"src/brepnet/data/list/deduplicated_abc_brepnet.txt"
 
 exception_files = [
@@ -77,60 +79,135 @@ def get_brep(v_root, output_root, v_folders):
                 raise ValueError("Multiple components: {}; Jump over".format(v_folder))
             shape = normalize_shape(shape, 0.9)
 
+            v,f = get_triangulations(shape)
+            trimesh.Trimesh(vertices=v, faces=f).export(str(output_root / v_folder / "mesh.obj"))
+
             data_dict = {
             }
 
-            # Render imgs
             (img_root / v_folder).mkdir(parents=True, exist_ok=True)
-            views = []
-            for phi in range(22, 382, 45):
-                for theta in range(-77, 79, 45):
-                    if theta == 0:
-                        continue
-                    views.append(gp_Pnt(3 * np.cos(np.deg2rad(phi)) * np.cos(np.deg2rad(theta)),
-                                        3 * np.sin(np.deg2rad(phi)) * np.cos(np.deg2rad(theta)),
-                                        3 * np.sin(np.deg2rad(theta)))
-                    )
-            display = MyOffscreenRenderer()
 
-            # Draw shape
-            imgs = []
-            # display.View.TriedronErase()
+            # Single view
+            display = MyOffscreenRenderer()
             mat = Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_Silver)
             mat.SetReflectionModeOff(Graphic3d_TypeOfReflection.Graphic3d_TOR_SPECULAR)
-            # Set light color
             display.DisplayShape(shape, material=mat, update=True)
-
+            display.camera.SetProjectionType(1)
             display.View.Dump(str(img_root / v_folder / f"view_.png"))
-            for i, view in enumerate(views):
-                display.camera.SetEyeAndCenter(gp_Pnt(view.X(), view.Y(), view.Z()), gp_Pnt(0., 0., 0.))
-                display.camera.SetDistance(5)
-                display.camera.SetUp(gp_Dir(0, 0, 1))
-                display.camera.SetAspect(1)
-                display.camera.SetFOVy(45)
-                filename = str(img_root / v_folder / f"shape_{i}.png")
-                display.View.Dump(filename)
-                img = Image.open(filename)
-                imgs.append(np.asarray(img))
 
-            # Draw wire
+            svr_imgs = []
+            display.camera.SetEyeAndCenter(gp_Pnt(2., 2., 2.), gp_Pnt(0., 0., 0.))
+            display.camera.SetUp(gp_Dir(0,0,1))
+            display.camera.SetAspect(1)
+            display.camera.SetFOVy(45)
+
+            init_pos = np.array((2, 2, 2))
+            up_pos = np.array((2, 2, 3))
+            for i in range(64):
+                angles = np.array([
+                    i % 4,
+                    i // 4 % 4,
+                    i // 16
+                ])
+                matrix = Rotation.from_euler('xyz', angles * np.pi / 2).as_matrix().T
+                view = (matrix @ init_pos.T).T
+                up = (matrix @ up_pos.T).T
+
+                # new_v = (matrix.T @ np.asarray(v).T).T
+                # trimesh.Trimesh(vertices=new_v, faces=f).export(str(img_root / v_folder / f"mesh_{i}.ply"))
+
+                display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
+                display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
+                filename = str(img_root / v_folder / f"shape_{i}.png")
+                data = display.GetImageData(224, 224)
+                img = Image.frombytes("RGB", (224, 224), data)
+                img1 = np.asarray(img)
+                img1 = img1[::-1]
+                # Image.fromarray(img1).save(filename)
+                svr_imgs.append(img1)
+
+            # Sketch
+            sketch_imgs = []
             mat.SetAmbientColor(Quantity_Color(1, 1, 1, Quantity_TOC_RGB))
             display.DisplayShape(shape, material=mat, update=True)
-
             display.View.Dump(str(img_root / v_folder / f"view_.png"))
-            for i, view in enumerate(views):
-                display.camera.SetEyeAndCenter(gp_Pnt(view.X(), view.Y(), view.Z()), gp_Pnt(0., 0., 0.))
-                display.camera.SetDistance(5)
-                display.camera.SetUp(gp_Dir(0, 0, 1))
-                display.camera.SetAspect(1)
-                display.camera.SetFOVy(45)
-                filename = str(img_root / v_folder / f"wire_{i}.png")
-                display.View.Dump(filename)
-                img = Image.open(filename)
-                imgs.append(np.asarray(img))
+            for i in range(64):
+                angles = np.array([
+                    i % 4,
+                    i // 4 % 4,
+                    i // 16
+                ])
+                matrix = Rotation.from_euler('xyz', angles * np.pi / 2).as_matrix().T
+                view = (matrix @ init_pos.T).T
+                up = (matrix @ up_pos.T).T
 
-            imgs = np.stack(imgs, axis=0)
-            data_dict["imgs"] = imgs
+                # new_v = (matrix.T @ np.asarray(v).T).T
+                # trimesh.Trimesh(vertices=new_v, faces=f).export(str(img_root / v_folder / f"mesh_{i}.ply"))
+
+                display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
+                display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
+                filename = str(img_root / v_folder / f"wire_{i}.png")
+                data = display.GetImageData(224, 224)
+                img = Image.frombytes("RGB", (224, 224), data)
+                img1 = np.asarray(img)
+                img1 = img1[::-1]
+                # Image.fromarray(img1).save(filename)
+                sketch_imgs.append(img1)
+
+            # Multi view
+            mat = Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_Silver)
+            mat.SetReflectionModeOff(Graphic3d_TypeOfReflection.Graphic3d_TOR_SPECULAR)
+            display.DisplayShape(shape, material=mat, update=True)
+            display.View.Dump(str(img_root / v_folder / f"view_.png"))
+            mvr_imgs = []
+
+            for j in range(8):
+                if j == 0:
+                    init_pos = np.array((2, 2, 2))
+                elif j == 1:
+                    init_pos = np.array((-2, 2, 2))
+                elif j == 2:
+                    init_pos = np.array((-2, -2, 2))
+                elif j == 3:
+                    init_pos = np.array((2, -2, 2))
+                elif j == 4:
+                    init_pos = np.array((2, 2, -2))
+                elif j == 5:
+                    init_pos = np.array((-2, 2, -2))
+                elif j == 6:
+                    init_pos = np.array((-2, -2, -2))
+                elif j == 7:
+                    init_pos = np.array((2, -2, -2))
+                up_pos = init_pos + np.array((0, 0, 1))
+                for i in range(64):
+                    angles = np.array([
+                        i % 4,
+                        i // 4 % 4,
+                        i // 16
+                    ])
+                    matrix = Rotation.from_euler('xyz', angles * np.pi / 2).as_matrix().T
+                    view = (matrix @ init_pos.T).T
+                    up = (matrix @ up_pos.T).T
+
+                    # new_v = (matrix.T @ np.asarray(v).T).T
+                    # trimesh.Trimesh(vertices=new_v, faces=f).export(str(img_root / v_folder / f"mesh_{i}.ply"))
+
+                    display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
+                    display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
+                    filename = str(img_root / v_folder / f"mvr_{i}_{j}.png")
+                    data = display.GetImageData(224, 224)
+                    img = Image.frombytes("RGB", (224, 224), data)
+                    img1 = np.asarray(img)
+                    img1 = img1[::-1]
+                    # Image.fromarray(img1).save(filename)
+                    mvr_imgs.append(img1)
+
+            svr_imgs = np.stack(svr_imgs, axis=0)
+            mvr_imgs = np.stack(mvr_imgs, axis=0)
+            sketch_imgs = np.stack(sketch_imgs, axis=0)
+            data_dict["svr_imgs"] = svr_imgs
+            data_dict["mvr_imgs"] = mvr_imgs
+            data_dict["sketch_imgs"] = sketch_imgs
 
             np.savez_compressed(output_root / v_folder / "data.npz", **data_dict)
         except Exception as e:
@@ -166,13 +243,13 @@ if __name__ == '__main__':
     total_ids.sort()
     total_ids = total_ids
     print("Total ids: {} -> {}".format(num_original, len(total_ids)))
-    check_dir(output_root)
+    check_dir(npz_root)
     safe_check_dir(img_root)
 
     # single process
     if debug_id is not None:
         total_ids = [debug_id]
-        get_brep(data_root, output_root, total_ids)
+        get_brep(data_root, npz_root, total_ids)
     else:
         ray.init(
                 dashboard_host="0.0.0.0",
@@ -186,7 +263,7 @@ if __name__ == '__main__':
         for i in range(num_batches):
             tasks.append(
                     get_brep_ray.remote(data_root,
-                                        output_root,
+                                        npz_root,
                                         total_ids[i * batch_size:min(len(total_ids), (i + 1) * batch_size)]))
         ray.get(tasks)
         print("Done")

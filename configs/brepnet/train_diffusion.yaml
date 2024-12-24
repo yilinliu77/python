@@ -1,18 +1,17 @@
 dataset:
   name: "Diffusion_dataset"
 
-  face_z: /root/repo/python/outputs_brepnet/0925_pure_face_z
   train_dataset: D:/img2brep/deepcad_whole_test_v5
   val_dataset: D:/img2brep/deepcad_whole_test_v5
   test_dataset: /mnt/d/deepcad_test_v6
 
   data_root: D:/img2brep/deepcad_whole_test_v5
+  face_z: /root/repo/python/outputs_brepnet/0925_pure_face_z
   deduplicate_list: 0
   pad_method: random
   cached_condition: true
 
   scale_factor: 1
-  condition:
   overfit: false
   is_overfit: false
   is_aug: 0
@@ -21,6 +20,8 @@ dataset:
   num_max_faces: 64
   addition_tag: false
 
+  condition: []
+  cond_root: D:/img2brep/deepcad_whole_test_v5
   num_points: 2048
   point_aug: 0
 

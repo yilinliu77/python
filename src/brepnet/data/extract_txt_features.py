@@ -27,12 +27,14 @@ def worker(prefixes, v_id):
             data = open(root_path/prefix/"text.txt").readlines()
             abs = data[0].strip()
             beg = data[1].strip()
+            inter = data[2].strip()
+            expert = data[3].strip()
             
             # batch_dict = tokenizer([abs, beg], max_length=8192, padding=True, truncation=True, return_tensors='pt')
             # outputs = model(**batch_dict)
             # embeddings = outputs.last_hidden_state[:, 0].cpu().numpy()
             
-            embeddings = model.encode([abs, beg])
+            embeddings = model.encode([abs, beg, inter, expert])
             np.save(root_path/prefix/"text_feat.npy", embeddings)
 
 if __name__ == "__main__":

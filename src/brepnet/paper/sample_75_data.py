@@ -10,8 +10,8 @@ from OCC.Core.BRepAdaptor import BRepAdaptor_Curve
 
 from src.brepnet.post.utils import triangulate_shape
 
-brepgen_root = Path("/mnt/d/uncond_results/1203/1127_730_li_270k_1gpu_post/")
-out_root = Path("/mnt/d/uncond_results/1203/1127_730_li_270k_1gpu_75")
+brepgen_root = Path("/mnt/d/img2brep/uncond_results/1203/1203_deepcad_730_li_0.0001_0.02_mean_11k_11m_post")
+out_root = Path("/mnt/d/img2brep/uncond_results/1203/1203_deepcad_730_li_0.0001_0.02_mean_11k_11m_75")
 out_root.mkdir(exist_ok=True, parents=True)
 
 all_folders = list(brepgen_root.iterdir())

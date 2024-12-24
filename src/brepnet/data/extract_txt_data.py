@@ -26,9 +26,13 @@ if __name__ == "__main__":
             continue
         abs = data["abstract"]
         beg = data["beginner"]
+        expert = data["expert"]
+        intermediate = data["intermediate"]
         with open(root_path/prefix/"text.txt", "w") as f:
             f.write(f"{abs}\n")
             f.write(f"{beg}\n")
+            f.write(f"{intermediate}\n")
+            f.write(f"{expert}\n")
 
     num_invalid = 0
     for prefix in tqdm(os.listdir(root_path)):

@@ -231,6 +231,11 @@ def get_topo_detection(recon_face_edge, gt_face_edge, id_recon_gt_face, id_recon
     recall = positive / (sum([len(edges) for edges in gt_face_edge.values()]) + 1e-6)
     return 2 * precision * recall / (precision + recall + 1e-6), precision, recall
 
+def eval_one_with_try(eval_root, gt_root, folder_name, is_point2cad=False, v_num_per_m=100):
+    try:
+        eval_one(eval_root, gt_root, folder_name, is_point2cad, v_num_per_m)
+    except:
+        pass
 
 def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, v_num_per_m=100):
     if os.path.exists(eval_root / folder_name / 'error.txt'):
@@ -428,7 +433,7 @@ if __name__ == '__main__':
             num_cpus=num_cpus,
             # local_mode=True
         )
-        eval_one_remote = ray.remote(max_retries=0)(eval_one)
+        eval_one_remote = ray.remote(max_retries=0)(eval_one_with_try)
         tasks = []
         for i in range(len(all_folders)):
             tasks.append(eval_one_remote.remote(eval_root, gt_root, all_folders[i], is_point2cad))

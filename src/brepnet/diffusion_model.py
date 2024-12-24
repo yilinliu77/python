@@ -1,5 +1,6 @@
 import importlib
 import math
+import numpy as np
 import time
 import torch
 from torch import autocast, isnan, nn, Tensor, einsum
@@ -111,6 +112,7 @@ class Diffusion_condition(nn.Module):
                 nn.Linear(256, self.dim_condition),
             )
         elif "pc" in v_conf["condition"]:
+            self.point_sample_aug = v_conf["point_sample_aug"]
             self.with_pc = True
             self.SA_modules = nn.ModuleList()
             # PointNet2
@@ -348,6 +350,12 @@ class Diffusion_condition(nn.Module):
             condition = img_feature[:, None]
         elif self.with_pc:
             pc = v_data["conditions"]["points"]
+            
+            if self.point_sample_aug:
+                index = np.arange(pc.shape[2])
+                np.random.shuffle(index)
+                num_points = np.random.randint(1000, pc.shape[2])
+                pc = pc[:,:,index[:num_points]]
             l_xyz, l_features = [pc[:, 0, :, :3].contiguous()], [pc[:, 0, ].permute(0, 2, 1).contiguous()]
 
             with torch.autocast(device_type=pc.device.type, dtype=torch.float32):

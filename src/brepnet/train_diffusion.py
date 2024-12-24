@@ -268,6 +268,7 @@ def main(v_cfg: DictConfig):
     assert v_cfg["dataset"]["num_max_faces"] == v_cfg["model"]["num_max_faces"]
     assert v_cfg["dataset"]["pad_method"] == v_cfg["model"]["pad_method"]
     assert v_cfg["dataset"]["condition"] == v_cfg["model"]["condition"]
+    # assert v_cfg["dataset"]["num_points"] == v_cfg["model"]["num_points"]
 
     callbacks = []
     callbacks.append(ModelCheckpoint(monitor="Validation_Loss", save_last=True, every_n_train_steps=50000, save_top_k=-1))

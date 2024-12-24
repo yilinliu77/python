@@ -22,8 +22,9 @@ dataset:
 
   condition: []
   cond_root: D:/img2brep/deepcad_whole_test_v5
-  num_points: 2048
+  num_points: 10000
   point_aug: 0
+
 
 trainer:
   gpu: 1
@@ -74,6 +75,8 @@ model:
   gaussian_weights: 1e-6
   norm: "layer"
   autoencoder_weights: 
+
+  point_sample_aug: false
 
 hydra:
   run:

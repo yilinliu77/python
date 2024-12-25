@@ -9,7 +9,7 @@ img_png_root = Path(r"/mnt/d/yilin/img2brep/deepcad_730_imgs_npz_v1/")
 txt_root = Path(r"/mnt/d/yilin/img2brep/deepcad_v6_txt")
 list_file = r"src/brepnet/data/list/deduplicated_deepcad_7_30.txt"
 
-output_root = Path(r"/mnt/d/deepcad_v6_cond")
+output_root = Path(r"/mnt/d/yilin/img2brep/deepcad_v6_cond")
 
 if __name__ == "__main__":
     valid_folders = [item.strip() for item in open(list_file, "r").readlines()]
@@ -24,6 +24,7 @@ if __name__ == "__main__":
 
             # Copy imgs
             shutil.copy(img_npz_root / v_folder / f"data.npz", output_root_folder / "imgs.npz")
+            shutil.copy(img_npz_root / v_folder / f"img_feature_dinov2.npy", output_root_folder / "img_feature_dinov2.npy")
             
             # Copy pc
             shutil.copyfile(data_train_root / v_folder / "pc.ply", output_root_folder / "pc.ply")

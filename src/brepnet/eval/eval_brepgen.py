@@ -339,8 +339,8 @@ def main():
 
         jsd = jsd_between_point_cloud_sets(rand_sample_pcs, rand_ref_pcs, in_unit_sphere=False)
         with torch.no_grad():
-            rand_sample_pcs = torch.tensor(rand_sample_pcs).cuda()
-            rand_ref_pcs = torch.tensor(rand_ref_pcs).cuda()
+            rand_sample_pcs = torch.tensor(rand_sample_pcs).cuda().float()
+            rand_ref_pcs = torch.tensor(rand_ref_pcs).cuda().float()
             result, idx = compute_cov_mmd(rand_sample_pcs, rand_ref_pcs, batch_size=args.batch_size)
         result.update({"JSD": jsd})
 

@@ -163,17 +163,18 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
     elif "pc" in v_condition_names:
         pc = o3d.io.read_point_cloud(str(v_cond_root / v_folder_path / "pc.ply"))
         points = np.concatenate((np.asarray(pc.points), np.asarray(pc.normals)), axis=-1)
-        if v_id_aug != -1:
-            angles = np.array([
-                v_id_aug % 4,
-                v_id_aug // 4 % 4,
-                v_id_aug // 16
-            ])
-            points = rotate_pc(points, angles)
+        # Already move to GPU
+        # if v_id_aug != -1:
+            # angles = np.array([
+                # v_id_aug % 4,
+                # v_id_aug // 4 % 4,
+                # v_id_aug // 16
+            # ])
+            # points = rotate_pc(points, angles)
         
-        points = crop_pc(points, 1000)
-        points = noisy_pc(points)
-        points = downsample_pc(points, v_num_points)
+        # points = crop_pc(points, 1000)
+        # points = noisy_pc(points)
+        # points = downsample_pc(points, v_num_points)
         condition["points"] = torch.from_numpy(points).float()[None,]
     elif "txt" in v_condition_names:
         if v_cache_data:
@@ -450,10 +451,10 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         # idx = 0
         folder_path = self.data_folders[idx]
         if self.is_aug:
-            id_latent = np.random.randint(0,63)
-            data_npz = np.load(self.latent_root / (folder_path+f"_{id_latent}") / "features.npy")
+            id_aug = np.random.randint(0,63)
+            data_npz = np.load(self.latent_root / (folder_path+f"_{id_aug}") / "features.npy")
         else:
-            id_latent = -1
+            id_aug = -1
             data_npz = np.load(self.latent_root / (folder_path+f"_{0}") / "features.npy")
         face_features = torch.from_numpy(data_npz)
 
@@ -484,21 +485,23 @@ class Diffusion_dataset(torch.utils.data.Dataset):
                 padded_face_features = torch.cat((padded_face_features, add_flag[index2]), dim=-1)
         else:
             raise ValueError("Invalid pad method")
-        condition = prepare_condition(self.condition, self.conditional_data_root, folder_path, id_latent,
+        condition = prepare_condition(self.condition, self.conditional_data_root, folder_path, id_aug,
                                       self.cached_condition, self.transform, self.conf["num_points"])
         return (
             folder_path,
             padded_face_features,
-            condition
+            condition,
+            id_aug
         )
 
     @staticmethod
     def collate_fn(batch):
         (
-            v_prefix, v_face_features, conditions
+            v_prefix, v_face_features, conditions, id_aug
         ) = zip(*batch)
 
         face_features = torch.stack(v_face_features, dim=0)
+        id_aug = torch.tensor(id_aug)
 
         keys = conditions[0].keys()
         condition_out = {key: [] for key in keys}
@@ -512,5 +515,6 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         return {
             "v_prefix"     : v_prefix,
             "face_features": face_features,
-            "conditions"   : condition_out
+            "conditions"   : condition_out,
+            "id_aug"   : id_aug,
         }

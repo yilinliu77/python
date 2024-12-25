@@ -130,7 +130,7 @@ def downsample_pc(v_pc, v_num_points):
 # Point Aug
 # Rotate according to v_id_latent and add noise and downsample and crop
 def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug, 
-                      v_cache_img=None, v_transform=None, 
+                      v_cache_data=None, v_transform=None, 
                       v_num_points=None):
     condition = {
 
@@ -146,7 +146,7 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
         else:
             idx = np.random.choice(np.arange(num_max_multi_view), 4, replace=False)
             idx = num_max_single_view + num_max_single_view + idx * num_max_single_view + v_id_aug
-        if v_cache_img:
+        if v_cache_data:
             ori_data = np.load(v_cond_root / v_folder_path / "img_feature_dinov2.npy")
             img_features = torch.from_numpy(ori_data[idx][None,:]).float()
             condition["img_features"] = img_features
@@ -178,7 +178,8 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
         condition["points"] = torch.from_numpy(points).float()[None,]
     elif "txt" in v_condition_names:
         if v_cache_data:
-            ori_data = np.load(v_cond_root / v_folder_path / "text_feat.npy")[0]
+            difficulty = np.random.randint(0, 3)
+            ori_data = np.load(v_cond_root / v_folder_path / "text_feat.npy")[difficulty]
             condition["txt_features"] = torch.from_numpy(ori_data).float()
         else:
             assert False

@@ -4,8 +4,6 @@ import sys
 import numpy as np
 import open3d as o3d
 
-from src.brepnet.dataset import AutoEncoder_dataset, AutoEncoder_dataset2
-
 sys.path.append('../../../')
 import os.path
 
@@ -135,6 +133,9 @@ class TrainAutoEncoder(pl.LightningModule):
                 self.viz["gt_edge"] = recon_data["gt_edge"]
                 self.viz["pred_edge"] = recon_data["pred_edge"]
         
+        if "features" not in self.viz:
+            self.viz["meanstd"] = []
+        self.viz["meanstd"].append(recon_data["face_features"].reshape(recon_data["face_features"].shape[0],2,-1))
         return total_loss
 
     def on_validation_epoch_end(self):
@@ -180,6 +181,21 @@ class TrainAutoEncoder(pl.LightningModule):
             pc.colors = o3d.utility.Vector3dVector(edge_colors / 255.0)
             o3d.io.write_point_cloud(
                 str(self.log_root / f"{self.trainer.current_epoch:05}_viz_edges.ply"), pc)
+        
+        if "meanstd" in self.viz:
+            meanstd = np.concatenate(self.viz["meanstd"], axis=0)
+            mean = meanstd[:,0]
+            std = meanstd[:,1]
+                
+            self.log_dict(
+                {
+                    "mean_mean": mean.mean(),
+                    "mean_std": mean.std(),
+                    "std_mean": std.mean(),
+                    "std_std": std.std(),
+                }, 
+                prog_bar=False, logger=True, on_step=False, on_epoch=True)
+            
         return
 
     def test_dataloader(self):

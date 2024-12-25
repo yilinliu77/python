@@ -9,7 +9,7 @@ from transformers import AutoModel, AutoTokenizer
 from sentence_transformers import SentenceTransformer
 from sentence_transformers.util import cos_sim
 
-root_path = Path(r"/mnt/d/img2brep/deepcad_730_cond")
+root_path = Path(r"/mnt/d/yilin/img2brep/deepcad_v6_txt")
 
 @ray.remote(num_gpus=1)
 def worker(prefixes, v_id):
@@ -48,7 +48,7 @@ if __name__ == "__main__":
         # local_mode=True,
     )
 
-    tasks = np.array_split(np.asarray(prefixes), 8)
+    tasks = np.array_split(np.asarray(prefixes), num_workers)
     for i, item in enumerate(tasks):
         tasks[i] = worker.remote(item, i)
     for prefix in tqdm(tasks):

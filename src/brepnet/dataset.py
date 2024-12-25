@@ -214,7 +214,7 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
 
         # Cond related
         self.condition = v_conf["condition"]
-        self.conditional_data_root = Path(v_conf["cond_root"])
+        self.conditional_data_root = Path(v_conf["cond_root"]) if v_conf["cond_root"] is not None else None
         self.cached_condition = v_conf["cached_condition"]
         self.transform = T.Compose([
             T.ToPILImage(),
@@ -304,7 +304,7 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         edge_bbox = torch.cat((edge_center, edge_scale), dim=-1)
 
         condition = prepare_condition(self.condition, self.conditional_data_root, prefix, self.is_aug,
-                                      self.cached_condition, self.transform, self.conf["num_points"], self.conf["point_aug"], None)
+                                      self.cached_condition, self.transform, self.conf["num_points"])
 
         return (
             prefix,

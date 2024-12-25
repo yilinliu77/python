@@ -9,6 +9,12 @@ dataset:
 
   is_aug: 0
   is_overfit: false
+  scale_factor: 1
+
+  cond_root: 
+  condition: []
+  cached_condition: false
+  num_points: 10000
 
 trainer:
   gpu: 1
@@ -46,6 +52,8 @@ model:
   stage: 0
   sigmoid: false
   gaussian_weights: 1e-6
+
+  condition: []
 
 hydra:
   run:

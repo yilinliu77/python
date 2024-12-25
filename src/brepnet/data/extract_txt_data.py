@@ -5,8 +5,9 @@ from pathlib import Path
 from tqdm import tqdm
 import os
 
-root_path = Path(r"/mnt/d/img2brep/deepcad_730_cond")
-csv_path = r"/mnt/d/img2brep/text2cad_v1.1.csv"
+root_path = Path(r"/mnt/d/yilin/img2brep/deepcad_v6")
+csv_path = r"/mnt/d/yilin/img2brep/text2cad_v1.1.csv"
+output_path = Path(r"/mnt/d/yilin/img2brep/deepcad_v6_txt")
 
 if __name__ == "__main__":
     # outputdir = Path(r"/mnt/d/img2brep/deepcad_730_cond")
@@ -17,7 +18,7 @@ if __name__ == "__main__":
     #         if (item/"text_feat.npy").exists():
     #             shutil.copy(item/"text_feat.npy", outputdir/item.name)
     #             shutil.copy(item/"text.txt", outputdir/item.name)
-    
+    output_path.mkdir(exist_ok=True)
     all_data = pd.read_csv(csv_path)
     for i in tqdm(range(all_data.shape[0])):
         data = all_data.loc[i]
@@ -28,7 +29,8 @@ if __name__ == "__main__":
         beg = data["beginner"]
         expert = data["expert"]
         intermediate = data["intermediate"]
-        with open(root_path/prefix/"text.txt", "w") as f:
+        (output_path/prefix).mkdir(exist_ok=True)
+        with open(output_path/prefix/"text.txt", "w") as f:
             f.write(f"{abs}\n")
             f.write(f"{beg}\n")
             f.write(f"{intermediate}\n")
@@ -36,6 +38,6 @@ if __name__ == "__main__":
 
     num_invalid = 0
     for prefix in tqdm(os.listdir(root_path)):
-        if not (root_path/prefix/"text.txt").exists():
+        if not (output_path/prefix/"text.txt").exists():
             num_invalid += 1
     print(num_invalid)

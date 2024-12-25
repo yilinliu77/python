@@ -390,6 +390,13 @@ class Diffusion_condition(nn.Module):
             num_points = np.random.randint(1000, num_points)
             pc = pc[:,index[:num_points]]
             
+            # Noise
+            noise = torch.randn_like(pc) * 0.02
+            pc = pc + noise
+            
+            # Mask normal
+            pc[...,3:] = 0. if torch.rand(1) > 0.5 else pc[...,3:]
+            
             l_xyz, l_features = [pc[:, :, :3].contiguous().float()], [pc.permute(0, 2, 1).contiguous().float()]
             with torch.autocast(device_type=pc.device.type, dtype=torch.float32):
                 for i in range(len(self.SA_modules)):

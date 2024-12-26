@@ -168,6 +168,23 @@ class TrainDiffusion(pl.LightningModule):
             result = self.model.inference(1, self.device, data)[0]
             self.viz["recon_faces"] = result["pred_face"]
         
+            if "conditions" in data:
+                bs = len(data["v_prefix"])
+                for idx in range(bs):
+                    if "ori_imgs" in data["conditions"]:
+                        img_id = data["conditions"]["img_id"]
+                        imgs = data["conditions"]["ori_imgs"][idx].cpu().numpy().astype(np.uint8)
+                        for i in range(imgs.shape[0]):
+                            o3d.io.write_image(str(self.log_root / f"epoch{self.current_epoch}_item{idx}_img{img_id[i]}.png"), o3d.geometry.Image(imgs[i]))
+                    elif "points" in data["conditions"]:
+                        points = data["conditions"]["points"][idx].cpu().numpy().astype(np.float32)[0]
+                        pc = o3d.geometry.PointCloud()
+                        pc.points = o3d.utility.Vector3dVector(points[:,:3])
+                        pc.normals = o3d.utility.Vector3dVector(points[:,3:])
+                        o3d.io.write_point_cloud(str(self.log_root / f"epoch{self.current_epoch}_item{idx}_pc.ply"), pc)
+                    elif "txt" in data["conditions"]:
+                        open(self.log_root / "epoch{}_item{}_txt.txt".format(self.current_epoch, idx)).write(data["conditions"]["txt"][idx])
+
         return total_loss
 
     def on_validation_epoch_end(self):

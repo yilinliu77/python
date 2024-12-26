@@ -76,7 +76,7 @@ model:
   norm: "layer"
   autoencoder_weights: 
 
-  is_aug: false
+  is_aug: false # Only control if point cloud is augmented
 
 hydra:
   run:

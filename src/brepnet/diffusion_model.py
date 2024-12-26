@@ -107,7 +107,7 @@ class Diffusion_condition(nn.Module):
                 nn.Linear(1024, self.dim_condition),
             )
             self.camera_embedding = nn.Sequential(
-                nn.Embedding(32, 256),
+                nn.Embedding(8, 256),
                 nn.Linear(256, 256),
                 nn.LayerNorm(256),
                 nn.SiLU(),
@@ -178,6 +178,10 @@ class Diffusion_condition(nn.Module):
             model_path = 'Alibaba-NLP/gte-large-en-v1.5'
             from sentence_transformers import SentenceTransformer
             self.txt_model = SentenceTransformer(model_path, trust_remote_code=True)
+            for param in self.txt_model.parameters():
+                param.requires_grad = False
+            self.txt_model.eval()
+            
             self.txt_fc = nn.Sequential(
                 nn.Linear(1024, 1024),
                 nn.LayerNorm(1024),
@@ -355,51 +359,53 @@ class Diffusion_condition(nn.Module):
         elif self.with_pc:
             pc = v_data["conditions"]["points"]
             
-            # Rotate
-            id_aug = v_data["id_aug"]
-            angles = torch.stack([id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
-            matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
-            rotation_3d_matrix = torch.tensor(matrix, device=pc.device, dtype=pc.dtype)
-            points = pc[:, 0, :, :3]
-            normals = pc[:, 0, :, 3:6]
-            
-            pc2 = (rotation_3d_matrix @ points.permute(0, 2, 1)).permute(0, 2, 1)
-            tpc2 = (rotation_3d_matrix @ (points+normals).permute(0, 2, 1)).permute(0, 2, 1)
-            normals2 = tpc2 - pc2
-            pc = torch.cat([pc2, normals2], dim=-1)
-            
-            # Crop
-            bs = pc.shape[0]
-            num_points = pc.shape[1]
-            pc_index = torch.randint(0, pc.shape[1], (bs,), device=pc.device)
-            center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[...,:3]
-            length_xyz = torch.rand((bs,3), device=pc.device) * 1.0
-            bbox_min = center_pos - length_xyz[:, None, :]
-            bbox_max = center_pos + length_xyz[:, None, :]
-            mask = torch.logical_not(((pc[:, :, :3] > bbox_min) & (pc[:, :, :3] < bbox_max)).all(dim=-1))
-            
-            sort_results = torch.sort(mask.long(),descending=True)
-            mask=sort_results.values
-            pc_sorted = torch.gather(pc,1,sort_results.indices[:,:,None].repeat(1,1,6))
-            num_valid = mask.sum(dim=-1)
-            index1 = torch.rand((bs,num_points), device=pc.device) * num_valid[:,None]
-            index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs,1)
-            index = torch.where(mask.bool(), index2, index1)
-            pc = pc_sorted[torch.arange(bs)[:, None].repeat(1, num_points), index.long()]
-            
-            # Downsample
-            index = np.arange(num_points)
-            np.random.shuffle(index)
-            num_points = np.random.randint(1000, num_points)
-            pc = pc[:,index[:num_points]]
-            
-            # Noise
-            noise = torch.randn_like(pc) * 0.02
-            pc = pc + noise
-            
-            # Mask normal
-            pc[...,3:] = 0. if torch.rand(1) > 0.5 else pc[...,3:]
-            
+            if self.is_aug:
+                # Rotate
+                id_aug = v_data["id_aug"]
+                angles = torch.stack([id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
+                matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
+                rotation_3d_matrix = torch.tensor(matrix, device=pc.device, dtype=pc.dtype)
+                points = pc[:, 0, :, :3]
+                normals = pc[:, 0, :, 3:6]
+                
+                pc2 = (rotation_3d_matrix @ points.permute(0, 2, 1)).permute(0, 2, 1)
+                tpc2 = (rotation_3d_matrix @ (points+normals).permute(0, 2, 1)).permute(0, 2, 1)
+                normals2 = tpc2 - pc2
+                pc = torch.cat([pc2, normals2], dim=-1)
+                
+                # Crop
+                bs = pc.shape[0]
+                num_points = pc.shape[1]
+                pc_index = torch.randint(0, pc.shape[1], (bs,), device=pc.device)
+                center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[...,:3]
+                length_xyz = torch.rand((bs,3), device=pc.device) * 1.0
+                bbox_min = center_pos - length_xyz[:, None, :]
+                bbox_max = center_pos + length_xyz[:, None, :]
+                mask = torch.logical_not(((pc[:, :, :3] > bbox_min) & (pc[:, :, :3] < bbox_max)).all(dim=-1))
+                
+                sort_results = torch.sort(mask.long(),descending=True)
+                mask=sort_results.values
+                pc_sorted = torch.gather(pc,1,sort_results.indices[:,:,None].repeat(1,1,6))
+                num_valid = mask.sum(dim=-1)
+                index1 = torch.rand((bs,num_points), device=pc.device) * num_valid[:,None]
+                index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs,1)
+                index = torch.where(mask.bool(), index2, index1)
+                pc = pc_sorted[torch.arange(bs)[:, None].repeat(1, num_points), index.long()]
+                
+                # Downsample
+                index = np.arange(num_points)
+                np.random.shuffle(index)
+                num_points = np.random.randint(1000, num_points)
+                pc = pc[:,index[:num_points]]
+                
+                # Noise
+                noise = torch.randn_like(pc) * 0.02
+                pc = pc + noise
+                
+                # Mask normal
+                pc[...,3:] = 0. if torch.rand(1) > 0.5 else pc[...,3:]
+            else:
+                pc = pc[:, 0]
             l_xyz, l_features = [pc[:, :, :3].contiguous().float()], [pc.permute(0, 2, 1).contiguous().float()]
             with torch.autocast(device_type=pc.device.type, dtype=torch.float32):
                 for i in range(len(self.SA_modules)):
@@ -409,7 +415,12 @@ class Diffusion_condition(nn.Module):
                 features = self.fc_lyaer(l_features[-1].mean(dim=-1))
                 condition = features[:, None]
         elif self.with_txt:
-            txt_feat = v_data["conditions"]["txt_features"]
+            if "txt_features" in v_data["conditions"]:
+                txt_feat = v_data["conditions"]["txt_features"]
+            else:
+                txt = v_data["conditions"]["txt"]
+                txt_feat = self.txt_model.encode(txt, show_progress_bar=False, convert_to_numpy=False, device=self.txt_model.device)
+                txt_feat = torch.stack(txt_feat, dim=0)
             condition = self.txt_fc(txt_feat)[:, None]
         return condition
 

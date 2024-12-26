@@ -353,15 +353,6 @@ def load_data_with_prefix(root_folder, prefix):
 
 
 def main():
-    brepgen = np.load("brepgen.npy")
-    ours = np.load("ours.npy")
-    gt = np.load("gt.npy")
-
-    print(np.mean((brepgen - gt) ** 2))
-    print(np.mean((ours - gt) ** 2))
-
-    jensen_shannon_divergence(brepgen, gt)
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--fake", type=str)
     parser.add_argument("--real", type=str)

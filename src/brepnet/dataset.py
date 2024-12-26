@@ -140,9 +140,9 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
         num_max_multi_view = 8
         num_max_single_view = 64
         if "single_img" in v_condition_names:
-            idx = v_id_aug
+            idx = np.array([v_id_aug])
         elif "sketch" in v_condition_names:
-            idx = v_id_aug+num_max_single_view
+            idx = np.array([v_id_aug+num_max_single_view])
         else:
             idx = np.random.choice(np.arange(num_max_multi_view), 4, replace=False)
             idx = num_max_single_view + num_max_single_view + idx * num_max_single_view + v_id_aug
@@ -420,7 +420,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         # Cond related
         self.is_aug = v_conf["is_aug"]
         self.condition = v_conf["condition"]
-        self.conditional_data_root = Path(v_conf["data_root"])
+        self.conditional_data_root = Path(v_conf["cond_root"])
         self.cached_condition = v_conf["cached_condition"]
         self.transform = T.Compose([
             T.ToPILImage(),
@@ -429,12 +429,12 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ])
         # Check cond data
-        if self.condition == "txt":
+        if len(self.condition) > 0:
             data_folders = []
             for item in filelist:
-                if os.path.exists(self.conditional_data_root/item/"text_feat.npy"):
+                if os.path.exists(self.conditional_data_root/item):
                     data_folders.append(item)
-            print("Filter out {} folders without text_feat".format(len(filelist)-len(data_folders)))
+            print("Filter out {} folders without feat".format(len(filelist)-len(data_folders)))
             filelist = data_folders
         
         if v_conf["overfit"]:  # Overfitting mode

@@ -2,6 +2,7 @@ import torch
 import argparse
 import os
 import numpy as np
+from lightning_fabric import seed_everything
 from tqdm import tqdm
 import random
 import warnings
@@ -304,6 +305,7 @@ def main():
 
     args.output = args.fake + '_results.txt'
 
+    seed_everything(0)
     # Load reference pcd
     num_cpus = multiprocessing.cpu_count()
     ref_pcs = []

@@ -92,6 +92,7 @@ class Diffusion_condition(nn.Module):
         self.with_img = False
         self.with_pc = False
         self.with_txt = False
+        self.is_aug = v_conf["is_aug"]
         if "single_img" in v_conf["condition"] or "multi_img" in v_conf["condition"] or "sketch" in v_conf["condition"]:
             self.with_img = True
             self.img_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
@@ -113,7 +114,6 @@ class Diffusion_condition(nn.Module):
                 nn.Linear(256, self.dim_condition),
             )
         elif "pc" in v_conf["condition"]:
-            self.point_sample_aug = v_conf["point_sample_aug"]
             self.with_pc = True
             self.SA_modules = nn.ModuleList()
             # PointNet2
@@ -175,6 +175,9 @@ class Diffusion_condition(nn.Module):
             )
         elif "txt" in v_conf["condition"]:
             self.with_txt = True
+            model_path = 'Alibaba-NLP/gte-large-en-v1.5'
+            from sentence_transformers import SentenceTransformer
+            self.txt_model = SentenceTransformer(model_path, trust_remote_code=True)
             self.txt_fc = nn.Sequential(
                 nn.Linear(1024, 1024),
                 nn.LayerNorm(1024),

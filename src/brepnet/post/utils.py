@@ -942,9 +942,11 @@ def set_tolerance(v_item, v_precision):
     tolorancer.SetTolerance(v_item, v_precision)
     return v_item
 
+
 def get_tolerance(v_item, v_type):
     tolorancer = ShapeAnalysis_ShapeTolerance()
     return tolorancer.Tolerance(v_item, v_type)
+
 
 def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_tolerance):
     topo_face = BRepBuilderAPI_MakeFace(geom_face, 1e-6).Face()
@@ -1463,6 +1465,16 @@ def solid_valid_check(solid, tolerance=0.01):
             return False
         shell_exp.Next()
 
+    return True
+
+
+def can_be_triangularized(shape):
+    faces = get_primitives(shape, TopAbs_FACE)
+    for face in faces:
+        loc = TopLoc_Location()
+        triangulation = BRep_Tool.Triangulation(face, loc)
+        if triangulation is None:
+            return False
     return True
 
 

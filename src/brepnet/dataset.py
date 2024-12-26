@@ -130,7 +130,7 @@ def downsample_pc(v_pc, v_num_points):
 # Point Aug
 # Rotate according to v_id_latent and add noise and downsample and crop
 def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug, 
-                      v_cache_img=None, v_transform=None, 
+                      v_cache_data=None, v_transform=None, 
                       v_num_points=None):
     condition = {
 
@@ -140,13 +140,13 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
         num_max_multi_view = 8
         num_max_single_view = 64
         if "single_img" in v_condition_names:
-            idx = v_id_aug
+            idx = np.array([v_id_aug])
         elif "sketch" in v_condition_names:
-            idx = v_id_aug+num_max_single_view
+            idx = np.array([v_id_aug+num_max_single_view])
         else:
             idx = np.random.choice(np.arange(num_max_multi_view), 4, replace=False)
             idx = num_max_single_view + num_max_single_view + idx * num_max_single_view + v_id_aug
-        if v_cache_img:
+        if v_cache_data:
             ori_data = np.load(v_cond_root / v_folder_path / "img_feature_dinov2.npy")
             img_features = torch.from_numpy(ori_data[idx][None,:]).float()
             condition["img_features"] = img_features
@@ -178,7 +178,8 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
         condition["points"] = torch.from_numpy(points).float()[None,]
     elif "txt" in v_condition_names:
         if v_cache_data:
-            ori_data = np.load(v_cond_root / v_folder_path / "text_feat.npy")[0]
+            difficulty = np.random.randint(0, 3)
+            ori_data = np.load(v_cond_root / v_folder_path / "text_feat.npy")[difficulty]
             condition["txt_features"] = torch.from_numpy(ori_data).float()
         else:
             assert False
@@ -213,7 +214,7 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
 
         # Cond related
         self.condition = v_conf["condition"]
-        self.conditional_data_root = Path(v_conf["cond_root"])
+        self.conditional_data_root = Path(v_conf["cond_root"]) if v_conf["cond_root"] is not None else None
         self.cached_condition = v_conf["cached_condition"]
         self.transform = T.Compose([
             T.ToPILImage(),
@@ -303,7 +304,7 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         edge_bbox = torch.cat((edge_center, edge_scale), dim=-1)
 
         condition = prepare_condition(self.condition, self.conditional_data_root, prefix, self.is_aug,
-                                      self.cached_condition, self.transform, self.conf["num_points"], self.conf["point_aug"], None)
+                                      self.cached_condition, self.transform, self.conf["num_points"])
 
         return (
             prefix,
@@ -419,7 +420,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         # Cond related
         self.is_aug = v_conf["is_aug"]
         self.condition = v_conf["condition"]
-        self.conditional_data_root = Path(v_conf["data_root"])
+        self.conditional_data_root = Path(v_conf["cond_root"])
         self.cached_condition = v_conf["cached_condition"]
         self.transform = T.Compose([
             T.ToPILImage(),
@@ -428,12 +429,12 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ])
         # Check cond data
-        if self.condition == "txt":
+        if len(self.condition) > 0:
             data_folders = []
             for item in filelist:
-                if os.path.exists(self.conditional_data_root/item/"text_feat.npy"):
+                if os.path.exists(self.conditional_data_root/item):
                     data_folders.append(item)
-            print("Filter out {} folders without text_feat".format(len(filelist)-len(data_folders)))
+            print("Filter out {} folders without feat".format(len(filelist)-len(data_folders)))
             filelist = data_folders
         
         if v_conf["overfit"]:  # Overfitting mode

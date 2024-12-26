@@ -22,10 +22,10 @@ from shared.occ_utils import normalize_shape, get_triangulations, get_primitives
 debug_id = None
 # debug_id = "00000003"
 
-data_root = Path(r"D:/Datasets/data_step")
-npz_root = Path(r"D:/Datasets/data_npz")
-img_root = Path(r"D:/Datasets/data_png")
-data_split = r"src/brepnet/data/list/deduplicated_abc_brepnet.txt"
+data_root = Path(r"/mnt/e/yilin/data_step")
+npz_root = Path(r"/mnt/d/yilin/img2brep/deepcad_730_imgs_npz_v1")
+img_root = Path(r"/mnt/d/yilin/img2brep/deepcad_730_imgs_png_v1")
+data_split = r"src/brepnet/data/list/deduplicated_deepcad_7_30.txt"
 
 exception_files = [
 ]
@@ -53,7 +53,7 @@ class MyOffscreenRenderer(Viewer3d):
     def __init__(self, screen_size=(224, 224)):
         super().__init__()
         # create the renderer
-        self.Create()
+        self.Create(display_glinfo=False)
         self.SetSize(screen_size[0], screen_size[1])
         self.SetModeShaded()
         self.set_bg_gradient_color([255, 255, 255], [255, 255, 255])
@@ -79,8 +79,8 @@ def get_brep(v_root, output_root, v_folders):
                 raise ValueError("Multiple components: {}; Jump over".format(v_folder))
             shape = normalize_shape(shape, 0.9)
 
-            v,f = get_triangulations(shape)
-            trimesh.Trimesh(vertices=v, faces=f).export(str(output_root / v_folder / "mesh.obj"))
+            #v,f = get_triangulations(shape)
+            #trimesh.Trimesh(vertices=v, faces=f).export(str(output_root / v_folder / "mesh.obj"))
 
             data_dict = {
             }

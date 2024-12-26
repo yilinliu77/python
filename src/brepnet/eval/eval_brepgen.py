@@ -301,6 +301,7 @@ def main():
     parser.add_argument("--batch_size", type=int, default=64)
     args = parser.parse_args()
 
+    seed_everything(0)
     print("n_test: {}, multiplier: {}, repeat times: {}".format(args.n_test, args.multi, args.times))
 
     args.output = args.fake + '_results.txt'

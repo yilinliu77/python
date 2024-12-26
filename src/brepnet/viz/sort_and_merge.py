@@ -210,6 +210,7 @@ if __name__ == "__main__":
         for folder in pbar:
             pbar.set_description(f"Processing {folder}")
             file_path = glob.glob(os.path.join(data_root, folder, "*.step"))
+            file_path.sort()
             if len(file_path) == 0:
                 continue
             file_path = file_path[0]

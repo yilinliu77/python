@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from OCC.Extend.DataExchange import write_stl_file
+from lightning_fabric import seed_everything
 from tqdm import tqdm
 from matplotlib import pyplot as plt
 import sys, pickle
@@ -15,7 +16,24 @@ pkl = r"/mnt/d/uncond_results/1127/1127_730_li_120k_lfd.pkl"
 # pkl = r"/mnt/d/uncond_results/1106/1108_730_li_600k_30_lfd.pkl"
 output_path = r"/mnt/d/uncond_results/1127/1127_730_li_120k_lfd.png"
 
+
+def remove_outliers_zscore(data, threshold=3):
+    """
+    Remove outliers using z-score method
+    Args:
+        data: 1D numpy array
+        threshold: z-score threshold (default 3)
+    """
+    mean = np.mean(data)
+    std = np.std(data)
+    z_scores = np.abs((data - mean) / std)
+
+    mask = z_scores < threshold
+    return data[mask], mask
+
+
 if __name__ == "__main__":
+    seed_everything(0)
     if len(sys.argv) == 3:
         pkl = sys.argv[1]
         output_path = sys.argv[2]
@@ -43,13 +61,15 @@ if __name__ == "__main__":
 
         print(f"Valid Shapes: {len(src_folder_list)}")
 
+    mean_list = []
     median_list = []
+    percentile_75_list = []
     data = data_ori.min(axis=1)
     for i in range(10):
-        print("No. {} Iteration".format(i))
-        # random sample 1000 shapes
-        data = np.random.choice(data, 800)
-
+        print("\nNo. {} Iteration".format(i))
+        # random sample 3000 shapes
+        data = np.random.choice(data, 1000)
+        data, _ = remove_outliers_zscore(data, threshold=3)
         his, bin_edges = np.histogram(data, bins=45, range=(0, 4500))
         plt.xlim(0, 100)
         plt.barh(bin_edges[:-1], his, height=50)
@@ -71,6 +91,8 @@ if __name__ == "__main__":
         print("90%: ", np.percentile(data, 90))
         print("99%: ", np.percentile(data, 99))
         median_list.append(np.median(data))
+        mean_list.append(np.mean(data))
+        percentile_75_list.append(np.percentile(data, 75))
         if True:
             small_ids = np.where(data < 100)
             # data_root = Path("/mnt/d/brepgen_train")
@@ -95,5 +117,10 @@ if __name__ == "__main__":
             # mesh.export(str(dst_file))
             print(f"{small_ids[0].shape[0]} shapes' LFD is less than 100")
         pass
-    print("Median List: ", median_list)
+    print("\nMean List: ", mean_list)
+    print("Mean of Mean List: ", np.mean(mean_list))
+    print("\nMedian List: ", median_list)
     print("Mean of Median List: ", np.mean(median_list))
+    print("\nPercentile 75 List: ", percentile_75_list)
+    print("Mean of Percentile 75 List: ", np.mean(percentile_75_list))
+    print(f"{np.mean(mean_list)} {np.mean(median_list)} {np.mean(percentile_75_list)}")

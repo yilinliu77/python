@@ -12,6 +12,7 @@ from plyfile import PlyData
 from pathlib import Path
 import multiprocessing
 from chamfer_distance import ChamferDistance
+from src.brepnet.eval.eval_pc_set import *
 
 N_POINTS = 2000
 
@@ -102,7 +103,6 @@ import matplotlib.pyplot as plt
 
 # 假设你的数据存储在变量 data 中
 # data = np.random.randint(0, 255, (28, 28, 28))
-
 def visualize_3d_array(data):
     # 创建三个子图，分别显示三个主要平面的切片
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
@@ -124,6 +124,12 @@ def visualize_3d_array(data):
 
     plt.tight_layout()
     plt.show()
+
+
+def volume_occpancy(sample_pcs, in_unit_sphere, resolution=28, min_value=10):
+    sample_grid_var = entropy_of_occupancy_grid(sample_pcs, resolution, in_unit_sphere)[1]
+    occ_rate = np.sum(sample_grid_var > min_value) / sample_grid_var.size
+    return occ_rate
 
 
 def jsd_between_point_cloud_sets(sample_pcs, ref_pcs, in_unit_sphere, resolution=28):
@@ -401,12 +407,16 @@ def main():
         select_idx2 = random.sample(list(range(len(ref_pcs))), args.n_test)
         rand_ref_pcs = ref_pcs[select_idx2]
 
+        select_idx3 = random.sample(list(range(len(sample_pcs))), args.n_test)
+        rand_sample_pcs2 = sample_pcs[select_idx3]
+        occ_rate = volume_occpancy(rand_sample_pcs2, in_unit_sphere=False, resolution=28, min_value=10)
         jsd = jsd_between_point_cloud_sets(rand_sample_pcs, rand_ref_pcs, in_unit_sphere=False)
         with torch.no_grad():
             rand_sample_pcs = torch.tensor(rand_sample_pcs).cuda().float()
             rand_ref_pcs = torch.tensor(rand_ref_pcs).cuda().float()
             result, idx = compute_cov_mmd(rand_sample_pcs, rand_ref_pcs, batch_size=args.batch_size)
         result.update({"JSD": jsd})
+        result.update({"OCC": occ_rate})
 
         cov_on_gt.extend(list(np.array(select_idx2)[np.unique(idx)]))
 

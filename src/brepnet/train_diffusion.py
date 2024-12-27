@@ -151,7 +151,7 @@ class TrainDiffusion(pl.LightningModule):
         loss = self.model(data, v_test=True)
         total_loss = loss["total_loss"]
         for key in loss:
-            if key == "total_loss" or key == "t":
+            if key in ["t", "total_loss", "cond_item", "cond_onehot"]:
                 continue
             self.log(f"Validation_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                      sync_dist=True, batch_size=self.batch_size)
@@ -165,8 +165,8 @@ class TrainDiffusion(pl.LightningModule):
             self.viz["time_loss"].append(loss["t"])
         
         if batch_idx == 0 and self.global_rank == 0:
-            result = self.model.inference(1, self.device, data)[0]
-            self.viz["recon_faces"] = result["pred_face"]
+            recon_faces = self.model.inference(1, self.device, data)[0]["pred_face"]
+            trimesh.PointCloud(recon_faces.reshape(-1, 3)).export(str(self.log_root / "{}_faces.ply".format(self.current_epoch)))
         
             if "conditions" in data:
                 bs = len(data["v_prefix"])
@@ -200,9 +200,6 @@ class TrainDiffusion(pl.LightningModule):
         
         if self.global_rank != 0:
             return
-        if "recon_faces" in self.viz:
-            recon_faces = self.viz["recon_faces"]
-            trimesh.PointCloud(recon_faces.reshape(-1, 3)).export(str(self.log_root / "{}_faces.ply".format(self.current_epoch)))
         self.viz = {"time_loss": []}
         return
 

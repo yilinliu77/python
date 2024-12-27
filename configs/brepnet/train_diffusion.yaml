@@ -52,7 +52,6 @@ model:
   name: Diffusion_condition
   train_decoder: false
   stored_z: True
-  condition:
   use_mean: true
 
   diffusion_latent: 512
@@ -77,6 +76,8 @@ model:
   autoencoder_weights: 
 
   is_aug: false # Only control if point cloud is augmented
+  condition: []
+  cond_prob: []
 
 hydra:
   run:

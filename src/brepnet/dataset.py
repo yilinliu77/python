@@ -127,8 +127,6 @@ def downsample_pc(v_pc, v_num_points):
     np.random.shuffle(index)
     return v_pc[index[:v_num_points]]
 
-# Point Aug
-# Rotate according to v_id_latent and add noise and downsample and crop
 def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug, 
                       v_cache_data=None, v_transform=None, 
                       v_num_points=None):
@@ -173,7 +171,7 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
             condition["ori_imgs"] = torch.from_numpy(imgs)
             condition["imgs"] = transformed_imgs
             condition["img_id"] = torch.from_numpy(idx)
-    elif "pc" in v_condition_names:
+    if "pc" in v_condition_names:
         pc = o3d.io.read_point_cloud(str(v_cond_root / v_folder_path / "pc.ply"))
         points = np.concatenate((np.asarray(pc.points), np.asarray(pc.normals)), axis=-1)
         # Already move to GPU
@@ -189,7 +187,7 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
         # points = noisy_pc(points)
         # points = downsample_pc(points, v_num_points)
         condition["points"] = torch.from_numpy(points).float()[None,]
-    elif "txt" in v_condition_names:
+    if "txt" in v_condition_names:
         if v_cache_data:
             difficulty = np.random.randint(0, 3)
             ori_data = np.load(v_cond_root / v_folder_path / "text_feat.npy")[difficulty]
@@ -543,7 +541,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
                 condition_out[key].append(conditions[idx][key])
 
         for key in keys:
-            condition_out[key] = torch.stack(condition_out[key], dim=0)
+            condition_out[key] = torch.stack(condition_out[key], dim=0) if isinstance(condition_out[key][0], torch.Tensor) else condition_out[key]
 
         return {
             "v_prefix"     : v_prefix,

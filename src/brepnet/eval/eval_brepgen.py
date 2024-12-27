@@ -2,6 +2,7 @@ import torch
 import argparse
 import os
 import numpy as np
+from lightning_fabric import seed_everything
 from tqdm import tqdm
 import random
 import warnings
@@ -93,6 +94,36 @@ def compute_cov_mmd(sample_pcs, ref_pcs, batch_size):
         'MMD-CD': mmd.item(),
         'COV-CD': cov.item(),
     }, min_idx.cpu().numpy()
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+# 假设你的数据存储在变量 data 中
+# data = np.random.randint(0, 255, (28, 28, 28))
+
+def visualize_3d_array(data):
+    # 创建三个子图，分别显示三个主要平面的切片
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
+
+    # 选择中间切片(第14层)进行显示
+    mid = data.shape[0] // 2
+
+    # XY平面 (俯视图)
+    ax1.imshow(data[mid, :, :], cmap='viridis')
+    ax1.set_title('XY Plane (Top View)')
+
+    # XZ平面
+    ax2.imshow(data[:, mid, :], cmap='viridis')
+    ax2.set_title('XZ Plane')
+
+    # YZ平面
+    ax3.imshow(data[:, :, mid], cmap='viridis')
+    ax3.set_title('YZ Plane')
+
+    plt.tight_layout()
+    plt.show()
 
 
 def jsd_between_point_cloud_sets(sample_pcs, ref_pcs, in_unit_sphere, resolution=28):
@@ -227,6 +258,35 @@ def normalize_pc(points):
     return points
 
 
+def align_pc(points):
+    # 1. Center the point cloud
+    centroid = np.mean(points, axis=0)
+    centered_points = points - centroid
+
+    # 2. Calculate the three edge lengths of bbox
+    min_coords = np.min(centered_points, axis=0)
+    max_coords = np.max(centered_points, axis=0)
+    dimensions = max_coords - min_coords
+
+    # 3. Sort axes by dimension length to get axis order
+    axis_order = np.argsort(dimensions)[::-1]  # sort from longest to shortest
+
+    # 4. Create permutation matrix (align longest edge to x, shortest to y)
+    perm_matrix = np.zeros((3, 3))
+    perm_matrix[0, axis_order[0]] = 1  # longest edge -> x
+    perm_matrix[1, axis_order[2]] = 1  # shortest edge -> y
+    perm_matrix[2, axis_order[1]] = 1  # medium edge -> z
+
+    # 5. Apply transformation
+    aligned_points = np.dot(centered_points, perm_matrix.T)
+
+    # 6. Ensure same centroid faces direction
+    if np.mean(aligned_points[:, 2]) < 0:
+        aligned_points[:, 2] *= -1
+
+    return aligned_points
+
+
 def collect_pc(cad_folder):
     pc_path = find_files(os.path.join(cad_folder, 'pcd'), 'final_pcd.ply')
     if len(pc_path) == 0:
@@ -244,6 +304,7 @@ def collect_pc2(cad_folder):
     if pc.shape[0] > N_POINTS:
         pc = downsample_pc(pc, N_POINTS)
     pc = normalize_pc(pc)
+    pc = align_pc(pc)
     return pc
 
 
@@ -287,6 +348,7 @@ def load_data_with_prefix(root_folder, prefix):
                 file_path = os.path.join(root, filename)
                 data_files.append(file_path)
 
+    data_files.sort()
     return data_files
 
 
@@ -295,15 +357,17 @@ def main():
     parser.add_argument("--fake", type=str)
     parser.add_argument("--real", type=str)
     parser.add_argument("--n_test", type=int, default=1000)
-    parser.add_argument("--multi", type=int, default=3)
+    parser.add_argument("--multi", type=float, default=3)
     parser.add_argument("--times", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=64)
     args = parser.parse_args()
 
+    seed_everything(0)
     print("n_test: {}, multiplier: {}, repeat times: {}".format(args.n_test, args.multi, args.times))
 
     args.output = args.fake + '_results.txt'
 
+    seed_everything(0)
     # Load reference pcd
     num_cpus = multiprocessing.cpu_count()
     ref_pcs = []
@@ -327,6 +391,7 @@ def main():
     print("fake point clouds: {}".format(sample_pcs.shape))
 
     # Testing
+    cov_on_gt = []
     fp = open(args.output, "w")
     result_list = []
     for i in range(args.times):
@@ -339,10 +404,12 @@ def main():
 
         jsd = jsd_between_point_cloud_sets(rand_sample_pcs, rand_ref_pcs, in_unit_sphere=False)
         with torch.no_grad():
-            rand_sample_pcs = torch.tensor(rand_sample_pcs).cuda()
-            rand_ref_pcs = torch.tensor(rand_ref_pcs).cuda()
+            rand_sample_pcs = torch.tensor(rand_sample_pcs).cuda().float()
+            rand_ref_pcs = torch.tensor(rand_ref_pcs).cuda().float()
             result, idx = compute_cov_mmd(rand_sample_pcs, rand_ref_pcs, batch_size=args.batch_size)
         result.update({"JSD": jsd})
+
+        cov_on_gt.extend(list(np.array(select_idx2)[np.unique(idx)]))
 
         if False:
             unique_idx = np.unique(idx, return_counts=True)
@@ -354,6 +421,7 @@ def main():
         print(result)
         print(result, file=fp)
         result_list.append(result)
+
     avg_result = {}
     for k in result_list[0].keys():
         avg_result.update({"avg-" + k: np.mean([x[k] for x in result_list])})
@@ -361,6 +429,10 @@ def main():
     print(avg_result)
     print(avg_result, file=fp)
     fp.close()
+
+    cov_on_gt = list(set(cov_on_gt))
+    cov_on_gt = [gt_shape_paths[i] for i in cov_on_gt]
+    np.save(args.fake + '_cov_on_gt.npy', cov_on_gt)
 
 
 if __name__ == '__main__':

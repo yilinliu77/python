@@ -105,7 +105,7 @@ if __name__ == '__main__':
 
     src_folder_list = os.listdir(args.gen_path)
     random.shuffle(src_folder_list)
-    src_folder_list = sorted(src_folder_list[:800])
+    src_folder_list = sorted(src_folder_list[:3000])
     src_folder_list = [os.path.join(args.gen_path, f) for f in src_folder_list]
 
     compute_lfd_all_remote = ray.remote(num_gpus=1, num_cpus=os.cpu_count() // num_workers)(compute_lfd_all)

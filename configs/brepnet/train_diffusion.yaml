@@ -22,8 +22,9 @@ dataset:
 
   condition: []
   cond_root: D:/img2brep/deepcad_whole_test_v5
-  num_points: 2048
+  num_points: 10000
   point_aug: 0
+
 
 trainer:
   gpu: 1
@@ -51,7 +52,6 @@ model:
   name: Diffusion_condition
   train_decoder: false
   stored_z: True
-  condition:
   use_mean: true
 
   diffusion_latent: 512
@@ -74,6 +74,10 @@ model:
   gaussian_weights: 1e-6
   norm: "layer"
   autoencoder_weights: 
+
+  is_aug: false # Only control if point cloud is augmented
+  condition: []
+  cond_prob: []
 
 hydra:
   run:

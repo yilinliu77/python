@@ -8,13 +8,14 @@
       <env name="PYTHONUNBUFFERED" value="1" />
     </envs>
     <option name="SDK_HOME" value="" />
+    <option name="SDK_NAME" value="brepgen" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/" />
-    <option name="IS_MODULE_SDK" value="true" />
+    <option name="IS_MODULE_SDK" value="false" />
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/src/brepnet/train_diffusion.py" />
-    <option name="PARAMETERS" value="dataset.face_z=D:/brepnet/v6/Test_AutoEncoder_0925_gaussian dataset.test_dataset=D:/brepnet/deepcad_test_v6 model.name=Diffusion_condition model.gaussian_weights=1e-6 model.dim_shape=768 model.autoencoder=AutoEncoder_0925 trainer.evaluate=true trainer.test_output_dir=$USER_HOME$/Desktop/cond_test trainer.num_worker=0 trainer.batch_size=4 trainer.resume_from_checkpoint=$USER_HOME$/Desktop/condition_model/mv_gau_600k.ckpt model.condition=multi_img dataset.condition=multi_img" />
+    <option name="PARAMETERS" value="dataset.face_z=$PROJECT_DIR$/../../brepnet/v6/Test_AutoEncoder_0925_gaussian dataset.test_dataset=$PROJECT_DIR$/../../brepnet/deepcad_test_v6 model.name=Diffusion_condition model.gaussian_weights=1e-6 model.dim_shape=768 model.autoencoder=AutoEncoder_0925 trainer.evaluate=true trainer.test_output_dir=$USER_HOME$/Desktop/cond_test trainer.num_worker=0 trainer.batch_size=4 trainer.resume_from_checkpoint=$USER_HOME$/Desktop/condition_model/mv_gau_600k.ckpt model.condition=multi_img dataset.condition=multi_img" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />

@@ -373,6 +373,7 @@ def main():
 
     args.output = args.fake + '_results.txt'
 
+    seed_everything(0)
     # Load reference pcd
     num_cpus = multiprocessing.cpu_count()
     ref_pcs = []

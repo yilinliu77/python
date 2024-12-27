@@ -53,7 +53,7 @@ class MyOffscreenRenderer(Viewer3d):
     def __init__(self, screen_size=(224, 224)):
         super().__init__()
         # create the renderer
-        self.Create()
+        self.Create(display_glinfo=False)
         self.SetSize(screen_size[0], screen_size[1])
         self.SetModeShaded()
         self.set_bg_gradient_color([255, 255, 255], [255, 255, 255])

@@ -237,7 +237,7 @@ class Diffusion_condition(nn.Module):
     def inference(self, bs, device, v_data=None, v_log=True, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
         condition = None
-        if self.with_img or self.with_pc:
+        if self.with_img or self.with_pc or self.with_txt:
             condition = self.extract_condition(v_data)[:bs]
             # face_features = face_features[:condition.shape[0]]
         # error = []

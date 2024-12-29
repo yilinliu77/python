@@ -8,14 +8,14 @@
       <env name="PYTHONUNBUFFERED" value="1" />
     </envs>
     <option name="SDK_HOME" value="" />
-    <option name="SDK_NAME" value="brepgen" />
+    <option name="SDK_NAME" value="brepnet" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/" />
     <option name="IS_MODULE_SDK" value="false" />
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/src/brepnet/train_diffusion.py" />
-    <option name="PARAMETERS" value="dataset.face_z=$PROJECT_DIR$/../../brepnet/v6/Test_AutoEncoder_0925_gaussian dataset.test_dataset=$PROJECT_DIR$/../../brepnet/deepcad_test_v6 model.name=Diffusion_condition model.gaussian_weights=1e-6 model.dim_shape=768 model.autoencoder=AutoEncoder_0925 trainer.evaluate=true trainer.test_output_dir=$USER_HOME$/Desktop/cond_test trainer.num_worker=0 trainer.batch_size=4 trainer.resume_from_checkpoint=$USER_HOME$/Desktop/condition_model/mv_gau_600k.ckpt model.condition=multi_img dataset.condition=multi_img" />
+    <option name="PARAMETERS" value="trainer.evaluate=true trainer.test_output_dir=$USER_HOME$/Desktop/cond_txt_test3 trainer.resume_from_checkpoint=D:/brepnet/ckpt/1224_cond_txt_1000k.ckpt trainer.num_worker=4 trainer.batch_size=512 dataset.name=AutoEncoder_dataset3 dataset.data_root=D:/brepnet/deepcad_v6 dataset.cond_root=D:/brepnet/deepcad_v6_cond dataset.face_z=D:/brepnet/1119_deepcad_aug1_11k dataset.train_dataset=src/brepnet/data/list/new/deduplicated_deepcad_training_7_30.txt dataset.val_dataset=src/brepnet/data/list/new/deduplicated_deepcad_validation_7_30.txt dataset.test_dataset=src/brepnet/data/list/new/deduplicated_deepcad_testing_7_30.txt dataset.num_max_faces=30 model.name=Diffusion_condition model.num_max_faces=30 model.autoencoder=AutoEncoder_1119_light model.diffusion_latent=768 model.in_channels=6 model.beta_schedule=squaredcos_cap_v2 model.autoencoder_weights=D:/brepnet/ckpt/1119_deepcad_aug1_11k.ckpt dataset.condition=[txt] model.condition=[txt] model.cond_prob=[0.20.10.10.10.10.10.3] dataset.is_aug=0 dataset.cached_condition=false model.stored_z=false model.is_aug=false" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />

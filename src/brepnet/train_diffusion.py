@@ -183,7 +183,7 @@ class TrainDiffusion(pl.LightningModule):
                         pc.normals = o3d.utility.Vector3dVector(points[:,3:])
                         o3d.io.write_point_cloud(str(self.log_root / f"epoch{self.current_epoch}_item{idx}_pc.ply"), pc)
                     elif "txt" in data["conditions"]:
-                        open(self.log_root / "epoch{}_item{}_txt.txt".format(self.current_epoch, idx)).write(data["conditions"]["txt"][idx])
+                        open(self.log_root / "epoch{}_item{}_txt.txt".format(self.current_epoch, idx), "w").write(data["conditions"]["txt"][idx])
 
         return total_loss
 
@@ -245,16 +245,20 @@ class TrainDiffusion(pl.LightningModule):
                                 pred_edge_face_connectivity=recon_data["pred_edge_face_connectivity"],
                                 )
 
-            if "conditions" in data and "ori_imgs" in data["conditions"]:
-                imgs = data["conditions"]["ori_imgs"][idx].cpu().numpy().astype(np.uint8)
-                for i in range(imgs.shape[0]):
-                    o3d.io.write_image(str(item_root / f"{prefix}_img{i}.png"), o3d.geometry.Image(imgs[i]))
-            if "conditions" in data and "points" in data["conditions"]:
-                points = data["conditions"]["points"][idx].cpu().numpy().astype(np.float32)[0]
-                pc = o3d.geometry.PointCloud()
-                pc.points = o3d.utility.Vector3dVector(points[:,:3])
-                pc.normals = o3d.utility.Vector3dVector(points[:,3:])
-                o3d.io.write_point_cloud(str(item_root / f"{prefix}_pc.ply"), pc)
+            if "conditions" in data:
+                if "ori_imgs" in data["conditions"]:
+                    img_id = data["conditions"]["img_id"]
+                    imgs = data["conditions"]["ori_imgs"][idx].cpu().numpy().astype(np.uint8)
+                    for i in range(imgs.shape[0]):
+                        o3d.io.write_image(str(self.log_root / f"{prefix}_img{img_id[i]}.png"), o3d.geometry.Image(imgs[i]))
+                elif "points" in data["conditions"]:
+                    points = data["conditions"]["points"][idx].cpu().numpy().astype(np.float32)[0]
+                    pc = o3d.geometry.PointCloud()
+                    pc.points = o3d.utility.Vector3dVector(points[:,:3])
+                    pc.normals = o3d.utility.Vector3dVector(points[:,3:])
+                    o3d.io.write_point_cloud(str(self.log_root / f"{prefix}_pc.ply"), pc)
+                elif "txt" in data["conditions"]:
+                    open(item_root / f"{prefix}_txt.txt", "w").write(data["conditions"]["txt"][idx])
 
     def on_test_epoch_end(self):
         for loss in self.trainer.callback_metrics:

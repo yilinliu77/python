@@ -256,6 +256,7 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         print(len(self.data_folders))
 
     def __len__(self):
+        # return 100
         return len(self.data_folders) * self.scale_factor
 
     def __getitem__(self, idx):

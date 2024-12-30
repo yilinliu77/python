@@ -19,7 +19,6 @@ import trimesh
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -169,6 +168,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_root", type=str, required=True)
     parser.add_argument("--out_root", type=str, required=False)
+    parser.add_argument("--src_root", type=str, required=False)
     parser.add_argument("--random", action='store_true')
     parser.add_argument("--sort", action='store_true')
     parser.add_argument("--sample_num", type=int, default=100)
@@ -178,6 +178,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     data_root = args.data_root
     out_root = args.out_root
+    src_root = None if not args.src_root else Path(args.src_root)
     random = args.random
     sort = args.sort
     sample_num = args.sample_num
@@ -250,6 +251,10 @@ if __name__ == "__main__":
 
         for idx, folder in enumerate(tqdm(sorted_folders)):
             shutil.copytree(str(os.path.join(data_root, folder[0])), str(os.path.join(out_root, f"{idx:05d}_{folder[0]}")))
+            if src_root is not None:
+                for file in (src_root/folder[0]).glob("*"):
+                    if "_pc.ply" in file.name or "_txt.txt" in file.name or ".png" in file.name:
+                        shutil.copy(str(file), str(os.path.join(out_root, f"{idx:05d}_{folder[0]}")))
         ray.shutdown()
         mesh_path_list = glob.glob(os.path.join(out_root, "**", "*.stl"), recursive=True)
         mesh_path_list.sort()

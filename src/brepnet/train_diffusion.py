@@ -250,13 +250,13 @@ class TrainDiffusion(pl.LightningModule):
                     img_id = data["conditions"]["img_id"]
                     imgs = data["conditions"]["ori_imgs"][idx].cpu().numpy().astype(np.uint8)
                     for i in range(imgs.shape[0]):
-                        o3d.io.write_image(str(self.log_root / f"{prefix}_img{img_id[i]}.png"), o3d.geometry.Image(imgs[i]))
+                        o3d.io.write_image(str(item_root / f"{prefix}_img{img_id[i][0].cpu().item()}.png"), o3d.geometry.Image(imgs[i]))
                 elif "points" in data["conditions"]:
                     points = data["conditions"]["points"][idx].cpu().numpy().astype(np.float32)[0]
                     pc = o3d.geometry.PointCloud()
                     pc.points = o3d.utility.Vector3dVector(points[:,:3])
                     pc.normals = o3d.utility.Vector3dVector(points[:,3:])
-                    o3d.io.write_point_cloud(str(self.log_root / f"{prefix}_pc.ply"), pc)
+                    o3d.io.write_point_cloud(str(item_root / f"{prefix}_pc.ply"), pc)
                 elif "txt" in data["conditions"]:
                     open(item_root / f"{prefix}_txt.txt", "w").write(data["conditions"]["txt"][idx])
 
@@ -329,6 +329,7 @@ def main(v_cfg: DictConfig):
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
         weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, weights_only=False, map_location="cpu")["state_dict"]
         weights = {k: v for k, v in weights.items() if "ae_model" not in k}
+        weights = {k: v for k, v in weights.items() if "camera_embedding" not in k}
         # weights = {k.replace("model.", ""): v for k, v in weights.items()}
         model.load_state_dict(weights, strict=False)
         trainer.test(model)

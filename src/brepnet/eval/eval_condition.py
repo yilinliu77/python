@@ -36,7 +36,7 @@ def is_vertex_close(p1, p2, tol=1e-3):
     return np.linalg.norm(np.array(p1) - np.array(p2)) < tol
 
 
-def compute_statistics(eval_root):
+def compute_statistics(eval_root, v_only_valid):
     all_folders = [folder for folder in os.listdir(eval_root) if os.path.isdir(os.path.join(eval_root, folder))]
     exception_folders = []
     results = {
@@ -48,9 +48,10 @@ def compute_statistics(eval_root):
             continue
 
         item = np.load(os.path.join(eval_root, folder_name, 'eval.npz'), allow_pickle=True)['results'].item()
-        if item['num_recon_face'] == 0:
+        if item['num_recon_face'] == 1:
             exception_folders.append(folder_name)
-            continue
+            if v_only_valid:
+                continue
 
         for key in item:
             if key not in results:
@@ -114,6 +115,7 @@ def compute_statistics(eval_root):
             np.mean(results['vertex_rec']), np.mean(results['edge_rec']), np.mean(results['face_rec']),
             np.mean(results['fe_rec']), np.mean(results['ev_rec'])
         ))
+    print(f"{len(all_folders)-len(exception_folders)}/{len(all_folders)} are valid")
 
     def draw():
         face_chamfer = results['face_cd']
@@ -135,6 +137,9 @@ def get_data(v_shape, v_num_per_m=100):
     for face in get_primitives(v_shape, TopAbs_FACE, v_remove_half=True):
         try:
             v, f = get_triangulations(face, 0.1, 0.1)
+            if len(f) == 0:
+                print("Ignore 0 face")
+                continue
         except:
             print("Ignore 1 face")
             continue
@@ -299,22 +304,29 @@ def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, v_num_per_m=10
                 recon_edge_vertex[int(items[0])] = list(map(lambda item: int(item), items[1:]))
         pass
     else:
-        # Face chamfer distance
-        if (eval_root / folder_name / step_name).exists():
-            valid, recon_shape = check_step_valid_soild(eval_root / folder_name / step_name, return_shape=True)
-        else:
-            print(f"Error: {folder_name} does not have {step_name}")
-            return
-        if recon_shape is None:
-            print(f"Error: {folder_name} 's {step_name} is not valid")
-            return
+        try:
+            # Face chamfer distance
+            if (eval_root / folder_name / step_name).exists():
+                valid, recon_shape = check_step_valid_soild(eval_root / folder_name / step_name, return_shape=True)
+            else:
+                print(f"Error: {folder_name} does not have {step_name}")
+                raise
+            if recon_shape is None:
+                print(f"Error: {folder_name} 's {step_name} is not valid")
+                raise
 
-        # Get data
-        recon_faces, recon_face_points, recon_edges, recon_edge_points, recon_vertices, recon_vertex_points = get_data(
-            recon_shape, v_num_per_m)
+            # Get data
+            recon_faces, recon_face_points, recon_edges, recon_edge_points, recon_vertices, recon_vertex_points = get_data(
+                recon_shape, v_num_per_m)
 
-        # Topology
-        recon_face_edge, recon_edge_vertex = get_topology(recon_faces, recon_edges, recon_vertices)
+            # Topology
+            recon_face_edge, recon_edge_vertex = get_topology(recon_faces, recon_edges, recon_vertices)
+        except:
+            recon_face_points = [np.zeros((1, 6), dtype=np.float32)]
+            recon_edge_points = [np.zeros((1, 6), dtype=np.float32)]
+            recon_vertex_points = [np.zeros((1, 3), dtype=np.float32)]
+            recon_face_edge = {}
+            recon_edge_vertex = {}
 
     # GT
     _, gt_shape = check_step_valid_soild(gt_root / folder_name / "normalized_shape.step", return_shape=True)
@@ -391,6 +403,7 @@ if __name__ == '__main__':
     parser.add_argument('--list', type=str, default='')
     parser.add_argument('--from_scratch', action='store_true')
     parser.add_argument('--is_point2cad', action='store_true')
+    parser.add_argument('--only_valid', action='store_true')
     args = parser.parse_args()
     eval_root = Path(args.eval_root)
     gt_root = Path(args.gt_root)
@@ -399,6 +412,7 @@ if __name__ == '__main__':
     listfile = args.list
     from_scratch = args.from_scratch
     is_point2cad = args.is_point2cad
+    only_valid = args.only_valid
 
     if not os.path.exists(eval_root):
         raise ValueError(f"Data root path {eval_root} does not exist.")
@@ -420,7 +434,7 @@ if __name__ == '__main__':
     if not from_scratch:
         print("Filtering the folders that have eval.npz")
         all_folders = [folder for folder in all_folders if not os.path.exists(eval_root / folder / 'eval.npz')]
-        print(f"Total {len(all_folders)} folders to evaluate after caching")
+        print(f"Total {len(all_folders)} folders to compute after caching")
 
     if not is_use_ray:
         # random.shuffle(self.folder_names)
@@ -441,5 +455,5 @@ if __name__ == '__main__':
             ray.get(tasks.pop(0))
 
     print("Computing statistics...")
-    compute_statistics(eval_root)
+    compute_statistics(eval_root, only_valid)
     print("Done")

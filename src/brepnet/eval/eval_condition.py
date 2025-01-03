@@ -36,8 +36,8 @@ def is_vertex_close(p1, p2, tol=1e-3):
     return np.linalg.norm(np.array(p1) - np.array(p2)) < tol
 
 
-def compute_statistics(eval_root, v_only_valid):
-    all_folders = [folder for folder in os.listdir(eval_root) if os.path.isdir(os.path.join(eval_root, folder))]
+def compute_statistics(eval_root, v_only_valid, all_folders):
+    # all_folders = [folder for folder in os.listdir(eval_root) if os.path.isdir(os.path.join(eval_root, folder))]
     exception_folders = []
     results = {
 
@@ -455,5 +455,5 @@ if __name__ == '__main__':
             ray.get(tasks.pop(0))
 
     print("Computing statistics...")
-    compute_statistics(eval_root, only_valid)
+    compute_statistics(eval_root, only_valid, all_folders)
     print("Done")

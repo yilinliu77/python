@@ -363,9 +363,10 @@ class Diffusion_condition(nn.Module):
             normals = pc[:, 0, :, 3:6]
             pc = torch.cat([points, normals], dim=-1)
 
-            if self.is_aug and self.training:
+            # if self.is_aug and self.training:
+            if self.is_aug:
                 # Rotate
-                if True:
+                if False:
                     id_aug = v_data["id_aug"]
                     angles = torch.stack([id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
                     matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
@@ -377,7 +378,7 @@ class Diffusion_condition(nn.Module):
                     pc = torch.cat([pc2, normals2], dim=-1)
                 
                 # Crop
-                if True:
+                if False:
                     bs = pc.shape[0]
                     num_points = pc.shape[1]
                     pc_index = torch.randint(0, pc.shape[1], (bs,), device=pc.device)
@@ -402,19 +403,33 @@ class Diffusion_condition(nn.Module):
                     index = np.arange(num_points)
                     np.random.shuffle(index)
                     num_points = np.random.randint(1000, num_points)
-                    pc = pc[:,index[:2048]]
+                    pc = pc[:,index[:4096]]
                     # pc = pc[:,index[:num_points]]
 
                 # Noise
-                if True:
+                if False:
                     noise = torch.randn_like(pc) * 0.02
                     pc = pc + noise
                 
                 # Mask normal
-                if True:
-                    pc[...,3:] = 0. if torch.rand(1) > 0.5 else pc[...,3:]
+                if False:
+                    pc[...,3:] = 0.
+                    # pc[...,3:] = 0. if torch.rand(1) > 0.5 else pc[...,3:]
             else:
-                pc = pc[:, 0]
+                pc = pc
+                
+            if True:
+                v_pc = pc.cpu().numpy()
+                import open3d as o3d
+                from pathlib import Path
+                root = Path(r"/mnt/d/cond_results/0103_pc_base_4096")
+                for idx in range(v_pc.shape[0]):
+                    prefix = v_data["v_prefix"][idx]
+                    (root/prefix).mkdir(parents=True, exist_ok=True)
+                    pcd = o3d.geometry.PointCloud()
+                    pcd.points = o3d.utility.Vector3dVector(v_pc[idx,:,:3])
+                    o3d.io.write_point_cloud(str(root/prefix/f"{idx}_aug.ply"), pcd)
+                
             l_xyz, l_features = [pc[:, :, :3].contiguous().float()], [pc.permute(0, 2, 1).contiguous().float()]
             with torch.autocast(device_type=pc.device.type, dtype=torch.float32):
                 for i in range(len(self.SA_modules)):

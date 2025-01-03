@@ -174,6 +174,7 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
     if "pc" in v_condition_names:
         pc = o3d.io.read_point_cloud(str(v_cond_root / v_folder_path / "pc.ply"))
         points = np.concatenate((np.asarray(pc.points), np.asarray(pc.normals)), axis=-1)
+        assert points.shape[0] == 10000
         # Already move to GPU
         # if v_id_aug != -1:
             # angles = np.array([

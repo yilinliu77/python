@@ -4,9 +4,9 @@ from tqdm import tqdm
 
 from src.brepnet.paper.step_to_obj import import_step_file_as_obj
 
-succ_root = Path(r"C:/Users/yilin/Desktop/1224_txt/succ")
+succ_root = Path(r"C:/Users/yilin/Desktop/1224_txt/fail")
 src_root = Path(r"D:/brepnet/deepcad_v6")
-dst_root = Path(r"C:/Users/yilin/Desktop/1224_txt/output")
+dst_root = Path(r"C:/Users/yilin/Desktop/1224_txt/output_fail")
 
 for succ_folder in tqdm(succ_root.iterdir()):
     succ_name = succ_folder.stem

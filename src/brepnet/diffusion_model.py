@@ -358,52 +358,61 @@ class Diffusion_condition(nn.Module):
             condition = img_feature[:, None]
         elif self.with_pc:
             pc = v_data["conditions"]["points"]
-            
-            if self.is_aug:
+
+            points = pc[:, 0, :, :3]
+            normals = pc[:, 0, :, 3:6]
+            pc = torch.cat([points, normals], dim=-1)
+
+            if self.is_aug and self.training:
                 # Rotate
-                id_aug = v_data["id_aug"]
-                angles = torch.stack([id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
-                matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
-                rotation_3d_matrix = torch.tensor(matrix, device=pc.device, dtype=pc.dtype)
-                points = pc[:, 0, :, :3]
-                normals = pc[:, 0, :, 3:6]
-                
-                pc2 = (rotation_3d_matrix @ points.permute(0, 2, 1)).permute(0, 2, 1)
-                tpc2 = (rotation_3d_matrix @ (points+normals).permute(0, 2, 1)).permute(0, 2, 1)
-                normals2 = tpc2 - pc2
-                pc = torch.cat([pc2, normals2], dim=-1)
+                if True:
+                    id_aug = v_data["id_aug"]
+                    angles = torch.stack([id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
+                    matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
+                    rotation_3d_matrix = torch.tensor(matrix, device=pc.device, dtype=pc.dtype)
+
+                    pc2 = (rotation_3d_matrix @ points.permute(0, 2, 1)).permute(0, 2, 1)
+                    tpc2 = (rotation_3d_matrix @ (points+normals).permute(0, 2, 1)).permute(0, 2, 1)
+                    normals2 = tpc2 - pc2
+                    pc = torch.cat([pc2, normals2], dim=-1)
                 
                 # Crop
-                bs = pc.shape[0]
-                num_points = pc.shape[1]
-                pc_index = torch.randint(0, pc.shape[1], (bs,), device=pc.device)
-                center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[...,:3]
-                length_xyz = torch.rand((bs,3), device=pc.device) * 1.0
-                bbox_min = center_pos - length_xyz[:, None, :]
-                bbox_max = center_pos + length_xyz[:, None, :]
-                mask = torch.logical_not(((pc[:, :, :3] > bbox_min) & (pc[:, :, :3] < bbox_max)).all(dim=-1))
-                
-                sort_results = torch.sort(mask.long(),descending=True)
-                mask=sort_results.values
-                pc_sorted = torch.gather(pc,1,sort_results.indices[:,:,None].repeat(1,1,6))
-                num_valid = mask.sum(dim=-1)
-                index1 = torch.rand((bs,num_points), device=pc.device) * num_valid[:,None]
-                index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs,1)
-                index = torch.where(mask.bool(), index2, index1)
-                pc = pc_sorted[torch.arange(bs)[:, None].repeat(1, num_points), index.long()]
+                if True:
+                    bs = pc.shape[0]
+                    num_points = pc.shape[1]
+                    pc_index = torch.randint(0, pc.shape[1], (bs,), device=pc.device)
+                    center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[...,:3]
+                    length_xyz = torch.rand((bs,3), device=pc.device) * 1.0
+                    bbox_min = center_pos - length_xyz[:, None, :]
+                    bbox_max = center_pos + length_xyz[:, None, :]
+                    mask = torch.logical_not(((pc[:, :, :3] > bbox_min) & (pc[:, :, :3] < bbox_max)).all(dim=-1))
+
+                    sort_results = torch.sort(mask.long(),descending=True)
+                    mask=sort_results.values
+                    pc_sorted = torch.gather(pc,1,sort_results.indices[:,:,None].repeat(1,1,6))
+                    num_valid = mask.sum(dim=-1)
+                    index1 = torch.rand((bs,num_points), device=pc.device) * num_valid[:,None]
+                    index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs,1)
+                    index = torch.where(mask.bool(), index2, index1)
+                    pc = pc_sorted[torch.arange(bs)[:, None].repeat(1, num_points), index.long()]
                 
                 # Downsample
-                index = np.arange(num_points)
-                np.random.shuffle(index)
-                num_points = np.random.randint(1000, num_points)
-                pc = pc[:,index[:num_points]]
-                
+                if True:
+                    num_points = pc.shape[1]
+                    index = np.arange(num_points)
+                    np.random.shuffle(index)
+                    num_points = np.random.randint(1000, num_points)
+                    pc = pc[:,index[:2048]]
+                    # pc = pc[:,index[:num_points]]
+
                 # Noise
-                noise = torch.randn_like(pc) * 0.02
-                pc = pc + noise
+                if True:
+                    noise = torch.randn_like(pc) * 0.02
+                    pc = pc + noise
                 
                 # Mask normal
-                pc[...,3:] = 0. if torch.rand(1) > 0.5 else pc[...,3:]
+                if True:
+                    pc[...,3:] = 0. if torch.rand(1) > 0.5 else pc[...,3:]
             else:
                 pc = pc[:, 0]
             l_xyz, l_features = [pc[:, :, :3].contiguous().float()], [pc.permute(0, 2, 1).contiguous().float()]

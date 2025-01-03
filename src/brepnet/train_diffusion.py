@@ -227,6 +227,7 @@ class TrainDiffusion(pl.LightningModule):
         # Generation
         results = self.model.inference(batch_size, self.device, v_data=data, v_log=self.global_rank == 0)
         log_root = Path(self.hydra_conf["trainer"]["test_output_dir"])
+        os.makedirs(log_root, exist_ok=True)
         for idx in range(batch_size):
             prefix = data["v_prefix"][idx]
             item_root = (log_root / prefix)
@@ -247,10 +248,10 @@ class TrainDiffusion(pl.LightningModule):
 
             if "conditions" in data:
                 if "ori_imgs" in data["conditions"]:
-                    img_id = data["conditions"]["img_id"]
+                    img_id = data["conditions"]["img_id"][idx]
                     imgs = data["conditions"]["ori_imgs"][idx].cpu().numpy().astype(np.uint8)
                     for i in range(imgs.shape[0]):
-                        o3d.io.write_image(str(item_root / f"{prefix}_img{img_id[i][0].cpu().item()}.png"), o3d.geometry.Image(imgs[i]))
+                        o3d.io.write_image(str(item_root / f"{prefix}_img{img_id[i].cpu().item()}.png"), o3d.geometry.Image(imgs[i]))
                 elif "points" in data["conditions"]:
                     points = data["conditions"]["points"][idx].cpu().numpy().astype(np.float32)[0]
                     pc = o3d.geometry.PointCloud()
@@ -329,7 +330,7 @@ def main(v_cfg: DictConfig):
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
         weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, weights_only=False, map_location="cpu")["state_dict"]
         weights = {k: v for k, v in weights.items() if "ae_model" not in k}
-        weights = {k: v for k, v in weights.items() if "camera_embedding" not in k}
+        # weights = {k: v for k, v in weights.items() if "camera_embedding" not in k}
         # weights = {k.replace("model.", ""): v for k, v in weights.items()}
         model.load_state_dict(weights, strict=False)
         trainer.test(model)

@@ -1,4 +1,6 @@
 import os
+import shutil
+
 from OCC.Core import STEPControl
 import OCC.Core.TopAbs as TopAbs
 import OCC.Core.TopExp as TopExp
@@ -132,6 +134,8 @@ if __name__ == "__main__":
     step_folder = Path(sys.argv[1])
     out_folder = Path(sys.argv[2])
     os.makedirs(out_folder, exist_ok=True)
-    for step_file in tqdm(os.listdir(step_folder)):
-        if step_file.endswith(".step"):
-            import_step_file_as_obj(step_folder / step_file, out_folder, 0.01, 0.005, 100)
+    for step_file in tqdm(step_folder.rglob("*.step")):
+        # folder_name = step_file.parent.name
+        # shutil.copyfile(step_file, out_folder / f"{folder_name}.step")
+        if step_file.name.endswith(".step"):
+            import_step_file_as_obj(step_file, out_folder, 0.01, 0.005, 100)

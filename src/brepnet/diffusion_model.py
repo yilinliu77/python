@@ -747,3 +747,143 @@ class Diffusion_condition_mm(Diffusion_condition):
             loss["l2"] = self.loss(pred, face_z)
             loss["diffusion_loss"] += loss["l2"]
         return loss
+
+
+class Diffusion_condition_mvr(Diffusion_condition):
+    def __init__(self, v_conf, ):
+        super().__init__(v_conf)
+        if "single_img" in v_conf["condition"] or "multi_img" in v_conf["condition"] or "sketch" in v_conf["condition"]:
+            self.with_img = True
+            self.img_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
+            for param in self.img_model.parameters():
+                param.requires_grad = False
+            self.img_model.eval()
+
+            self.img_fc = nn.Sequential(
+                nn.Linear(1280, 1024),
+                nn.LayerNorm(1024),
+                nn.SiLU(),
+                nn.Linear(1024, self.dim_condition),
+            )
+            self.camera_embedding = nn.Sequential(
+                nn.Embedding(8, 1024),
+                nn.Linear(1024, 1024),
+                nn.LayerNorm(1024),
+                nn.SiLU(),
+                nn.Linear(1024, 256),
+            )
+            self.single_view_embedding = nn.Parameter(torch.randn(256))
+
+    def extract_condition(self, v_data):
+        condition = None
+        if self.with_img:
+            if "img_features" in v_data["conditions"]:
+                img_feature = v_data["conditions"]["img_features"]
+                num_imgs = img_feature.shape[1]
+            else:
+                imgs = v_data["conditions"]["imgs"]
+                num_imgs = imgs.shape[1]
+                imgs = imgs.reshape(-1, 3, 224, 224)
+                img_feature = self.img_model(imgs)
+            img_idx = v_data["conditions"]["img_id"]
+            if img_idx.shape[-1] > 1:
+                camera_embedding = self.camera_embedding(img_idx)
+            else:
+                camera_embedding = self.single_view_embedding[None,None,:].repeat(img_idx.shape[0], num_imgs, 1)
+            img_feature = torch.cat((img_feature.reshape(-1, num_imgs, 1024), camera_embedding),dim=2)
+            img_feature = self.img_fc(img_feature).mean(dim=1)
+            condition = img_feature[:, None]
+        elif self.with_pc:
+            pc = v_data["conditions"]["points"]
+
+            points = pc[:, 0, :, :3]
+            normals = pc[:, 0, :, 3:6]
+            pc = torch.cat([points, normals], dim=-1)
+
+            if self.is_aug and self.training:
+                # if self.is_aug:
+                # Rotate
+                if True:
+                    id_aug = v_data["id_aug"]
+                    angles = torch.stack(
+                        [id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
+                    matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
+                    rotation_3d_matrix = torch.tensor(matrix, device=pc.device, dtype=pc.dtype)
+
+                    pc2 = (rotation_3d_matrix @ points.permute(0, 2, 1)).permute(0, 2, 1)
+                    tpc2 = (rotation_3d_matrix @ (points + normals).permute(0, 2, 1)).permute(0, 2, 1)
+                    normals2 = tpc2 - pc2
+                    pc = torch.cat([pc2, normals2], dim=-1)
+
+                # Crop
+                if True:
+                    bs = pc.shape[0]
+                    num_points = pc.shape[1]
+                    pc_index = torch.randint(0, pc.shape[1], (bs,), device=pc.device)
+                    center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[..., :3]
+                    length_xyz = torch.rand((bs, 3), device=pc.device) * 1.0
+                    bbox_min = center_pos - length_xyz[:, None, :]
+                    bbox_max = center_pos + length_xyz[:, None, :]
+                    mask = torch.logical_not(((pc[:, :, :3] > bbox_min) & (pc[:, :, :3] < bbox_max)).all(dim=-1))
+
+                    sort_results = torch.sort(mask.long(), descending=True)
+                    mask = sort_results.values
+                    pc_sorted = torch.gather(pc, 1, sort_results.indices[:, :, None].repeat(1, 1, 6))
+                    num_valid = mask.sum(dim=-1)
+                    index1 = torch.rand((bs, num_points), device=pc.device) * num_valid[:, None]
+                    index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs, 1)
+                    index = torch.where(mask.bool(), index2, index1)
+                    pc = pc_sorted[torch.arange(bs)[:, None].repeat(1, num_points), index.long()]
+
+                # Downsample
+                if True:
+                    num_points = pc.shape[1]
+                    index = np.arange(num_points)
+                    np.random.shuffle(index)
+                    num_points = np.random.randint(1000, num_points)
+                    # pc = pc[:,index[:2048]]
+                    pc = pc[:, index[:num_points]]
+
+                # Noise
+                if True:
+                    noise = torch.randn_like(pc) * 0.02
+                    pc = pc + noise
+
+                # Mask normal
+                if True:
+                    # pc[...,3:] = 0.
+                    pc[..., 3:] = 0. if torch.rand(1) > 0.5 else pc[..., 3:]
+            else:
+                pc = pc
+
+            if False:
+                v_pc = pc.cpu().numpy()
+                import open3d as o3d
+                from pathlib import Path
+                root = Path(r"D:/brepnet/noisy_input/111")
+                for idx in range(v_pc.shape[0]):
+                    prefix = v_data["v_prefix"][idx]
+                    (root / prefix).mkdir(parents=True, exist_ok=True)
+                    pcd = o3d.geometry.PointCloud()
+                    pcd.points = o3d.utility.Vector3dVector(v_pc[idx, :, :3])
+                    o3d.io.write_point_cloud(str(root / prefix / f"{idx}_aug.ply"), pcd)
+
+            l_xyz, l_features = [pc[:, :, :3].contiguous().float()], [pc.permute(0, 2, 1).contiguous().float()]
+            with torch.autocast(device_type=pc.device.type, dtype=torch.float32):
+                for i in range(len(self.SA_modules)):
+                    li_xyz, li_features = self.SA_modules[i](l_xyz[i], l_features[i])
+                    l_xyz.append(li_xyz)
+                    l_features.append(li_features)
+                features = self.fc_lyaer(l_features[-1].mean(dim=-1))
+                condition = features[:, None]
+        elif self.with_txt:
+            if "txt_features" in v_data["conditions"]:
+                txt_feat = v_data["conditions"]["txt_features"]
+            else:
+                txt = v_data["conditions"]["txt"]
+                txt_feat = self.txt_model.encode(txt, show_progress_bar=False, convert_to_numpy=False,
+                                                 device=self.txt_model.device)
+                txt_feat = torch.stack(txt_feat, dim=0)
+            condition = self.txt_fc(txt_feat)[:, None]
+        return condition
+

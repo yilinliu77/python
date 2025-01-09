@@ -20,8 +20,8 @@ if __name__ == "__main__":
     long_list = read_list("src/process_abc/abc_long_shape.txt")
 
     exception_list = read_list(r"src/process_abc/exception_list.txt")
-    exception_list1 = read_list(r"src/brepnet/data/list/exception1.txt")
-    exception_list2 = read_list(r"src/brepnet/data/list/exception2.txt")
+    exception_list1 = read_list(r"src/process_abc/exception1.txt")
+    exception_list2 = read_list(r"src/process_abc/exception2.txt")
 
     deduplicated_list = read_list(r"src/process_abc/abc_deduplicated_list.txt")
     print("{} samples in deduplicated_list".format(len(deduplicated_list)))
@@ -34,9 +34,9 @@ if __name__ == "__main__":
     deepcad_valid = read_list(r"src/img2brep/data/deepcad_validation_whole.txt")
     deepcad_test = read_list(r"src/img2brep/data/deepcad_test_whole.txt")
 
-    brepgen_abc_train_test = read_list(r"src/brepnet/data/list/deduplicated_abc_training_brepnet.txt")
-    brepgen_abc_validation_test = read_list(r"src/brepnet/data/list/deduplicated_abc_validation_brepnet.txt")
-    brepgen_abc_testing_test = read_list(r"src/brepnet/data/list/deduplicated_abc_testing_brepnet.txt")
+    brepgen_abc_train_test = read_list(r"src/brepnet/data/list/bak/deduplicated_abc_training_brepnet.txt")
+    brepgen_abc_validation_test = read_list(r"src/brepnet/data/list/bak/deduplicated_abc_validation_brepnet.txt")
+    brepgen_abc_testing_test = read_list(r"src/brepnet/data/list/bak/deduplicated_abc_testing_brepnet.txt")
 
     ours_validation_list = (brepgen_abc_validation_test & deduplicated_list)
     print("ours_validation_list: ", len(ours_validation_list))

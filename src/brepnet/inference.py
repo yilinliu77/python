@@ -136,7 +136,7 @@ if __name__ == '__main__':
                 T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
             ])
             img = np.array(Image.open(input_file).convert("RGB"))
-            img[img>100]=255
+            # img[img>100]=255
             img = transform(img).to(device)
             img = img[None, None, :].repeat(num_proposals, 1, 1, 1, 1)
             data["conditions"]["imgs"] = img

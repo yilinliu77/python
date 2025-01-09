@@ -230,6 +230,13 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
             self.is_aug = 0
             self.cached_condition = False
 
+        # Check data
+        data_folders = []
+        for item in self.data_folders:
+            if os.path.exists(self.root / item / "data.npz"):
+                data_folders.append(item)
+        self.data_folders = data_folders
+
         # Check cond data
         if len(self.condition) > 0:
             data_folders = []

@@ -23,9 +23,9 @@ debug_id = None
 # debug_id = "00000003"
 
 data_root = Path(r"/mnt/e/yilin/data_step")
-npz_root = Path(r"/mnt/d/yilin/img2brep/deepcad_730_imgs_npz_v1")
-img_root = Path(r"/mnt/d/yilin/img2brep/deepcad_730_imgs_png_v1")
-data_split = r"src/brepnet/data/list/deduplicated_deepcad_7_30.txt"
+npz_root = Path(r"/mnt/d/yilin/img2brep/abc_v2_npz")
+img_root = Path(r"/mnt/d/yilin/img2brep/abc_v2_png")
+data_split = r"src/brepnet/data/list/abc_total.txt"
 
 exception_files = [
 ]
@@ -129,6 +129,7 @@ def get_brep(v_root, output_root, v_folders):
             # Sketch
             sketch_imgs = []
             mat.SetAmbientColor(Quantity_Color(1, 1, 1, Quantity_TOC_RGB))
+            display.camera.SetProjectionType(0)
             display.DisplayShape(shape, material=mat, update=True)
             display.View.Dump(str(img_root / v_folder / f"view_.png"))
             for i in range(64):
@@ -157,6 +158,7 @@ def get_brep(v_root, output_root, v_folders):
             # Multi view
             mat = Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_Silver)
             mat.SetReflectionModeOff(Graphic3d_TypeOfReflection.Graphic3d_TOR_SPECULAR)
+            display.camera.SetProjectionType(1)
             display.DisplayShape(shape, material=mat, update=True)
             display.View.Dump(str(img_root / v_folder / f"view_.png"))
             mvr_imgs = []

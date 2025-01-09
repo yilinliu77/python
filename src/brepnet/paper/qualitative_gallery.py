@@ -99,7 +99,7 @@ def import_model(v_path):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python step_to_obj.py <succ_folder> <fail_folder>")
+        print("Usage: python src.brepnet.paper.qualitative_gallery <succ_folder> <fail_folder>")
         sys.exit(1)
     succ_folder = Path(sys.argv[1])
     fail_folder = None
@@ -133,6 +133,7 @@ if __name__ == "__main__":
     wire_line = []
     i_wire_vertex = 0
     vertex_vertex = []
+    
     for idx, prefix in enumerate(tqdm(folders)):
         mesh_item, (v_wire_item, l_wire_item), v_vertex_item = import_step_file_as_obj(prefix, 100)
         # mesh_item, (v_wire_item, l_wire_item), v_vertex_item = import_model(prefix)
@@ -141,15 +142,23 @@ if __name__ == "__main__":
         delta_y = idx // num_col * y_offset
         mesh_item.apply_translation([delta_x, delta_y, 0])
         v_wire_item += np.array([delta_x, delta_y, 0])
-        l_wire_item += i_wire_vertex
         v_vertex_item += np.array([delta_x, delta_y, 0])
-
+        
+        trimesh.PointCloud(v_vertex_item).export(out_folder / f"vertex_{idx}.obj")
+        with open(out_folder / f"wire_{idx}.obj", "w") as f:
+            for v in v_wire_item:
+                f.write(f"v {v[0]} {v[1]} {v[2]}\n")
+            for l in l_wire_item:
+                f.write(f"l {l[0]} {l[1]}\n")
+        mesh_item.export(out_folder / f"model_{idx}.obj")
+        
         mesh_model = trimesh.util.concatenate(mesh_model, mesh_item)
         wire_vertex.append(v_wire_item)
+        l_wire_item += i_wire_vertex
         wire_line.append(l_wire_item)
         vertex_vertex.append(v_vertex_item)
         i_wire_vertex += v_wire_item.shape[0]
-
+        
     wire_vertex = np.vstack(wire_vertex)
     wire_line = np.vstack(wire_line)
     vertex_vertex = np.vstack(vertex_vertex)

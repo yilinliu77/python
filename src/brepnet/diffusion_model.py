@@ -509,7 +509,7 @@ class Diffusion_condition_mm(Diffusion_condition):
     def inference(self, bs, device, v_data=None, v_log=True, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
         condition = None
-        if self.with_img or self.with_pc:
+        if self.with_img or self.with_pc or self.with_txt:
             condition, cond_nehot = self.extract_condition(v_data)
             condition = condition[:bs]
             # face_features = face_features[:condition.shape[0]]
@@ -568,20 +568,25 @@ class Diffusion_condition_mm(Diffusion_condition):
         pred_x0 = self.fc_out(pred_x0)
         return pred_x0
 
-    def extract_condition(self, v_data):
+    def extract_condition(self, v_data, v_test=False):
         bs = len(v_data["v_prefix"])
         device = self.learned_uncond_emb.device
-        sampled_prob = np.random.rand(bs)
-        idx = self.cond_prob_acc.shape[0]-(sampled_prob[:,None] < self.cond_prob_acc[None,]).sum(axis=-1)
-        cond_onehot = torch.zeros((bs, 5), device=device, dtype=bool) # svr, mvr, sketch, pc, txt
-        cond_onehot[idx==1, 0] = 1 # svr
-        cond_onehot[idx==2, 1] = 1 # mvr
-        cond_onehot[idx==3, 2] = 1 # sketch
-        cond_onehot[idx==4, 3] = 1 # pc
-        cond_onehot[idx==5, 4] = 1 # txt
-        num_mm = (idx==6).sum()
-        rand_onehot = torch.rand((num_mm, 5), device=device) > 0.5
-        cond_onehot[idx==6] = rand_onehot
+        
+        if not v_test:
+            sampled_prob = np.random.rand(bs)
+            idx = self.cond_prob_acc.shape[0]-(sampled_prob[:,None] < self.cond_prob_acc[None,]).sum(axis=-1)
+            cond_onehot = torch.zeros((bs, 5), device=device, dtype=bool) # svr, mvr, sketch, pc, txt
+            cond_onehot[idx==1, 0] = 1 # svr
+            cond_onehot[idx==2, 1] = 1 # mvr
+            cond_onehot[idx==3, 2] = 1 # sketch
+            cond_onehot[idx==4, 3] = 1 # pc
+            cond_onehot[idx==5, 4] = 1 # txt
+            num_mm = (idx==6).sum()
+            rand_onehot = torch.rand((num_mm, 5), device=device) > 0.5
+            cond_onehot[idx==6] = rand_onehot
+        else:
+            cond_onehot = torch.zeros((bs, 5), device=device, dtype=bool)
+            cond_onehot[:, 1] = True
 
         # Img feat
         if "img_features" in v_data["conditions"]:
@@ -601,80 +606,80 @@ class Diffusion_condition_mm(Diffusion_condition):
             img_feature = (img_feature.reshape(-1, num_imgs, self.dim_condition)).mean(dim=1)
         
         # PC feat
-        pc = v_data["conditions"]["points"]
-        if self.is_aug:
-            # Rotate
-            id_aug = v_data["id_aug"]
-            angles = torch.stack([id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
-            matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
-            rotation_3d_matrix = torch.tensor(matrix, device=pc.device, dtype=pc.dtype)
-            points = pc[:, 0, :, :3]
-            normals = pc[:, 0, :, 3:6]
+        # pc = v_data["conditions"]["points"]
+        # if self.is_aug:
+        #     # Rotate
+        #     id_aug = v_data["id_aug"]
+        #     angles = torch.stack([id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
+        #     matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
+        #     rotation_3d_matrix = torch.tensor(matrix, device=pc.device, dtype=pc.dtype)
+        #     points = pc[:, 0, :, :3]
+        #     normals = pc[:, 0, :, 3:6]
             
-            pc2 = (rotation_3d_matrix @ points.permute(0, 2, 1)).permute(0, 2, 1)
-            tpc2 = (rotation_3d_matrix @ (points+normals).permute(0, 2, 1)).permute(0, 2, 1)
-            normals2 = tpc2 - pc2
-            pc = torch.cat([pc2, normals2], dim=-1)
+        #     pc2 = (rotation_3d_matrix @ points.permute(0, 2, 1)).permute(0, 2, 1)
+        #     tpc2 = (rotation_3d_matrix @ (points+normals).permute(0, 2, 1)).permute(0, 2, 1)
+        #     normals2 = tpc2 - pc2
+        #     pc = torch.cat([pc2, normals2], dim=-1)
             
-            # Crop
-            bs = pc.shape[0]
-            num_points = pc.shape[1]
-            pc_index = torch.randint(0, pc.shape[1], (bs,), device=pc.device)
-            center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[...,:3]
-            length_xyz = torch.rand((bs,3), device=pc.device) * 1.0
-            bbox_min = center_pos - length_xyz[:, None, :]
-            bbox_max = center_pos + length_xyz[:, None, :]
-            mask = torch.logical_not(((pc[:, :, :3] > bbox_min) & (pc[:, :, :3] < bbox_max)).all(dim=-1))
+        #     # Crop
+        #     bs = pc.shape[0]
+        #     num_points = pc.shape[1]
+        #     pc_index = torch.randint(0, pc.shape[1], (bs,), device=pc.device)
+        #     center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[...,:3]
+        #     length_xyz = torch.rand((bs,3), device=pc.device) * 1.0
+        #     bbox_min = center_pos - length_xyz[:, None, :]
+        #     bbox_max = center_pos + length_xyz[:, None, :]
+        #     mask = torch.logical_not(((pc[:, :, :3] > bbox_min) & (pc[:, :, :3] < bbox_max)).all(dim=-1))
             
-            sort_results = torch.sort(mask.long(),descending=True)
-            mask=sort_results.values
-            pc_sorted = torch.gather(pc,1,sort_results.indices[:,:,None].repeat(1,1,6))
-            num_valid = mask.sum(dim=-1)
-            index1 = torch.rand((bs,num_points), device=pc.device) * num_valid[:,None]
-            index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs,1)
-            index = torch.where(mask.bool(), index2, index1)
-            pc = pc_sorted[torch.arange(bs)[:, None].repeat(1, num_points), index.long()]
+        #     sort_results = torch.sort(mask.long(),descending=True)
+        #     mask=sort_results.values
+        #     pc_sorted = torch.gather(pc,1,sort_results.indices[:,:,None].repeat(1,1,6))
+        #     num_valid = mask.sum(dim=-1)
+        #     index1 = torch.rand((bs,num_points), device=pc.device) * num_valid[:,None]
+        #     index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs,1)
+        #     index = torch.where(mask.bool(), index2, index1)
+        #     pc = pc_sorted[torch.arange(bs)[:, None].repeat(1, num_points), index.long()]
             
-            # Downsample
-            index = np.arange(num_points)
-            np.random.shuffle(index)
-            num_points = np.random.randint(1000, num_points)
-            pc = pc[:,index[:num_points]]
+        #     # Downsample
+        #     index = np.arange(num_points)
+        #     np.random.shuffle(index)
+        #     num_points = np.random.randint(1000, num_points)
+        #     pc = pc[:,index[:num_points]]
             
-            # Noise
-            noise = torch.randn_like(pc) * 0.02
-            pc = pc + noise
+        #     # Noise
+        #     noise = torch.randn_like(pc) * 0.02
+        #     pc = pc + noise
             
-            # Mask normal
-            pc[...,3:] = 0. if torch.rand(1) > 0.5 else pc[...,3:]
-        else:
-            pc = pc[:, 0]
-        l_xyz, l_features = [pc[:, :, :3].contiguous().float()], [pc.permute(0, 2, 1).contiguous().float()]
-        with torch.autocast(device_type=pc.device.type, dtype=torch.float32):
-            for i in range(len(self.SA_modules)):
-                li_xyz, li_features = self.SA_modules[i](l_xyz[i], l_features[i])
-                l_xyz.append(li_xyz)
-                l_features.append(li_features)
-            pc_features = self.fc_lyaer(l_features[-1].mean(dim=-1))
-        pc_features = pc_features.to(img_feature.dtype)
-        # TXT feat
-        if "txt_features" in v_data["conditions"]:
-            txt_feat = v_data["conditions"]["txt_features"]
-        else:
-            txt = v_data["conditions"]["txt"]
-            txt_feat = self.txt_model.encode(txt, show_progress_bar=False, convert_to_numpy=False, device=self.txt_model.device)
-            txt_feat = torch.stack(txt_feat, dim=0)
-        txt_features = self.txt_fc(txt_feat)
+        #     # Mask normal
+        #     pc[...,3:] = 0. if torch.rand(1) > 0.5 else pc[...,3:]
+        # else:
+        #     pc = pc[:, 0]
+        # l_xyz, l_features = [pc[:, :, :3].contiguous().float()], [pc.permute(0, 2, 1).contiguous().float()]
+        # with torch.autocast(device_type=pc.device.type, dtype=torch.float32):
+        #     for i in range(len(self.SA_modules)):
+        #         li_xyz, li_features = self.SA_modules[i](l_xyz[i], l_features[i])
+        #         l_xyz.append(li_xyz)
+        #         l_features.append(li_features)
+        #     pc_features = self.fc_lyaer(l_features[-1].mean(dim=-1))
+        # pc_features = pc_features.to(img_feature.dtype)
+        # # TXT feat
+        # if "txt_features" in v_data["conditions"]:
+        #     txt_feat = v_data["conditions"]["txt_features"]
+        # else:
+        #     txt = v_data["conditions"]["txt"]
+        #     txt_feat = self.txt_model.encode(txt, show_progress_bar=False, convert_to_numpy=False, device=self.txt_model.device)
+        #     txt_feat = torch.stack(txt_feat, dim=0)
+        # txt_features = self.txt_fc(txt_feat)
         
         condition = torch.stack([
             self.learned_svr_emb, self.learned_mvr_emb, self.learned_sketch_emb, 
             self.learned_pc_emb, self.learned_txt_emb], dim=0)[None,:].repeat(bs,1,1).to(img_feature.dtype)
         
-        condition[cond_onehot[:,0],0] = img_feature[cond_onehot[:,0]]
+        # condition[cond_onehot[:,0],0] = img_feature[cond_onehot[:,0]]
         condition[cond_onehot[:,1],1] = img_feature[cond_onehot[:,1]]
-        condition[cond_onehot[:,2],2] = img_feature[cond_onehot[:,2]]
-        condition[cond_onehot[:,3],3] = pc_features[cond_onehot[:,3]]
-        condition[cond_onehot[:,4],4] = txt_features[cond_onehot[:,4]]
+        # condition[cond_onehot[:,2],2] = img_feature[cond_onehot[:,2]]
+        # condition[cond_onehot[:,3],3] = pc_features[cond_onehot[:,3]]
+        # condition[cond_onehot[:,4],4] = txt_features[cond_onehot[:,4]]
         
         condition = self.cross_attn(condition)
         condition = condition.mean(dim=1, keepdim=True)

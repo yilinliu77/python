@@ -764,20 +764,18 @@ class Diffusion_condition_mvr(Diffusion_condition):
                 param.requires_grad = False
             self.img_model.eval()
 
-            self.img_fc = nn.Sequential(
-                nn.Linear(1280, 1024),
-                nn.LayerNorm(1024),
-                nn.SiLU(),
+            self.img_fc1 = nn.Sequential(
                 nn.Linear(1024, self.dim_condition),
-            )
-            self.camera_embedding = nn.Sequential(
-                nn.Embedding(8, 1024),
-                nn.Linear(1024, 1024),
-                nn.LayerNorm(1024),
+                nn.LayerNorm(self.dim_condition),
                 nn.SiLU(),
-                nn.Linear(1024, 256),
+                nn.Linear(self.dim_condition, self.dim_condition),
             )
-            self.single_view_embedding = nn.Parameter(torch.randn(256))
+            self.img_fc2 = nn.Sequential(
+                nn.Linear(1024, self.dim_condition),
+                nn.LayerNorm(self.dim_condition),
+                nn.SiLU(),
+                nn.Linear(self.dim_condition, self.dim_condition),
+            )
 
     def extract_condition(self, v_data):
         condition = None
@@ -790,13 +788,11 @@ class Diffusion_condition_mvr(Diffusion_condition):
                 num_imgs = imgs.shape[1]
                 imgs = imgs.reshape(-1, 3, 224, 224)
                 img_feature = self.img_model(imgs)
-            img_idx = v_data["conditions"]["img_id"]
-            if img_idx.shape[-1] > 1:
-                camera_embedding = self.camera_embedding(img_idx)
-            else:
-                camera_embedding = self.single_view_embedding[None,None,:].repeat(img_idx.shape[0], num_imgs, 1)
-            img_feature = torch.cat((img_feature.reshape(-1, num_imgs, 1024), camera_embedding),dim=2)
-            img_feature = self.img_fc(img_feature).mean(dim=1)
+
+            img_feature_down = self.img_fc1(img_feature)
+            img_feature_down = img_feature_down.reshape(-1, num_imgs, self.dim_condition)
+            img_feature_cat = img_feature_down.reshape(-1, num_imgs * self.dim_condition)
+            img_feature = self.img_fc2(img_feature_cat)
             condition = img_feature[:, None]
         elif self.with_pc:
             pc = v_data["conditions"]["points"]

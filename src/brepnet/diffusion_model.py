@@ -12,6 +12,7 @@ from einops.layers.torch import Rearrange
 from einops import rearrange, reduce
 
 from diffusers import DDPMScheduler
+from torch_scatter import scatter_mean
 from tqdm import tqdm
 
 from thirdparty.Pointnet2_PyTorch.pointnet2_ops_lib.pointnet2_ops.pointnet2_modules import PointnetSAModuleMSG, \
@@ -20,7 +21,7 @@ from scipy.spatial.transform import Rotation
 
 
 # from thirdparty.PointTransformerV3.model import *
-
+from thirdparty.point_transformer_v3.model import PointTransformerV3
 
 def add_timer(time_statics, v_attr, timer):
     if v_attr not in time_statics:
@@ -115,64 +116,71 @@ class Diffusion_condition(nn.Module):
             )
         if "pc" in v_conf["condition"]:
             self.with_pc = True
-            self.SA_modules = nn.ModuleList()
-            # PointNet2
-            c_in = 6
-            with_bn = False
-            self.SA_modules.append(
-                    PointnetSAModuleMSG(
-                            npoint=1024,
-                            radii=[0.05, 0.1],
-                            nsamples=[16, 32],
-                            mlps=[[c_in, 32], [c_in, 64]],
-                            use_xyz=True,
-                            bn=with_bn
-                    )
-            )
-            c_out_0 = 32 + 64
+            
+            if True:
+                self.point_model = PointTransformerV3(in_channels=6, cls_mode=True)
+                self.fc_lyaer = nn.Sequential(
+                    nn.Linear(512, self.dim_condition),
+                )
+            else:
+                self.SA_modules = nn.ModuleList()
+                # PointNet2
+                c_in = 6
+                with_bn = False
+                self.SA_modules.append(
+                        PointnetSAModuleMSG(
+                                npoint=1024,
+                                radii=[0.05, 0.1],
+                                nsamples=[16, 32],
+                                mlps=[[c_in, 32], [c_in, 64]],
+                                use_xyz=True,
+                                bn=with_bn
+                        )
+                )
+                c_out_0 = 32 + 64
 
-            c_in = c_out_0
-            self.SA_modules.append(
-                    PointnetSAModuleMSG(
-                            npoint=256,
-                            radii=[0.1, 0.2],
-                            nsamples=[16, 32],
-                            mlps=[[c_in, 64], [c_in, 128]],
-                            use_xyz=True,
-                            bn=with_bn
-                    )
-            )
-            c_out_1 = 64 + 128
-            c_in = c_out_1
-            self.SA_modules.append(
-                    PointnetSAModuleMSG(
-                            npoint=64,
-                            radii=[0.2, 0.4],
-                            nsamples=[16, 32],
-                            mlps=[[c_in, 128], [c_in, 256]],
-                            use_xyz=True,
-                            bn=with_bn
-                    )
-            )
-            c_out_2 = 128 + 256
+                c_in = c_out_0
+                self.SA_modules.append(
+                        PointnetSAModuleMSG(
+                                npoint=256,
+                                radii=[0.1, 0.2],
+                                nsamples=[16, 32],
+                                mlps=[[c_in, 64], [c_in, 128]],
+                                use_xyz=True,
+                                bn=with_bn
+                        )
+                )
+                c_out_1 = 64 + 128
+                c_in = c_out_1
+                self.SA_modules.append(
+                        PointnetSAModuleMSG(
+                                npoint=64,
+                                radii=[0.2, 0.4],
+                                nsamples=[16, 32],
+                                mlps=[[c_in, 128], [c_in, 256]],
+                                use_xyz=True,
+                                bn=with_bn
+                        )
+                )
+                c_out_2 = 128 + 256
 
-            c_in = c_out_2
-            self.SA_modules.append(
-                    PointnetSAModuleMSG(
-                            npoint=16,
-                            radii=[0.4, 0.8],
-                            nsamples=[16, 32],
-                            mlps=[[c_in, 512], [c_in, 512]],
-                            use_xyz=True,
-                            bn=with_bn
-                    )
-            )
-            self.fc_lyaer = nn.Sequential(
-                    nn.Linear(1024, 1024),
-                    nn.LayerNorm(1024),
-                    nn.SiLU(),
-                    nn.Linear(1024, self.dim_condition),
-            )
+                c_in = c_out_2
+                self.SA_modules.append(
+                        PointnetSAModuleMSG(
+                                npoint=16,
+                                radii=[0.4, 0.8],
+                                nsamples=[16, 32],
+                                mlps=[[c_in, 512], [c_in, 512]],
+                                use_xyz=True,
+                                bn=with_bn
+                        )
+                )
+                self.fc_lyaer = nn.Sequential(
+                        nn.Linear(1024, 1024),
+                        nn.LayerNorm(1024),
+                        nn.SiLU(),
+                        nn.Linear(1024, self.dim_condition),
+                )
         if "txt" in v_conf["condition"]:
             self.with_txt = True
             model_path = 'Alibaba-NLP/gte-large-en-v1.5'
@@ -430,14 +438,29 @@ class Diffusion_condition(nn.Module):
                     pcd.points = o3d.utility.Vector3dVector(v_pc[idx,:,:3])
                     o3d.io.write_point_cloud(str(root/prefix/f"{idx}_aug.ply"), pcd)
 
-            l_xyz, l_features = [pc[:, :, :3].contiguous().float()], [pc.permute(0, 2, 1).contiguous().float()]
-            with torch.autocast(device_type=pc.device.type, dtype=torch.float32):
-                for i in range(len(self.SA_modules)):
-                    li_xyz, li_features = self.SA_modules[i](l_xyz[i], l_features[i])
-                    l_xyz.append(li_xyz)
-                    l_features.append(li_features)
-                features = self.fc_lyaer(l_features[-1].mean(dim=-1))
+            if True:
+                bs = pc.shape[0]
+                num_points = pc.shape[1]
+                feat = pc.reshape(-1, 6)
+                coords = feat[:, :3]
+                results = self.point_model({
+                    "feat": feat,
+                    "coord": coords,
+                    "grid_size": 0.02,
+                    "batch": torch.arange(bs, device=pc.device).repeat_interleave(num_points),
+                })
+                features = scatter_mean(results["feat"], results["batch"], dim=0)
+                features = self.fc_lyaer(features)
                 condition = features[:, None]
+            else:
+                l_xyz, l_features = [pc[:, :, :3].contiguous().float()], [pc.permute(0, 2, 1).contiguous().float()]
+                with torch.autocast(device_type=pc.device.type, dtype=torch.float32):
+                    for i in range(len(self.SA_modules)):
+                        li_xyz, li_features = self.SA_modules[i](l_xyz[i], l_features[i])
+                        l_xyz.append(li_xyz)
+                        l_features.append(li_features)
+                    features = self.fc_lyaer(l_features[-1].mean(dim=-1))
+                    condition = features[:, None]
         elif self.with_txt:
             if "txt_features" in v_data["conditions"]:
                 txt_feat = v_data["conditions"]["txt_features"]

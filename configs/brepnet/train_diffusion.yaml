@@ -21,6 +21,7 @@ dataset:
   addition_tag: false
 
   condition: []
+  cond_prob: []
   cond_root: D:/img2brep/deepcad_whole_test_v5
   num_points: 10000
   point_aug: 0

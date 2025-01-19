@@ -137,8 +137,8 @@ if __name__ == "__main__":
     # x_offset = 1.5
     # y_offset = 2.0
     # Comparison
-    num_row = 5
-    num_col = 15
+    num_row = 15
+    num_col = 5
     x_offset = 1.5
     y_offset = 2.0
 
@@ -161,8 +161,8 @@ if __name__ == "__main__":
         # mesh_item, (v_wire_item, l_wire_item), v_vertex_item = import_step_file_as_obj(prefix, 100)
         mesh_item, (v_wire_item, l_wire_item), v_vertex_item = import_model(prefix)
 
-        delta_x = idx % num_col * x_offset
-        delta_y = idx // num_col * y_offset
+        delta_x = idx // num_col * x_offset
+        delta_y = idx % num_col * y_offset
         mesh_item.apply_translation([delta_x, delta_y, 0])
         v_wire_item += np.array([delta_x, delta_y, 0])
         v_vertex_item += np.array([delta_x, delta_y, 0])

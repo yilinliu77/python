@@ -461,7 +461,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         if v_training_mode == "validation":
             self.is_aug = False
             self.cached_condition = False
-        self.condition = v_conf["condition"]
+        self.condition = list(v_conf["condition"])
         self.conditional_data_root = Path(v_conf["cond_root"])
         self.transform = T.Compose([
             T.ToPILImage(),
@@ -554,6 +554,172 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         for key in keys:
             condition_out[key] = torch.stack(condition_out[key], dim=0) if isinstance(condition_out[key][0], torch.Tensor) else condition_out[key]
 
+        return {
+            "v_prefix"     : v_prefix,
+            "face_features": face_features,
+            "conditions"   : condition_out,
+            "id_aug"   : id_aug,
+        }
+
+
+class Diffusion_dataset_mm(Diffusion_dataset):
+    def __init__(self, v_training_mode, v_conf):
+        super(Diffusion_dataset_mm, self).__init__(v_training_mode, v_conf)
+        self.cond_prob = list(v_conf["cond_prob"])
+        self.cond_prob_acc = np.cumsum(self.cond_prob)
+        return
+
+    def __getitem__(self, idx):
+        # idx = 0
+        folder_path = self.data_folders[idx]
+        if self.is_aug != 0:
+            id_aug = np.random.randint(0, 63)
+            data_npz = np.load(self.latent_root / (folder_path + f"_{id_aug}") / "features.npy")
+        else:
+            id_aug = -1
+            data_npz = np.load(self.latent_root / (folder_path + f"_{0}") / "features.npy")
+        face_features = torch.from_numpy(data_npz)
+
+        if self.pad_method == "zero":
+            padded_face_features = torch.zeros((self.max_faces, 32), dtype=torch.float32)
+            padded_face_features[:face_features.shape[0]] = face_features
+        elif self.pad_method == "random":
+            add_flag = torch.ones(self.max_faces, dtype=face_features.dtype)
+            add_flag[face_features.shape[0]:] = -1
+            add_flag = add_flag[:, None]
+
+            if False:
+                index = torch.randperm(face_features.shape[0])
+                num_repeats = math.ceil(self.max_faces / index.shape[0])
+                index = index.repeat(num_repeats)[:self.max_faces]
+                index2 = torch.randperm(self.max_faces)
+                index = index[index2]
+            else:
+                positions = torch.arange(self.max_faces, device=face_features.device)
+                mandatory_mask = positions < face_features.shape[0]
+                random_indices = (
+                            torch.rand((self.max_faces,), device=face_features.device) * face_features.shape[0]).long()
+                indices = torch.where(mandatory_mask, positions, random_indices)
+                r_indices = torch.argsort(torch.rand((self.max_faces,), device=face_features.device), dim=0)
+                index = indices.gather(0, r_indices)
+            padded_face_features = face_features[index]
+
+            if self.addition_tag:
+                padded_face_features = torch.cat((padded_face_features, add_flag[index2]), dim=-1)
+        else:
+            raise ValueError("Invalid pad method")
+
+        sampled_prob = np.random.rand()
+        idx = self.cond_prob_acc.shape[0]-(sampled_prob < self.cond_prob_acc).sum(axis=-1)
+        used_condition = []
+        if idx == 0:
+            pass
+        elif idx == 6:
+            available_condition = [item for item in self.condition if item != "uncond" and item != "mm"]
+            num_condition = len(available_condition)
+            rand_onehot = np.random.rand(num_condition) > 0.5
+            used_condition = [available_condition[i] for i in range(num_condition) if rand_onehot[i]]
+        else:
+            used_condition.append(self.condition[idx])
+
+        condition = prepare_condition(used_condition, self.conditional_data_root, folder_path, id_aug,
+                                      self.cached_condition, self.transform, self.conf["num_points"])
+        condition["name"] = self.condition[idx]
+
+        return (
+            folder_path,
+            padded_face_features,
+            condition,
+            id_aug
+        )
+
+    @staticmethod
+    def collate_fn(batch):
+        (
+            v_prefix, v_face_features, conditions, id_aug
+        ) = zip(*batch)
+
+        face_features = torch.stack(v_face_features, dim=0)
+        id_aug = torch.tensor(id_aug)
+
+        keys = conditions[0].keys()
+
+        condition_out = {
+            "names": [],
+            "points": [],
+
+            "txt": [],
+            "txt_features": [],
+            "id_txt": [],
+
+            "img_features": [],
+            "img_id": [],
+            "ori_imgs": [],
+            "imgs": [],
+        }
+
+        id_condition = {
+            "pc": [],
+            "txt": [],
+            "single_img": [],
+            "multi_img": [],
+            "sketch": [],
+            "single_img_rec": [],
+            "multi_img_rec": [],
+            "multi_img_rec2": [],
+            "sketch_rec": [],
+        }
+        for id_batch, condition in enumerate(conditions):
+            condition_out["names"].append(condition["name"])
+            if condition["name"] == "pc":
+                condition_out["points"].append(condition["points"])
+                id_condition["pc"].append(id_batch)
+            elif condition["name"] == "txt":
+                if "txt_features" in condition:
+                    condition_out["txt_features"].append(condition["txt_features"])
+                else:
+                    condition_out["txt"].append(condition["txt"])
+                condition_out["id_txt"].append(condition["id_txt"])
+                id_condition["txt"].append(id_batch)
+            elif condition["name"] in ["single_img", "multi_img", "sketch"]:
+                if "img_features" in condition:
+                    id_cur = len(condition_out["img_features"])
+                    condition_out["img_features"].append(condition["img_features"])
+                else:
+                    id_cur = len(condition_out["ori_imgs"])
+                    condition_out["ori_imgs"].append(condition["ori_imgs"])
+                    condition_out["imgs"].append(condition["imgs"])
+                if condition["name"] == "single_img":
+                    id_condition["single_img"].append(id_batch)
+                    id_condition["single_img_rec"].append(id_cur)
+                elif condition["name"] == "multi_img":
+                    id_condition["multi_img"].append(id_batch)
+                    id_condition["multi_img_rec"]+=([id_cur+i for i in range(len(condition["img_id"]))])
+                    cur_max = 1+(max(id_condition["multi_img_rec2"]) if len(id_condition["multi_img_rec2"])>0 else -1)
+                    id_condition["multi_img_rec2"]+=([cur_max for i in range(len(condition["img_id"]))])
+                elif condition["name"] == "sketch":
+                    id_condition["sketch"].append(id_batch)
+                    id_condition["sketch_rec"].append(id_cur)
+                condition_out["img_id"].append(condition["img_id"])
+            elif condition["name"] == "mm":
+                continue
+
+        if len(condition_out["points"]) > 0:
+            condition_out["points"] = torch.concatenate(condition_out["points"], dim=0)
+        if len(condition_out["txt_features"]) > 0:
+            condition_out["txt_features"] = torch.stack(condition_out["txt_features"], dim=0)
+        if len(condition_out["img_features"]) > 0:
+            condition_out["img_features"] = torch.stack(condition_out["img_features"], dim=0)
+        if len(condition_out["ori_imgs"]) > 0:
+            condition_out["ori_imgs"] = torch.concatenate(condition_out["ori_imgs"], dim=0)
+        if len(condition_out["imgs"]) > 0:
+            condition_out["imgs"] = torch.concatenate(condition_out["imgs"], dim=0)
+        if len(condition_out["img_id"]) > 0:
+            condition_out["img_id"] = torch.concatenate(condition_out["img_id"], dim=0)
+        if len(id_condition["multi_img_rec2"]) > 0:
+            id_condition["multi_img_rec2"] = torch.tensor(id_condition["multi_img_rec2"], dtype=torch.long)
+
+        condition_out["id_batch"] = id_condition
         return {
             "v_prefix"     : v_prefix,
             "face_features": face_features,

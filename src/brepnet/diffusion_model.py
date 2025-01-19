@@ -12,6 +12,7 @@ from einops.layers.torch import Rearrange
 from einops import rearrange, reduce
 
 from diffusers import DDPMScheduler
+from torch_scatter import scatter_mean
 from tqdm import tqdm
 
 from thirdparty.Pointnet2_PyTorch.pointnet2_ops_lib.pointnet2_ops.pointnet2_modules import PointnetSAModuleMSG, \
@@ -486,6 +487,88 @@ class Diffusion_condition(nn.Module):
             loss["diffusion_loss"] += loss["l2"]
         return loss
 
+class PointEncoder(nn.Module):
+    def __init__(self, v_conf):
+        super().__init__()
+        self.conf = v_conf
+        if v_conf["point_encoder"] == "pointnet":
+            self.SA_modules = nn.ModuleList()
+            # PointNet2
+            c_in = 6
+            with_bn = False
+            self.SA_modules.append(
+                PointnetSAModuleMSG(
+                    npoint=1024,
+                    radii=[0.05, 0.1],
+                    nsamples=[16, 32],
+                    mlps=[[c_in, 32], [c_in, 64]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            c_out_0 = 32 + 64
+
+            c_in = c_out_0
+            self.SA_modules.append(
+                PointnetSAModuleMSG(
+                    npoint=256,
+                    radii=[0.1, 0.2],
+                    nsamples=[16, 32],
+                    mlps=[[c_in, 64], [c_in, 128]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            c_out_1 = 64 + 128
+            c_in = c_out_1
+            self.SA_modules.append(
+                PointnetSAModuleMSG(
+                    npoint=64,
+                    radii=[0.2, 0.4],
+                    nsamples=[16, 32],
+                    mlps=[[c_in, 128], [c_in, 256]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            c_out_2 = 128 + 256
+
+            c_in = c_out_2
+            self.SA_modules.append(
+                PointnetSAModuleMSG(
+                    npoint=16,
+                    radii=[0.4, 0.8],
+                    nsamples=[16, 32],
+                    mlps=[[c_in, 512], [c_in, 512]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            self.fc_lyaer = nn.Sequential(
+                nn.Linear(1024, 1024),
+                nn.LayerNorm(1024),
+                nn.SiLU(),
+                nn.Linear(1024, self.dim_condition),
+            )
+        else:
+            self.encoder = PointTransformerEncoder()
+
+    # v_points: bs, num_points, 6
+    def forward(self, v_points):
+        if self.conf["point_encoder"] == "pointnet":
+            pc = v_points
+            l_xyz, l_features = [pc[:, :, :3].contiguous().float()], [pc.permute(0, 2, 1).contiguous().float()]
+            with torch.autocast(device_type=pc.device.type, dtype=torch.float32):
+                for i in range(len(self.SA_modules)):
+                    li_xyz, li_features = self.SA_modules[i](l_xyz[i], l_features[i])
+                    l_xyz.append(li_xyz)
+                    l_features.append(li_features)
+                features = self.fc_lyaer(l_features[-1].mean(dim=-1))
+                condition = features[:, None]
+        else:
+            pc = v_data["points"]
+            condition = self.encoder(pc)
+        return condition
 
 class Diffusion_condition_mm(Diffusion_condition):
     def __init__(self, v_conf, ):
@@ -501,15 +584,25 @@ class Diffusion_condition_mm(Diffusion_condition):
         self.learned_pc_emb = nn.Parameter(torch.rand(self.dim_condition))
         self.learned_txt_emb = nn.Parameter(torch.rand(self.dim_condition))
         self.condition = v_conf["condition"]
-        assert len(self.condition) == 7 # uncond, svr, mvr, sketch, pc, txt, mm
+        # assert len(self.condition) == 7 # uncond, svr, mvr, sketch, pc, txt, mm
         self.cond_prob = v_conf["cond_prob"]
         self.cond_prob_acc = np.cumsum(self.cond_prob)
-        assert len(self.cond_prob) == len(self.condition)
-        
+        # assert len(self.cond_prob) == len(self.condition)
+
+        if "single_img" in v_conf["condition"] or "multi_img" in v_conf["condition"] or "sketch" in v_conf["condition"]:
+            self.img_fc = nn.Sequential(
+                nn.Linear(1280, 1024),
+                nn.LayerNorm(1024),
+                nn.SiLU(),
+                nn.Linear(1024, self.dim_condition),
+            )
+        if "pc" in v_conf["condition"]:
+            self.pc_encoder = PointEncoder(v_conf)
+
     def inference(self, bs, device, v_data=None, v_log=True, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
         condition = None
-        if self.with_img or self.with_pc:
+        if self.with_img or self.with_pc or self.with_txt:
             condition, cond_nehot = self.extract_condition(v_data)
             condition = condition[:bs]
             # face_features = face_features[:condition.shape[0]]
@@ -571,35 +664,57 @@ class Diffusion_condition_mm(Diffusion_condition):
     def extract_condition(self, v_data):
         bs = len(v_data["v_prefix"])
         device = self.learned_uncond_emb.device
-        sampled_prob = np.random.rand(bs)
-        idx = self.cond_prob_acc.shape[0]-(sampled_prob[:,None] < self.cond_prob_acc[None,]).sum(axis=-1)
-        cond_onehot = torch.zeros((bs, 5), device=device, dtype=bool) # svr, mvr, sketch, pc, txt
-        cond_onehot[idx==1, 0] = 1 # svr
-        cond_onehot[idx==2, 1] = 1 # mvr
-        cond_onehot[idx==3, 2] = 1 # sketch
-        cond_onehot[idx==4, 3] = 1 # pc
-        cond_onehot[idx==5, 4] = 1 # txt
-        num_mm = (idx==6).sum()
-        rand_onehot = torch.rand((num_mm, 5), device=device) > 0.5
-        cond_onehot[idx==6] = rand_onehot
+        dtype = self.learned_uncond_emb.dtype
+        condition = torch.stack([
+            self.learned_svr_emb, self.learned_mvr_emb, self.learned_sketch_emb,
+            self.learned_pc_emb, self.learned_txt_emb], dim=0)[None, :].repeat(bs, 1, 1)
 
-        # Img feat
-        if "img_features" in v_data["conditions"]:
-            img_feature = v_data["conditions"]["img_features"]
-            num_imgs = img_feature.shape[1]
-        else:
-            imgs = v_data["conditions"]["imgs"]
-            num_imgs = imgs.shape[1]
-            imgs = imgs.reshape(-1, 3, 224, 224)
-            img_feature = self.img_model(imgs)
-        img_idx = v_data["conditions"]["img_id"]
-        img_feature = self.img_fc(img_feature)
-        if img_idx.shape[-1] > 1:
+        all_condition_names = v_data["conditions"]["names"]
+        condition_batch_id = v_data["conditions"]["id_batch"]
+        # TXT feature
+        if "txt" in all_condition_names:
+            if v_data["conditions"]["txt_features"] != []:
+                txt_feat = v_data["conditions"]["txt_features"]
+            else:
+                txt = v_data["conditions"]["txt"]
+                txt_feat = self.txt_model.encode(txt, show_progress_bar=False, convert_to_numpy=False, device=self.txt_model.device)
+                txt_feat = torch.stack(txt_feat, dim=0) # bs, 1024
+            txt_features = self.txt_fc(txt_feat)
+            condition[condition_batch_id["txt"], 4] = txt_features.to(dtype)
+
+        # PC feature
+        if "pc" in all_condition_names:
+            pc = v_data["conditions"]["points"]
+            points = pc[:, :, :3]
+            normals = pc[:, :, 3:6]
+
+
+
+
+        if v_data["conditions"]["img_id"] != []:
+            # Get features
+            if v_data["conditions"]["img_features"] != []:
+                dino_feature = v_data["conditions"]["img_features"]
+            else:
+                assert v_data["conditions"]["imgs"].shape[1:] == (3, 224, 224)
+                dino_feature = self.img_model(v_data["conditions"]["imgs"])
+            num_imgs = dino_feature.shape[0]
+
+            img_idx = v_data["conditions"]["img_id"]
             camera_embedding = self.camera_embedding(img_idx)
-            img_feature = (img_feature.reshape(-1, num_imgs, self.dim_condition) + camera_embedding).mean(dim=1)
-        else:
-            img_feature = (img_feature.reshape(-1, num_imgs, self.dim_condition)).mean(dim=1)
-        
+            dino_feature = torch.cat([dino_feature, camera_embedding], dim=-1)
+            img_feature = self.img_fc(dino_feature)
+
+            condition[condition_batch_id["single_img"], 0] = img_feature[condition_batch_id["single_img_rec"]].to(dtype)
+            condition[condition_batch_id["sketch"], 2] = img_feature[condition_batch_id["sketch_rec"]].to(dtype)
+
+            mvr_feature_total = img_feature[condition_batch_id["multi_img_rec"]]
+            condition[condition_batch_id["multi_img"], 1] = scatter_mean(
+                mvr_feature_total,
+                condition_batch_id["multi_img_rec2"],
+                dim=0
+            ).to(dtype)
+
         # PC feat
         pc = v_data["conditions"]["points"]
         if self.is_aug:
@@ -657,25 +772,7 @@ class Diffusion_condition_mm(Diffusion_condition):
                 l_features.append(li_features)
             pc_features = self.fc_lyaer(l_features[-1].mean(dim=-1))
         pc_features = pc_features.to(img_feature.dtype)
-        # TXT feat
-        if "txt_features" in v_data["conditions"]:
-            txt_feat = v_data["conditions"]["txt_features"]
-        else:
-            txt = v_data["conditions"]["txt"]
-            txt_feat = self.txt_model.encode(txt, show_progress_bar=False, convert_to_numpy=False, device=self.txt_model.device)
-            txt_feat = torch.stack(txt_feat, dim=0)
-        txt_features = self.txt_fc(txt_feat)
-        
-        condition = torch.stack([
-            self.learned_svr_emb, self.learned_mvr_emb, self.learned_sketch_emb, 
-            self.learned_pc_emb, self.learned_txt_emb], dim=0)[None,:].repeat(bs,1,1).to(img_feature.dtype)
-        
-        condition[cond_onehot[:,0],0] = img_feature[cond_onehot[:,0]]
-        condition[cond_onehot[:,1],1] = img_feature[cond_onehot[:,1]]
-        condition[cond_onehot[:,2],2] = img_feature[cond_onehot[:,2]]
-        condition[cond_onehot[:,3],3] = pc_features[cond_onehot[:,3]]
-        condition[cond_onehot[:,4],4] = txt_features[cond_onehot[:,4]]
-        
+
         condition = self.cross_attn(condition)
         condition = condition.mean(dim=1, keepdim=True)
         return condition, cond_onehot

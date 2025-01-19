@@ -168,7 +168,7 @@ class TrainDiffusion(pl.LightningModule):
             recon_faces = self.model.inference(1, self.device, data)[0]["pred_face"]
             trimesh.PointCloud(recon_faces.reshape(-1, 3)).export(str(self.log_root / "{}_faces.ply".format(self.current_epoch)))
         
-            if "conditions" in data:
+            if "conditions" in data and False:
                 bs = len(data["v_prefix"])
                 for idx in range(bs):
                     if "ori_imgs" in data["conditions"]:

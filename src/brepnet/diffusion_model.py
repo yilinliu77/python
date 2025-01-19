@@ -16,7 +16,7 @@ from torch_scatter import scatter_mean
 from tqdm import tqdm
 
 from thirdparty.Pointnet2_PyTorch.pointnet2_ops_lib.pointnet2_ops.pointnet2_modules import PointnetSAModuleMSG, \
-    PointnetFPModule
+    PointnetFPModule, PointnetSAModule
 from scipy.spatial.transform import Rotation
 
 
@@ -510,15 +510,17 @@ class Diffusion_condition(nn.Module):
         return loss
 
 class PointEncoder(nn.Module):
-    def __init__(self, v_conf):
+    def __init__(self, v_conf, v_fc_dim):
         super().__init__()
         self.conf = v_conf
+        self.aug_points_prob = v_conf["aug_points_prob"]
+        self.aug_rotate = v_conf["is_aug"]
         if v_conf["point_encoder"] == "pointnet":
-            self.SA_modules = nn.ModuleList()
+            self.point_model = nn.ModuleList()
             # PointNet2
             c_in = 6
             with_bn = False
-            self.SA_modules.append(
+            self.point_model.append(
                 PointnetSAModuleMSG(
                     npoint=1024,
                     radii=[0.05, 0.1],
@@ -531,7 +533,7 @@ class PointEncoder(nn.Module):
             c_out_0 = 32 + 64
 
             c_in = c_out_0
-            self.SA_modules.append(
+            self.point_model.append(
                 PointnetSAModuleMSG(
                     npoint=256,
                     radii=[0.1, 0.2],
@@ -543,7 +545,7 @@ class PointEncoder(nn.Module):
             )
             c_out_1 = 64 + 128
             c_in = c_out_1
-            self.SA_modules.append(
+            self.point_model.append(
                 PointnetSAModuleMSG(
                     npoint=64,
                     radii=[0.2, 0.4],
@@ -556,41 +558,110 @@ class PointEncoder(nn.Module):
             c_out_2 = 128 + 256
 
             c_in = c_out_2
-            self.SA_modules.append(
-                PointnetSAModuleMSG(
-                    npoint=16,
-                    radii=[0.4, 0.8],
-                    nsamples=[16, 32],
-                    mlps=[[c_in, 512], [c_in, 512]],
+            self.point_model.append(
+                PointnetSAModule(
+                    mlp=[c_in, 256, 512, 1024],
                     use_xyz=True,
                     bn=with_bn
                 )
             )
-            self.fc_lyaer = nn.Sequential(
+            self.fc_layer = nn.Sequential(
                 nn.Linear(1024, 1024),
                 nn.LayerNorm(1024),
                 nn.SiLU(),
-                nn.Linear(1024, self.dim_condition),
+                nn.Linear(1024, v_fc_dim),
             )
         else:
-            self.encoder = PointTransformerEncoder()
+            self.point_model = PointTransformerV3(
+                in_channels=6, cls_mode=True,
+                enc_depths=(1, 1, 1, 1, 1),
+                # enc_channels=(32, 64, 128, 256, 512),
+                enc_channels=(16, 32, 64, 128, 256),
+            )
+            self.fc_layer = nn.Sequential(
+                nn.Linear(256, v_fc_dim),
+            )
+
+    def augment(self, v_points):
+        # PC feat
+        pc = v_points
+
+        if np.random.rand() < self.aug_points_prob:
+            # Crop
+            bs = pc.shape[0]
+            num_points = pc.shape[1]
+            pc_index = torch.randint(0, pc.shape[1], (bs,), device=pc.device)
+            center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[...,:3]
+            length_xyz = torch.rand((bs,3), device=pc.device) * 1.0
+            bbox_min = center_pos - length_xyz[:, None, :]
+            bbox_max = center_pos + length_xyz[:, None, :]
+            mask = torch.logical_not(((pc[:, :, :3] > bbox_min) & (pc[:, :, :3] < bbox_max)).all(dim=-1))
+
+            sort_results = torch.sort(mask.long(),descending=True)
+            mask=sort_results.values
+            pc_sorted = torch.gather(pc,1,sort_results.indices[:,:,None].repeat(1,1,6))
+            num_valid = mask.sum(dim=-1)
+            index1 = torch.rand((bs,num_points), device=pc.device) * num_valid[:,None]
+            index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs,1)
+            index = torch.where(mask.bool(), index2, index1)
+            pc = pc_sorted[torch.arange(bs)[:, None].repeat(1, num_points), index.long()]
+
+            # Downsample
+            index = np.arange(num_points)
+            np.random.shuffle(index)
+            num_points = np.random.randint(1000, num_points)
+            pc = pc[:,index[:num_points]]
+
+            # Noise
+            noise = torch.randn_like(pc) * 0.02
+            pc = pc + noise
+
+            # Mask normal
+            pc[..., 3:] = 0. if torch.rand(1) > 0.5 else pc[..., 3:]
+
+        return pc
+
 
     # v_points: bs, num_points, 6
-    def forward(self, v_points):
+    def forward(self, v_points, v_id_aug=None):
+        # Rotate
+        if v_id_aug is not None:
+            angles = torch.stack([
+                v_id_aug % 4 * torch.pi / 2, v_id_aug // 4 % 4 * torch.pi / 2, v_id_aug // 16 * torch.pi / 2],
+                dim=1)
+            matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
+            rotation_3d_matrix = torch.tensor(matrix, device=v_points.device, dtype=v_points.dtype)
+            points = v_points[..., :3]
+            normals = v_points[..., 3:6]
+
+            pc2 = (rotation_3d_matrix @ points.permute(0, 2, 1)).permute(0, 2, 1)
+            tpc2 = (rotation_3d_matrix @ (points + normals).permute(0, 2, 1)).permute(0, 2, 1)
+            normals2 = tpc2 - pc2
+            v_points = torch.cat([pc2, normals2], dim=-1)
+
+        aug_pc = self.augment(v_points)
         if self.conf["point_encoder"] == "pointnet":
-            pc = v_points
-            l_xyz, l_features = [pc[:, :, :3].contiguous().float()], [pc.permute(0, 2, 1).contiguous().float()]
-            with torch.autocast(device_type=pc.device.type, dtype=torch.float32):
-                for i in range(len(self.SA_modules)):
-                    li_xyz, li_features = self.SA_modules[i](l_xyz[i], l_features[i])
+            l_xyz, l_features = [aug_pc[:, :, :3].contiguous().float()], [aug_pc.permute(0, 2, 1).contiguous().float()]
+            with torch.autocast(device_type=aug_pc.device.type, dtype=torch.float32):
+                for i in range(len(self.point_model)):
+                    li_xyz, li_features = self.point_model[i](l_xyz[i], l_features[i])
                     l_xyz.append(li_xyz)
                     l_features.append(li_features)
-                features = self.fc_lyaer(l_features[-1].mean(dim=-1))
-                condition = features[:, None]
+            features = self.fc_layer(l_features[-1][...,0])
         else:
-            pc = v_data["points"]
-            condition = self.encoder(pc)
-        return condition
+            bs = aug_pc.shape[0]
+            num_points = aug_pc.shape[1]
+            feat = aug_pc.reshape(-1, 6)
+            coords = feat[:, :3]
+            results = self.point_model({
+                "feat": feat,
+                "coord": coords,
+                "grid_size": 0.02,
+                "batch": torch.arange(bs, device=aug_pc.device).repeat_interleave(num_points),
+            })
+            features = scatter_mean(results["feat"], results["batch"], dim=0)
+            features = self.fc_layer(features)
+        return features
 
 class Diffusion_condition_mm(Diffusion_condition):
     def __init__(self, v_conf, ):
@@ -598,7 +669,7 @@ class Diffusion_condition_mm(Diffusion_condition):
         layer = nn.TransformerEncoderLayer(
                 d_model=self.dim_condition,
                 nhead=8, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
-        self.cross_attn = nn.TransformerEncoder(layer, 8, nn.LayerNorm(self.dim_condition))
+        self.cond_attn = nn.TransformerEncoder(layer, 8, nn.LayerNorm(self.dim_condition))
         self.learned_uncond_emb = nn.Parameter(torch.rand(self.dim_condition))
         self.learned_svr_emb = nn.Parameter(torch.rand(self.dim_condition))
         self.learned_mvr_emb = nn.Parameter(torch.rand(self.dim_condition))
@@ -619,13 +690,15 @@ class Diffusion_condition_mm(Diffusion_condition):
                 nn.Linear(1024, self.dim_condition),
             )
         if "pc" in v_conf["condition"]:
-            self.pc_encoder = PointEncoder(v_conf)
+            self.SA_modules = None
+            self.fc_lyaer = None
+            self.pc_encoder = PointEncoder(v_conf, self.dim_condition)
 
     def inference(self, bs, device, v_data=None, v_log=True, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
         condition = None
         if self.with_img or self.with_pc or self.with_txt:
-            condition, cond_nehot = self.extract_condition(v_data)
+            condition = self.extract_condition(v_data)
             condition = condition[:bs]
             # face_features = face_features[:condition.shape[0]]
         # error = []
@@ -707,11 +780,9 @@ class Diffusion_condition_mm(Diffusion_condition):
         # PC feature
         if "pc" in all_condition_names:
             pc = v_data["conditions"]["points"]
-            points = pc[:, :, :3]
-            normals = pc[:, :, 3:6]
-
-
-
+            pc_feat = self.pc_encoder(pc, v_data["id_aug"] if self.is_aug else None)
+            condition[condition_batch_id["pc"], 3] = pc_feat.to(dtype)
+            pass
 
         if v_data["conditions"]["img_id"] != []:
             # Get features
@@ -737,67 +808,9 @@ class Diffusion_condition_mm(Diffusion_condition):
                 dim=0
             ).to(dtype)
 
-        # PC feat
-        # pc = v_data["conditions"]["points"]
-        # if self.is_aug:
-        #     # Rotate
-        #     id_aug = v_data["id_aug"]
-        #     angles = torch.stack([id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
-        #     matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
-        #     rotation_3d_matrix = torch.tensor(matrix, device=pc.device, dtype=pc.dtype)
-        #     points = pc[:, 0, :, :3]
-        #     normals = pc[:, 0, :, 3:6]
-            
-        #     pc2 = (rotation_3d_matrix @ points.permute(0, 2, 1)).permute(0, 2, 1)
-        #     tpc2 = (rotation_3d_matrix @ (points+normals).permute(0, 2, 1)).permute(0, 2, 1)
-        #     normals2 = tpc2 - pc2
-        #     pc = torch.cat([pc2, normals2], dim=-1)
-            
-        #     # Crop
-        #     bs = pc.shape[0]
-        #     num_points = pc.shape[1]
-        #     pc_index = torch.randint(0, pc.shape[1], (bs,), device=pc.device)
-        #     center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[...,:3]
-        #     length_xyz = torch.rand((bs,3), device=pc.device) * 1.0
-        #     bbox_min = center_pos - length_xyz[:, None, :]
-        #     bbox_max = center_pos + length_xyz[:, None, :]
-        #     mask = torch.logical_not(((pc[:, :, :3] > bbox_min) & (pc[:, :, :3] < bbox_max)).all(dim=-1))
-            
-        #     sort_results = torch.sort(mask.long(),descending=True)
-        #     mask=sort_results.values
-        #     pc_sorted = torch.gather(pc,1,sort_results.indices[:,:,None].repeat(1,1,6))
-        #     num_valid = mask.sum(dim=-1)
-        #     index1 = torch.rand((bs,num_points), device=pc.device) * num_valid[:,None]
-        #     index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs,1)
-        #     index = torch.where(mask.bool(), index2, index1)
-        #     pc = pc_sorted[torch.arange(bs)[:, None].repeat(1, num_points), index.long()]
-            
-        #     # Downsample
-        #     index = np.arange(num_points)
-        #     np.random.shuffle(index)
-        #     num_points = np.random.randint(1000, num_points)
-        #     pc = pc[:,index[:num_points]]
-            
-        #     # Noise
-        #     noise = torch.randn_like(pc) * 0.02
-        #     pc = pc + noise
-            
-            # Mask normal
-            pc[...,3:] = 0. if torch.rand(1) > 0.5 else pc[...,3:]
-        else:
-            pc = pc[:, 0]
-        l_xyz, l_features = [pc[:, :, :3].contiguous().float()], [pc.permute(0, 2, 1).contiguous().float()]
-        with torch.autocast(device_type=pc.device.type, dtype=torch.float32):
-            for i in range(len(self.SA_modules)):
-                li_xyz, li_features = self.SA_modules[i](l_xyz[i], l_features[i])
-                l_xyz.append(li_xyz)
-                l_features.append(li_features)
-            pc_features = self.fc_lyaer(l_features[-1].mean(dim=-1))
-        pc_features = pc_features.to(img_feature.dtype)
-
-        condition = self.cross_attn(condition)
+        condition = self.cond_attn(condition)
         condition = condition.mean(dim=1, keepdim=True)
-        return condition, cond_onehot
+        return condition
 
     def forward(self, v_data, v_test=False, **kwargs):
         encoding_result = self.get_z(v_data, v_test)
@@ -806,7 +819,7 @@ class Diffusion_condition_mm(Diffusion_condition):
         bs = face_z.size(0)
         timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bs,), device=device).long()
 
-        condition, cond_onehot = self.extract_condition(v_data)
+        condition = self.extract_condition(v_data)
         noise = torch.randn(face_z.shape, device=device)
         noise_input = self.noise_scheduler.add_noise(face_z, noise, timesteps)
 
@@ -829,33 +842,33 @@ class Diffusion_condition_mm(Diffusion_condition):
         
         loss["t"] = torch.stack((timesteps, loss_item.mean(dim=1).mean(dim=1)), dim=1)
         loss_item = loss_item.mean(dim=1).mean(dim=1)
-        uncond_mask = cond_onehot.sum(dim=1) == 0
-        loss["uncond_count"] = uncond_mask.sum().to(loss_item.dtype)
-        if uncond_mask.sum() > 0:
+        uncond_mask = [item=="uncond" for item in v_data["conditions"]["names"]]
+        loss["uncond_count"] = sum(uncond_mask)
+        if loss["uncond_count"] > 0:
             loss["uncond_diffusion_loss"] = loss_item[uncond_mask].mean()
-        mm_mask = cond_onehot.sum(dim=1) > 1
-        loss["mm_count"] = mm_mask.sum().to(loss_item.dtype)
-        if mm_mask.sum() > 0:
+        mm_mask = [item=="mm" for item in v_data["conditions"]["names"]]
+        loss["mm_count"] = sum(mm_mask)
+        if loss["mm_count"] > 0:
             loss["mm_diffusion_loss"] = loss_item[mm_mask].mean()
-        svr_mask = torch.logical_and(cond_onehot[:,0], torch.logical_not(mm_mask))
-        loss["svr_count"] = svr_mask.sum().to(loss_item.dtype)
-        if svr_mask.sum() > 0:
+        svr_mask = [item=="single_img" for item in v_data["conditions"]["names"]]
+        loss["svr_count"] = sum(svr_mask)
+        if loss["svr_count"] > 0:
             loss["svr_diffusion_loss"] = loss_item[svr_mask].mean()
-        mvr_mask = torch.logical_and(cond_onehot[:,1], torch.logical_not(mm_mask))
-        loss["mvr_count"] = mvr_mask.sum().to(loss_item.dtype)
-        if mvr_mask.sum() > 0:
+        mvr_mask = [item=="multi_img" for item in v_data["conditions"]["names"]]
+        loss["mvr_count"] = sum(mvr_mask)
+        if loss["mvr_count"] > 0:
             loss["mvr_diffusion_loss"] = loss_item[mvr_mask].mean()
-        sketch_mask = torch.logical_and(cond_onehot[:,2], torch.logical_not(mm_mask))
-        loss["sketch_count"] = sketch_mask.sum().to(loss_item.dtype)
-        if sketch_mask.sum() > 0:
+        sketch_mask = [item=="sketch" for item in v_data["conditions"]["names"]]
+        loss["sketch_count"] = sum(sketch_mask)
+        if loss["sketch_count"] > 0:
             loss["sketch_diffusion_loss"] = loss_item[sketch_mask].mean()
-        pc_mask = torch.logical_and(cond_onehot[:,3], torch.logical_not(mm_mask))
-        loss["pc_count"] = pc_mask.sum().to(loss_item.dtype)
-        if pc_mask.sum() > 0:
+        pc_mask = [item=="pc" for item in v_data["conditions"]["names"]]
+        loss["pc_count"] = sum(pc_mask)
+        if loss["pc_count"] > 0:
             loss["pc_diffusion_loss"] = loss_item[pc_mask].mean()
-        txt_mask = torch.logical_and(cond_onehot[:,4], torch.logical_not(mm_mask))
-        loss["txt_count"] = txt_mask.sum().to(loss_item.dtype)
-        if txt_mask.sum() > 0:
+        txt_mask = [item=="txt" for item in v_data["conditions"]["names"]]
+        loss["txt_count"] = sum(txt_mask)
+        if loss["txt_count"] > 0:
             loss["txt_diffusion_loss"] = loss_item[txt_mask].mean()
 
         if self.is_train_decoder:

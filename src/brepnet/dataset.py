@@ -142,37 +142,37 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
         if v_cache_data:
             ori_data = np.load(v_cond_root / v_folder_path / "img_feature_dinov2.npy")
             if "single_img" in v_condition_names:
-                idx = np.array([v_id_aug])
                 img_features = torch.from_numpy(ori_data[v_id_aug][None,:]).float()
+                img_id = np.array([0], dtype=np.int64)
             elif "sketch" in v_condition_names:
-                idx = np.array([v_id_aug])
                 img_features = torch.from_numpy(ori_data[v_id_aug+num_max_single_view][None,:]).float()
+                img_id = np.array([0], dtype=np.int64)
             else:
                 # idx = np.random.choice(np.arange(num_max_multi_view), 4, replace=False)
-                idx = np.array([0,1,2,3])
-                img_features = torch.from_numpy(ori_data[num_max_single_view + num_max_single_view + idx * num_max_single_view + v_id_aug]).float()
-        
-            condition["img_id"] = torch.from_numpy(idx)
+                img_id = np.array([0,1,2,3], dtype=np.int64)
+                img_features = torch.from_numpy(ori_data[num_max_single_view + num_max_single_view + img_id * num_max_single_view + v_id_aug]).float()
+
+            condition["img_id"] = torch.from_numpy(img_id)
             condition["img_features"] = img_features
         else:
             ori_data = np.load(v_cond_root / v_folder_path / "imgs.npz")
             if "single_img" in v_condition_names:
-                idx = np.array([v_id_aug])
                 imgs = ori_data["svr_imgs"][v_id_aug][None,:]
+                img_id = np.array([0], dtype=np.int64)
             elif "multi_img" in v_condition_names:
                 # idx = np.random.choice(np.arange(num_max_multi_view), 4, replace=False)
-                idx = np.array([0,1,2,3])
-                imgs = ori_data["mvr_imgs"][idx * num_max_single_view + v_id_aug]
+                img_id = np.array([0,1,2,3], dtype=np.int64)
+                imgs = ori_data["mvr_imgs"][img_id * num_max_single_view + v_id_aug]
             else:
-                idx = np.array([v_id_aug])
                 imgs = ori_data["sketch_imgs"][v_id_aug][None,:]
+                img_id = np.array([0], dtype=np.int64)
             transformed_imgs = []
             for id in range(imgs.shape[0]):
                 transformed_imgs.append(v_transform(imgs[id]))
             transformed_imgs = torch.stack(transformed_imgs, dim=0)
             condition["ori_imgs"] = torch.from_numpy(imgs)
             condition["imgs"] = transformed_imgs
-            condition["img_id"] = torch.from_numpy(idx)
+            condition["img_id"] = torch.from_numpy(img_id)
     if "pc" in v_condition_names:
         pc = o3d.io.read_point_cloud(str(v_cond_root / v_folder_path / "pc.ply"))
         points = np.concatenate((np.asarray(pc.points), np.asarray(pc.normals)), axis=-1)
@@ -195,6 +195,7 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
             difficulty = np.random.randint(0, 3)
             ori_data = np.load(v_cond_root / v_folder_path / "text_feat.npy")[difficulty]
             condition["txt_features"] = torch.from_numpy(ori_data).float()
+            condition["id_txt"] = difficulty
         else:
             difficulty = 0
             condition["txt"] = open(v_cond_root / v_folder_path / "text.txt").readlines()[difficulty].strip()
@@ -709,7 +710,7 @@ class Diffusion_dataset_mm(Diffusion_dataset):
         if len(condition_out["txt_features"]) > 0:
             condition_out["txt_features"] = torch.stack(condition_out["txt_features"], dim=0)
         if len(condition_out["img_features"]) > 0:
-            condition_out["img_features"] = torch.stack(condition_out["img_features"], dim=0)
+            condition_out["img_features"] = torch.concatenate(condition_out["img_features"], dim=0)
         if len(condition_out["ori_imgs"]) > 0:
             condition_out["ori_imgs"] = torch.concatenate(condition_out["ori_imgs"], dim=0)
         if len(condition_out["imgs"]) > 0:

@@ -79,6 +79,8 @@ model:
   is_aug: false # Only control if point cloud is augmented
   condition: []
   cond_prob: []
+  point_encoder: pointnet1
+  aug_points_prob: 0.5
 
 hydra:
   run:

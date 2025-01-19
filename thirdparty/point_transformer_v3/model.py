@@ -549,6 +549,7 @@ class Block(PointModule):
                 kernel_size=3,
                 bias=True,
                 indice_key=cpe_indice_key,
+                algo=spconv.ConvAlgo.Native,
             ),
             nn.Linear(channels, channels),
             norm_layer(channels),
@@ -771,6 +772,7 @@ class Embedding(PointModule):
                 padding=1,
                 bias=False,
                 indice_key="stem",
+                algo=spconv.ConvAlgo.Native,
             )
         )
         if norm_layer is not None:

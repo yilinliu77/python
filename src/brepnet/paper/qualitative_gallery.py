@@ -181,7 +181,7 @@ if __name__ == "__main__":
         wire_line.append(l_wire_item)
         vertex_vertex.append(v_vertex_item)
         i_wire_vertex += v_wire_item.shape[0]
-
+        
     wire_vertex = np.vstack(wire_vertex)
     wire_line = np.vstack(wire_line)
     vertex_vertex = np.vstack(vertex_vertex)

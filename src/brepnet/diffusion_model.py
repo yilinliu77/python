@@ -21,7 +21,7 @@ from scipy.spatial.transform import Rotation
 
 
 # from thirdparty.PointTransformerV3.model import *
-
+from thirdparty.point_transformer_v3.model import PointTransformerV3
 
 def add_timer(time_statics, v_attr, timer):
     if v_attr not in time_statics:
@@ -116,64 +116,71 @@ class Diffusion_condition(nn.Module):
             )
         if "pc" in v_conf["condition"]:
             self.with_pc = True
-            self.SA_modules = nn.ModuleList()
-            # PointNet2
-            c_in = 6
-            with_bn = False
-            self.SA_modules.append(
-                    PointnetSAModuleMSG(
-                            npoint=1024,
-                            radii=[0.05, 0.1],
-                            nsamples=[16, 32],
-                            mlps=[[c_in, 32], [c_in, 64]],
-                            use_xyz=True,
-                            bn=with_bn
-                    )
-            )
-            c_out_0 = 32 + 64
+            
+            if True:
+                self.point_model = PointTransformerV3(in_channels=6, cls_mode=True)
+                self.fc_lyaer = nn.Sequential(
+                    nn.Linear(512, self.dim_condition),
+                )
+            else:
+                self.SA_modules = nn.ModuleList()
+                # PointNet2
+                c_in = 6
+                with_bn = False
+                self.SA_modules.append(
+                        PointnetSAModuleMSG(
+                                npoint=1024,
+                                radii=[0.05, 0.1],
+                                nsamples=[16, 32],
+                                mlps=[[c_in, 32], [c_in, 64]],
+                                use_xyz=True,
+                                bn=with_bn
+                        )
+                )
+                c_out_0 = 32 + 64
 
-            c_in = c_out_0
-            self.SA_modules.append(
-                    PointnetSAModuleMSG(
-                            npoint=256,
-                            radii=[0.1, 0.2],
-                            nsamples=[16, 32],
-                            mlps=[[c_in, 64], [c_in, 128]],
-                            use_xyz=True,
-                            bn=with_bn
-                    )
-            )
-            c_out_1 = 64 + 128
-            c_in = c_out_1
-            self.SA_modules.append(
-                    PointnetSAModuleMSG(
-                            npoint=64,
-                            radii=[0.2, 0.4],
-                            nsamples=[16, 32],
-                            mlps=[[c_in, 128], [c_in, 256]],
-                            use_xyz=True,
-                            bn=with_bn
-                    )
-            )
-            c_out_2 = 128 + 256
+                c_in = c_out_0
+                self.SA_modules.append(
+                        PointnetSAModuleMSG(
+                                npoint=256,
+                                radii=[0.1, 0.2],
+                                nsamples=[16, 32],
+                                mlps=[[c_in, 64], [c_in, 128]],
+                                use_xyz=True,
+                                bn=with_bn
+                        )
+                )
+                c_out_1 = 64 + 128
+                c_in = c_out_1
+                self.SA_modules.append(
+                        PointnetSAModuleMSG(
+                                npoint=64,
+                                radii=[0.2, 0.4],
+                                nsamples=[16, 32],
+                                mlps=[[c_in, 128], [c_in, 256]],
+                                use_xyz=True,
+                                bn=with_bn
+                        )
+                )
+                c_out_2 = 128 + 256
 
-            c_in = c_out_2
-            self.SA_modules.append(
-                    PointnetSAModuleMSG(
-                            npoint=16,
-                            radii=[0.4, 0.8],
-                            nsamples=[16, 32],
-                            mlps=[[c_in, 512], [c_in, 512]],
-                            use_xyz=True,
-                            bn=with_bn
-                    )
-            )
-            self.fc_lyaer = nn.Sequential(
-                    nn.Linear(1024, 1024),
-                    nn.LayerNorm(1024),
-                    nn.SiLU(),
-                    nn.Linear(1024, self.dim_condition),
-            )
+                c_in = c_out_2
+                self.SA_modules.append(
+                        PointnetSAModuleMSG(
+                                npoint=16,
+                                radii=[0.4, 0.8],
+                                nsamples=[16, 32],
+                                mlps=[[c_in, 512], [c_in, 512]],
+                                use_xyz=True,
+                                bn=with_bn
+                        )
+                )
+                self.fc_lyaer = nn.Sequential(
+                        nn.Linear(1024, 1024),
+                        nn.LayerNorm(1024),
+                        nn.SiLU(),
+                        nn.Linear(1024, self.dim_condition),
+                )
         if "txt" in v_conf["condition"]:
             self.with_txt = True
             model_path = 'Alibaba-NLP/gte-large-en-v1.5'
@@ -431,14 +438,29 @@ class Diffusion_condition(nn.Module):
                     pcd.points = o3d.utility.Vector3dVector(v_pc[idx,:,:3])
                     o3d.io.write_point_cloud(str(root/prefix/f"{idx}_aug.ply"), pcd)
 
-            l_xyz, l_features = [pc[:, :, :3].contiguous().float()], [pc.permute(0, 2, 1).contiguous().float()]
-            with torch.autocast(device_type=pc.device.type, dtype=torch.float32):
-                for i in range(len(self.SA_modules)):
-                    li_xyz, li_features = self.SA_modules[i](l_xyz[i], l_features[i])
-                    l_xyz.append(li_xyz)
-                    l_features.append(li_features)
-                features = self.fc_lyaer(l_features[-1].mean(dim=-1))
+            if True:
+                bs = pc.shape[0]
+                num_points = pc.shape[1]
+                feat = pc.reshape(-1, 6)
+                coords = feat[:, :3]
+                results = self.point_model({
+                    "feat": feat,
+                    "coord": coords,
+                    "grid_size": 0.02,
+                    "batch": torch.arange(bs, device=pc.device).repeat_interleave(num_points),
+                })
+                features = scatter_mean(results["feat"], results["batch"], dim=0)
+                features = self.fc_lyaer(features)
                 condition = features[:, None]
+            else:
+                l_xyz, l_features = [pc[:, :, :3].contiguous().float()], [pc.permute(0, 2, 1).contiguous().float()]
+                with torch.autocast(device_type=pc.device.type, dtype=torch.float32):
+                    for i in range(len(self.SA_modules)):
+                        li_xyz, li_features = self.SA_modules[i](l_xyz[i], l_features[i])
+                        l_xyz.append(li_xyz)
+                        l_features.append(li_features)
+                    features = self.fc_lyaer(l_features[-1].mean(dim=-1))
+                    condition = features[:, None]
         elif self.with_txt:
             if "txt_features" in v_data["conditions"]:
                 txt_feat = v_data["conditions"]["txt_features"]
@@ -661,7 +683,7 @@ class Diffusion_condition_mm(Diffusion_condition):
         pred_x0 = self.fc_out(pred_x0)
         return pred_x0
 
-    def extract_condition(self, v_data):
+    def extract_condition(self, v_data, v_test=False):
         bs = len(v_data["v_prefix"])
         device = self.learned_uncond_emb.device
         dtype = self.learned_uncond_emb.dtype
@@ -716,49 +738,49 @@ class Diffusion_condition_mm(Diffusion_condition):
             ).to(dtype)
 
         # PC feat
-        pc = v_data["conditions"]["points"]
-        if self.is_aug:
-            # Rotate
-            id_aug = v_data["id_aug"]
-            angles = torch.stack([id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
-            matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
-            rotation_3d_matrix = torch.tensor(matrix, device=pc.device, dtype=pc.dtype)
-            points = pc[:, 0, :, :3]
-            normals = pc[:, 0, :, 3:6]
+        # pc = v_data["conditions"]["points"]
+        # if self.is_aug:
+        #     # Rotate
+        #     id_aug = v_data["id_aug"]
+        #     angles = torch.stack([id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
+        #     matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
+        #     rotation_3d_matrix = torch.tensor(matrix, device=pc.device, dtype=pc.dtype)
+        #     points = pc[:, 0, :, :3]
+        #     normals = pc[:, 0, :, 3:6]
             
-            pc2 = (rotation_3d_matrix @ points.permute(0, 2, 1)).permute(0, 2, 1)
-            tpc2 = (rotation_3d_matrix @ (points+normals).permute(0, 2, 1)).permute(0, 2, 1)
-            normals2 = tpc2 - pc2
-            pc = torch.cat([pc2, normals2], dim=-1)
+        #     pc2 = (rotation_3d_matrix @ points.permute(0, 2, 1)).permute(0, 2, 1)
+        #     tpc2 = (rotation_3d_matrix @ (points+normals).permute(0, 2, 1)).permute(0, 2, 1)
+        #     normals2 = tpc2 - pc2
+        #     pc = torch.cat([pc2, normals2], dim=-1)
             
-            # Crop
-            bs = pc.shape[0]
-            num_points = pc.shape[1]
-            pc_index = torch.randint(0, pc.shape[1], (bs,), device=pc.device)
-            center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[...,:3]
-            length_xyz = torch.rand((bs,3), device=pc.device) * 1.0
-            bbox_min = center_pos - length_xyz[:, None, :]
-            bbox_max = center_pos + length_xyz[:, None, :]
-            mask = torch.logical_not(((pc[:, :, :3] > bbox_min) & (pc[:, :, :3] < bbox_max)).all(dim=-1))
+        #     # Crop
+        #     bs = pc.shape[0]
+        #     num_points = pc.shape[1]
+        #     pc_index = torch.randint(0, pc.shape[1], (bs,), device=pc.device)
+        #     center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[...,:3]
+        #     length_xyz = torch.rand((bs,3), device=pc.device) * 1.0
+        #     bbox_min = center_pos - length_xyz[:, None, :]
+        #     bbox_max = center_pos + length_xyz[:, None, :]
+        #     mask = torch.logical_not(((pc[:, :, :3] > bbox_min) & (pc[:, :, :3] < bbox_max)).all(dim=-1))
             
-            sort_results = torch.sort(mask.long(),descending=True)
-            mask=sort_results.values
-            pc_sorted = torch.gather(pc,1,sort_results.indices[:,:,None].repeat(1,1,6))
-            num_valid = mask.sum(dim=-1)
-            index1 = torch.rand((bs,num_points), device=pc.device) * num_valid[:,None]
-            index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs,1)
-            index = torch.where(mask.bool(), index2, index1)
-            pc = pc_sorted[torch.arange(bs)[:, None].repeat(1, num_points), index.long()]
+        #     sort_results = torch.sort(mask.long(),descending=True)
+        #     mask=sort_results.values
+        #     pc_sorted = torch.gather(pc,1,sort_results.indices[:,:,None].repeat(1,1,6))
+        #     num_valid = mask.sum(dim=-1)
+        #     index1 = torch.rand((bs,num_points), device=pc.device) * num_valid[:,None]
+        #     index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs,1)
+        #     index = torch.where(mask.bool(), index2, index1)
+        #     pc = pc_sorted[torch.arange(bs)[:, None].repeat(1, num_points), index.long()]
             
-            # Downsample
-            index = np.arange(num_points)
-            np.random.shuffle(index)
-            num_points = np.random.randint(1000, num_points)
-            pc = pc[:,index[:num_points]]
+        #     # Downsample
+        #     index = np.arange(num_points)
+        #     np.random.shuffle(index)
+        #     num_points = np.random.randint(1000, num_points)
+        #     pc = pc[:,index[:num_points]]
             
-            # Noise
-            noise = torch.randn_like(pc) * 0.02
-            pc = pc + noise
+        #     # Noise
+        #     noise = torch.randn_like(pc) * 0.02
+        #     pc = pc + noise
             
             # Mask normal
             pc[...,3:] = 0. if torch.rand(1) > 0.5 else pc[...,3:]

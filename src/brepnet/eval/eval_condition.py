@@ -44,7 +44,7 @@ def compute_statistics(eval_root, v_only_valid, listfile):
         all_folders.sort()
     exception_folders = []
     results = {
-
+        "prefix": []
     }
     for folder_name in tqdm(all_folders):
         if not os.path.exists(os.path.join(eval_root, folder_name, 'eval.npz')):
@@ -57,6 +57,10 @@ def compute_statistics(eval_root, v_only_valid, listfile):
             if v_only_valid:
                 continue
 
+        if v_only_valid and not os.path.exists(os.path.join(eval_root, folder_name, 'success.txt')):
+            continue
+        
+        results["prefix"].append(folder_name)
         for key in item:
             if key not in results:
                 results[key] = []
@@ -119,7 +123,8 @@ def compute_statistics(eval_root, v_only_valid, listfile):
             np.mean(results['vertex_rec']), np.mean(results['edge_rec']), np.mean(results['face_rec']),
             np.mean(results['fe_rec']), np.mean(results['ev_rec'])
         ))
-    print(f"{len(all_folders)-len(exception_folders)}/{len(all_folders)} are valid")
+    # print(f"{len(all_folders)-len(exception_folders)}/{len(all_folders)} are valid")
+    print(f"{results['face_cd'].shape[0]}/{len(all_folders)} are valid")
 
     def draw():
         face_chamfer = results['face_cd']
@@ -453,10 +458,21 @@ if __name__ == '__main__':
         )
         eval_one_remote = ray.remote(max_retries=0)(eval_one_with_try)
         tasks = []
+        timeout_cancel_list = []
         for i in range(len(all_folders)):
             tasks.append(eval_one_remote.remote(eval_root, gt_root, all_folders[i], is_point2cad))
-        for _ in tqdm(range(len(all_folders))):
-            ray.get(tasks.pop(0))
+        results = []
+        for i in tqdm(range(len(all_folders))):
+            try:
+                results.append(ray.get(tasks[i], timeout=60 * 3))
+            except ray.exceptions.GetTimeoutError:
+                results.append(None)
+                timeout_cancel_list.append(all_folders[i])
+                ray.cancel(tasks[i])
+            except:
+                results.append(None)
+        results = [item for item in results if item is not None]
+        print(f"Cancel for timeout: {timeout_cancel_list}")
 
     print("Computing statistics...")
     compute_statistics(eval_root, only_valid, listfile)

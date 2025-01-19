@@ -8,7 +8,7 @@ from tqdm import tqdm
 import torchvision.transforms as T
 import ray
 
-root = Path(r"/mnt/d/yilin/img2brep/deepcad_730_imgs_npz_v1")
+root = Path(r"/mnt/d/yilin/img2brep/abc_v2_npz")
 
 @ray.remote(num_gpus=0.5)
 def worker(folders, v_id):

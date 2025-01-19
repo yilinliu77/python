@@ -7,3 +7,5 @@ pip install git+'https://github.com/otaheri/chamfer_distance'
 
 # LFD
 apt install freeglut3 freeglut3-dev libosmesa6-dev libglu1-mesa-dev libglu1-mesa xserver-xorg-video-dummy
+pip install flash-attn --no-build-isolation
+pip install spconv-cu124

@@ -94,6 +94,7 @@ if __name__ == '__main__':
     )
     print(f"dataset_path: {args.dataset_path}")
     print(f"gen_path: {args.gen_path}")
+    assert os.path.exists(args.dataset_path) and os.path.exists(args.gen_path)
 
     tgt_folder_list = sorted(os.listdir(args.dataset_path))
     if listfile is not None:

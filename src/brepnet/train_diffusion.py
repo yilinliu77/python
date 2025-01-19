@@ -329,10 +329,10 @@ def main(v_cfg: DictConfig):
     if v_cfg["trainer"].evaluate:
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
         weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, weights_only=False, map_location="cpu")["state_dict"]
-        weights = {k: v for k, v in weights.items() if "ae_model" not in k}
+        # weights = {k: v for k, v in weights.items() if "ae_model" not in k}
         # weights = {k: v for k, v in weights.items() if "camera_embedding" not in k}
         # weights = {k.replace("model.", ""): v for k, v in weights.items()}
-        model.load_state_dict(weights, strict=False)
+        model.load_state_dict(weights, strict=True)
         trainer.test(model)
 
     else:

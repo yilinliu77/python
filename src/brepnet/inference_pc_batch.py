@@ -2,6 +2,7 @@ import argparse
 import shutil
 import sys
 import os.path
+import time
 from pathlib import Path
 import numpy as np
 # import open3d as o3d
@@ -109,10 +110,12 @@ if __name__ == '__main__':
     model.to(device)
     model.eval()
 
+    # 1. Generate data
     print("We have {} data".format(len(args.input)))
     output_dir = Path(args.output_dir)
     (output_dir / "network_pred").mkdir(parents=True, exist_ok=True)
 
+    ts = time.time()
     batch_size = 1024 // num_proposals  # 1024 in RTX 4090
     # for id_item, fileitem in enumerate(tqdm(args.input)):
     for batch_idx in range(0, len(args.input), batch_size):
@@ -209,15 +212,19 @@ if __name__ == '__main__':
                                     pred_edge=recon_data["pred_edge"],
                                     pred_edge_face_connectivity=recon_data["pred_edge_face_connectivity"],
                                     )
+    te = time.time()
+    with open(output_dir / "time1_gen.txt", "w") as f:
+        f.write(f"time1_gen: {te - ts} s")
 
     # Start post-processing
+    ts = time.time()
     ray.init(
             dashboard_host="0.0.0.0",
             dashboard_port=8080,
             num_cpus=int(args.num_cpus),
     )
     construct_brep_from_datanpz_ray = ray.remote(num_cpus=1, max_retries=0)(construct_brep_from_datanpz)
-    #
+    
     all_folders = os.listdir(output_dir / "network_pred")
     all_folders.sort()
 
@@ -239,6 +246,12 @@ if __name__ == '__main__':
         except:
             results.append(None)
 
+    te = time.time()
+    with open(output_dir / "time2_post.txt", "w") as f:
+        f.write(f"time2_post: {te - ts} s")
+
+    # Start choose best post
+    ts = time.time()
     if args.only_best:
         assert args.cond_root is not None
         cond_root = Path(args.cond_root)
@@ -269,4 +282,7 @@ if __name__ == '__main__':
             best_results = results[np.argmin(cd_dis_to_pc)]
             shutil.copytree(best_results.parent, output_dir / "best_post" / folder, dirs_exist_ok=True)
 
+    te = time.time()
+    with open(output_dir / "time3_choose_best.txt", "w") as f:
+        f.write(f"time3_choose_best: {te - ts} s")
     print("Done.")

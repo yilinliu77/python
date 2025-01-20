@@ -239,8 +239,8 @@ if __name__ == '__main__':
         tasks.append(construct_brep_from_datanpz_ray.remote(
                 output_dir / "network_pred", output_dir / "after_post",
                 all_folders[i],
-                v_drop_num=3,
-                use_cuda=False, from_scratch=False,
+                v_drop_num=2,
+                use_cuda=False, from_scratch=True,
                 is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False,
         ))
     results = []
@@ -271,10 +271,10 @@ if __name__ == '__main__':
             valid_results = []
             all_results = []
             for i in range(num_proposals):
-                if (output_dir / "after_post" / f"{folder}_pc_{i:02d}" / "recon_brep.stl").exists():
-                    valid_results.append(output_dir / "after_post" / f"{folder}_pc_{i:02d}" / "recon_brep.stl")
-                if (output_dir / "after_post" / f"{folder}_pc_{i:02d}" / "separate_faces.ply").exists():
-                    all_results.append(output_dir / "after_post" / f"{folder}_pc_{i:02d}" / "separate_faces.ply")
+                if (output_dir / "after_post" / f"{folder}_{i:02d}" / "recon_brep.stl").exists():
+                    valid_results.append(output_dir / "after_post" / f"{folder}_{i:02d}" / "recon_brep.stl")
+                if (output_dir / "after_post" / f"{folder}_{i:02d}" / "separate_faces.ply").exists():
+                    all_results.append(output_dir / "after_post" / f"{folder}_{i:02d}" / "separate_faces.ply")
 
             results = valid_results if len(valid_results) > 0 else all_results
             tasks = []

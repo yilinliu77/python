@@ -12,9 +12,9 @@ from addict import Dict
 import math
 import torch
 import torch.nn as nn
-import spconv.pytorch as spconv
+# import spconv.pytorch as spconv
 import torch_scatter
-from timm.models.layers import DropPath
+# from timm.models.layers import DropPath
 from collections import OrderedDict
 
 try:
@@ -28,7 +28,7 @@ from .serialization import encode
 @torch.inference_mode()
 def offset2bincount(offset):
     return torch.diff(
-        offset, prepend=torch.tensor([0], device=offset.device, dtype=torch.long)
+            offset, prepend=torch.tensor([0], device=offset.device, dtype=torch.long)
     )
 
 
@@ -36,7 +36,7 @@ def offset2bincount(offset):
 def offset2batch(offset):
     bincount = offset2bincount(offset)
     return torch.arange(
-        len(bincount), device=offset.device, dtype=torch.long
+            len(bincount), device=offset.device, dtype=torch.long
     ).repeat_interleave(bincount)
 
 
@@ -92,7 +92,7 @@ class Point(Dict):
             # (adjust `grid_size` to what your want)
             assert {"grid_size", "coord"}.issubset(self.keys())
             self["grid_coord"] = torch.div(
-                self.coord - self.coord.min(0)[0], self.grid_size, rounding_mode="trunc"
+                    self.coord - self.coord.min(0)[0], self.grid_size, rounding_mode="trunc"
             ).int()
 
         if depth is None:
@@ -118,11 +118,11 @@ class Point(Dict):
         code = torch.stack(code)
         order = torch.argsort(code)
         inverse = torch.zeros_like(order).scatter_(
-            dim=1,
-            index=order,
-            src=torch.arange(0, code.shape[1], device=order.device).repeat(
-                code.shape[0], 1
-            ),
+                dim=1,
+                index=order,
+                src=torch.arange(0, code.shape[1], device=order.device).repeat(
+                        code.shape[0], 1
+                ),
         )
 
         if shuffle_orders:
@@ -154,21 +154,21 @@ class Point(Dict):
             # (adjust `grid_size` to what your want)
             assert {"grid_size", "coord"}.issubset(self.keys())
             self["grid_coord"] = torch.div(
-                self.coord - self.coord.min(0)[0], self.grid_size, rounding_mode="trunc"
+                    self.coord - self.coord.min(0)[0], self.grid_size, rounding_mode="trunc"
             ).int()
         if "sparse_shape" in self.keys():
             sparse_shape = self.sparse_shape
         else:
             sparse_shape = torch.add(
-                torch.max(self.grid_coord, dim=0).values, pad
+                    torch.max(self.grid_coord, dim=0).values, pad
             ).tolist()
         sparse_conv_feat = spconv.SparseConvTensor(
-            features=self.feat,
-            indices=torch.cat(
-                [self.batch.unsqueeze(-1).int(), self.grid_coord.int()], dim=1
-            ).contiguous(),
-            spatial_shape=sparse_shape,
-            batch_size=self.batch[-1].tolist() + 1,
+                features=self.feat,
+                indices=torch.cat(
+                        [self.batch.unsqueeze(-1).int(), self.grid_coord.int()], dim=1
+                ).contiguous(),
+                spatial_shape=sparse_shape,
+                batch_size=self.batch[-1].tolist() + 1,
         )
         self["sparse_shape"] = sparse_shape
         self["sparse_conv_feat"] = sparse_conv_feat
@@ -242,7 +242,7 @@ class PointSequential(PointModule):
                     input.feat = module(input.feat)
                     if "sparse_conv_feat" in input.keys():
                         input.sparse_conv_feat = input.sparse_conv_feat.replace_feature(
-                            input.feat
+                                input.feat
                         )
                 elif isinstance(input, spconv.SparseConvTensor):
                     if input.indices.shape[0] != 0:
@@ -254,13 +254,13 @@ class PointSequential(PointModule):
 
 class PDNorm(PointModule):
     def __init__(
-        self,
-        num_features,
-        norm_layer,
-        context_channels=256,
-        conditions=("ScanNet", "S3DIS", "Structured3D"),
-        decouple=True,
-        adaptive=False,
+            self,
+            num_features,
+            norm_layer,
+            context_channels=256,
+            conditions=("ScanNet", "S3DIS", "Structured3D"),
+            decouple=True,
+            adaptive=False,
     ):
         super().__init__()
         self.conditions = conditions
@@ -272,7 +272,7 @@ class PDNorm(PointModule):
             self.norm = norm_layer
         if self.adaptive:
             self.modulation = nn.Sequential(
-                nn.SiLU(), nn.Linear(context_channels, 2 * num_features, bias=True)
+                    nn.SiLU(), nn.Linear(context_channels, 2 * num_features, bias=True)
             )
 
     def forward(self, point):
@@ -306,9 +306,9 @@ class RPE(torch.nn.Module):
 
     def forward(self, coord):
         idx = (
-            coord.clamp(-self.pos_bnd, self.pos_bnd)  # clamp into bnd
-            + self.pos_bnd  # relative position to positive index
-            + torch.arange(3, device=coord.device) * self.rpe_num  # x, y, z stride
+                coord.clamp(-self.pos_bnd, self.pos_bnd)  # clamp into bnd
+                + self.pos_bnd  # relative position to positive index
+                + torch.arange(3, device=coord.device) * self.rpe_num  # x, y, z stride
         )
         out = self.rpe_table.index_select(0, idx.reshape(-1))
         out = out.view(idx.shape + (-1,)).sum(3)
@@ -318,19 +318,19 @@ class RPE(torch.nn.Module):
 
 class SerializedAttention(PointModule):
     def __init__(
-        self,
-        channels,
-        num_heads,
-        patch_size,
-        qkv_bias=True,
-        qk_scale=None,
-        attn_drop=0.0,
-        proj_drop=0.0,
-        order_index=0,
-        enable_rpe=False,
-        enable_flash=True,
-        upcast_attention=True,
-        upcast_softmax=True,
+            self,
+            channels,
+            num_heads,
+            patch_size,
+            qkv_bias=True,
+            qk_scale=None,
+            attn_drop=0.0,
+            proj_drop=0.0,
+            order_index=0,
+            enable_rpe=False,
+            enable_flash=True,
+            upcast_attention=True,
+            upcast_softmax=True,
     ):
         super().__init__()
         assert channels % num_heads == 0
@@ -344,13 +344,13 @@ class SerializedAttention(PointModule):
         self.enable_flash = enable_flash
         if enable_flash:
             assert (
-                enable_rpe is False
+                    enable_rpe is False
             ), "Set enable_rpe to False when enable Flash Attention"
             assert (
-                upcast_attention is False
+                    upcast_attention is False
             ), "Set upcast_attention to False when enable Flash Attention"
             assert (
-                upcast_softmax is False
+                    upcast_softmax is False
             ), "Set upcast_softmax to False when enable Flash Attention"
             assert flash_attn is not None, "Make sure flash_attn is installed."
             self.patch_size = patch_size
@@ -385,19 +385,19 @@ class SerializedAttention(PointModule):
         unpad_key = "unpad"
         cu_seqlens_key = "cu_seqlens_key"
         if (
-            pad_key not in point.keys()
-            or unpad_key not in point.keys()
-            or cu_seqlens_key not in point.keys()
+                pad_key not in point.keys()
+                or unpad_key not in point.keys()
+                or cu_seqlens_key not in point.keys()
         ):
             offset = point.offset
             bincount = offset2bincount(offset)
             bincount_pad = (
-                torch.div(
-                    bincount + self.patch_size - 1,
-                    self.patch_size,
-                    rounding_mode="trunc",
-                )
-                * self.patch_size
+                    torch.div(
+                            bincount + self.patch_size - 1,
+                            self.patch_size,
+                            rounding_mode="trunc",
+                    )
+                    * self.patch_size
             )
             # only pad point when num of points larger than patch_size
             mask_pad = bincount > self.patch_size
@@ -408,39 +408,39 @@ class SerializedAttention(PointModule):
             unpad = torch.arange(_offset[-1], device=offset.device)
             cu_seqlens = []
             for i in range(len(offset)):
-                unpad[_offset[i] : _offset[i + 1]] += _offset_pad[i] - _offset[i]
+                unpad[_offset[i]: _offset[i + 1]] += _offset_pad[i] - _offset[i]
                 if bincount[i] != bincount_pad[i]:
                     pad[
-                        _offset_pad[i + 1]
-                        - self.patch_size
-                        + (bincount[i] % self.patch_size) : _offset_pad[i + 1]
+                    _offset_pad[i + 1]
+                    - self.patch_size
+                    + (bincount[i] % self.patch_size): _offset_pad[i + 1]
                     ] = pad[
                         _offset_pad[i + 1]
                         - 2 * self.patch_size
-                        + (bincount[i] % self.patch_size) : _offset_pad[i + 1]
-                        - self.patch_size
-                    ]
-                pad[_offset_pad[i] : _offset_pad[i + 1]] -= _offset_pad[i] - _offset[i]
+                        + (bincount[i] % self.patch_size): _offset_pad[i + 1]
+                                                           - self.patch_size
+                        ]
+                pad[_offset_pad[i]: _offset_pad[i + 1]] -= _offset_pad[i] - _offset[i]
                 cu_seqlens.append(
-                    torch.arange(
-                        _offset_pad[i],
-                        _offset_pad[i + 1],
-                        step=self.patch_size,
-                        dtype=torch.int32,
-                        device=offset.device,
-                    )
+                        torch.arange(
+                                _offset_pad[i],
+                                _offset_pad[i + 1],
+                                step=self.patch_size,
+                                dtype=torch.int32,
+                                device=offset.device,
+                        )
                 )
             point[pad_key] = pad
             point[unpad_key] = unpad
             point[cu_seqlens_key] = nn.functional.pad(
-                torch.concat(cu_seqlens), (0, 1), value=_offset_pad[-1]
+                    torch.concat(cu_seqlens), (0, 1), value=_offset_pad[-1]
             )
         return point[pad_key], point[unpad_key], point[cu_seqlens_key]
 
     def forward(self, point):
         if not self.enable_flash:
             self.patch_size = min(
-                offset2bincount(point.offset).min().tolist(), self.patch_size_max
+                    offset2bincount(point.offset).min().tolist(), self.patch_size_max
             )
 
         H = self.num_heads
@@ -474,11 +474,11 @@ class SerializedAttention(PointModule):
             feat = (attn @ v).transpose(1, 2).reshape(-1, C)
         else:
             feat = flash_attn.flash_attn_varlen_qkvpacked_func(
-                qkv.half().reshape(-1, 3, H, C // H),
-                cu_seqlens,
-                max_seqlen=self.patch_size,
-                dropout_p=self.attn_drop if self.training else 0,
-                softmax_scale=self.scale,
+                    qkv.half().reshape(-1, 3, H, C // H),
+                    cu_seqlens,
+                    max_seqlen=self.patch_size,
+                    dropout_p=self.attn_drop if self.training else 0,
+                    softmax_scale=self.scale,
             ).reshape(-1, C)
             feat = feat.to(qkv.dtype)
         feat = feat[inverse]
@@ -492,12 +492,12 @@ class SerializedAttention(PointModule):
 
 class MLP(nn.Module):
     def __init__(
-        self,
-        in_channels,
-        hidden_channels=None,
-        out_channels=None,
-        act_layer=nn.GELU,
-        drop=0.0,
+            self,
+            in_channels,
+            hidden_channels=None,
+            out_channels=None,
+            act_layer=nn.GELU,
+            drop=0.0,
     ):
         super().__init__()
         out_channels = out_channels or in_channels
@@ -518,69 +518,69 @@ class MLP(nn.Module):
 
 class Block(PointModule):
     def __init__(
-        self,
-        channels,
-        num_heads,
-        patch_size=48,
-        mlp_ratio=4.0,
-        qkv_bias=True,
-        qk_scale=None,
-        attn_drop=0.0,
-        proj_drop=0.0,
-        drop_path=0.0,
-        norm_layer=nn.LayerNorm,
-        act_layer=nn.GELU,
-        pre_norm=True,
-        order_index=0,
-        cpe_indice_key=None,
-        enable_rpe=False,
-        enable_flash=True,
-        upcast_attention=True,
-        upcast_softmax=True,
+            self,
+            channels,
+            num_heads,
+            patch_size=48,
+            mlp_ratio=4.0,
+            qkv_bias=True,
+            qk_scale=None,
+            attn_drop=0.0,
+            proj_drop=0.0,
+            drop_path=0.0,
+            norm_layer=nn.LayerNorm,
+            act_layer=nn.GELU,
+            pre_norm=True,
+            order_index=0,
+            cpe_indice_key=None,
+            enable_rpe=False,
+            enable_flash=True,
+            upcast_attention=True,
+            upcast_softmax=True,
     ):
         super().__init__()
         self.channels = channels
         self.pre_norm = pre_norm
 
         self.cpe = PointSequential(
-            spconv.SubMConv3d(
-                channels,
-                channels,
-                kernel_size=3,
-                bias=True,
-                indice_key=cpe_indice_key,
-            ),
-            nn.Linear(channels, channels),
-            norm_layer(channels),
+                spconv.SubMConv3d(
+                        channels,
+                        channels,
+                        kernel_size=3,
+                        bias=True,
+                        indice_key=cpe_indice_key,
+                ),
+                nn.Linear(channels, channels),
+                norm_layer(channels),
         )
 
         self.norm1 = PointSequential(norm_layer(channels))
         self.attn = SerializedAttention(
-            channels=channels,
-            patch_size=patch_size,
-            num_heads=num_heads,
-            qkv_bias=qkv_bias,
-            qk_scale=qk_scale,
-            attn_drop=attn_drop,
-            proj_drop=proj_drop,
-            order_index=order_index,
-            enable_rpe=enable_rpe,
-            enable_flash=enable_flash,
-            upcast_attention=upcast_attention,
-            upcast_softmax=upcast_softmax,
+                channels=channels,
+                patch_size=patch_size,
+                num_heads=num_heads,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                attn_drop=attn_drop,
+                proj_drop=proj_drop,
+                order_index=order_index,
+                enable_rpe=enable_rpe,
+                enable_flash=enable_flash,
+                upcast_attention=upcast_attention,
+                upcast_softmax=upcast_softmax,
         )
         self.norm2 = PointSequential(norm_layer(channels))
         self.mlp = PointSequential(
-            MLP(
-                in_channels=channels,
-                hidden_channels=int(channels * mlp_ratio),
-                out_channels=channels,
-                act_layer=act_layer,
-                drop=proj_drop,
-            )
+                MLP(
+                        in_channels=channels,
+                        hidden_channels=int(channels * mlp_ratio),
+                        out_channels=channels,
+                        act_layer=act_layer,
+                        drop=proj_drop,
+                )
         )
         self.drop_path = PointSequential(
-            DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
+                DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         )
 
     def forward(self, point: Point):
@@ -608,15 +608,15 @@ class Block(PointModule):
 
 class SerializedPooling(PointModule):
     def __init__(
-        self,
-        in_channels,
-        out_channels,
-        stride=2,
-        norm_layer=None,
-        act_layer=None,
-        reduce="max",
-        shuffle_orders=True,
-        traceable=True,  # record parent and cluster
+            self,
+            in_channels,
+            out_channels,
+            stride=2,
+            norm_layer=None,
+            act_layer=None,
+            reduce="max",
+            shuffle_orders=True,
+            traceable=True,  # record parent and cluster
     ):
         super().__init__()
         self.in_channels = in_channels
@@ -646,15 +646,15 @@ class SerializedPooling(PointModule):
             "serialized_inverse",
             "serialized_depth",
         }.issubset(
-            point.keys()
+                point.keys()
         ), "Run point.serialization() point cloud before SerializedPooling"
 
         code = point.serialized_code >> pooling_depth * 3
         code_, cluster, counts = torch.unique(
-            code[0],
-            sorted=True,
-            return_inverse=True,
-            return_counts=True,
+                code[0],
+                sorted=True,
+                return_inverse=True,
+                return_counts=True,
         )
         # indices of point sorted by cluster, for torch_scatter.segment_csr
         _, indices = torch.sort(cluster)
@@ -666,11 +666,11 @@ class SerializedPooling(PointModule):
         code = code[:, head_indices]
         order = torch.argsort(code)
         inverse = torch.zeros_like(order).scatter_(
-            dim=1,
-            index=order,
-            src=torch.arange(0, code.shape[1], device=order.device).repeat(
-                code.shape[0], 1
-            ),
+                dim=1,
+                index=order,
+                src=torch.arange(0, code.shape[1], device=order.device).repeat(
+                        code.shape[0], 1
+                ),
         )
 
         if self.shuffle_orders:
@@ -681,18 +681,18 @@ class SerializedPooling(PointModule):
 
         # collect information
         point_dict = Dict(
-            feat=torch_scatter.segment_csr(
-                self.proj(point.feat)[indices], idx_ptr, reduce=self.reduce
-            ),
-            coord=torch_scatter.segment_csr(
-                point.coord[indices], idx_ptr, reduce="mean"
-            ),
-            grid_coord=point.grid_coord[head_indices] >> pooling_depth,
-            serialized_code=code,
-            serialized_order=order,
-            serialized_inverse=inverse,
-            serialized_depth=point.serialized_depth - pooling_depth,
-            batch=point.batch[head_indices],
+                feat=torch_scatter.segment_csr(
+                        self.proj(point.feat)[indices], idx_ptr, reduce=self.reduce
+                ),
+                coord=torch_scatter.segment_csr(
+                        point.coord[indices], idx_ptr, reduce="mean"
+                ),
+                grid_coord=point.grid_coord[head_indices] >> pooling_depth,
+                serialized_code=code,
+                serialized_order=order,
+                serialized_inverse=inverse,
+                serialized_depth=point.serialized_depth - pooling_depth,
+                batch=point.batch[head_indices],
         )
 
         if "condition" in point.keys():
@@ -714,13 +714,13 @@ class SerializedPooling(PointModule):
 
 class SerializedUnpooling(PointModule):
     def __init__(
-        self,
-        in_channels,
-        skip_channels,
-        out_channels,
-        norm_layer=None,
-        act_layer=None,
-        traceable=False,  # record parent and cluster
+            self,
+            in_channels,
+            skip_channels,
+            out_channels,
+            norm_layer=None,
+            act_layer=None,
+            traceable=False,  # record parent and cluster
     ):
         super().__init__()
         self.proj = PointSequential(nn.Linear(in_channels, out_channels))
@@ -752,11 +752,11 @@ class SerializedUnpooling(PointModule):
 
 class Embedding(PointModule):
     def __init__(
-        self,
-        in_channels,
-        embed_channels,
-        norm_layer=None,
-        act_layer=None,
+            self,
+            in_channels,
+            embed_channels,
+            norm_layer=None,
+            act_layer=None,
     ):
         super().__init__()
         self.in_channels = in_channels
@@ -764,14 +764,14 @@ class Embedding(PointModule):
 
         # TODO: check remove spconv
         self.stem = PointSequential(
-            conv=spconv.SubMConv3d(
-                in_channels,
-                embed_channels,
-                kernel_size=5,
-                padding=1,
-                bias=False,
-                indice_key="stem",
-            )
+                conv=spconv.SubMConv3d(
+                        in_channels,
+                        embed_channels,
+                        kernel_size=5,
+                        padding=1,
+                        bias=False,
+                        indice_key="stem",
+                )
         )
         if norm_layer is not None:
             self.stem.add(norm_layer(embed_channels), name="norm")
@@ -785,37 +785,37 @@ class Embedding(PointModule):
 
 class PointTransformerV3(PointModule):
     def __init__(
-        self,
-        in_channels=6,
-        order=("z", "z-trans", "hilbert", "hilbert-trans"),
-        stride=(2, 2, 2, 2),
-        enc_depths=(2, 2, 2, 6, 2),
-        enc_channels=(32, 64, 128, 256, 512),
-        enc_num_head=(2, 4, 8, 16, 32),
-        enc_patch_size=(1024, 1024, 1024, 1024, 1024),
-        dec_depths=(2, 2, 2, 2),
-        dec_channels=(64, 64, 128, 256),
-        dec_num_head=(4, 4, 8, 16),
-        dec_patch_size=(1024, 1024, 1024, 1024),
-        mlp_ratio=4,
-        qkv_bias=True,
-        qk_scale=None,
-        attn_drop=0.0,
-        proj_drop=0.0,
-        drop_path=0.3,
-        pre_norm=True,
-        shuffle_orders=True,
-        enable_rpe=False,
-        enable_flash=True,
-        upcast_attention=False,
-        upcast_softmax=False,
-        cls_mode=False,
-        pdnorm_bn=False,
-        pdnorm_ln=False,
-        pdnorm_decouple=True,
-        pdnorm_adaptive=False,
-        pdnorm_affine=True,
-        pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
+            self,
+            in_channels=6,
+            order=("z", "z-trans", "hilbert", "hilbert-trans"),
+            stride=(2, 2, 2, 2),
+            enc_depths=(2, 2, 2, 6, 2),
+            enc_channels=(32, 64, 128, 256, 512),
+            enc_num_head=(2, 4, 8, 16, 32),
+            enc_patch_size=(1024, 1024, 1024, 1024, 1024),
+            dec_depths=(2, 2, 2, 2),
+            dec_channels=(64, 64, 128, 256),
+            dec_num_head=(4, 4, 8, 16),
+            dec_patch_size=(1024, 1024, 1024, 1024),
+            mlp_ratio=4,
+            qkv_bias=True,
+            qk_scale=None,
+            attn_drop=0.0,
+            proj_drop=0.0,
+            drop_path=0.3,
+            pre_norm=True,
+            shuffle_orders=True,
+            enable_rpe=False,
+            enable_flash=True,
+            upcast_attention=False,
+            upcast_softmax=False,
+            cls_mode=False,
+            pdnorm_bn=False,
+            pdnorm_ln=False,
+            pdnorm_decouple=True,
+            pdnorm_adaptive=False,
+            pdnorm_affine=True,
+            pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D"),
     ):
         super().__init__()
         self.num_stages = len(enc_depths)
@@ -836,23 +836,23 @@ class PointTransformerV3(PointModule):
         # norm layers
         if pdnorm_bn:
             bn_layer = partial(
-                PDNorm,
-                norm_layer=partial(
-                    nn.BatchNorm1d, eps=1e-3, momentum=0.01, affine=pdnorm_affine
-                ),
-                conditions=pdnorm_conditions,
-                decouple=pdnorm_decouple,
-                adaptive=pdnorm_adaptive,
+                    PDNorm,
+                    norm_layer=partial(
+                            nn.BatchNorm1d, eps=1e-3, momentum=0.01, affine=pdnorm_affine
+                    ),
+                    conditions=pdnorm_conditions,
+                    decouple=pdnorm_decouple,
+                    adaptive=pdnorm_adaptive,
             )
         else:
             bn_layer = partial(nn.BatchNorm1d, eps=1e-3, momentum=0.01)
         if pdnorm_ln:
             ln_layer = partial(
-                PDNorm,
-                norm_layer=partial(nn.LayerNorm, elementwise_affine=pdnorm_affine),
-                conditions=pdnorm_conditions,
-                decouple=pdnorm_decouple,
-                adaptive=pdnorm_adaptive,
+                    PDNorm,
+                    norm_layer=partial(nn.LayerNorm, elementwise_affine=pdnorm_affine),
+                    conditions=pdnorm_conditions,
+                    decouple=pdnorm_decouple,
+                    adaptive=pdnorm_adaptive,
             )
         else:
             ln_layer = nn.LayerNorm
@@ -860,10 +860,10 @@ class PointTransformerV3(PointModule):
         act_layer = nn.GELU
 
         self.embedding = Embedding(
-            in_channels=in_channels,
-            embed_channels=enc_channels[0],
-            norm_layer=bn_layer,
-            act_layer=act_layer,
+                in_channels=in_channels,
+                embed_channels=enc_channels[0],
+                norm_layer=bn_layer,
+                act_layer=act_layer,
         )
 
         # encoder
@@ -873,43 +873,43 @@ class PointTransformerV3(PointModule):
         self.enc = PointSequential()
         for s in range(self.num_stages):
             enc_drop_path_ = enc_drop_path[
-                sum(enc_depths[:s]) : sum(enc_depths[: s + 1])
-            ]
+                             sum(enc_depths[:s]): sum(enc_depths[: s + 1])
+                             ]
             enc = PointSequential()
             if s > 0:
                 enc.add(
-                    SerializedPooling(
-                        in_channels=enc_channels[s - 1],
-                        out_channels=enc_channels[s],
-                        stride=stride[s - 1],
-                        norm_layer=bn_layer,
-                        act_layer=act_layer,
-                    ),
-                    name="down",
+                        SerializedPooling(
+                                in_channels=enc_channels[s - 1],
+                                out_channels=enc_channels[s],
+                                stride=stride[s - 1],
+                                norm_layer=bn_layer,
+                                act_layer=act_layer,
+                        ),
+                        name="down",
                 )
             for i in range(enc_depths[s]):
                 enc.add(
-                    Block(
-                        channels=enc_channels[s],
-                        num_heads=enc_num_head[s],
-                        patch_size=enc_patch_size[s],
-                        mlp_ratio=mlp_ratio,
-                        qkv_bias=qkv_bias,
-                        qk_scale=qk_scale,
-                        attn_drop=attn_drop,
-                        proj_drop=proj_drop,
-                        drop_path=enc_drop_path_[i],
-                        norm_layer=ln_layer,
-                        act_layer=act_layer,
-                        pre_norm=pre_norm,
-                        order_index=i % len(self.order),
-                        cpe_indice_key=f"stage{s}",
-                        enable_rpe=enable_rpe,
-                        enable_flash=enable_flash,
-                        upcast_attention=upcast_attention,
-                        upcast_softmax=upcast_softmax,
-                    ),
-                    name=f"block{i}",
+                        Block(
+                                channels=enc_channels[s],
+                                num_heads=enc_num_head[s],
+                                patch_size=enc_patch_size[s],
+                                mlp_ratio=mlp_ratio,
+                                qkv_bias=qkv_bias,
+                                qk_scale=qk_scale,
+                                attn_drop=attn_drop,
+                                proj_drop=proj_drop,
+                                drop_path=enc_drop_path_[i],
+                                norm_layer=ln_layer,
+                                act_layer=act_layer,
+                                pre_norm=pre_norm,
+                                order_index=i % len(self.order),
+                                cpe_indice_key=f"stage{s}",
+                                enable_rpe=enable_rpe,
+                                enable_flash=enable_flash,
+                                upcast_attention=upcast_attention,
+                                upcast_softmax=upcast_softmax,
+                        ),
+                        name=f"block{i}",
                 )
             if len(enc) != 0:
                 self.enc.add(module=enc, name=f"enc{s}")
@@ -923,43 +923,43 @@ class PointTransformerV3(PointModule):
             dec_channels = list(dec_channels) + [enc_channels[-1]]
             for s in reversed(range(self.num_stages - 1)):
                 dec_drop_path_ = dec_drop_path[
-                    sum(dec_depths[:s]) : sum(dec_depths[: s + 1])
-                ]
+                                 sum(dec_depths[:s]): sum(dec_depths[: s + 1])
+                                 ]
                 dec_drop_path_.reverse()
                 dec = PointSequential()
                 dec.add(
-                    SerializedUnpooling(
-                        in_channels=dec_channels[s + 1],
-                        skip_channels=enc_channels[s],
-                        out_channels=dec_channels[s],
-                        norm_layer=bn_layer,
-                        act_layer=act_layer,
-                    ),
-                    name="up",
+                        SerializedUnpooling(
+                                in_channels=dec_channels[s + 1],
+                                skip_channels=enc_channels[s],
+                                out_channels=dec_channels[s],
+                                norm_layer=bn_layer,
+                                act_layer=act_layer,
+                        ),
+                        name="up",
                 )
                 for i in range(dec_depths[s]):
                     dec.add(
-                        Block(
-                            channels=dec_channels[s],
-                            num_heads=dec_num_head[s],
-                            patch_size=dec_patch_size[s],
-                            mlp_ratio=mlp_ratio,
-                            qkv_bias=qkv_bias,
-                            qk_scale=qk_scale,
-                            attn_drop=attn_drop,
-                            proj_drop=proj_drop,
-                            drop_path=dec_drop_path_[i],
-                            norm_layer=ln_layer,
-                            act_layer=act_layer,
-                            pre_norm=pre_norm,
-                            order_index=i % len(self.order),
-                            cpe_indice_key=f"stage{s}",
-                            enable_rpe=enable_rpe,
-                            enable_flash=enable_flash,
-                            upcast_attention=upcast_attention,
-                            upcast_softmax=upcast_softmax,
-                        ),
-                        name=f"block{i}",
+                            Block(
+                                    channels=dec_channels[s],
+                                    num_heads=dec_num_head[s],
+                                    patch_size=dec_patch_size[s],
+                                    mlp_ratio=mlp_ratio,
+                                    qkv_bias=qkv_bias,
+                                    qk_scale=qk_scale,
+                                    attn_drop=attn_drop,
+                                    proj_drop=proj_drop,
+                                    drop_path=dec_drop_path_[i],
+                                    norm_layer=ln_layer,
+                                    act_layer=act_layer,
+                                    pre_norm=pre_norm,
+                                    order_index=i % len(self.order),
+                                    cpe_indice_key=f"stage{s}",
+                                    enable_rpe=enable_rpe,
+                                    enable_flash=enable_flash,
+                                    upcast_attention=upcast_attention,
+                                    upcast_softmax=upcast_softmax,
+                            ),
+                            name=f"block{i}",
                     )
                 self.dec.add(module=dec, name=f"dec{s}")
 

@@ -19,9 +19,9 @@ from thirdparty.Pointnet2_PyTorch.pointnet2_ops_lib.pointnet2_ops.pointnet2_modu
     PointnetFPModule
 from scipy.spatial.transform import Rotation
 
-
 # from thirdparty.PointTransformerV3.model import *
 from thirdparty.point_transformer_v3.model import PointTransformerV3
+
 
 def add_timer(time_statics, v_attr, timer):
     if v_attr not in time_statics:
@@ -70,13 +70,13 @@ class Diffusion_condition(nn.Module):
         if "addition_tag" in v_conf:
             self.addition_tag = v_conf["addition_tag"]
         if self.addition_tag:
-            self.dim_input += 1 
+            self.dim_input += 1
 
         self.p_embed = nn.Sequential(
-            nn.Linear(self.dim_input, self.dim_latent),
-            nn.LayerNorm(self.dim_latent),
-            nn.SiLU(),
-            nn.Linear(self.dim_latent, self.dim_latent),
+                nn.Linear(self.dim_input, self.dim_latent),
+                nn.LayerNorm(self.dim_latent),
+                nn.SiLU(),
+                nn.Linear(self.dim_latent, self.dim_latent),
         )
 
         layer1 = nn.TransformerEncoderLayer(
@@ -102,25 +102,25 @@ class Diffusion_condition(nn.Module):
             self.img_model.eval()
 
             self.img_fc = nn.Sequential(
-                nn.Linear(1024, 1024),
-                nn.LayerNorm(1024),
-                nn.SiLU(),
-                nn.Linear(1024, self.dim_condition),
+                    nn.Linear(1024, 1024),
+                    nn.LayerNorm(1024),
+                    nn.SiLU(),
+                    nn.Linear(1024, self.dim_condition),
             )
             self.camera_embedding = nn.Sequential(
-                nn.Embedding(8, 256),
-                nn.Linear(256, 256),
-                nn.LayerNorm(256),
-                nn.SiLU(),
-                nn.Linear(256, self.dim_condition),
+                    nn.Embedding(8, 256),
+                    nn.Linear(256, 256),
+                    nn.LayerNorm(256),
+                    nn.SiLU(),
+                    nn.Linear(256, self.dim_condition),
             )
         if "pc" in v_conf["condition"]:
             self.with_pc = True
-            
-            if True:
+
+            if False:
                 self.point_model = PointTransformerV3(in_channels=6, cls_mode=True)
                 self.fc_lyaer = nn.Sequential(
-                    nn.Linear(512, self.dim_condition),
+                        nn.Linear(512, self.dim_condition),
                 )
             else:
                 self.SA_modules = nn.ModuleList()
@@ -189,12 +189,12 @@ class Diffusion_condition(nn.Module):
             for param in self.txt_model.parameters():
                 param.requires_grad = False
             self.txt_model.eval()
-            
+
             self.txt_fc = nn.Sequential(
-                nn.Linear(1024, 1024),
-                nn.LayerNorm(1024),
-                nn.SiLU(),
-                nn.Linear(1024, self.dim_condition),
+                    nn.Linear(1024, 1024),
+                    nn.LayerNorm(1024),
+                    nn.SiLU(),
+                    nn.Linear(1024, self.dim_condition),
             )
 
         self.classifier = nn.Sequential(
@@ -202,21 +202,21 @@ class Diffusion_condition(nn.Module):
                 nn.LayerNorm(self.dim_input),
                 nn.SiLU(),
                 nn.Linear(self.dim_input, 1),
-        )    
+        )
         self.noise_scheduler = DDPMScheduler(
-            num_train_timesteps=1000,
-            beta_schedule=v_conf["beta_schedule"],
-            prediction_type=v_conf["diffusion_type"],
-            beta_start=v_conf["beta_start"],
-            beta_end=v_conf["beta_end"],
-            variance_type=v_conf["variance_type"],
-            clip_sample=False,
+                num_train_timesteps=1000,
+                beta_schedule=v_conf["beta_schedule"],
+                prediction_type=v_conf["diffusion_type"],
+                beta_start=v_conf["beta_start"],
+                beta_end=v_conf["beta_end"],
+                variance_type=v_conf["variance_type"],
+                clip_sample=False,
         )
         self.time_embed = nn.Sequential(
-            nn.Linear(self.dim_total, self.dim_total),
-            nn.LayerNorm(self.dim_total),
-            nn.SiLU(),
-            nn.Linear(self.dim_total, self.dim_total),
+                nn.Linear(self.dim_total, self.dim_total),
+                nn.LayerNorm(self.dim_total),
+                nn.SiLU(),
+                nn.Linear(self.dim_total, self.dim_total),
         )
 
         self.num_max_faces = v_conf["num_max_faces"]
@@ -261,24 +261,24 @@ class Diffusion_condition(nn.Module):
             mask = label > 0.5
         else:
             mask = torch.ones_like(face_z[:, :, 0]).to(bool)
-        
+
         recon_data = []
         for i in range(bs):
             face_z_item = face_z[i:i + 1][mask[i:i + 1]]
-            if self.addition_tag: # Deduplicate
-                flag = face_z_item[...,-1] > 0
+            if self.addition_tag:  # Deduplicate
+                flag = face_z_item[..., -1] > 0
                 face_z_item = face_z_item[flag][:, :-1]
-            if self.pad_method == "random": # Deduplicate
+            if self.pad_method == "random":  # Deduplicate
                 threshold = 1e-2
                 max_faces = face_z_item.shape[0]
-                index = torch.stack(torch.meshgrid(torch.arange(max_faces),torch.arange(max_faces), indexing="ij"), dim=2)
+                index = torch.stack(torch.meshgrid(torch.arange(max_faces), torch.arange(max_faces), indexing="ij"), dim=2)
                 features = face_z_item[index]
-                distance = (features[:,:,0]-features[:,:,1]).abs().mean(dim=-1)
+                distance = (features[:, :, 0] - features[:, :, 1]).abs().mean(dim=-1)
                 final_face_z = []
                 for j in range(max_faces):
                     valid = True
                     for k in final_face_z:
-                        if distance[j,k] < threshold:
+                        if distance[j, k] < threshold:
                             valid = False
                             break
                     if valid:
@@ -311,19 +311,19 @@ class Diffusion_condition(nn.Module):
             # Fill the face_z to the padded_face_z without forloop
             if self.pad_method == "zero":
                 padded_face_z = torch.zeros(
-                    (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
+                        (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
                 mask = num_faces[:, None] > torch.arange(self.num_max_faces, device=num_faces.device)
                 padded_face_z[mask] = face_features
                 data["padded_face_z"] = padded_face_z
                 data["mask"] = mask
             else:
                 positions = torch.arange(self.num_max_faces, device=face_features.device).unsqueeze(0).repeat(bs, 1)
-                mandatory_mask = positions < num_faces[:,None]
-                random_indices = (torch.rand((bs, self.num_max_faces), device=face_features.device) * num_faces[:,None]).long()
+                mandatory_mask = positions < num_faces[:, None]
+                random_indices = (torch.rand((bs, self.num_max_faces), device=face_features.device) * num_faces[:, None]).long()
                 indices = torch.where(mandatory_mask, positions, random_indices)
                 num_faces_cum = num_faces.cumsum(dim=0).roll(1)
                 num_faces_cum[0] = 0
-                indices += num_faces_cum[:,None]
+                indices += num_faces_cum[:, None]
                 # Permute the indices
                 r_indices = torch.argsort(torch.rand((bs, self.num_max_faces), device=face_features.device), dim=1)
                 indices = indices.gather(1, r_indices)
@@ -372,7 +372,7 @@ class Diffusion_condition(nn.Module):
             pc = torch.cat([points, normals], dim=-1)
 
             if self.is_aug and self.training:
-            # if self.is_aug:
+                # if self.is_aug:
                 # Rotate
                 if True:
                     id_aug = v_data["id_aug"]
@@ -381,30 +381,30 @@ class Diffusion_condition(nn.Module):
                     rotation_3d_matrix = torch.tensor(matrix, device=pc.device, dtype=pc.dtype)
 
                     pc2 = (rotation_3d_matrix @ points.permute(0, 2, 1)).permute(0, 2, 1)
-                    tpc2 = (rotation_3d_matrix @ (points+normals).permute(0, 2, 1)).permute(0, 2, 1)
+                    tpc2 = (rotation_3d_matrix @ (points + normals).permute(0, 2, 1)).permute(0, 2, 1)
                     normals2 = tpc2 - pc2
                     pc = torch.cat([pc2, normals2], dim=-1)
-                
+
                 # Crop
                 if True:
                     bs = pc.shape[0]
                     num_points = pc.shape[1]
                     pc_index = torch.randint(0, pc.shape[1], (bs,), device=pc.device)
-                    center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[...,:3]
-                    length_xyz = torch.rand((bs,3), device=pc.device) * 1.0
+                    center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[..., :3]
+                    length_xyz = torch.rand((bs, 3), device=pc.device) * 1.0
                     bbox_min = center_pos - length_xyz[:, None, :]
                     bbox_max = center_pos + length_xyz[:, None, :]
                     mask = torch.logical_not(((pc[:, :, :3] > bbox_min) & (pc[:, :, :3] < bbox_max)).all(dim=-1))
 
-                    sort_results = torch.sort(mask.long(),descending=True)
-                    mask=sort_results.values
-                    pc_sorted = torch.gather(pc,1,sort_results.indices[:,:,None].repeat(1,1,6))
+                    sort_results = torch.sort(mask.long(), descending=True)
+                    mask = sort_results.values
+                    pc_sorted = torch.gather(pc, 1, sort_results.indices[:, :, None].repeat(1, 1, 6))
                     num_valid = mask.sum(dim=-1)
-                    index1 = torch.rand((bs,num_points), device=pc.device) * num_valid[:,None]
-                    index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs,1)
+                    index1 = torch.rand((bs, num_points), device=pc.device) * num_valid[:, None]
+                    index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs, 1)
                     index = torch.where(mask.bool(), index2, index1)
                     pc = pc_sorted[torch.arange(bs)[:, None].repeat(1, num_points), index.long()]
-                
+
                 # Downsample
                 if True:
                     num_points = pc.shape[1]
@@ -412,17 +412,17 @@ class Diffusion_condition(nn.Module):
                     np.random.shuffle(index)
                     num_points = np.random.randint(1000, num_points)
                     # pc = pc[:,index[:2048]]
-                    pc = pc[:,index[:num_points]]
+                    pc = pc[:, index[:num_points]]
 
                 # Noise
                 if True:
                     noise = torch.randn_like(pc) * 0.02
                     pc = pc + noise
-                
+
                 # Mask normal
                 if True:
                     # pc[...,3:] = 0.
-                    pc[...,3:] = 0. if torch.rand(1) > 0.5 else pc[...,3:]
+                    pc[..., 3:] = 0. if torch.rand(1) > 0.5 else pc[..., 3:]
             else:
                 pc = pc
 
@@ -433,21 +433,21 @@ class Diffusion_condition(nn.Module):
                 root = Path(r"D:/brepnet/noisy_input/111")
                 for idx in range(v_pc.shape[0]):
                     prefix = v_data["v_prefix"][idx]
-                    (root/prefix).mkdir(parents=True, exist_ok=True)
+                    (root / prefix).mkdir(parents=True, exist_ok=True)
                     pcd = o3d.geometry.PointCloud()
-                    pcd.points = o3d.utility.Vector3dVector(v_pc[idx,:,:3])
-                    o3d.io.write_point_cloud(str(root/prefix/f"{idx}_aug.ply"), pcd)
+                    pcd.points = o3d.utility.Vector3dVector(v_pc[idx, :, :3])
+                    o3d.io.write_point_cloud(str(root / prefix / f"{idx}_aug.ply"), pcd)
 
-            if True:
+            if False:
                 bs = pc.shape[0]
                 num_points = pc.shape[1]
                 feat = pc.reshape(-1, 6)
                 coords = feat[:, :3]
                 results = self.point_model({
-                    "feat": feat,
-                    "coord": coords,
+                    "feat"     : feat,
+                    "coord"    : coords,
                     "grid_size": 0.02,
-                    "batch": torch.arange(bs, device=pc.device).repeat_interleave(num_points),
+                    "batch"    : torch.arange(bs, device=pc.device).repeat_interleave(num_points),
                 })
                 features = scatter_mean(results["feat"], results["batch"], dim=0)
                 features = self.fc_lyaer(features)
@@ -484,7 +484,7 @@ class Diffusion_condition(nn.Module):
 
         # Model
         pred = self.diffuse(noise_input, timesteps, condition)
-        
+
         loss = {}
         loss_item = self.loss(pred, face_z if self.diffusion_type == "sample" else noise, reduction="none")
         loss["diffusion_loss"] = loss_item.mean()
@@ -524,11 +524,11 @@ class Diffusion_condition_mm(Diffusion_condition):
         self.learned_pc_emb = nn.Parameter(torch.rand(self.dim_condition))
         self.learned_txt_emb = nn.Parameter(torch.rand(self.dim_condition))
         self.condition = v_conf["condition"]
-        assert len(self.condition) == 7 # uncond, svr, mvr, sketch, pc, txt, mm
+        assert len(self.condition) == 7  # uncond, svr, mvr, sketch, pc, txt, mm
         self.cond_prob = v_conf["cond_prob"]
         self.cond_prob_acc = np.cumsum(self.cond_prob)
         assert len(self.cond_prob) == len(self.condition)
-        
+
     def inference(self, bs, device, v_data=None, v_log=True, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
         condition = None
@@ -549,24 +549,24 @@ class Diffusion_condition_mm(Diffusion_condition):
             mask = label > 0.5
         else:
             mask = torch.ones_like(face_z[:, :, 0]).to(bool)
-        
+
         recon_data = []
         for i in range(bs):
             face_z_item = face_z[i:i + 1][mask[i:i + 1]]
-            if self.addition_tag: # Deduplicate
-                flag = face_z_item[...,-1] > 0
+            if self.addition_tag:  # Deduplicate
+                flag = face_z_item[..., -1] > 0
                 face_z_item = face_z_item[flag][:, :-1]
-            if self.pad_method == "random": # Deduplicate
+            if self.pad_method == "random":  # Deduplicate
                 threshold = 1e-2
                 max_faces = face_z_item.shape[0]
-                index = torch.stack(torch.meshgrid(torch.arange(max_faces),torch.arange(max_faces), indexing="ij"), dim=2)
+                index = torch.stack(torch.meshgrid(torch.arange(max_faces), torch.arange(max_faces), indexing="ij"), dim=2)
                 features = face_z_item[index]
-                distance = (features[:,:,0]-features[:,:,1]).abs().mean(dim=-1)
+                distance = (features[:, :, 0] - features[:, :, 1]).abs().mean(dim=-1)
                 final_face_z = []
                 for j in range(max_faces):
                     valid = True
                     for k in final_face_z:
-                        if distance[j,k] < threshold:
+                        if distance[j, k] < threshold:
                             valid = False
                             break
                     if valid:
@@ -575,7 +575,7 @@ class Diffusion_condition_mm(Diffusion_condition):
             data_item = self.ae_model.inference(face_z_item)
             recon_data.append(data_item)
         return recon_data
-        
+
     def diffuse(self, v_feature, v_timesteps, v_condition=None):
         bs = v_feature.size(0)
         de = v_feature.device
@@ -594,19 +594,19 @@ class Diffusion_condition_mm(Diffusion_condition):
     def extract_condition(self, v_data, v_test=False):
         bs = len(v_data["v_prefix"])
         device = self.learned_uncond_emb.device
-        
+
         if not v_test:
             sampled_prob = np.random.rand(bs)
-            idx = self.cond_prob_acc.shape[0]-(sampled_prob[:,None] < self.cond_prob_acc[None,]).sum(axis=-1)
-            cond_onehot = torch.zeros((bs, 5), device=device, dtype=bool) # svr, mvr, sketch, pc, txt
-            cond_onehot[idx==1, 0] = 1 # svr
-            cond_onehot[idx==2, 1] = 1 # mvr
-            cond_onehot[idx==3, 2] = 1 # sketch
-            cond_onehot[idx==4, 3] = 1 # pc
-            cond_onehot[idx==5, 4] = 1 # txt
-            num_mm = (idx==6).sum()
+            idx = self.cond_prob_acc.shape[0] - (sampled_prob[:, None] < self.cond_prob_acc[None,]).sum(axis=-1)
+            cond_onehot = torch.zeros((bs, 5), device=device, dtype=bool)  # svr, mvr, sketch, pc, txt
+            cond_onehot[idx == 1, 0] = 1  # svr
+            cond_onehot[idx == 2, 1] = 1  # mvr
+            cond_onehot[idx == 3, 2] = 1  # sketch
+            cond_onehot[idx == 4, 3] = 1  # pc
+            cond_onehot[idx == 5, 4] = 1  # txt
+            num_mm = (idx == 6).sum()
             rand_onehot = torch.rand((num_mm, 5), device=device) > 0.5
-            cond_onehot[idx==6] = rand_onehot
+            cond_onehot[idx == 6] = rand_onehot
         else:
             cond_onehot = torch.zeros((bs, 5), device=device, dtype=bool)
             cond_onehot[:, 1] = True
@@ -627,7 +627,7 @@ class Diffusion_condition_mm(Diffusion_condition):
             img_feature = (img_feature.reshape(-1, num_imgs, self.dim_condition) + camera_embedding).mean(dim=1)
         else:
             img_feature = (img_feature.reshape(-1, num_imgs, self.dim_condition)).mean(dim=1)
-        
+
         # PC feat
         # pc = v_data["conditions"]["points"]
         # if self.is_aug:
@@ -638,12 +638,12 @@ class Diffusion_condition_mm(Diffusion_condition):
         #     rotation_3d_matrix = torch.tensor(matrix, device=pc.device, dtype=pc.dtype)
         #     points = pc[:, 0, :, :3]
         #     normals = pc[:, 0, :, 3:6]
-            
+
         #     pc2 = (rotation_3d_matrix @ points.permute(0, 2, 1)).permute(0, 2, 1)
         #     tpc2 = (rotation_3d_matrix @ (points+normals).permute(0, 2, 1)).permute(0, 2, 1)
         #     normals2 = tpc2 - pc2
         #     pc = torch.cat([pc2, normals2], dim=-1)
-            
+
         #     # Crop
         #     bs = pc.shape[0]
         #     num_points = pc.shape[1]
@@ -653,7 +653,7 @@ class Diffusion_condition_mm(Diffusion_condition):
         #     bbox_min = center_pos - length_xyz[:, None, :]
         #     bbox_max = center_pos + length_xyz[:, None, :]
         #     mask = torch.logical_not(((pc[:, :, :3] > bbox_min) & (pc[:, :, :3] < bbox_max)).all(dim=-1))
-            
+
         #     sort_results = torch.sort(mask.long(),descending=True)
         #     mask=sort_results.values
         #     pc_sorted = torch.gather(pc,1,sort_results.indices[:,:,None].repeat(1,1,6))
@@ -662,17 +662,17 @@ class Diffusion_condition_mm(Diffusion_condition):
         #     index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs,1)
         #     index = torch.where(mask.bool(), index2, index1)
         #     pc = pc_sorted[torch.arange(bs)[:, None].repeat(1, num_points), index.long()]
-            
+
         #     # Downsample
         #     index = np.arange(num_points)
         #     np.random.shuffle(index)
         #     num_points = np.random.randint(1000, num_points)
         #     pc = pc[:,index[:num_points]]
-            
+
         #     # Noise
         #     noise = torch.randn_like(pc) * 0.02
         #     pc = pc + noise
-            
+
         #     # Mask normal
         #     pc[...,3:] = 0. if torch.rand(1) > 0.5 else pc[...,3:]
         # else:
@@ -693,17 +693,17 @@ class Diffusion_condition_mm(Diffusion_condition):
         #     txt_feat = self.txt_model.encode(txt, show_progress_bar=False, convert_to_numpy=False, device=self.txt_model.device)
         #     txt_feat = torch.stack(txt_feat, dim=0)
         # txt_features = self.txt_fc(txt_feat)
-        
+
         condition = torch.stack([
-            self.learned_svr_emb, self.learned_mvr_emb, self.learned_sketch_emb, 
-            self.learned_pc_emb, self.learned_txt_emb], dim=0)[None,:].repeat(bs,1,1).to(img_feature.dtype)
-        
+            self.learned_svr_emb, self.learned_mvr_emb, self.learned_sketch_emb,
+            self.learned_pc_emb, self.learned_txt_emb], dim=0)[None, :].repeat(bs, 1, 1).to(img_feature.dtype)
+
         # condition[cond_onehot[:,0],0] = img_feature[cond_onehot[:,0]]
-        condition[cond_onehot[:,1],1] = img_feature[cond_onehot[:,1]]
+        condition[cond_onehot[:, 1], 1] = img_feature[cond_onehot[:, 1]]
         # condition[cond_onehot[:,2],2] = img_feature[cond_onehot[:,2]]
         # condition[cond_onehot[:,3],3] = pc_features[cond_onehot[:,3]]
         # condition[cond_onehot[:,4],4] = txt_features[cond_onehot[:,4]]
-        
+
         condition = self.cross_attn(condition)
         condition = condition.mean(dim=1, keepdim=True)
         return condition, cond_onehot
@@ -721,7 +721,7 @@ class Diffusion_condition_mm(Diffusion_condition):
 
         # Model
         pred = self.diffuse(noise_input, timesteps, condition)
-        
+
         loss = {}
         loss_item = self.loss(pred, face_z if self.diffusion_type == "sample" else noise, reduction="none")
         loss["diffusion_loss"] = loss_item.mean()
@@ -735,7 +735,7 @@ class Diffusion_condition_mm(Diffusion_condition):
                 classification_loss = classification_loss * 1e-4
             loss["classification"] = classification_loss
         loss["total_loss"] = sum(loss.values())
-        
+
         loss["t"] = torch.stack((timesteps, loss_item.mean(dim=1).mean(dim=1)), dim=1)
         loss_item = loss_item.mean(dim=1).mean(dim=1)
         uncond_mask = cond_onehot.sum(dim=1) == 0
@@ -746,23 +746,23 @@ class Diffusion_condition_mm(Diffusion_condition):
         loss["mm_count"] = mm_mask.sum().to(loss_item.dtype)
         if mm_mask.sum() > 0:
             loss["mm_diffusion_loss"] = loss_item[mm_mask].mean()
-        svr_mask = torch.logical_and(cond_onehot[:,0], torch.logical_not(mm_mask))
+        svr_mask = torch.logical_and(cond_onehot[:, 0], torch.logical_not(mm_mask))
         loss["svr_count"] = svr_mask.sum().to(loss_item.dtype)
         if svr_mask.sum() > 0:
             loss["svr_diffusion_loss"] = loss_item[svr_mask].mean()
-        mvr_mask = torch.logical_and(cond_onehot[:,1], torch.logical_not(mm_mask))
+        mvr_mask = torch.logical_and(cond_onehot[:, 1], torch.logical_not(mm_mask))
         loss["mvr_count"] = mvr_mask.sum().to(loss_item.dtype)
         if mvr_mask.sum() > 0:
             loss["mvr_diffusion_loss"] = loss_item[mvr_mask].mean()
-        sketch_mask = torch.logical_and(cond_onehot[:,2], torch.logical_not(mm_mask))
+        sketch_mask = torch.logical_and(cond_onehot[:, 2], torch.logical_not(mm_mask))
         loss["sketch_count"] = sketch_mask.sum().to(loss_item.dtype)
         if sketch_mask.sum() > 0:
             loss["sketch_diffusion_loss"] = loss_item[sketch_mask].mean()
-        pc_mask = torch.logical_and(cond_onehot[:,3], torch.logical_not(mm_mask))
+        pc_mask = torch.logical_and(cond_onehot[:, 3], torch.logical_not(mm_mask))
         loss["pc_count"] = pc_mask.sum().to(loss_item.dtype)
         if pc_mask.sum() > 0:
             loss["pc_diffusion_loss"] = loss_item[pc_mask].mean()
-        txt_mask = torch.logical_and(cond_onehot[:,4], torch.logical_not(mm_mask))
+        txt_mask = torch.logical_and(cond_onehot[:, 4], torch.logical_not(mm_mask))
         loss["txt_count"] = txt_mask.sum().to(loss_item.dtype)
         if txt_mask.sum() > 0:
             loss["txt_diffusion_loss"] = loss_item[txt_mask].mean()
@@ -788,16 +788,16 @@ class Diffusion_condition_mvr(Diffusion_condition):
             self.img_model.eval()
 
             self.img_fc1 = nn.Sequential(
-                nn.Linear(1024, self.dim_condition),
-                nn.LayerNorm(self.dim_condition),
-                nn.SiLU(),
-                nn.Linear(self.dim_condition, self.dim_condition),
+                    nn.Linear(1024, self.dim_condition),
+                    nn.LayerNorm(self.dim_condition),
+                    nn.SiLU(),
+                    nn.Linear(self.dim_condition, self.dim_condition),
             )
             self.img_fc2 = nn.Sequential(
-                nn.Linear(1024, self.dim_condition),
-                nn.LayerNorm(self.dim_condition),
-                nn.SiLU(),
-                nn.Linear(self.dim_condition, self.dim_condition),
+                    nn.Linear(1024, self.dim_condition),
+                    nn.LayerNorm(self.dim_condition),
+                    nn.SiLU(),
+                    nn.Linear(self.dim_condition, self.dim_condition),
             )
 
     def extract_condition(self, v_data):
@@ -830,7 +830,7 @@ class Diffusion_condition_mvr(Diffusion_condition):
                 if True:
                     id_aug = v_data["id_aug"]
                     angles = torch.stack(
-                        [id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
+                            [id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
                     matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
                     rotation_3d_matrix = torch.tensor(matrix, device=pc.device, dtype=pc.dtype)
 
@@ -910,4 +910,3 @@ class Diffusion_condition_mvr(Diffusion_condition):
                 txt_feat = torch.stack(txt_feat, dim=0)
             condition = self.txt_fc(txt_feat)[:, None]
         return condition
-

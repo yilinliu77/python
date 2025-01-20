@@ -21,32 +21,32 @@ os.environ["HTTPS_PROXY"] = "http://172.31.178.126:7890"
 
 if __name__ == '__main__':
     conf = {
-        "name": "Diffusion_condition",
-        "train_decoder": False,
-        "stored_z": False,
-        "use_mean": True,
-        "diffusion_latent": 768,
-        "diffusion_type": "epsilon",
-        "loss": "l2",
-        "pad_method": "random",
-        "num_max_faces": 30,
-        "beta_schedule": "squaredcos_cap_v2",
-        "beta_start": 0.0001,
-        "beta_end": 0.02,
-        "variance_type": "fixed_small",
-        "addition_tag": False,
-        "autoencoder": "AutoEncoder_1119_light",
-        "with_intersection": True,
-        "dim_latent": 8,
-        "dim_shape": 768,
-        "sigmoid": False,
-        "in_channels": 6,
-        "gaussian_weights": 1e-6,
-        "norm": "layer",
+        "name"               : "Diffusion_condition",
+        "train_decoder"      : False,
+        "stored_z"           : False,
+        "use_mean"           : True,
+        "diffusion_latent"   : 768,
+        "diffusion_type"     : "epsilon",
+        "loss"               : "l2",
+        "pad_method"         : "random",
+        "num_max_faces"      : 30,
+        "beta_schedule"      : "squaredcos_cap_v2",
+        "beta_start"         : 0.0001,
+        "beta_end"           : 0.02,
+        "variance_type"      : "fixed_small",
+        "addition_tag"       : False,
+        "autoencoder"        : "AutoEncoder_1119_light",
+        "with_intersection"  : True,
+        "dim_latent"         : 8,
+        "dim_shape"          : 768,
+        "sigmoid"            : False,
+        "in_channels"        : 6,
+        "gaussian_weights"   : 1e-6,
+        "norm"               : "layer",
         "autoencoder_weights": "",
-        "is_aug": False,
-        "condition": [],
-        "cond_prob": []
+        "is_aug"             : False,
+        "condition"          : [],
+        "cond_prob"          : []
     }
 
     parser = argparse.ArgumentParser(prog='Inference')
@@ -72,7 +72,7 @@ if __name__ == '__main__':
     diffusion_weights = {k[6:]: v for k, v in diffusion_weights.items() if "model" in k}
     autoencoder_weights = torch.load(conf["autoencoder_weights"], map_location=device, weights_only=False)["state_dict"]
     autoencoder_weights = {k[6:]: v for k, v in autoencoder_weights.items() if "model" in k}
-    autoencoder_weights = {"ae_model."+k: v for k, v in autoencoder_weights.items()}
+    autoencoder_weights = {"ae_model." + k: v for k, v in autoencoder_weights.items()}
     diffusion_weights.update(autoencoder_weights)
     diffusion_weights = {k: v for k, v in diffusion_weights.items() if "camera_embedding" not in k}
     model.load_state_dict(diffusion_weights, strict=False)
@@ -129,6 +129,7 @@ if __name__ == '__main__':
                 exit(1)
 
             import torchvision.transforms as T
+
             transform = T.Compose([
                 T.ToPILImage(),
                 T.Resize((224, 224)),
@@ -150,7 +151,7 @@ if __name__ == '__main__':
 
         for idx in range((len(network_preds))):
             prefix = f"{name}_{idx:02d}"
-            (output_dir/"network_pred"/prefix).mkdir(parents=True, exist_ok=True)
+            (output_dir / "network_pred" / prefix).mkdir(parents=True, exist_ok=True)
             recon_data = network_preds[idx]
             export_edges(recon_data["pred_edge"], str(output_dir / "network_pred" / prefix / f"edge.obj"))
             np.savez_compressed(str(output_dir / "network_pred" / prefix / f"data.npz"),
@@ -164,9 +165,9 @@ if __name__ == '__main__':
     print("Start post processing")
     num_cpus = 8
     ray.init(
-        dashboard_host="0.0.0.0",
-        dashboard_port=8080,
-        num_cpus=num_cpus,
+            dashboard_host="0.0.0.0",
+            dashboard_port=8080,
+            num_cpus=num_cpus,
     )
     construct_brep_from_datanpz_ray = ray.remote(num_cpus=1, max_retries=0)(construct_brep_from_datanpz)
 
@@ -176,11 +177,11 @@ if __name__ == '__main__':
     tasks = []
     for i in range(len(all_folders)):
         tasks.append(construct_brep_from_datanpz_ray.remote(
-            output_dir / "network_pred", output_dir/"after_post",
-            all_folders[i],
-            v_drop_num=3,
-            use_cuda=False, from_scratch=True,
-            is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False,
+                output_dir / "network_pred", output_dir / "after_post",
+                all_folders[i],
+                v_drop_num=3,
+                use_cuda=False, from_scratch=True,
+                is_log=False, is_ray=True, is_optimize_geom=True, isdebug=False,
         ))
     results = []
     for i in tqdm(range(len(all_folders))):

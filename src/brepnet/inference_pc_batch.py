@@ -68,11 +68,12 @@ if __name__ == '__main__':
     parser.add_argument('--diffusion_weights', type=str, required=True)
     parser.add_argument('--condition', nargs='+', required=True)
     parser.add_argument('--output_dir', type=str, default="./inference_output")
-    parser.add_argument("--list", required=False)
-    parser.add_argument("--cond_root", required=False)
+    parser.add_argument("--list", required=True)
+    parser.add_argument("--cond_root", required=True)
     parser.add_argument("--num_proposals", type=int, default=32)
     parser.add_argument("--only_best", action="store_true")
     parser.add_argument("--num_cpus", type=int, default=100)
+    parser.add_argument("--random_choose_num", type=int, required=False)
 
     args = parser.parse_args()
     conf["autoencoder_weights"] = args.autoencoder_weights
@@ -88,6 +89,9 @@ if __name__ == '__main__':
         args.input = [os.path.join(args.cond_root, line.strip(), 'pc.ply') for line in f.readlines()]
         for each in args.input:
             assert os.path.exists(each), f"File {each} not found."
+        if args.random_choose_num is not None:
+            print(f"Random choose {args.random_choose_num} from {len(args.input)}")
+            args.input = np.random.choice(args.input, args.random_choose_num, replace=False)
 
     if args.only_best is not None:
         assert "pc" in args.condition, "Only pc is supported when list is provided."
@@ -224,7 +228,7 @@ if __name__ == '__main__':
             num_cpus=int(args.num_cpus),
     )
     construct_brep_from_datanpz_ray = ray.remote(num_cpus=1, max_retries=0)(construct_brep_from_datanpz)
-    
+
     all_folders = os.listdir(output_dir / "network_pred")
     all_folders.sort()
 

@@ -23,13 +23,13 @@ os.environ["HTTPS_PROXY"] = "http://172.31.178.126:7890"
 
 
 @ray.remote
-def sample_and_eval(gt_pc_path, recon_mesh_path):
+def sample_and_eval(gt_pc_path, recon_mesh_path, num_sample_ratio=1):
     import open3d as o3d
     gt_pc = o3d.io.read_point_cloud(gt_pc_path)
     recon = o3d.io.read_triangle_mesh(recon_mesh_path)
     if len(gt_pc.points) == 0 or len(recon.vertices) == 0:
         return np.Inf
-    recon_pc = recon.sample_points_poisson_disk(len(gt_pc.points) * 3)
+    recon_pc = recon.sample_points_poisson_disk(len(gt_pc.points) * num_sample_ratio)
     return np.mean(gt_pc.compute_point_cloud_distance(recon_pc))
 
 

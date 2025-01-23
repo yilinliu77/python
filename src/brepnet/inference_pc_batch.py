@@ -4,6 +4,8 @@ import sys
 import os.path
 import time
 from pathlib import Path
+import random
+
 import numpy as np
 # import open3d as o3d
 import ray
@@ -22,15 +24,40 @@ os.environ["HTTP_PROXY"] = "http://172.31.178.126:7890"
 os.environ["HTTPS_PROXY"] = "http://172.31.178.126:7890"
 
 
-@ray.remote
-def sample_and_eval(gt_pc_path, recon_mesh_path, num_sample_ratio=1):
+def choose_best(cond_root, folder, output_dir, num_proposals=32):
+    valid_results = []
+    all_results = []
+    for i in range(num_proposals):
+        if (output_dir / "after_post" / f"{folder}_{i:02d}" / "recon_brep.stl").exists():
+            valid_results.append(output_dir / "after_post" / f"{folder}_{i:02d}" / "recon_brep.stl")
+        if (output_dir / "after_post" / f"{folder}_{i:02d}" / "separate_faces.ply").exists():
+            all_results.append(output_dir / "after_post" / f"{folder}_{i:02d}" / "separate_faces.ply")
+
+    results = valid_results if len(valid_results) > 0 else all_results
+
+    assert len(results) > 0, f"No valid results for {folder}"
+
     import open3d as o3d
-    gt_pc = o3d.io.read_point_cloud(gt_pc_path)
-    recon = o3d.io.read_triangle_mesh(recon_mesh_path)
-    if len(gt_pc.points) == 0 or len(recon.vertices) == 0:
-        return np.Inf
-    recon_pc = recon.sample_points_poisson_disk(len(gt_pc.points) * num_sample_ratio)
-    return np.mean(gt_pc.compute_point_cloud_distance(recon_pc))
+    gt_pc = o3d.io.read_point_cloud(str(cond_root / folder / "pc.ply"))
+
+    # eval 32 proposals
+    num_sample_ratio = 1
+    cd_dis_to_pc = []
+    for i in range(len(results)):
+        recon_mesh = o3d.io.read_triangle_mesh(str(results[i]))
+        if len(recon_mesh.vertices) == 0:
+            return np.Inf
+        recon_pc = recon_mesh.sample_points_poisson_disk(len(gt_pc.points) * num_sample_ratio)
+        dis = np.mean(gt_pc.compute_point_cloud_distance(recon_pc))
+        cd_dis_to_pc.append(dis)
+
+    best_results = results[np.argmin(cd_dis_to_pc)]
+    shutil.copytree(best_results.parent, output_dir / "best_post" / folder, dirs_exist_ok=True)
+
+
+def downsample_pc(points, n):
+    sample_idx = random.sample(list(range(points.shape[0])), n)
+    return points[sample_idx]
 
 
 if __name__ == '__main__':
@@ -70,16 +97,28 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', type=str, default="./inference_output")
     parser.add_argument("--list", required=True)
     parser.add_argument("--cond_root", required=True)
+    parser.add_argument("--cond_pc_num", type=int, default=2048)
     parser.add_argument("--num_proposals", type=int, default=32)
     parser.add_argument("--only_best", action="store_true")
     parser.add_argument("--num_cpus", type=int, default=100)
     parser.add_argument("--random_choose_num", type=int, required=False)
+    parser.add_argument("--from_scratch", action="store_true")
 
     args = parser.parse_args()
     conf["autoencoder_weights"] = args.autoencoder_weights
     conf["diffusion_weights"] = args.diffusion_weights
     conf["condition"] = args.condition
 
+    seed_everything(0)
+
+    from_scratch = args.from_scratch
+    if not from_scratch:
+        print("Not from scratch, will use the existing data in output_dir.")
+    else:
+        print("From scratch, removing the existing data in output_dir.")
+        shutil.rmtree(args.output_dir, ignore_errors=True) if os.path.exists(args.output_dir) else None
+
+    cond_pc_num = int(args.cond_pc_num)
     num_proposals = int(args.num_proposals)
 
     assert args.list is not None, "list is required."
@@ -96,7 +135,6 @@ if __name__ == '__main__':
     if args.only_best is not None:
         assert "pc" in args.condition, "Only pc is supported when list is provided."
 
-    seed_everything(0)
     torch.backends.cudnn.benchmark = False
     torch.set_float32_matmul_precision("medium")
 
@@ -128,7 +166,13 @@ if __name__ == '__main__':
             "conditions": {
             }
         }
+
+        valid_hitted_fileitems = []
         for id_item, fileitem in enumerate(tqdm(hitted_fileitems)):
+            name = os.path.basename(os.path.dirname(fileitem))
+            if os.path.exists(output_dir / "network_pred" / f"{name}_00"):
+                continue
+            valid_hitted_fileitems.append(fileitem)
             if "pc" in conf["condition"]:
                 input_file = Path(fileitem)
                 name = input_file.stem
@@ -157,9 +201,13 @@ if __name__ == '__main__':
                 points *= 0.9 * 2
 
                 points = np.concatenate([points, normals], axis=1)
-                num_sample = min(8192, points.shape[0])
-                index = np.random.choice(points.shape[0], num_sample, replace=False)
-                points = points[index]
+
+                if points.shape[0] > cond_pc_num:
+                    points = downsample_pc(points, cond_pc_num)
+                elif points.shape[0] < cond_pc_num:
+                    # upsample
+                    raise NotImplementedError
+                assert points.shape[0] == cond_pc_num
                 points_tensor = torch.tensor(points, dtype=torch.float32).to(device)
                 if "points" not in data["conditions"]:
                     data["conditions"]["points"] = torch.empty((0, 1, points_tensor.shape[0], points_tensor.shape[1]),
@@ -196,18 +244,21 @@ if __name__ == '__main__':
                 print("Unknown condition")
                 exit(1)
 
+        if len(valid_hitted_fileitems) == 0:
+            continue
+
         # run in batch
         with torch.no_grad():
-            network_preds = model.inference(num_proposals * len(hitted_fileitems), device, v_data=data, v_log=True)
+            network_preds = model.inference(num_proposals * len(valid_hitted_fileitems), device, v_data=data, v_log=True)
 
         # unpack num_proposals network_preds for each fileitem
-        for id_item, fileitem in enumerate(tqdm(hitted_fileitems)):
+        for id_item, fileitem in enumerate(tqdm(valid_hitted_fileitems)):
             local_network_preds = network_preds[id_item * num_proposals:(id_item + 1) * num_proposals]
             for idx in range((len(local_network_preds))):
                 name = os.path.basename(os.path.dirname(fileitem))
                 prefix = f"{name}_{idx:02d}"
                 (output_dir / "network_pred" / prefix).mkdir(parents=True, exist_ok=True)
-                recon_data = network_preds[idx]
+                recon_data = local_network_preds[idx]
                 export_edges(recon_data["pred_edge"], str(output_dir / "network_pred" / prefix / f"edge.obj"))
                 np.savez_compressed(str(output_dir / "network_pred" / prefix / f"data.npz"),
                                     pred_face_adj_prob=recon_data["pred_face_adj_prob"],
@@ -217,8 +268,8 @@ if __name__ == '__main__':
                                     pred_edge_face_connectivity=recon_data["pred_edge_face_connectivity"],
                                     )
     te = time.time()
-    with open(output_dir / "time1_gen.txt", "w") as f:
-        f.write(f"time1_gen: {te - ts} s")
+    with open(output_dir / "time1_gen.txt", "a") as f:
+        f.write(f"time1_gen: {te - ts} s\n")
 
     # Start post-processing
     ts = time.time()
@@ -236,6 +287,8 @@ if __name__ == '__main__':
     # all_folders = [folder for folder in all_folders if not (output_dir / "after_post" / folder).exists()]
     print(f"Start post processing, folder num: {len(all_folders)}")
     for i in range(len(all_folders)):
+        if (output_dir / "after_post" / all_folders[i]).exists():
+            continue
         tasks.append(construct_brep_from_datanpz_ray.remote(
                 output_dir / "network_pred", output_dir / "after_post",
                 all_folders[i],
@@ -251,8 +304,8 @@ if __name__ == '__main__':
             results.append(None)
 
     te = time.time()
-    with open(output_dir / "time2_post.txt", "w") as f:
-        f.write(f"time2_post: {te - ts} s")
+    with open(output_dir / "time2_post.txt", "a") as f:
+        f.write(f"time2_post: {te - ts} s\n")
 
     # Start choose best post
     ts = time.time()
@@ -267,26 +320,16 @@ if __name__ == '__main__':
         print(f"\nStart choose best post, folder num: {len(all_folders)}\n")
         os.makedirs(output_dir / "best_post", exist_ok=True)
 
+        choose_best_remote = ray.remote(choose_best)
+        futures = []
         for folder in tqdm(all_folders):
-            valid_results = []
-            all_results = []
-            for i in range(num_proposals):
-                if (output_dir / "after_post" / f"{folder}_{i:02d}" / "recon_brep.stl").exists():
-                    valid_results.append(output_dir / "after_post" / f"{folder}_{i:02d}" / "recon_brep.stl")
-                if (output_dir / "after_post" / f"{folder}_{i:02d}" / "separate_faces.ply").exists():
-                    all_results.append(output_dir / "after_post" / f"{folder}_{i:02d}" / "separate_faces.ply")
-
-            results = valid_results if len(valid_results) > 0 else all_results
-            tasks = []
-            for i in range(len(results)):
-                tasks.append(sample_and_eval.remote(str(cond_root / folder / "pc.ply"), str(results[i])))
-            cd_dis_to_pc = []
-            for i in range(len(results)):
-                cd_dis_to_pc.append(ray.get(tasks[i]))
-            best_results = results[np.argmin(cd_dis_to_pc)]
-            shutil.copytree(best_results.parent, output_dir / "best_post" / folder, dirs_exist_ok=True)
+            if (output_dir / "best_post" / folder).exists():
+                continue
+            futures.append(choose_best_remote.remote(cond_root, folder, output_dir, num_proposals))
+        for future in tqdm(futures):
+            ray.get(future)
 
     te = time.time()
-    with open(output_dir / "time3_choose_best.txt", "w") as f:
-        f.write(f"time3_choose_best: {te - ts} s")
+    with open(output_dir / "time3_choose_best.txt", "a") as f:
+        f.write(f"time3_choose_best: {te - ts} s\n")
     print("Done.")

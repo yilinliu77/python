@@ -19,7 +19,7 @@ from OCC.Core.BRep import BRep_Tool
 from OCC.Core.gp import gp_Pnt
 
 
-def remove_outliers_zscore(data, threshold=10):
+def remove_outliers_zscore(data, threshold=3):
     if len(data) == 0 or sum(data) == 0:
         return data
     mean = np.mean(data)
@@ -97,7 +97,7 @@ def eval_complexity_one(step_file_path):
     num_vertex = len(edges)
 
     sample_point_curvature = []
-    num_samples = 16
+    num_samples = 256
     for face in face_list:
         surf_adaptor = BRepAdaptor_Surface(face)
         u_min, u_max, v_min, v_max = (surf_adaptor.FirstUParameter(), surf_adaptor.LastUParameter(), surf_adaptor.FirstVParameter(),
@@ -106,14 +106,16 @@ def eval_complexity_one(step_file_path):
         u_samples = np.linspace(u_min, u_max, int(np.sqrt(num_samples)))
         v_samples = np.linspace(v_min, v_max, int(np.sqrt(num_samples)))
 
+        face_sample_point_curvature = []
         for u in u_samples:
             for v in v_samples:
-                props = BRepLProp_SLProps(surf_adaptor, u, v, 2, 1e-6)
+                props = BRepLProp_SLProps(surf_adaptor, u, v, 2, 1e-8)
                 if props.IsCurvatureDefined():
                     mean_curvature = props.MeanCurvature()
-                    sample_point_curvature.append(abs(mean_curvature))
+                    face_sample_point_curvature.append(abs(mean_curvature))
+        # face_sample_point_curvature = remove_outliers_zscore(face_sample_point_curvature)
+        sample_point_curvature.append(np.median(face_sample_point_curvature))
 
-    sample_point_curvature = remove_outliers_zscore(sample_point_curvature)
     mean_curvature = np.mean(sample_point_curvature) if len(sample_point_curvature) > 0 else np.nan
 
     if num_face == 0 or mean_curvature == np.nan:

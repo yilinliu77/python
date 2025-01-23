@@ -19,12 +19,12 @@ from OCC.Core.BRep import BRep_Tool
 from OCC.Core.gp import gp_Pnt
 
 
-def remove_outliers_zscore(data, threshold=3):
+def remove_outliers_zscore(data, threshold=3, max_value=50):
     if len(data) == 0 or sum(data) == 0:
         return data
     mean = np.mean(data)
     std_dev = np.std(data)
-    return [x for x in data if abs((x - mean) / std_dev) <= threshold]
+    return [x for x in data if abs((x - mean) / (std_dev + 1e-8)) <= threshold and x < max_value]
 
 
 def extract_edges_and_vertices(shape):
@@ -113,7 +113,9 @@ def eval_complexity_one(step_file_path):
                 if props.IsCurvatureDefined():
                     mean_curvature = props.MeanCurvature()
                     face_sample_point_curvature.append(abs(mean_curvature))
-        # face_sample_point_curvature = remove_outliers_zscore(face_sample_point_curvature)
+        face_sample_point_curvature = remove_outliers_zscore(face_sample_point_curvature)
+        if len(face_sample_point_curvature) == 0:
+            continue
         sample_point_curvature.append(np.median(face_sample_point_curvature))
 
     mean_curvature = np.mean(sample_point_curvature) if len(sample_point_curvature) > 0 else np.nan
@@ -135,7 +137,7 @@ eval_complexity_one_remote = ray.remote(eval_complexity_one)
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Evaluate Brep Complexity')
     parser.add_argument('--eval_root', type=str)
-    parser.add_argument('--use_ray', action='store_true')
+    parser.add_argument('--only_valid', action='store_true')
     args = parser.parse_args()
 
     # 设置随机种子
@@ -143,16 +145,25 @@ if __name__ == '__main__':
     ray.init(ignore_reinit_error=True, local_mode=False)
 
     all_folders = os.listdir(args.eval_root)
+    is_valid_list = []
     futures = []
     for folder in tqdm(all_folders):
         step_path_list = glob.glob(os.path.join(args.eval_root, folder, '*.step'))
         if len(step_path_list) == 0:
+            is_valid_list.append(False)
+            futures.append(None)
             continue
+        is_valid_list.append(check_step_valid_soild(step_path_list[0], return_shape=False))
         futures.append(eval_complexity_one_remote.remote(step_path_list[0]))
 
+    assert len(is_valid_list) == len(futures) == len(all_folders)
     all_result = {}
     for i, future in enumerate(tqdm(futures)):
+        if future is None:
+            continue
         result = ray.get(future)
+        if args.only_valid and not is_valid_list[i]:
+            continue
         all_result[all_folders[i]] = result
 
     num_face_list = []

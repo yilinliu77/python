@@ -135,7 +135,9 @@ if __name__ == '__main__':
                 T.ToTensor(),
                 T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
             ])
-            img = np.array(Image.open(input_file).convert("RGB"))
+            img = np.array(Image.open(input_file))
+            if img.shape[2] == 4:
+                img = img[:, :, :3]
             # img[img>100]=255
             img = transform(img).to(device)
             img = img[None, None, :].repeat(num_proposals, 1, 1, 1, 1)

@@ -61,7 +61,8 @@ def import_step_file_as_obj(file_path, output_folder, step_line_deflection, step
     mesh.fix_normals()  # Recalculates normals
     
     # root, _ = os.path.splitext(file_path)
-    file_name = file_path.stem
+    file_name = file_path.parent.name
+    # file_name = file_path.stem
     # file_name = os.path.basename(root)
     
     temp_dir = os.path.join(output_folder, file_name)

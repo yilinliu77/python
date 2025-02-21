@@ -34,3 +34,6 @@
 [submodule "thirdparty/PointTransformerV3"]
 	path = thirdparty/PointTransformerV3
 	url = https://github.com/Pointcept/PointTransformerV3
+[submodule "thirdparty/Pointnet_Pointnet2_pytorch"]
+	path = thirdparty/Pointnet_Pointnet2_pytorch
+	url = https://github.com/yanx27/Pointnet_Pointnet2_pytorch

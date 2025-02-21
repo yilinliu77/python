@@ -495,10 +495,9 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         folder_path = self.data_folders[idx]
         if self.is_aug != 0:
             id_aug = np.random.randint(0,63)
-            data_npz = np.load(self.latent_root / (folder_path+f"_{id_aug}") / "features.npy")
         else:
-            id_aug = -1
-            data_npz = np.load(self.latent_root / (folder_path+f"_{0}") / "features.npy")
+            id_aug = 0
+        data_npz = np.load(self.latent_root / (folder_path+f"_{id_aug}") / "features.npy")
         face_features = torch.from_numpy(data_npz)
 
         if self.pad_method == "zero":

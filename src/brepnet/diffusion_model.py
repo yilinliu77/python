@@ -529,44 +529,57 @@ class PointEncoder(nn.Module):
             self.point_model.append(
                 PointnetSAModuleMSG(
                     npoint=1024,
-                    radii=[0.05, 0.1],
-                    nsamples=[16, 32],
-                    mlps=[[c_in, 32], [c_in, 64]],
+                    radii=[0.05, 0.1, 0.2],
+                    nsamples=[16, 32, 128],
+                    mlps=[[c_in, 16, 16], [c_in, 32, 32], [c_in, 64, 64]],
                     use_xyz=True,
                     bn=with_bn
                 )
             )
-            c_out_0 = 32 + 64
+            c_out_0 = 16 + 32 + 64
 
             c_in = c_out_0
             self.point_model.append(
                 PointnetSAModuleMSG(
                     npoint=256,
-                    radii=[0.1, 0.2],
-                    nsamples=[16, 32],
-                    mlps=[[c_in, 64], [c_in, 128]],
+                    radii=[0.1, 0.2, 0.4],
+                    nsamples=[16, 32, 128],
+                    mlps=[[c_in, 32, 32], [c_in, 64, 64], [c_in, 128, 128]],
                     use_xyz=True,
                     bn=with_bn
                 )
             )
-            c_out_1 = 64 + 128
+            c_out_1 = 32 + 64 + 128
             c_in = c_out_1
             self.point_model.append(
                 PointnetSAModuleMSG(
                     npoint=64,
-                    radii=[0.2, 0.4],
-                    nsamples=[16, 32],
-                    mlps=[[c_in, 128], [c_in, 256]],
+                    radii=[0.2, 0.4, 0.8],
+                    nsamples=[16, 32, 128],
+                    mlps=[[c_in, 64, 64], [c_in, 128, 128], [c_in, 128, 128]],
                     use_xyz=True,
                     bn=with_bn
                 )
             )
-            c_out_2 = 128 + 256
+            c_out_2 = 64 + 128 + 128
 
             c_in = c_out_2
             self.point_model.append(
+                PointnetSAModuleMSG(
+                    npoint=16,
+                    radii=[0.4, 0.8, 1.6],
+                    nsamples=[16, 32, 128],
+                    mlps=[[c_in, 128, 128], [c_in, 128, 128], [c_in, 128, 128]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+
+            c_out_3 = 128 + 128 + 128
+            c_in = c_out_3
+            self.point_model.append(
                 PointnetSAModule(
-                    mlp=[c_in, 256, 512, 1024],
+                    mlp=[c_in, 1024, 1024, 1024],
                     use_xyz=True,
                     bn=with_bn
                 )
@@ -577,6 +590,22 @@ class PointEncoder(nn.Module):
                 nn.SiLU(),
                 nn.Linear(1024, v_fc_dim),
             )
+        elif v_conf["point_encoder"] == "pointnet_noncuda":
+            from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet2_utils import PointNetSetAbstractionMsg,PointNetFeaturePropagation,PointNetSetAbstraction
+            
+            self.sa1 = PointNetSetAbstractionMsg(1024, [0.05, 0.1], [16, 32], 6, [[16, 16, 32], [32, 32, 64]])
+            self.sa2 = PointNetSetAbstractionMsg(256, [0.1, 0.2], [16, 32], 32+64, [[64, 64, 128], [64, 96, 128]])
+            self.sa3 = PointNetSetAbstractionMsg(64, [0.2, 0.4], [16, 32], 128+128, [[128, 196, 256], [128, 196, 256]])
+            self.sa4 = PointNetSetAbstractionMsg(16, [0.4, 0.8], [16, 32], 256+256, [[256, 256, 512], [256, 384, 512]])
+            self.sa5 = PointNetSetAbstraction(None, None, None, 512 + 512 + 3, [512, 512, 1024], True)
+            
+            self.fc1 = nn.Linear(1024, 512)
+            # self.bn1 = nn.BatchNorm1d(512)
+            self.drop1 = nn.Dropout(0.4)
+            self.fc2 = nn.Linear(512, 256)
+            # self.bn2 = nn.BatchNorm1d(256)
+            self.drop2 = nn.Dropout(0.5)
+            self.fc3 = nn.Linear(256, v_fc_dim)
         else:
             self.point_model = PointTransformerV3(
                 in_channels=6, cls_mode=True,
@@ -653,6 +682,22 @@ class PointEncoder(nn.Module):
                     l_xyz.append(li_xyz)
                     l_features.append(li_features)
             features = self.fc_layer(l_features[-1][...,0])
+        elif self.conf["point_encoder"] == "pointnet_noncuda":
+            aug_pc = aug_pc.permute(0, 2, 1)
+            l0_points = aug_pc
+            l0_xyz = aug_pc[:,:3,:]
+
+            l1_xyz, l1_points = self.sa1(l0_xyz, l0_points)
+            l2_xyz, l2_points = self.sa2(l1_xyz, l1_points)
+            l3_xyz, l3_points = self.sa3(l2_xyz, l2_points)
+            l4_xyz, l4_points = self.sa4(l3_xyz, l3_points)
+            l5_xyz, l5_points = self.sa5(l4_xyz, l4_points)
+            
+            x = l5_points.view(aug_pc.shape[0], 1024)
+            x = self.drop1(F.relu((self.fc1(x))))
+            x = self.drop2(F.relu((self.fc2(x))))
+            features = self.fc3(x)
+            
         else:
             bs = aug_pc.shape[0]
             num_points = aug_pc.shape[1]

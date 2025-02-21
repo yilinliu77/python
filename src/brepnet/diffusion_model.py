@@ -529,6 +529,62 @@ class PointEncoder(nn.Module):
             self.point_model.append(
                 PointnetSAModuleMSG(
                     npoint=1024,
+                    radii=[0.05, 0.1],
+                    nsamples=[16, 32],
+                    mlps=[[c_in, 32], [c_in, 64]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            c_out_0 = 32 + 64
+
+            c_in = c_out_0
+            self.point_model.append(
+                PointnetSAModuleMSG(
+                    npoint=256,
+                    radii=[0.1, 0.2],
+                    nsamples=[16, 32],
+                    mlps=[[c_in, 64], [c_in, 128]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            c_out_1 = 64 + 128
+            c_in = c_out_1
+            self.point_model.append(
+                PointnetSAModuleMSG(
+                    npoint=64,
+                    radii=[0.2, 0.4],
+                    nsamples=[16, 32],
+                    mlps=[[c_in, 128], [c_in, 256]],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            c_out_2 = 128 + 256
+
+            c_in = c_out_2
+            self.point_model.append(
+                PointnetSAModule(
+                    mlp=[c_in, 256, 512, 1024],
+                    use_xyz=True,
+                    bn=with_bn
+                )
+            )
+            self.fc_layer = nn.Sequential(
+                nn.Linear(1024, 1024),
+                nn.LayerNorm(1024),
+                nn.SiLU(),
+                nn.Linear(1024, v_fc_dim),
+            )
+        if v_conf["point_encoder"] == "pointnet2":
+            self.point_model = nn.ModuleList()
+            # PointNet2
+            c_in = 6
+            with_bn = False
+            self.point_model.append(
+                PointnetSAModuleMSG(
+                    npoint=1024,
                     radii=[0.05, 0.1, 0.2],
                     nsamples=[16, 32, 128],
                     mlps=[[c_in, 16, 16], [c_in, 32, 32], [c_in, 64, 64]],
@@ -674,7 +730,7 @@ class PointEncoder(nn.Module):
             v_points = torch.cat([pc2, normals2], dim=-1)
 
         aug_pc = self.augment(v_points)
-        if self.conf["point_encoder"] == "pointnet":
+        if self.conf["point_encoder"] == "pointnet" or self.conf["point_encoder"] == "pointnet2":
             l_xyz, l_features = [aug_pc[:, :, :3].contiguous().float()], [aug_pc.permute(0, 2, 1).contiguous().float()]
             with torch.autocast(device_type=aug_pc.device.type, dtype=torch.float32):
                 for i in range(len(self.point_model)):
@@ -697,7 +753,6 @@ class PointEncoder(nn.Module):
             x = self.drop1(F.relu((self.fc1(x))))
             x = self.drop2(F.relu((self.fc2(x))))
             features = self.fc3(x)
-            
         else:
             bs = aug_pc.shape[0]
             num_points = aug_pc.shape[1]

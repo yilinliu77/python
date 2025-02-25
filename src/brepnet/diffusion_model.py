@@ -21,7 +21,7 @@ from scipy.spatial.transform import Rotation
 
 
 # from thirdparty.PointTransformerV3.model import *
-from thirdparty.point_transformer_v3.model import PointTransformerV3
+# from thirdparty.point_transformer_v3.model import PointTransformerV3
 
 def add_timer(time_statics, v_attr, timer):
     if v_attr not in time_statics:
@@ -577,7 +577,7 @@ class PointEncoder(nn.Module):
                 nn.SiLU(),
                 nn.Linear(1024, v_fc_dim),
             )
-        if v_conf["point_encoder"] == "pointnet2":
+        elif v_conf["point_encoder"] == "pointnet2":
             self.point_model = nn.ModuleList()
             # PointNet2
             c_in = 6
@@ -768,9 +768,152 @@ class PointEncoder(nn.Module):
             features = self.fc_layer(features)
         return features
 
-class Diffusion_condition_mm(Diffusion_condition):
+class ImageEncoder(nn.Module):
+    def __init__(self, v_fc_dim):
+        super().__init__()
+        self.img_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
+        for param in self.img_model.parameters():
+            param.requires_grad = False
+        self.img_model.eval()
+
+        decoder_layer=nn.TransformerDecoderLayer(1024, 8, batch_first=True, norm_first=True)
+        self.pose_attn = nn.TransformerDecoder(decoder_layer, 4, nn.LayerNorm(1024))
+
+        self.camera_embedding = nn.Sequential(
+            nn.Embedding(8, 1024),
+            nn.Linear(1024, 1024),
+            nn.LayerNorm(1024),
+            nn.SiLU(),
+            nn.Linear(1024, 1024),
+        )
+
+        self.img_fc = nn.Sequential(
+            nn.Linear(1024, 1024),
+            nn.LayerNorm(1024),
+            nn.SiLU(),
+            nn.Linear(1024, v_fc_dim),
+        )
+
+    def forward(self, v_data):
+        if v_data["conditions"]["img_features"] == []:
+            v_imgs = v_data["conditions"]["imgs"]
+            dino_feature = self.img_model(v_imgs)
+        else:
+            dino_feature = v_data["conditions"]["img_features"]
+
+        v_id_aug = v_data["conditions"]["img_id"]
+        camera_embedding = self.camera_embedding(v_id_aug)
+        queried_feature = self.pose_attn(tgt=camera_embedding,memory=dino_feature)
+
+        condition_batch_id = v_data["conditions"]["id_batch"]
+        svr_feature = queried_feature[condition_batch_id["single_img_rec"]]
+        sketch_feature = queried_feature[condition_batch_id["sketch_rec"]]
+
+        mvr_feature_total = queried_feature[condition_batch_id["multi_img_rec"]]
+        if mvr_feature_total.shape[0] > 0:
+            mvr_feature = scatter_mean(
+                mvr_feature_total,
+                condition_batch_id["multi_img_rec2"],
+                dim=0
+            )
+        else:
+            mvr_feature = mvr_feature_total
+
+        svr_feature = self.img_fc(svr_feature)
+        sketch_feature = self.img_fc(sketch_feature)
+        mvr_feature = self.img_fc(mvr_feature)
+        return svr_feature, sketch_feature, mvr_feature
+
+class Diffusion_condition_mm(nn.Module):
     def __init__(self, v_conf, ):
-        super().__init__(v_conf)
+        super().__init__()
+        self.dim_input = 8 * 2 * 2
+        self.dim_latent = v_conf["diffusion_latent"]
+        self.dim_condition = 256
+        self.dim_total = self.dim_latent + self.dim_condition
+        self.time_statics = [0 for _ in range(10)]
+
+        self.p_embed = nn.Sequential(
+            nn.Linear(self.dim_input, self.dim_latent),
+            nn.LayerNorm(self.dim_latent),
+            nn.SiLU(),
+            nn.Linear(self.dim_latent, self.dim_latent),
+        )
+
+        layer1 = nn.TransformerEncoderLayer(
+            d_model=self.dim_total,
+            nhead=self.dim_total // 64, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
+        self.net1 = nn.TransformerEncoder(layer1, 24, nn.LayerNorm(self.dim_total))
+        self.fc_out = nn.Sequential(
+            nn.Linear(self.dim_total, self.dim_total),
+            nn.LayerNorm(self.dim_total),
+            nn.SiLU(),
+            nn.Linear(self.dim_total, self.dim_input),
+        )
+
+        self.with_img = False
+        self.with_pc = False
+        self.with_txt = False
+        self.is_aug = v_conf["is_aug"]
+        if "single_img" in v_conf["condition"] or "multi_img" in v_conf["condition"] or "sketch" in v_conf["condition"]:
+            self.with_img = True
+            self.img_model = ImageEncoder(self.dim_condition)
+        if "pc" in v_conf["condition"]:
+            self.with_pc = True
+            self.point_model = PointEncoder(v_conf, self.dim_condition)
+        if "txt" in v_conf["condition"]:
+            self.with_txt = True
+            model_path = 'Alibaba-NLP/gte-large-en-v1.5'
+            from sentence_transformers import SentenceTransformer
+            self.txt_model = SentenceTransformer(model_path, trust_remote_code=True)
+            for param in self.txt_model.parameters():
+                param.requires_grad = False
+            self.txt_model.eval()
+
+            self.txt_fc = nn.Sequential(
+                nn.Linear(1024, 1024),
+                nn.LayerNorm(1024),
+                nn.SiLU(),
+                nn.Linear(1024, self.dim_condition),
+            )
+
+        self.noise_scheduler = DDPMScheduler(
+            num_train_timesteps=1000,
+            beta_schedule=v_conf["beta_schedule"],
+            prediction_type=v_conf["diffusion_type"],
+            beta_start=v_conf["beta_start"],
+            beta_end=v_conf["beta_end"],
+            variance_type=v_conf["variance_type"],
+            clip_sample=False,
+        )
+        self.time_embed = nn.Sequential(
+            nn.Linear(self.dim_total, self.dim_total),
+            nn.LayerNorm(self.dim_total),
+            nn.SiLU(),
+            nn.Linear(self.dim_total, self.dim_total),
+        )
+
+        self.num_max_faces = v_conf["num_max_faces"]
+        self.loss = nn.functional.l1_loss if v_conf["loss"] == "l1" else nn.functional.mse_loss
+        self.diffusion_type = v_conf["diffusion_type"]
+
+        model_mod = importlib.import_module("src.brepnet.model")
+        model_mod = getattr(model_mod, v_conf["autoencoder"])
+        self.ae_model = model_mod(v_conf)
+
+        self.is_pretrained = v_conf["autoencoder_weights"] is not None
+        self.is_stored_z = v_conf["stored_z"]
+        self.use_mean = v_conf["use_mean"]
+        self.is_train_decoder = v_conf["train_decoder"]
+        if self.is_pretrained:
+            checkpoint = torch.load(v_conf["autoencoder_weights"], weights_only=False)["state_dict"]
+            weights = {k.replace("model.", ""): v for k, v in checkpoint.items()}
+            self.ae_model.load_state_dict(weights)
+        if not self.is_train_decoder:
+            for param in self.ae_model.parameters():
+                param.requires_grad = False
+            self.ae_model.eval()
+
         layer = nn.TransformerEncoderLayer(
                 d_model=self.dim_condition,
                 nhead=8, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
@@ -782,22 +925,11 @@ class Diffusion_condition_mm(Diffusion_condition):
         self.learned_pc_emb = nn.Parameter(torch.rand(self.dim_condition))
         self.learned_txt_emb = nn.Parameter(torch.rand(self.dim_condition))
         self.condition = v_conf["condition"]
-        # assert len(self.condition) == 7 # uncond, svr, mvr, sketch, pc, txt, mm
         self.cond_prob = v_conf["cond_prob"]
         self.cond_prob_acc = np.cumsum(self.cond_prob)
-        # assert len(self.cond_prob) == len(self.condition)
 
-        if "single_img" in v_conf["condition"] or "multi_img" in v_conf["condition"] or "sketch" in v_conf["condition"]:
-            self.img_fc = nn.Sequential(
-                nn.Linear(1280, 1024),
-                nn.LayerNorm(1024),
-                nn.SiLU(),
-                nn.Linear(1024, self.dim_condition),
-            )
-        if "pc" in v_conf["condition"]:
-            self.SA_modules = None
-            self.fc_lyaer = None
-            self.pc_encoder = PointEncoder(v_conf, self.dim_condition)
+        # assert len(self.cond_prob) == len(self.condition)
+        # assert len(self.condition) == 7 # uncond, svr, mvr, sketch, pc, txt, mm
 
     def inference(self, bs, device, v_data=None, v_log=True, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
@@ -814,38 +946,74 @@ class Diffusion_condition_mm(Diffusion_condition):
             # error.append((v_data["face_features"] - face_features).abs().mean(dim=[1,2]))
 
         face_z = face_features
-        if self.pad_method == "zero":
-            label = torch.sigmoid(self.classifier(face_features))[..., 0]
-            mask = label > 0.5
-        else:
-            mask = torch.ones_like(face_z[:, :, 0]).to(bool)
+        mask = torch.ones_like(face_z[:, :, 0]).to(bool)
         
         recon_data = []
         for i in range(bs):
             face_z_item = face_z[i:i + 1][mask[i:i + 1]]
-            if self.addition_tag: # Deduplicate
-                flag = face_z_item[...,-1] > 0
-                face_z_item = face_z_item[flag][:, :-1]
-            if self.pad_method == "random": # Deduplicate
-                threshold = 1e-2
-                max_faces = face_z_item.shape[0]
-                index = torch.stack(torch.meshgrid(torch.arange(max_faces),torch.arange(max_faces), indexing="ij"), dim=2)
-                features = face_z_item[index]
-                distance = (features[:,:,0]-features[:,:,1]).abs().mean(dim=-1)
-                final_face_z = []
-                for j in range(max_faces):
-                    valid = True
-                    for k in final_face_z:
-                        if distance[j,k] < threshold:
-                            valid = False
-                            break
-                    if valid:
-                        final_face_z.append(j)
-                face_z_item = face_z_item[final_face_z]
+            threshold = 1e-2
+            max_faces = face_z_item.shape[0]
+            index = torch.stack(torch.meshgrid(torch.arange(max_faces),torch.arange(max_faces), indexing="ij"), dim=2)
+            features = face_z_item[index]
+            distance = (features[:,:,0]-features[:,:,1]).abs().mean(dim=-1)
+            final_face_z = []
+            for j in range(max_faces):
+                valid = True
+                for k in final_face_z:
+                    if distance[j,k] < threshold:
+                        valid = False
+                        break
+                if valid:
+                    final_face_z.append(j)
+            face_z_item = face_z_item[final_face_z]
             data_item = self.ae_model.inference(face_z_item)
             recon_data.append(data_item)
         return recon_data
-        
+
+    def get_z(self, v_data, v_test):
+        data = {}
+        if self.is_stored_z:
+            face_features = v_data["face_features"]
+            bs = face_features.shape[0]
+            num_face = face_features.shape[1]
+            mean = face_features[..., :32]
+            std = face_features[..., 32:]
+            if self.use_mean:
+                face_features = mean
+            else:
+                face_features = mean + std * torch.randn_like(mean)
+            data["padded_face_z"] = face_features.reshape(bs, num_face, -1)
+        else:
+            with torch.no_grad() and autocast(device_type='cuda', dtype=torch.float32):
+                encoding_result = self.ae_model.encode(v_data, True)
+                face_features, _, _ = self.ae_model.sample(encoding_result["face_features"],
+                                                           v_is_test=self.use_mean)
+            dim_latent = face_features.shape[-1]
+            num_faces = v_data["num_face_record"]
+            bs = num_faces.shape[0]
+            # Fill the face_z to the padded_face_z without forloop
+            if self.pad_method == "zero":
+                padded_face_z = torch.zeros(
+                    (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
+                mask = num_faces[:, None] > torch.arange(self.num_max_faces, device=num_faces.device)
+                padded_face_z[mask] = face_features
+                data["padded_face_z"] = padded_face_z
+                data["mask"] = mask
+            else:
+                positions = torch.arange(self.num_max_faces, device=face_features.device).unsqueeze(0).repeat(bs, 1)
+                mandatory_mask = positions < num_faces[:, None]
+                random_indices = (torch.rand((bs, self.num_max_faces), device=face_features.device) * num_faces[:,
+                                                                                                      None]).long()
+                indices = torch.where(mandatory_mask, positions, random_indices)
+                num_faces_cum = num_faces.cumsum(dim=0).roll(1)
+                num_faces_cum[0] = 0
+                indices += num_faces_cum[:, None]
+                # Permute the indices
+                r_indices = torch.argsort(torch.rand((bs, self.num_max_faces), device=face_features.device), dim=1)
+                indices = indices.gather(1, r_indices)
+                data["padded_face_z"] = face_features[indices]
+        return data
+
     def diffuse(self, v_feature, v_timesteps, v_condition=None):
         bs = v_feature.size(0)
         de = v_feature.device
@@ -885,33 +1053,16 @@ class Diffusion_condition_mm(Diffusion_condition):
         # PC feature
         if "pc" in all_condition_names:
             pc = v_data["conditions"]["points"]
-            pc_feat = self.pc_encoder(pc, v_data["id_aug"] if self.is_aug else None)
+            pc_feat = self.point_model(pc, v_data["id_aug"] if self.is_aug else None)
             condition[condition_batch_id["pc"], 3] = pc_feat.to(dtype)
             pass
 
         if v_data["conditions"]["img_id"] != []:
-            # Get features
-            if v_data["conditions"]["img_features"] != []:
-                dino_feature = v_data["conditions"]["img_features"]
-            else:
-                assert v_data["conditions"]["imgs"].shape[1:] == (3, 224, 224)
-                dino_feature = self.img_model(v_data["conditions"]["imgs"])
-            num_imgs = dino_feature.shape[0]
+            svr_feature, sketch_feature, mvr_feature = self.img_model(v_data)
 
-            img_idx = v_data["conditions"]["img_id"]
-            camera_embedding = self.camera_embedding(img_idx)
-            dino_feature = torch.cat([dino_feature, camera_embedding], dim=-1)
-            img_feature = self.img_fc(dino_feature)
-
-            condition[condition_batch_id["single_img"], 0] = img_feature[condition_batch_id["single_img_rec"]].to(dtype)
-            condition[condition_batch_id["sketch"], 2] = img_feature[condition_batch_id["sketch_rec"]].to(dtype)
-
-            mvr_feature_total = img_feature[condition_batch_id["multi_img_rec"]]
-            condition[condition_batch_id["multi_img"], 1] = scatter_mean(
-                mvr_feature_total,
-                condition_batch_id["multi_img_rec2"],
-                dim=0
-            ).to(dtype)
+            condition[condition_batch_id["single_img"], 0] = svr_feature.to(dtype)
+            condition[condition_batch_id["multi_img"], 1] = mvr_feature.to(dtype)
+            condition[condition_batch_id["sketch"], 2] = sketch_feature.to(dtype)
 
         condition = self.cond_attn(condition)
         condition = condition.mean(dim=1, keepdim=True)
@@ -934,15 +1085,6 @@ class Diffusion_condition_mm(Diffusion_condition):
         loss = {}
         loss_item = self.loss(pred, face_z if self.diffusion_type == "sample" else noise, reduction="none")
         loss["diffusion_loss"] = loss_item.mean()
-        if self.pad_method == "zero":
-            mask = torch.logical_not((face_z.abs() < 1e-4).all(dim=-1))
-            label = self.classifier(pred)
-            classification_loss = nn.functional.binary_cross_entropy_with_logits(label[..., 0], mask.float())
-            if self.loss == nn.functional.l1_loss:
-                classification_loss = classification_loss * 1e-1
-            else:
-                classification_loss = classification_loss * 1e-4
-            loss["classification"] = classification_loss
         loss["total_loss"] = sum(loss.values())
         
         loss["t"] = torch.stack((timesteps, loss_item.mean(dim=1).mean(dim=1)), dim=1)

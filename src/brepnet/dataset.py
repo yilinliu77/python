@@ -279,7 +279,7 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         face_points = torch.from_numpy(data_npz['sample_points_faces'])
         edge_points = torch.from_numpy(data_npz['sample_points_lines'])
 
-        id_aug = -1
+        id_aug = 0
         if self.is_aug == 0:
             matrix = np.identity(3)
         if self.is_aug == 1:
@@ -612,9 +612,7 @@ class Diffusion_dataset_mm(Diffusion_dataset):
         sampled_prob = np.random.rand()
         idx = self.cond_prob_acc.shape[0]-(sampled_prob < self.cond_prob_acc).sum(axis=-1)
         used_condition = []
-        if idx == 0:
-            pass
-        elif idx == 6:
+        if self.condition[idx] == "mm":
             available_condition = [item for item in self.condition if item != "uncond" and item != "mm"]
             num_condition = len(available_condition)
             rand_onehot = np.random.rand(num_condition) > 0.5
@@ -683,10 +681,10 @@ class Diffusion_dataset_mm(Diffusion_dataset):
                 id_condition["txt"].append(id_batch)
             elif condition["name"] in ["single_img", "multi_img", "sketch"]:
                 if "img_features" in condition:
-                    id_cur = len(condition_out["img_features"])
+                    id_cur = sum([item.shape[0] for item in condition_out["img_features"]])
                     condition_out["img_features"].append(condition["img_features"])
                 else:
-                    id_cur = len(condition_out["ori_imgs"])
+                    id_cur = sum([item.shape[0] for item in condition_out["ori_imgs"]])
                     condition_out["ori_imgs"].append(condition["ori_imgs"])
                     condition_out["imgs"].append(condition["imgs"])
                 if condition["name"] == "single_img":
@@ -694,9 +692,13 @@ class Diffusion_dataset_mm(Diffusion_dataset):
                     id_condition["single_img_rec"].append(id_cur)
                 elif condition["name"] == "multi_img":
                     id_condition["multi_img"].append(id_batch)
-                    id_condition["multi_img_rec"]+=([id_cur+i for i in range(len(condition["img_id"]))])
                     cur_max = 1+(max(id_condition["multi_img_rec2"]) if len(id_condition["multi_img_rec2"])>0 else -1)
-                    id_condition["multi_img_rec2"]+=([cur_max for i in range(len(condition["img_id"]))])
+                    for id_inside in range(len(condition["img_id"])):
+                        id_condition["multi_img_rec"].append(id_cur+id_inside)
+                        id_condition["multi_img_rec2"].append(cur_max)
+                    # id_condition["multi_img_rec"]+=([id_cur+i for i in range(len(condition["img_id"]))])
+                    # cur_max = 1+(max(id_condition["multi_img_rec2"]) if len(id_condition["multi_img_rec2"])>0 else -1)
+                    # id_condition["multi_img_rec2"]+=([cur_max for i in range(len(condition["img_id"]))])
                 elif condition["name"] == "sketch":
                     id_condition["sketch"].append(id_batch)
                     id_condition["sketch_rec"].append(id_cur)

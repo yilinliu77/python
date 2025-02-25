@@ -41,8 +41,8 @@ from torchmetrics import MetricCollection
 import trimesh
 from pytorch_lightning.loggers import WandbLogger
 
-os.environ["HTTP_PROXY"] = "http://172.31.178.46:12996"
-os.environ["HTTPS_PROXY"] = "http://172.31.178.46:12996"
+# os.environ["HTTP_PROXY"] = "http://172.31.178.46:12996"
+# os.environ["HTTPS_PROXY"] = "http://172.31.178.46:12996"
 
 
 def to_mesh(face_points):

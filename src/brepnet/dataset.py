@@ -148,8 +148,8 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
                 img_features = torch.from_numpy(ori_data[v_id_aug+num_max_single_view][None,:]).float()
                 img_id = np.array([0], dtype=np.int64)
             else:
-                # idx = np.random.choice(np.arange(num_max_multi_view), 4, replace=False)
-                img_id = np.array([0,1,2,3], dtype=np.int64)
+                img_id = np.random.choice(np.arange(num_max_multi_view), 4, replace=False)
+                # img_id = np.array([0,1,2,3], dtype=np.int64)
                 img_features = torch.from_numpy(ori_data[num_max_single_view + num_max_single_view + img_id * num_max_single_view + v_id_aug]).float()
 
             condition["img_id"] = torch.from_numpy(img_id)
@@ -160,8 +160,8 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
                 imgs = ori_data["svr_imgs"][v_id_aug][None,:]
                 img_id = np.array([0], dtype=np.int64)
             elif "multi_img" in v_condition_names:
-                # idx = np.random.choice(np.arange(num_max_multi_view), 4, replace=False)
-                img_id = np.array([0,1,2,3], dtype=np.int64)
+                img_id = np.random.choice(np.arange(num_max_multi_view), 4, replace=False)
+                # img_id = np.array([0,1,2,3], dtype=np.int64)
                 imgs = ori_data["mvr_imgs"][img_id * num_max_single_view + v_id_aug]
             else:
                 imgs = ori_data["sketch_imgs"][v_id_aug][None,:]

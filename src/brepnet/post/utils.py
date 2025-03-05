@@ -54,19 +54,14 @@ from shared.occ_utils import get_primitives
 import importlib.util
 
 CONFIRM_CHAMFERDIST_NO_AVAILABLE = False
-if CONFIRM_CHAMFERDIST_NO_AVAILABLE:
+if importlib.util.find_spec("chamferdist") is None or CONFIRM_CHAMFERDIST_NO_AVAILABLE:
     CHAMFERDIST_AVAILABLE = False
     # print("chamferdist package not found. ChamferDistance will be computed using only PyTorch.")
     from src.brepnet.post.chamferdist_torch import ChamferDistanceTorch as ChamferDistance
 else:
-    if importlib.util.find_spec("chamferdist") is not None:
-        CHAMFERDIST_AVAILABLE = True
-        # print("chamferdist package found. ChamferDistance will be computed using chamferdist package.")
-        from chamferdist import ChamferDistance
-    else:
-        CHAMFERDIST_AVAILABLE = False
-        # print("chamferdist package not found. ChamferDistance will be computed using only PyTorch.")
-        from src.brepnet.post.chamferdist_torch import ChamferDistanceTorch as ChamferDistance
+    CHAMFERDIST_AVAILABLE = True
+    # print("chamferdist package found. ChamferDistance will be computed using chamferdist package.")
+    from chamferdist import ChamferDistance
 
 # EDGE_FITTING_TOLERANCE = [1e-5, 1e-4, 1e-3, 5e-3, 8e-3, 5e-2, ]
 # FACE_FITTING_TOLERANCE = [1e-4, 1e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]

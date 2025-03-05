@@ -17,7 +17,7 @@ from OCC.Core.STEPControl import STEPControl_Writer, STEPControl_AsIs, STEPContr
 from OCC.Core.ShapeFix import ShapeFix_ShapeTolerance
 from OCC.Core.TopAbs import TopAbs_SHAPE
 from OCC.Core.TopoDS import TopoDS_Face
-from OCC.Extend.DataExchange import read_step_file
+from OCC.Extend.DataExchange import read_step_file, write_stl_file
 
 from shared.common_utils import safe_check_dir, check_dir
 from shared.common_utils import export_point_cloud
@@ -93,7 +93,8 @@ def get_candidate_shapes(num_drop, v_faces, v_curves, v_conn):
 
 def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
                                 is_ray=False, is_log=True,
-                                is_optimize_geom=True, isdebug=False, use_cuda=False, from_scratch=True,
+                                is_optimize_geom=True, v_max_optimize_iter=200,
+                                isdebug=False, use_cuda=False, from_scratch=True,
                                 is_save_data=False):
     disable_occ_log()
     # is_log = False
@@ -163,12 +164,12 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
             shape.recon_face_points, shape.recon_edge_points = optimize(
                     interpolation_face, shape.recon_edge_points, shape.recon_face_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                    shape.face_edge_adj, v_islog=isdebug, v_max_iter=200, use_cuda=use_cuda)
+                    shape.face_edge_adj, v_islog=isdebug, v_max_iter=v_max_optimize_iter, use_cuda=use_cuda)
         else:
             shape.recon_face_points, shape.recon_edge_points = optimize(
                     shape.interpolation_face, shape.recon_edge_points, shape.recon_face_points,
                     shape.edge_face_connectivity, shape.is_end_point, shape.pair1,
-                    shape.face_edge_adj, v_islog=False, v_max_iter=200, use_cuda=use_cuda)
+                    shape.face_edge_adj, v_islog=False, v_max_iter=v_max_optimize_iter, use_cuda=use_cuda)
 
         if is_save_data:
             updated_edge_points = np.delete(shape.recon_edge_points, shape.remove_edge_idx_new, axis=0)
@@ -359,6 +360,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_ray', action='store_true')
     parser.add_argument('--prefix', type=str, default="")
     parser.add_argument('--use_cuda', action='store_true')
+    parser.add_argument('--max_optimize_iter', type=int, default=200)
     parser.add_argument('--from_scratch', action='store_true')
     parser.add_argument('--drop_num', type=int, default=0)
     args = parser.parse_args()
@@ -368,6 +370,7 @@ if __name__ == '__main__':
     is_use_ray = args.use_ray
     num_cpus = args.num_cpus
     use_cuda = args.use_cuda
+    max_optimize_iter = int(args.max_optimize_iter)
     from_scratch = args.from_scratch
     drop_num = args.drop_num
     safe_check_dir(v_out_root)
@@ -377,7 +380,10 @@ if __name__ == '__main__':
     if args.prefix != "":
         construct_brep_from_datanpz(v_data_root, v_out_root, args.prefix,
                                     v_drop_num=drop_num,
-                                    use_cuda=use_cuda, is_optimize_geom=True, isdebug=True, is_save_data=True, )
+                                    use_cuda=use_cuda,
+                                    is_optimize_geom=True,
+                                    v_max_optimize_iter=max_optimize_iter,
+                                    isdebug=True, is_save_data=True, )
         exit()
     all_folders = [folder for folder in os.listdir(v_data_root) if os.path.isdir(os.path.join(v_data_root, folder))]
     if filter_list != "":
@@ -403,7 +409,9 @@ if __name__ == '__main__':
             construct_brep_from_datanpz(v_data_root, v_out_root, all_folders[i],
                                         v_drop_num=drop_num,
                                         use_cuda=use_cuda, from_scratch=from_scratch,
-                                        is_save_data=True, is_log=False, is_optimize_geom=True, is_ray=False, )
+                                        is_save_data=False, is_log=False,
+                                        is_optimize_geom=True, v_max_optimize_iter=max_optimize_iter,
+                                        is_ray=False, )
     else:
         ray.init(
                 dashboard_host="0.0.0.0",

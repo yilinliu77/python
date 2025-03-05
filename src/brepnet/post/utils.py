@@ -1,22 +1,12 @@
-import argparse
-import copy
-import math
-import os
-import queue
 import random
-import string
-import time
-from typing import List, Optional, Tuple, Union
 
 import numpy as np
-import ray
 import torch
 import torch.nn as nn
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeEdge, \
     BRepBuilderAPI_MakeVertex
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Sewing, BRepBuilderAPI_MakeSolid
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
-from OCC.Core.BRepTools import breptools
 
 from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface, GeomAPI_PointsToBSpline
 from OCC.Core.GeomAbs import GeomAbs_C0, GeomAbs_C1, GeomAbs_C2, GeomAbs_C3, GeomAbs_G1
@@ -31,18 +21,12 @@ from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_FORWARD, TopAbs_REVERSED, To
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.gp import gp_Pnt, gp_XYZ, gp_Vec
 from OCC.Display.SimpleGui import init_display
-from OCC.Extend.TopologyUtils import TopologyExplorer, WireExplorer
-# from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-from OCC.Extend.DataExchange import write_stl_file, write_step_file, read_step_file
 
-# xdt
 from OCC.Core.TopoDS import topods, TopoDS_Shell, TopoDS_Builder, TopoDS_Vertex
 from OCC.Core.TopExp import TopExp_Explorer, topexp
 from OCC.Core.TopAbs import TopAbs_EDGE, TopAbs_VERTEX
 from OCC.Core.BRep import BRep_Tool
-from OCC.Core.ShapeAnalysis import ShapeAnalysis_Surface
-from OCC.Core.BRepClass import BRepClass_FaceClassifier
-from OCC.Core.TopAbs import TopAbs_IN, TopAbs_OUT, TopAbs_ON
+
 from OCC.Core.BRepExtrema import BRepExtrema_DistShapeShape
 
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_FreeBounds
@@ -50,38 +34,15 @@ from OCC.Core.TopTools import TopTools_HSequenceOfShape
 from OCC.Core.Bnd import Bnd_Box
 from OCC.Core.BRepBndLib import brepbndlib
 
-from OCC.Core.ShapeAnalysis import ShapeAnalysis_WireOrder
-from OCC.Core.BRepAlgo import BRepAlgo_Loop
-
 from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
 from random import randint
-from OCC.Core.TopoDS import TopoDS_Compound, TopoDS_Shell
-from OCC.Core.BRep import BRep_Builder
-from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Section
+
 from OCC.Core.BRepCheck import BRepCheck_Analyzer
-
-from OCC.Core.GeomPlate import (GeomPlate_BuildPlateSurface, GeomPlate_PointConstraint, GeomPlate_CurveConstraint,
-                                GeomPlate_MakeApprox, GeomPlate_PlateG0Criterion, GeomPlate_PlateG1Criterion, )
-from OCC.Core.TColgp import TColgp_SequenceOfXY, TColgp_SequenceOfXYZ
-from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
-
-from OCC.Core.GProp import GProp_GProps
-from OCC.Core.BRepGProp import brepgprop
-
-from OCC.Core.Geom import Geom_Line
-from OCC.Core.ShapeAnalysis import ShapeAnalysis_Curve
-from OCC.Core.Geom import Geom_BSplineCurve
-
-from OCC.Core import Message
-from OCC.Core.Message import Message_PrinterOStream, Message_Alarm
-
-from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
 
 from OCC.Core.STEPControl import STEPControl_Writer, STEPControl_AsIs
 from OCC.Core.Interface import Interface_Static
 from OCC.Core.IFSelect import IFSelect_RetDone
 
-from chamferdist import ChamferDistance
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 import trimesh
@@ -89,6 +50,23 @@ import trimesh
 from itertools import combinations
 
 from shared.occ_utils import get_primitives
+
+import importlib.util
+
+CONFIRM_CHAMFERDIST_NO_AVAILABLE = True
+if CONFIRM_CHAMFERDIST_NO_AVAILABLE:
+    CHAMFERDIST_AVAILABLE = False
+    # print("chamferdist package not found. ChamferDistance will be computed using only PyTorch.")
+    from src.brepnet.post.chamferdist_torch import ChamferDistanceTorch as ChamferDistance
+else:
+    if importlib.util.find_spec("chamferdist") is not None:
+        CHAMFERDIST_AVAILABLE = True
+        # print("chamferdist package found. ChamferDistance will be computed using chamferdist package.")
+        from chamferdist import ChamferDistance
+    else:
+        CHAMFERDIST_AVAILABLE = False
+        # print("chamferdist package not found. ChamferDistance will be computed using only PyTorch.")
+        from src.brepnet.post.chamferdist_torch import ChamferDistanceTorch as ChamferDistance
 
 # EDGE_FITTING_TOLERANCE = [1e-5, 1e-4, 1e-3, 5e-3, 8e-3, 5e-2, ]
 # FACE_FITTING_TOLERANCE = [1e-4, 1e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]
@@ -133,6 +111,7 @@ INTERPOLATION_PRECISION = 0.05
 # weight_CurveLength, weight_Curvature, weight_Torsion = 0.4, 0.4, 0.2
 # IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, True
 # CONTINUITY = GeomAbs_C2
+
 
 def interpolation_face_points(face, is_use_cuda=False, precision=INTERPOLATION_PRECISION):
     if type(face) is np.ndarray:
@@ -200,21 +179,21 @@ class Shape:
             face_id2 = key[1]
 
             # first check the validity of the intersection
-            if is_check_intersection:
-                face1 = torch.from_numpy(self.recon_face_points[face_id1]).to(self.device)
-                face2 = torch.from_numpy(self.recon_face_points[face_id2]).to(self.device)
-                dist_face1_to_face2 = torch.sqrt(self.chamferdist(
-                        face1.reshape(1, -1, 3),
-                        self.interpolation_face[face_id2][None], bidirectional=False, batch_reduction=None, point_reduction=None))
-                dist_face2_to_face1 = torch.sqrt(self.chamferdist(
-                        face2.reshape(1, -1, 3),
-                        self.interpolation_face[face_id1][None], bidirectional=False, batch_reduction=None, point_reduction=None))
-                dis_face_to_face = torch.min(dist_face1_to_face2.min(), dist_face2_to_face1.min())
-
-                if dis_face_to_face > face2face_threshold:
-                    for item in value:
-                        self.remove_edge_idx_src.append(item)
-                    continue
+            # if is_check_intersection:
+            #     face1 = torch.from_numpy(self.recon_face_points[face_id1]).to(self.device)
+            #     face2 = torch.from_numpy(self.recon_face_points[face_id2]).to(self.device)
+            #     dist_face1_to_face2 = torch.sqrt(self.chamferdist(
+            #             face1.reshape(1, -1, 3),
+            #             self.interpolation_face[face_id2][None], bidirectional=False, batch_reduction=None, point_reduction=None))
+            #     dist_face2_to_face1 = torch.sqrt(self.chamferdist(
+            #             face2.reshape(1, -1, 3),
+            #             self.interpolation_face[face_id1][None], bidirectional=False, batch_reduction=None, point_reduction=None))
+            #     dis_face_to_face = torch.min(dist_face1_to_face2.min(), dist_face2_to_face1.min())
+            #
+            #     if dis_face_to_face > face2face_threshold:
+            #         for item in value:
+            #             self.remove_edge_idx_src.append(item)
+            #         continue
 
             edge1 = torch.from_numpy(self.recon_edge_points[value[0]]).to(self.device)
             distance11 = torch.sqrt(self.chamferdist(
@@ -562,6 +541,7 @@ def optimize(
     is_optimization_diverged = False
     if v_islog:
         pbar = tqdm(total=v_max_iter, desc='Geom Optimization', unit='iter')
+
     chamferdist = ChamferDistance()
     iter = 0
     while iter < v_max_iter:

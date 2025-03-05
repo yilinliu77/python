@@ -53,7 +53,7 @@ from shared.occ_utils import get_primitives
 
 import importlib.util
 
-CONFIRM_CHAMFERDIST_NO_AVAILABLE = True
+CONFIRM_CHAMFERDIST_NO_AVAILABLE = False
 if CONFIRM_CHAMFERDIST_NO_AVAILABLE:
     CHAMFERDIST_AVAILABLE = False
     # print("chamferdist package not found. ChamferDistance will be computed using only PyTorch.")

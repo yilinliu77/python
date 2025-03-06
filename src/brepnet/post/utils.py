@@ -988,7 +988,7 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
         face_fixer.SetPrecision(connected_tolerance)
         face_fixer.SetMaxTolerance(connected_tolerance)
         face_fixer.SetFixOrientationMode(True)
-        face_fixer.SetFixMissingSeamMode(True)
+        face_fixer.SetFixMissingSeamMode(False)
         face_fixer.SetFixWireMode(True)
         face_fixer.SetFixLoopWiresMode(False)
         face_fixer.SetFixIntersectingWiresMode(False)
@@ -1005,7 +1005,7 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
         face_fixer.FixOrientation()
 
     except Exception as e:
-        print(f"Error fixing face {e}")
+        # print(f"Error fixing face {e}")
         return None
 
     face_occ = face_fixer.Face()

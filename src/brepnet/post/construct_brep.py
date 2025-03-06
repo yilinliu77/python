@@ -278,7 +278,7 @@ def construct_brep_from_datanpz(data_root, out_root, folder_name, v_drop_num=0,
             if solid is not None:
                 save_step_file(out_root / folder_name / 'recon_brep.step', solid)
                 if not check_step_valid_soild(str(out_root / folder_name / 'recon_brep.step')):
-                    print("Inconsistent solid check in {}".format(folder_name))
+                    # print("Inconsistent solid check in {}".format(folder_name))
                     os.remove(out_root / folder_name / 'recon_brep.step')
                 else:
                     write_stl_file(solid, str(out_root / folder_name / "recon_brep.stl"),

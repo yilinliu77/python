@@ -363,6 +363,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_optimize_iter', type=int, default=200)
     parser.add_argument('--from_scratch', action='store_true')
     parser.add_argument('--drop_num', type=int, default=0)
+    parser.add_argument('--timeout', type=int, default=60)
     args = parser.parse_args()
     v_data_root = args.data_root
     v_out_root = args.out_root
@@ -373,6 +374,7 @@ if __name__ == '__main__':
     max_optimize_iter = int(args.max_optimize_iter)
     from_scratch = args.from_scratch
     drop_num = args.drop_num
+    timeout = args.timeout
     safe_check_dir(v_out_root)
     if not os.path.exists(v_data_root):
         raise ValueError(f"Data root path {v_data_root} does not exist.")
@@ -436,7 +438,7 @@ if __name__ == '__main__':
         results = []
         for i in tqdm(range(len(all_folders))):
             try:
-                results.append(ray.get(tasks[i], timeout=30))
+                results.append(ray.get(tasks[i], timeout=timeout))
             except ray.exceptions.GetTimeoutError:
                 results.append(None)
                 timeout_cancel_list.append(all_folders[i])

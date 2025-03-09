@@ -105,7 +105,7 @@ class res_block_xd(nn.Module):
             norm = nn.Identity()
         elif v_norm == "layer":
             norm = nn.LayerNorm(v_norm_shape)
-            
+
         if dim == 0:
             self.conv1 = nn.Linear(dim_in, dim_out)
             self.norm1 = copy.deepcopy(norm)
@@ -184,7 +184,7 @@ class AttnIntersection3(nn.Module):
 
         self.attn_proj_in = nn.Linear(dim_in, dim_latent)
         layer = nn.TransformerDecoderLayer(
-            dim_latent, 8, dim_feedforward=2048, dropout=0.1, 
+            dim_latent, 8, dim_feedforward=2048, dropout=0.1,
             batch_first=True, norm_first=True)
         self.layers = ModuleList([copy.deepcopy(layer) for i in range(num_layers)])
         self.attn_proj_out = nn.Linear(dim_latent, dim_in * 2)
@@ -198,7 +198,7 @@ class AttnIntersection3(nn.Module):
         output = self.attn_proj_in(src) + self.pos_encoding
         tgt = output[:,0:1]
         mem = output[:,1:2]
-        
+
         for mod in self.layers:
             tgt = mod(tgt, mem)
 
@@ -261,16 +261,16 @@ class AutoEncoder_1119(nn.Module):
         self.graph_face_edge = nn.ModuleList()
         for i in range(10):
             self.graph_face_edge.append(GATv2Conv(
-                df, df, 
+                df, df,
                 heads=1, edge_dim=df * 2,
             ))
             self.graph_face_edge.append(nn.LeakyReLU())
-        
+
         bd = 768 # bottlenek_dim
         self.face_attn_proj_in = nn.Linear(df, bd)
         self.face_attn_proj_out = nn.Linear(bd, df)
         layer = nn.TransformerEncoderLayer(
-            bd, 16, dim_feedforward=2048, dropout=0.1, 
+            bd, 16, dim_feedforward=2048, dropout=0.1,
             batch_first=True, norm_first=True)
         self.face_attn = nn.TransformerEncoder(layer, 12, nn.LayerNorm(bd))
 
@@ -291,7 +291,7 @@ class AutoEncoder_1119(nn.Module):
         self.face_attn_proj_in2 = nn.Linear(df, bd)
         self.face_attn_proj_out2 = nn.Linear(bd, df)
         layer2 = nn.TransformerEncoderLayer(
-            bd, 16, dim_feedforward=2048, dropout=0.1, 
+            bd, 16, dim_feedforward=2048, dropout=0.1,
             batch_first=True, norm_first=True)
         self.face_attn2 = nn.TransformerEncoder(layer2, 12)
 
@@ -322,7 +322,7 @@ class AutoEncoder_1119(nn.Module):
             res_block_xd(0, ds, ds, v_norm=norm, v_norm_shape=(ds,)),
             nn.Linear(ds, 4),
         )
-        
+
         self.edge_points_decoder = nn.Sequential(
             Rearrange("b (n w)-> b n w", n=df, w=2),
             res_block_xd(1, df, ds, 3, 1, 1, v_norm=norm, v_norm_shape=(ds, 2,)),
@@ -349,7 +349,7 @@ class AutoEncoder_1119(nn.Module):
             res_block_xd(0, ds, ds, v_norm=norm, v_norm_shape=(ds,)),
             nn.Linear(ds, 4),
         )
-        
+
         self.sigmoid = v_conf["sigmoid"]
         self.gaussian_weights = v_conf["gaussian_weights"]
         if self.gaussian_weights > 0:
@@ -404,8 +404,8 @@ class AutoEncoder_1119(nn.Module):
 
     def encode(self, v_data, v_test):
         face_points = rearrange(v_data["face_points"][..., :self.in_channels], 'b h w n -> b n h w').contiguous()
-        edge_points = rearrange(v_data["edge_points"][..., :self.in_channels], 'b h n -> b n h').contiguous()      
-        face_features = self.face_coords(face_points)        
+        edge_points = rearrange(v_data["edge_points"][..., :self.in_channels], 'b h n -> b n h').contiguous()
+        face_features = self.face_coords(face_points)
         edge_features = self.edge_coords(edge_points)
 
         # Face attn
@@ -451,11 +451,11 @@ class AutoEncoder_1119(nn.Module):
             attn_mask = v_data["attn_mask"]
         face_feature = self.face_attn2(face_feature, attn_mask)
         face_z = self.face_attn_proj_out2(face_feature)
-        
+
         decoding_results = {}
         decoding_results["face_points_local"] = self.face_points_decoder(face_z)
         decoding_results["face_center_scale"] = self.face_center_scale_decoder(face_z)
-        
+
         if v_deduplicated: # Deduplicate
             face_points_local = decoding_results["face_points_local"]
             face_center_scale = decoding_results["face_center_scale"]
@@ -503,7 +503,7 @@ class AutoEncoder_1119(nn.Module):
             gt_labels = torch.ones_like(pred)
             gt_labels[id_false_start:] = 0
             loss_edge = F.binary_cross_entropy_with_logits(pred, gt_labels)
-            
+
             intersected_edge_feature = feature_pair[:id_false_start]
 
             decoding_results["loss_edge_feature"] = self.loss_fn(
@@ -518,7 +518,7 @@ class AutoEncoder_1119(nn.Module):
         if "edge_features" in v_encoding_result:
             decoding_results["edge_points_local1"] = self.edge_points_decoder(v_encoding_result["edge_features"])
             decoding_results["edge_center_scale1"] = self.edge_center_scale_decoder(v_encoding_result["edge_features"])
-        
+
         decoding_results["face_features"] = v_encoding_result["face_z"]
         return decoding_results
 
@@ -556,7 +556,7 @@ class AutoEncoder_1119(nn.Module):
         if self.gaussian_weights > 0:
             loss["kl_loss"] = v_decoding_result["kl_loss"]
         return loss
-          
+
     def forward(self, v_data, v_test=False):
         encoding_result = self.encode(v_data, v_test)
         face_z, kl_loss, features = self.sample(encoding_result["face_features"], v_is_test=v_test)
@@ -568,7 +568,7 @@ class AutoEncoder_1119(nn.Module):
         data = {}
         if v_test:
             pred_data = self.decode(encoding_result)
-            
+
             num_faces = v_data["face_points"].shape[0]
             face_adj = torch.zeros((num_faces, num_faces), dtype=bool, device=loss["total_loss"].device)
             conn = v_data["edge_face_connectivity"]
@@ -638,7 +638,8 @@ class AutoEncoder_1119_light(AutoEncoder_1119):
             res_block_xd(2, ds // 2, ds // 1, 3, 1, 1, v_norm=norm, v_norm_shape = (ds // 1, 4, 4)),
             nn.MaxPool2d(kernel_size=2, stride=2), # 2
             res_block_xd(2, ds // 1, ds, 3, 1, 1, v_norm=norm, v_norm_shape = (ds // 1, 2, 2)),
-            nn.Conv2d(ds, dl, kernel_size=1, stride=1, padding=0),
+            nn.MaxPool2d(kernel_size=2, stride=2), # 1
+            nn.Conv2d(ds, df, kernel_size=1, stride=1, padding=0),
             Rearrange("b n h w -> b (n h w)")
         )
         self.edge_coords = nn.Sequential(
@@ -652,23 +653,24 @@ class AutoEncoder_1119_light(AutoEncoder_1119):
             res_block_xd(1, ds // 2, ds, 3, 1, 1, v_norm=norm, v_norm_shape = (ds // 1, 4,)),
             nn.MaxPool1d(kernel_size=2, stride=2), # 2
             res_block_xd(1, ds, ds, 3, 1, 1, v_norm=norm, v_norm_shape = (ds // 1, 2,)),
-            nn.Conv1d(ds, df, kernel_size=1, stride=1, padding=0),
+            nn.MaxPool1d(kernel_size=2, stride=2), # 1
+            nn.Conv1d(ds, df*2, kernel_size=1, stride=1, padding=0),
             Rearrange("b n w -> b (n w)"),
         ) # b c 1
 
         self.graph_face_edge = nn.ModuleList()
         for i in range(5):
             self.graph_face_edge.append(GATv2Conv(
-                df, df, 
+                df, df,
                 heads=1, edge_dim=df * 2,
             ))
             self.graph_face_edge.append(nn.LeakyReLU())
-        
+
         bd = 768 # bottlenek_dim
         self.face_attn_proj_in = nn.Linear(df, bd)
         self.face_attn_proj_out = nn.Linear(bd, df)
         layer = nn.TransformerEncoderLayer(
-            bd, 16, dim_feedforward=2048, dropout=0.1, 
+            bd, 16, dim_feedforward=2048, dropout=0.1,
             batch_first=True, norm_first=True)
         self.face_attn = nn.TransformerEncoder(layer, 8, nn.LayerNorm(bd))
 
@@ -689,7 +691,7 @@ class AutoEncoder_1119_light(AutoEncoder_1119):
         self.face_attn_proj_in2 = nn.Linear(df, bd)
         self.face_attn_proj_out2 = nn.Linear(bd, df)
         layer2 = nn.TransformerEncoderLayer(
-            bd, 16, dim_feedforward=2048, dropout=0.1, 
+            bd, 16, dim_feedforward=2048, dropout=0.1,
             batch_first=True, norm_first=True)
         self.face_attn2 = nn.TransformerEncoder(layer2, 8)
 
@@ -716,7 +718,7 @@ class AutoEncoder_1119_light(AutoEncoder_1119):
             res_block_xd(0, ds, ds, v_norm=norm, v_norm_shape=(ds,)),
             nn.Linear(ds, 4),
         )
-        
+
         self.edge_points_decoder = nn.Sequential(
             Rearrange("b (n w)-> b n w", n=df, w=2),
             res_block_xd(1, df, ds, 3, 1, 1, v_norm=norm, v_norm_shape=(ds, 2,)),
@@ -739,7 +741,7 @@ class AutoEncoder_1119_light(AutoEncoder_1119):
             res_block_xd(0, ds, ds, v_norm=norm, v_norm_shape=(ds,)),
             nn.Linear(ds, 4),
         )
-        
+
         self.sigmoid = v_conf["sigmoid"]
         self.gaussian_weights = v_conf["gaussian_weights"]
         if self.gaussian_weights > 0:
@@ -815,16 +817,16 @@ class AutoEncoder_1225(nn.Module):
         self.graph_face_edge = nn.ModuleList()
         for i in range(5):
             self.graph_face_edge.append(GATv2Conv(
-                df, df, 
+                df, df,
                 heads=1, edge_dim=df * 2,
             ))
             self.graph_face_edge.append(nn.LeakyReLU())
-        
+
         bd = 768 # bottlenek_dim
         self.face_attn_proj_in = nn.Linear(df, bd)
         self.face_attn_proj_out = nn.Linear(bd, df)
         layer = nn.TransformerEncoderLayer(
-            bd, 16, dim_feedforward=2048, dropout=0.1, 
+            bd, 16, dim_feedforward=2048, dropout=0.1,
             batch_first=True, norm_first=True)
         self.face_attn = nn.TransformerEncoder(layer, 8, nn.LayerNorm(bd))
 
@@ -845,7 +847,7 @@ class AutoEncoder_1225(nn.Module):
         self.face_attn_proj_in2 = nn.Linear(df, bd)
         self.face_attn_proj_out2 = nn.Linear(bd, df)
         layer2 = nn.TransformerEncoderLayer(
-            bd, 16, dim_feedforward=2048, dropout=0.1, 
+            bd, 16, dim_feedforward=2048, dropout=0.1,
             batch_first=True, norm_first=True)
         self.face_attn2 = nn.TransformerEncoder(layer2, 8)
 
@@ -872,7 +874,7 @@ class AutoEncoder_1225(nn.Module):
             res_block_xd(0, ds, ds, v_norm=norm, v_norm_shape=(ds,)),
             nn.Linear(ds, 4),
         )
-        
+
         self.edge_points_decoder = nn.Sequential(
             Rearrange("b (n w)-> b n w", n=df, w=2),
             res_block_xd(1, df, ds, 3, 1, 1, v_norm=norm, v_norm_shape=(ds, 2,)),
@@ -895,7 +897,7 @@ class AutoEncoder_1225(nn.Module):
             res_block_xd(0, ds, ds, v_norm=norm, v_norm_shape=(ds,)),
             nn.Linear(ds, 4),
         )
-        
+
         self.sigmoid = v_conf["sigmoid"]
         self.gaussian_weights = v_conf["gaussian_weights"]
         if self.gaussian_weights > 0:
@@ -950,8 +952,8 @@ class AutoEncoder_1225(nn.Module):
 
     def encode(self, v_data, v_test):
         face_points = rearrange(v_data["face_points"][..., :self.in_channels], 'b h w n -> b n h w').contiguous()
-        edge_points = rearrange(v_data["edge_points"][..., :self.in_channels], 'b h n -> b n h').contiguous()      
-        face_features = self.face_coords(face_points)        
+        edge_points = rearrange(v_data["edge_points"][..., :self.in_channels], 'b h n -> b n h').contiguous()
+        face_features = self.face_coords(face_points)
         edge_features = self.edge_coords(edge_points)
 
         # Face attn
@@ -997,11 +999,11 @@ class AutoEncoder_1225(nn.Module):
             attn_mask = v_data["attn_mask"]
         face_feature = self.face_attn2(face_feature, attn_mask)
         face_z = self.face_attn_proj_out2(face_feature)
-        
+
         decoding_results = {}
         decoding_results["face_points_local"] = self.face_points_decoder(face_z)
         decoding_results["face_center_scale"] = self.face_center_scale_decoder(face_z)
-        
+
         if v_deduplicated: # Deduplicate
             face_points_local = decoding_results["face_points_local"]
             face_center_scale = decoding_results["face_center_scale"]
@@ -1049,7 +1051,7 @@ class AutoEncoder_1225(nn.Module):
             gt_labels = torch.ones_like(pred)
             gt_labels[id_false_start:] = 0
             loss_edge = F.binary_cross_entropy_with_logits(pred, gt_labels)
-            
+
             intersected_edge_feature = feature_pair[:id_false_start]
 
             decoding_results["loss_edge_feature"] = self.loss_fn(
@@ -1064,7 +1066,7 @@ class AutoEncoder_1225(nn.Module):
         if "edge_features" in v_encoding_result:
             decoding_results["edge_points_local1"] = self.edge_points_decoder(v_encoding_result["edge_features"])
             decoding_results["edge_center_scale1"] = self.edge_center_scale_decoder(v_encoding_result["edge_features"])
-        
+
         decoding_results["face_features"] = v_encoding_result["face_z"]
         return decoding_results
 
@@ -1102,7 +1104,7 @@ class AutoEncoder_1225(nn.Module):
         if self.gaussian_weights > 0:
             loss["kl_loss"] = v_decoding_result["kl_loss"]
         return loss
-          
+
     def forward(self, v_data, v_test=False):
         encoding_result = self.encode(v_data, v_test)
         face_z, kl_loss, features = self.sample(encoding_result["face_features"], v_is_test=v_test)
@@ -1114,7 +1116,7 @@ class AutoEncoder_1225(nn.Module):
         data = {}
         if v_test:
             pred_data = self.decode(encoding_result)
-            
+
             num_faces = v_data["face_points"].shape[0]
             face_adj = torch.zeros((num_faces, num_faces), dtype=bool, device=loss["total_loss"].device)
             conn = v_data["edge_face_connectivity"]

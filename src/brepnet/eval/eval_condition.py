@@ -251,7 +251,7 @@ def eval_one_with_try(eval_root, gt_root, folder_name, is_point2cad=False, v_num
     except:
         pass
 
-def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, v_num_per_m=100):
+def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, is_complexgen=False, is_nvdnet=False, v_num_per_m=100):
     if os.path.exists(eval_root / folder_name / 'error.txt'):
         os.remove(eval_root / folder_name / 'error.txt')
     if os.path.exists(eval_root / folder_name / 'eval.npz'):
@@ -259,6 +259,9 @@ def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, v_num_per_m=10
 
     # At least have fall_back_mesh
     step_name = "recon_brep.step"
+
+    assert [is_point2cad, is_complexgen, is_nvdnet].count(True) <= 1, \
+        "Only one of [is_point2cad, is_complexgen, is_nvdnet] can be True"
 
     if is_point2cad:
         if not (eval_root / folder_name / "clipped/mesh_transformed.ply").exists():
@@ -312,6 +315,10 @@ def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, v_num_per_m=10
             else:
                 recon_edge_vertex[int(items[0])] = list(map(lambda item: int(item), items[1:]))
         pass
+    elif is_complexgen:
+        raise NotImplementedError
+    elif is_nvdnet:
+        raise NotImplementedError
     else:
         try:
             # Face chamfer distance

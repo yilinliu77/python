@@ -70,17 +70,18 @@ class Dummy_dataset(torch.utils.data.Dataset):
     def __init__(self, v_mode, v_conf):
         self.length = v_conf["length"]
 
-    def __len__(self,):
+    def __len__(self, ):
         return self.length
 
     def __getitem__(self, idx):
         return "{:08d}".format(idx)
-    
+
     @staticmethod
     def collate_fn(batch):
         return {
-            "v_prefix"     : batch,
+            "v_prefix": batch,
         }
+
 
 # Input pc range from [-1,1]
 def crop_pc(v_pc, v_min_points=1000):
@@ -88,7 +89,7 @@ def crop_pc(v_pc, v_min_points=1000):
         num_points = v_pc.shape[0]
         index = np.arange(num_points)
         np.random.shuffle(index)
-        pc_index = np.random.randint(0, num_points-1)
+        pc_index = np.random.randint(0, num_points - 1)
         center_pos = v_pc[pc_index, :3]
         length_xyz = np.random.rand(3) * 1.0
         obb = o3d.geometry.AxisAlignedBoundingBox(center_pos - length_xyz / 2, center_pos + length_xyz / 2)
@@ -101,7 +102,8 @@ def crop_pc(v_pc, v_min_points=1000):
         if result.shape[0] > v_min_points:
             result = result[index % result.shape[0]]
             return result
-   
+
+
 def rotate_pc(v_pc, v_angle):
     matrix = Rotation.from_euler('xyz', v_angle).as_matrix()
     points = v_pc[:, :3]
@@ -118,17 +120,20 @@ def rotate_pc(v_pc, v_angle):
     normals = fn1
     return np.concatenate((points, normals), axis=-1)
 
+
 def noisy_pc(v_pc, v_length=0.02):
     noise = np.random.randn(*v_pc.shape) * v_length
     return v_pc + noise
+
 
 def downsample_pc(v_pc, v_num_points):
     index = np.arange(v_pc.shape[0])
     np.random.shuffle(index)
     return v_pc[index[:v_num_points]]
 
-def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug, 
-                      v_cache_data=None, v_transform=None, 
+
+def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
+                      v_cache_data=None, v_transform=None,
                       v_num_points=None):
     condition = {
 
@@ -138,33 +143,34 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
         num_max_single_view = 64
         if v_id_aug == -1:
             v_id_aug = 0
-        
+
         if v_cache_data:
             ori_data = np.load(v_cond_root / v_folder_path / "img_feature_dinov2.npy")
             if "single_img" in v_condition_names:
-                img_features = torch.from_numpy(ori_data[v_id_aug][None,:]).float()
+                img_features = torch.from_numpy(ori_data[v_id_aug][None, :]).float()
                 img_id = np.array([0], dtype=np.int64)
             elif "sketch" in v_condition_names:
-                img_features = torch.from_numpy(ori_data[v_id_aug+num_max_single_view][None,:]).float()
+                img_features = torch.from_numpy(ori_data[v_id_aug + num_max_single_view][None, :]).float()
                 img_id = np.array([0], dtype=np.int64)
             else:
                 img_id = np.random.choice(np.arange(num_max_multi_view), 4, replace=False)
                 # img_id = np.array([0,1,2,3], dtype=np.int64)
-                img_features = torch.from_numpy(ori_data[num_max_single_view + num_max_single_view + img_id * num_max_single_view + v_id_aug]).float()
+                img_features = torch.from_numpy(
+                        ori_data[num_max_single_view + num_max_single_view + img_id * num_max_single_view + v_id_aug]).float()
 
             condition["img_id"] = torch.from_numpy(img_id)
             condition["img_features"] = img_features
         else:
             ori_data = np.load(v_cond_root / v_folder_path / "imgs.npz")
             if "single_img" in v_condition_names:
-                imgs = ori_data["svr_imgs"][v_id_aug][None,:]
+                imgs = ori_data["svr_imgs"][v_id_aug][None, :]
                 img_id = np.array([0], dtype=np.int64)
             elif "multi_img" in v_condition_names:
                 img_id = np.random.choice(np.arange(num_max_multi_view), 4, replace=False)
                 # img_id = np.array([0,1,2,3], dtype=np.int64)
                 imgs = ori_data["mvr_imgs"][img_id * num_max_single_view + v_id_aug]
             else:
-                imgs = ori_data["sketch_imgs"][v_id_aug][None,:]
+                imgs = ori_data["sketch_imgs"][v_id_aug][None, :]
                 img_id = np.array([0], dtype=np.int64)
             transformed_imgs = []
             for id in range(imgs.shape[0]):
@@ -179,13 +185,13 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
         assert points.shape[0] == 10000
         # Already move to GPU
         # if v_id_aug != -1:
-            # angles = np.array([
-                # v_id_aug % 4,
-                # v_id_aug // 4 % 4,
-                # v_id_aug // 16
-            # ])
-            # points = rotate_pc(points, angles)
-        
+        # angles = np.array([
+        # v_id_aug % 4,
+        # v_id_aug // 4 % 4,
+        # v_id_aug // 16
+        # ])
+        # points = rotate_pc(points, angles)
+
         # points = crop_pc(points, 1000)
         # points = noisy_pc(points)
         # points = downsample_pc(points, v_num_points)
@@ -201,7 +207,7 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
             condition["txt"] = open(v_cond_root / v_folder_path / "text.txt").readlines()[difficulty].strip()
             condition["id_txt"] = difficulty
     return condition
-        
+
 
 class AutoEncoder_dataset3(torch.utils.data.Dataset):
     def __init__(self, v_training_mode, v_conf):
@@ -244,9 +250,9 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         if len(self.condition) > 0:
             data_folders = []
             for item in self.data_folders:
-                if os.path.exists(self.conditional_data_root/item):
+                if os.path.exists(self.conditional_data_root / item):
                     data_folders.append(item)
-            print("Filter out {} folders without feat".format(len(self.data_folders)-len(data_folders)))
+            print("Filter out {} folders without feat".format(len(self.data_folders) - len(data_folders)))
             self.data_folders = data_folders
 
         self.ori_length = len(self.data_folders)
@@ -259,11 +265,12 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
             T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ])
 
-
         if v_conf["is_overfit"]:
             self.data_folders = self.data_folders[:100]
             if v_training_mode == "training":
                 self.data_folders = self.data_folders * 100
+
+        self.disable_half = v_conf["disable_half"]
         print(len(self.data_folders))
 
     def __len__(self):
@@ -272,9 +279,9 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         # idx = 0
-        prefix = self.data_folders[idx%len(self.data_folders)]
+        prefix = self.data_folders[idx % len(self.data_folders)]
         data_npz = np.load(str(self.root / prefix / "data.npz"))
-        if self.mode == "testing" and self.is_aug==1:
+        if self.mode == "testing" and self.is_aug == 1:
             prefix += "_{}".format(idx // self.ori_length)
         face_points = torch.from_numpy(data_npz['sample_points_faces'])
         edge_points = torch.from_numpy(data_npz['sample_points_lines'])
@@ -408,13 +415,14 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
                 condition_out[key].append(conditions[idx][key])
 
         for key in keys:
-            condition_out[key] = torch.stack(condition_out[key], dim=0) if isinstance(condition_out[key][0], torch.Tensor) else condition_out[key]
+            condition_out[key] = torch.stack(condition_out[key], dim=0) if isinstance(condition_out[key][0], torch.Tensor) else \
+                condition_out[key]
 
         return {
             "v_prefix"              : prefix,
-            "face_points"             : torch.cat(face_points, dim=0).to(dtype),
+            "face_points"           : torch.cat(face_points, dim=0).to(dtype),
             "face_norm"             : torch.cat(face_norm, dim=0).to(dtype),
-            "edge_points"             : torch.cat(edge_points, dim=0).to(dtype),
+            "edge_points"           : torch.cat(edge_points, dim=0).to(dtype),
             "edge_norm"             : torch.cat(edge_norm, dim=0).to(dtype),
             "face_bbox"             : torch.cat(face_bbox, dim=0).to(dtype),
             "edge_bbox"             : torch.cat(edge_bbox, dim=0).to(dtype),
@@ -426,13 +434,13 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
 
             "num_face_record"       : num_face_record,
             "valid_mask"            : valid_mask,
-            "conditions"   : condition_out
+            "conditions"            : condition_out
         }
 
 
 class Diffusion_dataset(torch.utils.data.Dataset):
     def __init__(self, v_training_mode, v_conf):
-        super(Diffusion_dataset, self).__init__()        
+        super(Diffusion_dataset, self).__init__()
         self.mode = v_training_mode
         self.conf = v_conf
         scale_factor = int(v_conf["scale_factor"])
@@ -474,11 +482,11 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         if len(self.condition) > 0:
             data_folders = []
             for item in filelist:
-                if os.path.exists(self.conditional_data_root/item):
+                if os.path.exists(self.conditional_data_root / item):
                     data_folders.append(item)
-            print("Filter out {} folders without feat".format(len(filelist)-len(data_folders)))
+            print("Filter out {} folders without feat".format(len(filelist) - len(data_folders)))
             filelist = data_folders
-        
+
         if v_conf["overfit"]:  # Overfitting mode
             self.data_folders = filelist[:100] * scale_factor
         else:
@@ -494,10 +502,10 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         # idx = 0
         folder_path = self.data_folders[idx]
         if self.is_aug != 0:
-            id_aug = np.random.randint(0,63)
+            id_aug = np.random.randint(0, 63)
         else:
             id_aug = 0
-        data_npz = np.load(self.latent_root / (folder_path+f"_{id_aug}") / "features.npy")
+        data_npz = np.load(self.latent_root / (folder_path + f"_{id_aug}") / "features.npy")
         face_features = torch.from_numpy(data_npz)
 
         if self.pad_method == "zero":
@@ -506,7 +514,7 @@ class Diffusion_dataset(torch.utils.data.Dataset):
         elif self.pad_method == "random":
             add_flag = torch.ones(self.max_faces, dtype=face_features.dtype)
             add_flag[face_features.shape[0]:] = -1
-            add_flag = add_flag[:,None]
+            add_flag = add_flag[:, None]
 
             if False:
                 index = torch.randperm(face_features.shape[0])
@@ -552,13 +560,14 @@ class Diffusion_dataset(torch.utils.data.Dataset):
                 condition_out[key].append(conditions[idx][key])
 
         for key in keys:
-            condition_out[key] = torch.stack(condition_out[key], dim=0) if isinstance(condition_out[key][0], torch.Tensor) else condition_out[key]
+            condition_out[key] = torch.stack(condition_out[key], dim=0) if isinstance(condition_out[key][0], torch.Tensor) else \
+                condition_out[key]
 
         return {
             "v_prefix"     : v_prefix,
             "face_features": face_features,
             "conditions"   : condition_out,
-            "id_aug"   : id_aug,
+            "id_aug"       : id_aug,
         }
 
 
@@ -598,7 +607,7 @@ class Diffusion_dataset_mm(Diffusion_dataset):
                 positions = torch.arange(self.max_faces, device=face_features.device)
                 mandatory_mask = positions < face_features.shape[0]
                 random_indices = (
-                            torch.rand((self.max_faces,), device=face_features.device) * face_features.shape[0]).long()
+                        torch.rand((self.max_faces,), device=face_features.device) * face_features.shape[0]).long()
                 indices = torch.where(mandatory_mask, positions, random_indices)
                 r_indices = torch.argsort(torch.rand((self.max_faces,), device=face_features.device), dim=0)
                 index = indices.gather(0, r_indices)
@@ -610,7 +619,7 @@ class Diffusion_dataset_mm(Diffusion_dataset):
             raise ValueError("Invalid pad method")
 
         sampled_prob = np.random.rand()
-        idx = self.cond_prob_acc.shape[0]-(sampled_prob < self.cond_prob_acc).sum(axis=-1)
+        idx = self.cond_prob_acc.shape[0] - (sampled_prob < self.cond_prob_acc).sum(axis=-1)
         used_condition = []
         if self.condition[idx] == "mm":
             available_condition = [item for item in self.condition if item != "uncond" and item != "mm"]
@@ -643,29 +652,29 @@ class Diffusion_dataset_mm(Diffusion_dataset):
         keys = conditions[0].keys()
 
         condition_out = {
-            "names": [],
-            "points": [],
+            "names"       : [],
+            "points"      : [],
 
-            "txt": [],
+            "txt"         : [],
             "txt_features": [],
-            "id_txt": [],
+            "id_txt"      : [],
 
             "img_features": [],
-            "img_id": [],
-            "ori_imgs": [],
-            "imgs": [],
+            "img_id"      : [],
+            "ori_imgs"    : [],
+            "imgs"        : [],
         }
 
         id_condition = {
-            "pc": [],
-            "txt": [],
-            "single_img": [],
-            "multi_img": [],
-            "sketch": [],
+            "pc"            : [],
+            "txt"           : [],
+            "single_img"    : [],
+            "multi_img"     : [],
+            "sketch"        : [],
             "single_img_rec": [],
-            "multi_img_rec": [],
+            "multi_img_rec" : [],
             "multi_img_rec2": [],
-            "sketch_rec": [],
+            "sketch_rec"    : [],
         }
         for id_batch, condition in enumerate(conditions):
             condition_out["names"].append(condition["name"])
@@ -692,9 +701,9 @@ class Diffusion_dataset_mm(Diffusion_dataset):
                     id_condition["single_img_rec"].append(id_cur)
                 elif condition["name"] == "multi_img":
                     id_condition["multi_img"].append(id_batch)
-                    cur_max = 1+(max(id_condition["multi_img_rec2"]) if len(id_condition["multi_img_rec2"])>0 else -1)
+                    cur_max = 1 + (max(id_condition["multi_img_rec2"]) if len(id_condition["multi_img_rec2"]) > 0 else -1)
                     for id_inside in range(len(condition["img_id"])):
-                        id_condition["multi_img_rec"].append(id_cur+id_inside)
+                        id_condition["multi_img_rec"].append(id_cur + id_inside)
                         id_condition["multi_img_rec2"].append(cur_max)
                     # id_condition["multi_img_rec"]+=([id_cur+i for i in range(len(condition["img_id"]))])
                     # cur_max = 1+(max(id_condition["multi_img_rec2"]) if len(id_condition["multi_img_rec2"])>0 else -1)
@@ -726,5 +735,5 @@ class Diffusion_dataset_mm(Diffusion_dataset):
             "v_prefix"     : v_prefix,
             "face_features": face_features,
             "conditions"   : condition_out,
-            "id_aug"   : id_aug,
+            "id_aug"       : id_aug,
         }

@@ -1,11 +1,10 @@
-import time, os, random, traceback, sys
+import os
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
 
-from OCC.Core.BRepAdaptor import BRepAdaptor_Curve
 from tqdm import tqdm
 import trimesh
 import argparse
@@ -13,24 +12,14 @@ import argparse
 # import pandas as pd
 from chamferdist import ChamferDistance
 
-from OCC.Core.STEPControl import STEPControl_Reader
-from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core.TopAbs import TopAbs_VERTEX, TopAbs_EDGE, TopAbs_FACE
 from OCC.Core.BRep import BRep_Tool
-from OCC.Core.gp import gp_Pnt
-from OCC.Core.IFSelect import IFSelect_RetDone
-from OCC.Extend.DataExchange import read_step_file, write_step_file, write_stl_file
-from OCC.Core.BRepCheck import BRepCheck_Analyzer
 
 import ray
-import shutil
-
-from OCC.Core.TopoDS import TopoDS_Solid, TopoDS_Shell
-from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_SHELL, TopAbs_SOLID
 
 from shared.occ_utils import get_primitives, get_triangulations, get_points_along_edge, get_curve_length
 from src.brepnet.eval.check_valid import check_step_valid_soild
-
+from src.brepnet.eval.baseline_preprocess.data_processor import ComplexGenProcessor
 
 def is_vertex_close(p1, p2, tol=1e-3):
     return np.linalg.norm(np.array(p1) - np.array(p2)) < tol
@@ -316,7 +305,12 @@ def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, is_complexgen=
                 recon_edge_vertex[int(items[0])] = list(map(lambda item: int(item), items[1:]))
         pass
     elif is_complexgen:
-        raise NotImplementedError
+        complex_data = ComplexGenProcessor(eval_root / folder_name / f"{folder_name}_geom_refine.json")
+        # Geometry
+        recon_faces, recon_face_points, recon_edges, recon_edge_points, \
+            recon_vertices, recon_vertex_points = complex_data.get_data(v_num_per_m)
+        # Topology
+        recon_face_edge, recon_edge_vertex = complex_data.FaceEdge, complex_data.EdgeVertex
     elif is_nvdnet:
         raise NotImplementedError
     else:
@@ -331,9 +325,9 @@ def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, is_complexgen=
                 print(f"Error: {folder_name} 's {step_name} is not valid")
                 raise
 
-            # Get data
-            recon_faces, recon_face_points, recon_edges, recon_edge_points, recon_vertices, recon_vertex_points = get_data(
-                recon_shape, v_num_per_m)
+            # Geometry
+            recon_faces, recon_face_points, recon_edges, recon_edge_points, \
+                recon_vertices, recon_vertex_points = get_data(recon_shape, v_num_per_m)
 
             # Topology
             recon_face_edge, recon_edge_vertex = get_topology(recon_faces, recon_edges, recon_vertices)
@@ -419,6 +413,8 @@ if __name__ == '__main__':
     parser.add_argument('--list', type=str, default='')
     parser.add_argument('--from_scratch', action='store_true')
     parser.add_argument('--is_point2cad', action='store_true')
+    parser.add_argument('--is_complexgen', action='store_true')
+    parser.add_argument('--is_nvdnet', action='store_true')
     parser.add_argument('--only_valid', action='store_true')
     args = parser.parse_args()
     eval_root = Path(args.eval_root)
@@ -428,12 +424,17 @@ if __name__ == '__main__':
     listfile = args.list
     from_scratch = args.from_scratch
     is_point2cad = args.is_point2cad
+    is_complexgen = args.is_complexgen
+    is_nvdenet = args.is_nvdnet
     only_valid = args.only_valid
 
     if not os.path.exists(eval_root):
         raise ValueError(f"Data root path {eval_root} does not exist.")
     if not os.path.exists(gt_root):
         raise ValueError(f"Output root path {gt_root} does not exist.")
+
+    assert [is_point2cad, is_complexgen, is_nvdenet].count(True) <= 1, \
+        "Only one of [is_point2cad, is_complexgen, is_nvdenet] can be True"
 
     if args.prefix != '':
         eval_one(eval_root, gt_root, args.prefix, is_point2cad)
@@ -455,7 +456,8 @@ if __name__ == '__main__':
     if not is_use_ray:
         # random.shuffle(self.folder_names)
         for i in tqdm(range(len(all_folders))):
-            eval_one(eval_root, gt_root, all_folders[i], is_point2cad)
+            eval_one(eval_root, gt_root, all_folders[i],
+                     is_point2cad, is_complexgen, is_nvdenet)
     else:
         ray.init(
             dashboard_host="0.0.0.0",
@@ -467,7 +469,8 @@ if __name__ == '__main__':
         tasks = []
         timeout_cancel_list = []
         for i in range(len(all_folders)):
-            tasks.append(eval_one_remote.remote(eval_root, gt_root, all_folders[i], is_point2cad))
+            tasks.append(eval_one_remote.remote(eval_root, gt_root, all_folders[i],
+                                                is_point2cad, is_complexgen, is_nvdenet))
         results = []
         for i in tqdm(range(len(all_folders))):
             try:

@@ -20,8 +20,6 @@ import numpy as np
 from shared.occ_utils import get_primitives
 from src.brepnet.post.utils import solid_valid_check, viz_shapes, get_solid, CONNECT_TOLERANCE, get_tolerance
 
-import ray
-
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 Interface_Static.SetIVal("read.precision.mode", 1)
@@ -121,24 +119,17 @@ if __name__ == "__main__":
         shutil.rmtree(exception_out_root)
     os.makedirs(exception_out_root, exist_ok=False)
 
-    # use ray to get validity
-    ray.init()
-    check_step_valid_soild_remote = ray.remote(check_step_valid_soild)
-    tasks = []
-    for step_file in tqdm(step_file_list):
-        tasks.append(check_step_valid_soild_remote.remote(step_file, return_shape=True))
-    results = [ray.get(task) for task in tqdm(tasks)]
-
     # Load cad data
     valid_count = 0
+    pbar = tqdm(step_file_list)
     num_faces = []
     num_edges = []
-    for idx, step_file in tqdm(enumerate(step_file_list)):
-        is_valid, shape = results[idx]
+    for step_file in pbar:
+        is_valid, shape = check_step_valid_soild(step_file, return_shape=True)
         if os.path.exists(os.path.join(os.path.dirname(step_file), "success.txt")) and not is_valid:
             folder_name = os.path.basename(os.path.dirname(step_file))
             exception_folders.append(folder_name)
-            shutil.copytree(str(os.path.dirname(step_file)), str(os.path.join(exception_out_root, folder_name)))
+            shutil.copytree(os.path.dirname(step_file), os.path.join(exception_out_root, folder_name))
 
         if is_valid:
             if only_success and not os.path.exists(os.path.join(os.path.dirname(step_file), "success.txt")):
@@ -146,6 +137,7 @@ if __name__ == "__main__":
             valid_count += 1
             num_faces.append(len(get_primitives(shape, TopAbs_FACE)))
             num_edges.append(len(get_primitives(shape, TopAbs_EDGE)) // 2)
+            pbar.set_postfix({"valid_count": valid_count})
         # else:
         # print(f"Invalid CAD solid: {step_file}")
 
@@ -174,5 +166,3 @@ if __name__ == "__main__":
     if len(exception_folders) == 0:
         shutil.rmtree(exception_out_root)
         print("No exception folders found.")
-
-    ray.shutdown()

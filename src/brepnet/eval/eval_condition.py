@@ -19,7 +19,7 @@ import ray
 
 from shared.occ_utils import get_primitives, get_triangulations, get_points_along_edge, get_curve_length
 from src.brepnet.eval.check_valid import check_step_valid_soild
-from src.brepnet.eval.baseline_preprocess.data_processor import ComplexGenProcessor
+from src.brepnet.eval.baseline_preprocess.data_processor import ComplexGenProcessor, NVDNetProcessor
 
 def is_vertex_close(p1, p2, tol=1e-3):
     return np.linalg.norm(np.array(p1) - np.array(p2)) < tol
@@ -100,8 +100,10 @@ def compute_statistics(eval_root, v_only_valid, listfile):
         np.mean(results['vertex_fscore']), np.mean(results['edge_fscore']), np.mean(results['face_fscore']),
         np.mean(results['fe_fscore']), np.mean(results['ev_fscore']),
     ))
+
+    print("\nMean:")
     print(
-        "{:.0f}/{:.0f} {:.0f}/{:.0f} {:.0f}/{:.0f} {:.4f} {:.4f} {:.4f} {:.4f} {:.4f} {:.4f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f}".format(
+        "{:.0f}/{:.0f} {:.0f}/{:.0f} {:.0f}/{:.0f} {:.6f} {:.6f} {:.6f} {:.6f} {:.6f} {:.6f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f}".format(
             np.mean(results['num_recon_vertex']), np.mean(results['num_gt_vertex']),
             np.mean(results['num_recon_edge']), np.mean(results['num_gt_edge']),
             np.mean(results['num_recon_face']), np.mean(results['num_gt_face']),
@@ -112,6 +114,21 @@ def compute_statistics(eval_root, v_only_valid, listfile):
             np.mean(results['vertex_rec']), np.mean(results['edge_rec']), np.mean(results['face_rec']),
             np.mean(results['fe_rec']), np.mean(results['ev_rec'])
         ))
+
+    # median
+    print("\nMedian:")
+    print(
+            "{:.0f}/{:.0f} {:.0f}/{:.0f} {:.0f}/{:.0f} {:.6f} {:.6f} {:.6f} {:.6f} {:.6f} {:.6f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f}".format(
+            np.median(results['num_recon_vertex']), np.median(results['num_gt_vertex']),
+            np.median(results['num_recon_edge']), np.median(results['num_gt_edge']),
+            np.median(results['num_recon_face']), np.median(results['num_gt_face']),
+            np.median(results['vertex_acc_cd']), np.median(results['edge_acc_cd']), np.median(results['face_acc_cd']),
+            np.median(results['vertex_com_cd']), np.median(results['edge_com_cd']), np.median(results['face_com_cd']),
+            np.median(results['vertex_pre']), np.median(results['edge_pre']), np.median(results['face_pre']),
+            np.median(results['fe_pre']), np.median(results['ev_pre']),
+            np.median(results['vertex_rec']), np.median(results['edge_rec']), np.median(results['face_rec']),
+            np.median(results['fe_rec']), np.median(results['ev_rec'])
+    ))
     # print(f"{len(all_folders)-len(exception_folders)}/{len(all_folders)} are valid")
     print(f"{results['face_cd'].shape[0]}/{len(all_folders)} are valid")
 
@@ -234,6 +251,18 @@ def get_topo_detection(recon_face_edge, gt_face_edge, id_recon_gt_face, id_recon
     recall = positive / (sum([len(edges) for edges in gt_face_edge.values()]) + 1e-6)
     return 2 * precision * recall / (precision + recall + 1e-6), precision, recall
 
+def get_model_normalize(points_with_normal, to_unit_sphere=False):
+    assert (len(points_with_normal.shape) == 2 and points_with_normal.shape[1] == 3)
+    points = points_with_normal[:, :3]
+    # normalize to unit bounding box
+    max_coord = points.max(axis=0)
+    min_coord = points.min(axis=0)
+    center = (max_coord + min_coord) / 2.0
+    scale = (max_coord - min_coord).max()
+    # normalized_points = points - center
+    # normalized_points *= 1.0/scale
+    return center, scale
+
 def eval_one_with_try(eval_root, gt_root, folder_name, is_point2cad=False, v_num_per_m=100):
     try:
         eval_one(eval_root, gt_root, folder_name, is_point2cad, v_num_per_m)
@@ -251,6 +280,7 @@ def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, is_complexgen=
 
     assert [is_point2cad, is_complexgen, is_nvdnet].count(True) <= 1, \
         "Only one of [is_point2cad, is_complexgen, is_nvdnet] can be True"
+
 
     if is_point2cad:
         if not (eval_root / folder_name / "clipped/mesh_transformed.ply").exists():
@@ -305,14 +335,44 @@ def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, is_complexgen=
                 recon_edge_vertex[int(items[0])] = list(map(lambda item: int(item), items[1:]))
         pass
     elif is_complexgen:
-        complex_data = ComplexGenProcessor(eval_root / folder_name / f"{folder_name}_geom_refine.json")
+        complex_data = ComplexGenProcessor(eval_root / folder_name / f"{folder_name}_geom_refine.json", build_brep=True)
+        gt_mesh = trimesh.load(gt_root / folder_name / "mesh.ply")
+        center, scale = get_model_normalize(np.array(gt_mesh.vertices))
+
         # Geometry
         recon_faces, recon_face_points, recon_edges, recon_edge_points, \
             recon_vertices, recon_vertex_points = complex_data.get_data(v_num_per_m)
+
+
+        # from shared.common_utils import export_point_cloud
+        # export_point_cloud(r"E:\data\img2brep\0311_debug\recon_face_points_before.ply",
+        #                    np.concatenate(recon_face_points)[:,:3].reshape(-1, 3))
+
+        # scale back
+        recon_vertex_points = recon_vertex_points * scale + center
+        for i in range(len(recon_face_points)):
+            recon_face_points[i][:, :3] = recon_face_points[i][:, :3] * scale + center
+        for i in range(len(recon_edge_points)):
+            recon_edge_points[i][:, :3] = recon_edge_points[i][:, :3] * scale + center
         # Topology
         recon_face_edge, recon_edge_vertex = complex_data.FaceEdge, complex_data.EdgeVertex
+
+        # just for debug
+        # from shared.common_utils import export_point_cloud
+        # export_point_cloud(r"E:\data\img2brep\0311_debug\recon_face_points.ply",
+        #                    np.concatenate(recon_face_points)[:,:3].reshape(-1, 3))
+        # gt_mesh.export(r"E:\data\img2brep\0311_debug\gt_mesh.ply")
     elif is_nvdnet:
-        raise NotImplementedError
+        nvdnet_data = NVDNetProcessor(eval_root / folder_name, build_brep=False)
+        recon_faces, recon_face_points, recon_edges, recon_edge_points, \
+            recon_vertices, recon_vertex_points = nvdnet_data.get_data(v_num_per_m)
+        recon_face_edge, recon_edge_vertex = nvdnet_data.FaceEdge, nvdnet_data.EdgeVertex
+        # just for debug
+        # from shared.common_utils import export_point_cloud
+        # export_point_cloud(r"E:\data\img2brep\0311_debug\recon_face_points.ply",
+        #                    np.concatenate(recon_face_points)[:, :3].reshape(-1, 3))
+        # gt_mesh = trimesh.load(gt_root / folder_name / "mesh.ply")
+        # gt_mesh.export(r"E:\data\img2brep\0311_debug\gt_mesh.ply")
     else:
         try:
             # Face chamfer distance

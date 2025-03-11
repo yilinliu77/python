@@ -1,271 +1,45 @@
 from __future__ import annotations
 
 import trimesh
-import json
 import numpy as np
 from pathlib import Path
 from abc import ABC, abstractmethod
 
 from OCC.Core.TopoDS import TopoDS_Vertex, TopoDS_Edge, TopoDS_Face
 
-from OCC.Core.TColgp import TColgp_Array1OfPnt, TColgp_Array2OfPnt
-
-from OCC.Core.gp import gp_Pnt
-
-from OCC.Core.GeomAPI import GeomAPI_PointsToBSpline, GeomAPI_PointsToBSplineSurface
-from OCC.Core.GeomAbs import GeomAbs_C0, GeomAbs_C1, GeomAbs_C2, GeomAbs_C3
-
-from OCC.Core.BRep import BRep_Tool
-from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeVertex, BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeFace
-from OCC.Core.BRepAdaptor import BRepAdaptor_Curve
-
-from OCC.Core.ShapeAnalysis import ShapeAnalysis_Surface, ShapeAnalysis_Curve, shapeanalysis
 from typing import List
 
 from shared.occ_utils import get_primitives, get_triangulations, get_points_along_edge, get_curve_length
+from src.brepnet.eval.baseline_preprocess.brep_model_constructor import BRepModelConstructor
+from src.brepnet.eval.baseline_preprocess.model_loader import ModelLoader, ComplexLoader, NVDNetLoader
 
 class DataProcessor(ABC):
-    _BSPLINE_CURVE_DEGREE_MIN = 0
-    _BSPLINE_CURVE_DEGREE_MAX = 8
-    _BSPLINE_FACE_DEGREE_MIN = 3
-    _BSPLINE_FACE_DEGREE_MAX = 8
-    _CONTINUITY = GeomAbs_C2
-    _CURVELENGTH = 1
-    _CURVATURE = 1
-    _TORSION = 1
-    _EDGE_FITTING_TOLERANCE = [1e-3, 5e-3, 8e-3, 5e-2]
-    _FACE_FITTING_TOLERANCE = [1e-3, 1e-2, 3e-2, 5e-2, 8e-2]
-    _U_AXIS = 0
-    _V_AXIS = 1
 
-    def __init__(self, file_path: str | Path):
-        self._transfer_tolerance = 1e-6
+    def __init__(self, file_path: str | Path, build_brep: bool = False):
         self.file_path = file_path
-        self.file_content = self._read_file(self.file_path)
-        self._vertex_sample_points = self._get_vertex_array()
-        self._edge_sample_points = self._get_edge_array()
-        self._face_sample_points = self._get_face_array()
-        self._vertices = self.get_vertices()
-        self._edges = self.get_edges()
-        self._faces = self.get_faces(self.TransferTolerance)
-        self._face_edge = self._get_face_edge()
-        self._edge_vertex = self._get_edge_vertex()
-        assert len(self.Vertices) == self.VertexPositions.shape[0]
-        assert len(self.Edges) == self.EdgeSamplePoints.shape[0]
-        assert len(self.Faces) == self.FaceSamplePoints.shape[0]
-
-    def get_vertices(self) -> List[TopoDS_Vertex]:
-        """
-        Get the vertices in the BRep form
-
-        Returns:
-            List[TopoDS_Vertex]: List of vertices
-        """
-        vertices = []
-        for vertex_position in self.VertexPositions:
-            vertex_position = vertex_position[0]
-            vertices.append(BRepBuilderAPI_MakeVertex(gp_Pnt(*vertex_position)))
-        return vertices
-
-    def get_edges(self) -> List[TopoDS_Edge]:
-        """
-        Get the edges in the BRep form
-
-        Returns:
-            List[TopoDS_Edge]: List of edges
-        """
-        edges = []
-        for i, edge_sample_points in enumerate(self.EdgeSamplePoints):
-            # 34 points
-            gp_array = TColgp_Array1OfPnt(1, len(edge_sample_points))
-            for index_i, sample_point in enumerate(edge_sample_points):
-                gp_array.SetValue(index_i + 1, gp_Pnt(*sample_point))
-
-            for precision in self._EDGE_FITTING_TOLERANCE:
-                try:
-                    bspline_edge = GeomAPI_PointsToBSpline(
-                            gp_array,
-                            self._CURVELENGTH,
-                            self._CURVATURE,
-                            self._TORSION,
-                            # self._BSPLINE_CURVE_DEGREE_MIN,
-                            self._BSPLINE_CURVE_DEGREE_MAX,
-                            self._CONTINUITY,
-                            precision
-                    ).Curve()
-                    edges.append(BRepBuilderAPI_MakeEdge(bspline_edge).Edge())
-                    break
-                except Exception as e:
-                    print(e)
-                    trimesh.PointCloud(edge_sample_points).export(f'{i}_edge.ply')
-                    continue
-        return edges
-
-    def get_faces(self, tolerance) -> List[TopoDS_Face]:
-        faces = []
-        for i, face_sample_points in enumerate(self.FaceSamplePoints):
-            u_dim = face_sample_points.shape[0]
-            v_dim = face_sample_points.shape[1]
-            gp_array = TColgp_Array2OfPnt(1, u_dim, 1, v_dim)
-            for index_i in range(1, u_dim + 1):
-                for index_j in range(1, v_dim + 1):
-                    gp_array.SetValue(index_i, index_j, gp_Pnt(*face_sample_points[index_i - 1, index_j - 1]))
-
-            for precision in self._FACE_FITTING_TOLERANCE:
-                try:
-                    bspline_face = GeomAPI_PointsToBSplineSurface(
-                            gp_array,
-                            self._CURVELENGTH,
-                            self._CURVATURE,
-                            self._TORSION,
-                            # self._BSPLINE_CURVE_DEGREE_MIN,
-                            self._BSPLINE_CURVE_DEGREE_MAX,
-                            self._CONTINUITY,
-                            precision
-                    ).Surface()
-                    faces.append(BRepBuilderAPI_MakeFace(bspline_face, tolerance).Face())
-                    break
-                except Exception as e:
-                    print("Some face is not able to be fitted")
-                    continue
-
-        return faces
-
-    @property
-    def Vertices(self) -> List[TopoDS_Vertex]:
-        """
-        The list of TopoDS_Vertex
-        """
-        vertices = self._vertices
-        return vertices
-
-    @property
-    def Edges(self) -> List[TopoDS_Edge]:
-        """
-        The list of TopoDS_Edge
-        """
-        edges = self._edges
-        return edges
-
-    @property
-    def Faces(self) -> List[TopoDS_Face]:
-        """
-        The list of TopoDS_Face
-        """
-        faces = self._faces
-        return faces
-
-    @property
-    def VertexPositions(self) -> np.ndarray:
-        """
-        Vertex positions
-
-        Returns:
-            np.ndarray: (num_vertices, 3)
-        """
-        vertex_sample_points = self._vertex_sample_points
-        return vertex_sample_points
-
-    @property
-    def EdgeSamplePoints(self) -> np.ndarray:
-        """
-        Sample points on every edge
-
-        Returns:
-            np.ndarray: (num_edges, edge_sample_frequency, 3)
-        """
-        edge_sample_points = self._edge_sample_points
-        return edge_sample_points
-
-    @property
-    def FaceSamplePoints(self) -> np.ndarray:
-        """
-        Sample points on every face
-
-        Returns:
-            np.ndarray: (num_faces, u_sample_frequency, v_sample_frequency, 3)
-        """
-        face_sample_points = self._face_sample_points
-        return face_sample_points
-
-    @property
-    def FaceEdge(self) -> dict:
-        face_edge = self._face_edge
-        return face_edge
-
-    @property
-    def EdgeVertex(self) -> dict:
-        edge_vertex = self._edge_vertex
-        return edge_vertex
-
-    @property
-    def TransferTolerance(self):
-        """
-        The tolerance to build a TopoDS_Face
-        """
-        return self._transfer_tolerance
-
-    @TransferTolerance.setter
-    def TransferTolerance(self, value):
-        self._transfer_tolerance = value
-        self._rebuild_faces(self._transfer_tolerance)
-
-    @property
-    @abstractmethod
-    def FaceSampleFrequency(self):
-        pass
-
-    @abstractmethod
-    def _read_file(self, file_path: str | Path):
-        pass
-
-    @abstractmethod
-    def _get_vertex_array(self) -> np.ndarray:
-        pass
-
-    @abstractmethod
-    def _get_edge_array(self) -> np.ndarray:
-        pass
-
-    @abstractmethod
-    def _get_face_array(self) -> np.ndarray:
-        pass
-
-    @abstractmethod
-    def _get_face_edge(self) -> dict:
-        pass
-
-    @abstractmethod
-    def _get_edge_vertex(self) -> dict:
-        pass
-
-    @abstractmethod
-    def _openness_of_face(self, index: int, direction: int) -> bool:
-        pass
-
-    @abstractmethod
-    def _openness_of_curve(self, index: int) -> bool:
-        pass
-
-    def _rebuild_faces(self):
-        """
-        Rebuild the sufaces when the tolerance is changed
-        """
-        self._faces = self.get_faces(self.TransferTolerance)
-
-
-class ComplexGenProcessor(DataProcessor):
-
-    def __init__(self, file_path: str | Path):
-        super().__init__(file_path)
+        
+        self.model_loader:ModelLoader = self.create_loader()
+        self.model_loader.load(self.file_path)
+        
+        if build_brep:
+            self._brep_constructor = BRepModelConstructor(self.model_loader)
+            self._brep_constructor.build()
+        else:
+            self._brep_constructor = BRepModelConstructor()
+        # assert len(self.Vertices) == self.VertexPositions.shape[0]
+        # assert len(self.Edges) == self.EdgeSamplePoints.shape[0]
+        # assert len(self.Faces) == self.FaceSamplePoints.shape[0]
 
     def get_data(self, v_num_per_m: int):
         vertices, vertex_points = self.Vertices, self.VertexPositions
-        edges, edge_points = self.sample_points_on_edges(v_num_per_m)
-        faces, face_points = self.sample_points_on_faces(v_num_per_m)
+        edges, edge_points = self.__sample_points_on_edges(v_num_per_m)
+        faces, face_points = self.__sample_points_on_faces(v_num_per_m)
         return faces, face_points, edges, edge_points, vertices, vertex_points
 
-    def sample_points_on_faces(self, v_num_per_m: int):
+    def __sample_points_on_faces(self, v_num_per_m: int):
+        if len(self.Faces) == 0:
+            return [], self.FaceSamplePoints
+        
         faces, face_points = [], []
 
         for face in self.Faces:
@@ -287,7 +61,10 @@ class ComplexGenProcessor(DataProcessor):
 
         return faces, face_points
 
-    def sample_points_on_edges(self, v_num_per_m: int):
+    def __sample_points_on_edges(self, v_num_per_m: int):
+        if len(self.Edges) == 0:
+            return [], self.EdgeSamplePoints
+        
         edges, edge_points = [], []
 
         for edge in self.Edges:
@@ -298,75 +75,99 @@ class ComplexGenProcessor(DataProcessor):
             edge_points.append(v)
 
         return edges, edge_points
+    
+    @abstractmethod
+    def create_loader(self) -> ModelLoader:
+        pass
+    
+    @property
+    def Vertices(self) -> List[TopoDS_Vertex]:
+        """
+        The list of TopoDS_Vertex
+        """
+        vertices = []
+        if self._brep_constructor.IsDone():
+            vertices = self._brep_constructor.BRepVertices
+        return vertices
 
     @property
-    def FaceSampleFrequency(self):
-        return int(np.sqrt(len(self.file_content['patches'][0]['grid']) / 3))
+    def Edges(self) -> List[TopoDS_Edge]:
+        """
+        The list of TopoDS_Edge
+        """
+        edges = []
+        if self._brep_constructor.IsDone():
+            edges = self._brep_constructor.BRepEdges
+        return edges
 
-    def _read_file(self, file_path: str | Path) -> dict:
-        """Return the raw file content from a JSON file
+    @property
+    def Faces(self) -> List[TopoDS_Face]:
+        """
+        The list of TopoDS_Face
+        """
+        faces = []
+        if self._brep_constructor.IsDone():
+            faces = self._brep_constructor.BRepFaces
+        return faces
 
-        Args:
-            file_path (str | Path): file path
+    @property
+    def VertexPositions(self) -> np.ndarray:
+        """
+        Vertex positions
 
         Returns:
-            dict: JSON dictionary
+            np.ndarray: (num_vertices, 3)
         """
-        with open(file_path, 'r') as json_file:
-            return json.load(json_file)
+        
+        vertex_sample_points = self.model_loader.Vertices
+        return vertex_sample_points
 
-    def _get_vertex_array(self):
-        vertices = []
-        if self.file_content['corners'] is None:
-            return np.asarray((0,0,0), dtype=np.float64)[None, None]
-        for vertex_data in self.file_content['corners']:
-            vertices.append(vertex_data['pts'])
-        return np.array(vertices, dtype=np.float64)[:, None, :]
+    @property
+    def EdgeSamplePoints(self) -> np.ndarray:
+        """
+        Sample points on every edge
 
-    def _get_edge_array(self):
-        edges = []
-        if self.file_content['curves'] is None:
-            return np.array(edges, dtype=np.float64)
-        for edge_data in self.file_content['curves']:
-            edges.append(np.array(edge_data['pts']).reshape([-1, 3]))
-        return np.array(edges, dtype=np.float64)
+        Returns:
+            np.ndarray: (num_edges, edge_sample_frequency, 3)
+        """
+        edge_sample_points = self.model_loader.Edges
+        return edge_sample_points
 
-    def _get_face_array(self):
-        faces = []
-        if self.file_content['patches'] is None:
-            return np.array(faces, dtype=np.float64)
-        for face_data in self.file_content['patches']:
-            faces.append(np.array(face_data['grid']).reshape([self.FaceSampleFrequency, self.FaceSampleFrequency, 3]))
-        return np.array(faces, dtype=np.float64)
+    @property
+    def FaceSamplePoints(self) -> np.ndarray:
+        """
+        Sample points on every face
 
-    def _openness_of_face(self, index: int, direction: int):
-        if direction == self._U_AXIS:
-            return self.file_content['patches'][index]['u_closed']
-        elif direction == self._V_AXIS:
-            return self.file_content['patches'][index]['v_closed']
-        else:
-            raise ValueError("Axis Error: Must be U_AXIS or V_AXIS!")
+        Returns:
+            np.ndarray: (num_faces, u_sample_frequency, v_sample_frequency, 3)
+        """
+        face_sample_points = self.model_loader.Faces
+        return face_sample_points
 
-    def _openness_of_curve(self, index: int):
-        return self.file_content['curves'][index]['closed']
+    @property
+    def FaceEdge(self) -> dict:
+        face_edge = self.model_loader.FaceEdge
+        return face_edge
 
-    def _get_face_edge(self):
-        face_edge_matrix = self.file_content['patch2curve']
-        return self.__convert_topo_matrix(face_edge_matrix)
+    @property
+    def EdgeVertex(self) -> dict:
+        edge_vertex = self.model_loader.EdgeVertex
+        return edge_vertex
 
-    def _get_edge_vertex(self):
-        edge_vertex_matrix = self.file_content['curve2corner']
-        return self.__convert_topo_matrix(edge_vertex_matrix)
 
-    def __convert_topo_matrix(self, topo_matrix):
-        topo_dict = dict()
-        if topo_matrix is None:
-            return topo_dict
-        for main_index, topo_one_hot in enumerate(topo_matrix):
-            connectivity = []
-            for secondary_index, is_connected in enumerate(topo_one_hot):
-                if is_connected == 1:
-                    connectivity.append(secondary_index)
-            if len(connectivity) > 0:
-                topo_dict[main_index] = connectivity
-        return topo_dict
+class ComplexGenProcessor(DataProcessor):
+
+    def __init__(self, file_path, build_brep = False):
+        super().__init__(file_path, build_brep)
+
+    def create_loader(self):
+        return ComplexLoader()
+
+
+class NVDNetProcessor(DataProcessor):
+    def __init__(self, file_path, build_brep = False):
+        super().__init__(file_path, build_brep)
+
+    def create_loader(self):
+        return NVDNetLoader()    
+

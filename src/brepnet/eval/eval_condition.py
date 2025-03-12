@@ -101,6 +101,12 @@ def compute_statistics(eval_root, v_only_valid, listfile):
         np.mean(results['fe_fscore']), np.mean(results['ev_fscore']),
     ))
 
+    print("{:.4f} {:.4f} {:.4f} {:.3f} {:.3f} {:.3f} {:.3f} {:.3f}".format(
+            np.mean(results['vertex_cd']), np.mean(results['edge_cd']), np.mean(results['face_cd']),
+            np.mean(results['vertex_fscore']), np.mean(results['edge_fscore']), np.mean(results['face_fscore']),
+            np.mean(results['fe_fscore']), np.mean(results['ev_fscore']),
+    ))
+
     print("\nMean:")
     print(
         "{:.0f}/{:.0f} {:.0f}/{:.0f} {:.0f}/{:.0f} {:.6f} {:.6f} {:.6f} {:.6f} {:.6f} {:.6f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f}".format(

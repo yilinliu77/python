@@ -524,6 +524,7 @@ if __name__ == '__main__':
     if not is_use_ray:
         # random.shuffle(self.folder_names)
         for i in tqdm(range(len(all_folders))):
+            print(f"Processing {all_folders[i]}")
             eval_one(eval_root, gt_root, all_folders[i],
                      is_point2cad, is_complexgen, is_nvdenet)
     else:

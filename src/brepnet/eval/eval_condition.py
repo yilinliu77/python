@@ -241,6 +241,8 @@ def get_topology(faces, edges, vertices):
 def get_topo_detection(recon_face_edge, gt_face_edge, id_recon_gt_face, id_recon_gt_edge):
     positive = 0
     for i_recon_face, edges in recon_face_edge.items():
+        if i_recon_face >= len(id_recon_gt_face):
+            continue
         i_gt_face = id_recon_gt_face[i_recon_face]
         if i_gt_face == -1:
             continue

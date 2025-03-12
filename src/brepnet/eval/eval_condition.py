@@ -265,11 +265,11 @@ def get_model_normalize(points_with_normal, to_unit_sphere=False):
     # normalized_points *= 1.0/scale
     return center, scale
 
-def eval_one_with_try(eval_root, gt_root, folder_name, is_point2cad=False, v_num_per_m=100):
+def eval_one_with_try(eval_root, gt_root, folder_name, is_point2cad=False, is_complexgen=False, is_nvdnet=False, v_num_per_m=100):
     try:
-        eval_one(eval_root, gt_root, folder_name, is_point2cad, v_num_per_m)
+        eval_one(eval_root, gt_root, folder_name, is_point2cad, is_complexgen, is_nvdnet, v_num_per_m)
     except:
-        pass
+        print(f"Failed to evaluate {folder_name}")
 
 def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, is_complexgen=False, is_nvdnet=False, v_num_per_m=100):
     if os.path.exists(eval_root / folder_name / 'error.txt'):

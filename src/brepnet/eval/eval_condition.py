@@ -539,7 +539,7 @@ if __name__ == '__main__':
         eval_one_remote = ray.remote(max_retries=0)(eval_one_with_try)
         tasks = []
         timeout_cancel_list = []
-        for i in range(len(all_folders)):
+        for i in tqdm(range(len(all_folders))):
             tasks.append(eval_one_remote.remote(eval_root, gt_root, all_folders[i],
                                                 is_point2cad, is_complexgen, is_nvdenet))
         results = []

@@ -362,6 +362,10 @@ def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, is_complexgen=
         # export_point_cloud(r"E:\data\img2brep\0311_debug\recon_face_points.ply",
         #                    np.concatenate(recon_face_points)[:,:3].reshape(-1, 3))
         # gt_mesh.export(r"E:\data\img2brep\0311_debug\gt_mesh.ply")
+        recon_face_points = [np.zeros((1, 6), dtype=np.float32)] if len(recon_face_points[0]) == 0 else recon_face_points
+        recon_edge_points = [np.zeros((1, 6), dtype=np.float32)] if len(recon_edge_points[0]) == 0 else recon_edge_points
+        recon_vertex_points = [np.zeros((1, 3), dtype=np.float32)] if len(recon_vertex_points[0]) == 0 else recon_vertex_points
+
     elif is_nvdnet:
         nvdnet_data = NVDNetProcessor(eval_root / folder_name, build_brep=False)
         recon_faces, recon_face_points, recon_edges, recon_edge_points, \
@@ -373,6 +377,10 @@ def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, is_complexgen=
         #                    np.concatenate(recon_face_points)[:, :3].reshape(-1, 3))
         # gt_mesh = trimesh.load(gt_root / folder_name / "mesh.ply")
         # gt_mesh.export(r"E:\data\img2brep\0311_debug\gt_mesh.ply")
+        recon_face_points = [np.zeros((1, 6), dtype=np.float32)] if len(recon_face_points[0]) == 0 else recon_face_points
+        recon_edge_points = [np.zeros((1, 6), dtype=np.float32)] if len(recon_edge_points[0]) == 0 else recon_edge_points
+        recon_vertex_points = [np.zeros((1, 3), dtype=np.float32)] if len(recon_vertex_points[0]) == 0 else recon_vertex_points
+
     else:
         try:
             # Face chamfer distance
@@ -497,7 +505,7 @@ if __name__ == '__main__':
         "Only one of [is_point2cad, is_complexgen, is_nvdenet] can be True"
 
     if args.prefix != '':
-        eval_one(eval_root, gt_root, args.prefix, is_point2cad)
+        eval_one(eval_root, gt_root, args.prefix, is_point2cad, is_complexgen, is_nvdenet)
         exit()
 
     all_folders = [folder for folder in os.listdir(eval_root) if os.path.isdir(eval_root / folder)]

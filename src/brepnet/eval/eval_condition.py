@@ -100,7 +100,6 @@ def compute_statistics(eval_root, v_only_valid, listfile):
         np.mean(results['vertex_fscore']), np.mean(results['edge_fscore']), np.mean(results['face_fscore']),
         np.mean(results['fe_fscore']), np.mean(results['ev_fscore']),
     ))
-
     print("{:.4f} {:.4f} {:.4f} {:.3f} {:.3f} {:.3f} {:.3f} {:.3f}".format(
             np.mean(results['vertex_cd']), np.mean(results['edge_cd']), np.mean(results['face_cd']),
             np.mean(results['vertex_fscore']), np.mean(results['edge_fscore']), np.mean(results['face_fscore']),
@@ -343,52 +342,66 @@ def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, is_complexgen=
                 recon_edge_vertex[int(items[0])] = list(map(lambda item: int(item), items[1:]))
         pass
     elif is_complexgen:
-        complex_data = ComplexGenProcessor(eval_root / folder_name / f"{folder_name}_geom_refine.json", build_brep=True)
-        gt_mesh = trimesh.load(gt_root / folder_name / "mesh.ply")
-        center, scale = get_model_normalize(np.array(gt_mesh.vertices))
+        try:
+            complex_data = ComplexGenProcessor(eval_root / folder_name / f"{folder_name}_geom_refine.json", build_brep=True)
+            gt_mesh = trimesh.load(gt_root / folder_name / "mesh.ply")
+            center, scale = get_model_normalize(np.array(gt_mesh.vertices))
 
-        # Geometry
-        recon_faces, recon_face_points, recon_edges, recon_edge_points, \
-            recon_vertices, recon_vertex_points = complex_data.get_data(v_num_per_m)
+            # Geometry
+            recon_faces, recon_face_points, recon_edges, recon_edge_points, \
+                recon_vertices, recon_vertex_points = complex_data.get_data(v_num_per_m)
 
+            if len(recon_face_points.shape) == 4:
+                recon_face_points = recon_face_points.reshape(recon_face_points.shape[0], -1, recon_face_points.shape[-1])
 
-        # from shared.common_utils import export_point_cloud
-        # export_point_cloud(r"E:\data\img2brep\0311_debug\recon_face_points_before.ply",
-        #                    np.concatenate(recon_face_points)[:,:3].reshape(-1, 3))
+            # from shared.common_utils import export_point_cloud
+            # export_point_cloud(r"E:\data\img2brep\0311_debug\recon_face_points_before.ply",
+            #                    np.concatenate(recon_face_points)[:,:3].reshape(-1, 3))
 
-        # scale back
-        recon_vertex_points = recon_vertex_points * scale + center
-        for i in range(len(recon_face_points)):
-            recon_face_points[i][:, :3] = recon_face_points[i][:, :3] * scale + center
-        for i in range(len(recon_edge_points)):
-            recon_edge_points[i][:, :3] = recon_edge_points[i][:, :3] * scale + center
-        # Topology
-        recon_face_edge, recon_edge_vertex = complex_data.FaceEdge, complex_data.EdgeVertex
+            # scale back
+            recon_vertex_points = recon_vertex_points * scale + center
+            for i in range(len(recon_face_points)):
+                recon_face_points[i][:, :3] = recon_face_points[i][:, :3] * scale + center
+            for i in range(len(recon_edge_points)):
+                recon_edge_points[i][:, :3] = recon_edge_points[i][:, :3] * scale + center
+            # Topology
+            recon_face_edge, recon_edge_vertex = complex_data.FaceEdge, complex_data.EdgeVertex
 
-        # just for debug
-        # from shared.common_utils import export_point_cloud
-        # export_point_cloud(r"E:\data\img2brep\0311_debug\recon_face_points.ply",
-        #                    np.concatenate(recon_face_points)[:,:3].reshape(-1, 3))
-        # gt_mesh.export(r"E:\data\img2brep\0311_debug\gt_mesh.ply")
-        recon_face_points = [np.zeros((1, 6), dtype=np.float32)] if len(recon_face_points[0]) == 0 else recon_face_points
-        recon_edge_points = [np.zeros((1, 6), dtype=np.float32)] if len(recon_edge_points[0]) == 0 else recon_edge_points
-        recon_vertex_points = [np.zeros((1, 3), dtype=np.float32)] if len(recon_vertex_points[0]) == 0 else recon_vertex_points
-
+            # just for debug
+            # from shared.common_utils import export_point_cloud
+            # export_point_cloud(r"E:\data\img2brep\0311_debug\recon_face_points.ply",
+            #                    np.concatenate(recon_face_points)[:,:3].reshape(-1, 3))
+            # gt_mesh.export(r"E:\data\img2brep\0311_debug\gt_mesh.ply")
+            recon_face_points = [np.zeros((1, 6), dtype=np.float32)] if len(recon_face_points[0]) == 0 else recon_face_points
+            recon_edge_points = [np.zeros((1, 6), dtype=np.float32)] if len(recon_edge_points[0]) == 0 else recon_edge_points
+            recon_vertex_points = [np.zeros((1, 3), dtype=np.float32)] if len(recon_vertex_points[0]) == 0 else recon_vertex_points
+        except:
+            recon_face_points = [np.zeros((1, 6), dtype=np.float32)]
+            recon_edge_points = [np.zeros((1, 6), dtype=np.float32)]
+            recon_vertex_points = [np.zeros((1, 3), dtype=np.float32)]
+            recon_face_edge = {}
+            recon_edge_vertex = {}
     elif is_nvdnet:
-        nvdnet_data = NVDNetProcessor(eval_root / folder_name, build_brep=False)
-        recon_faces, recon_face_points, recon_edges, recon_edge_points, \
-            recon_vertices, recon_vertex_points = nvdnet_data.get_data(v_num_per_m)
-        recon_face_edge, recon_edge_vertex = nvdnet_data.FaceEdge, nvdnet_data.EdgeVertex
-        # just for debug
-        # from shared.common_utils import export_point_cloud
-        # export_point_cloud(r"E:\data\img2brep\0311_debug\recon_face_points.ply",
-        #                    np.concatenate(recon_face_points)[:, :3].reshape(-1, 3))
-        # gt_mesh = trimesh.load(gt_root / folder_name / "mesh.ply")
-        # gt_mesh.export(r"E:\data\img2brep\0311_debug\gt_mesh.ply")
-        recon_face_points = [np.zeros((1, 6), dtype=np.float32)] if len(recon_face_points[0]) == 0 else recon_face_points
-        recon_edge_points = [np.zeros((1, 6), dtype=np.float32)] if len(recon_edge_points[0]) == 0 else recon_edge_points
-        recon_vertex_points = [np.zeros((1, 3), dtype=np.float32)] if len(recon_vertex_points[0]) == 0 else recon_vertex_points
-
+        try:
+            nvdnet_data = NVDNetProcessor(eval_root / folder_name, build_brep=False)
+            recon_faces, recon_face_points, recon_edges, recon_edge_points, \
+                recon_vertices, recon_vertex_points = nvdnet_data.get_data(v_num_per_m)
+            recon_face_edge, recon_edge_vertex = nvdnet_data.FaceEdge, nvdnet_data.EdgeVertex
+            # just for debug
+            # from shared.common_utils import export_point_cloud
+            # export_point_cloud(r"E:\data\img2brep\0311_debug\recon_face_points.ply",
+            #                    np.concatenate(recon_face_points)[:, :3].reshape(-1, 3))
+            # gt_mesh = trimesh.load(gt_root / folder_name / "mesh.ply")
+            # gt_mesh.export(r"E:\data\img2brep\0311_debug\gt_mesh.ply")
+            recon_face_points = [np.zeros((1, 6), dtype=np.float32)] if len(recon_face_points[0]) == 0 else recon_face_points
+            recon_edge_points = [np.zeros((1, 6), dtype=np.float32)] if len(recon_edge_points[0]) == 0 else recon_edge_points
+            recon_vertex_points = [np.zeros((1, 3), dtype=np.float32)] if len(recon_vertex_points[0]) == 0 else recon_vertex_points
+        except:
+            recon_face_points = [np.zeros((1, 6), dtype=np.float32)]
+            recon_edge_points = [np.zeros((1, 6), dtype=np.float32)]
+            recon_vertex_points = [np.zeros((1, 3), dtype=np.float32)]
+            recon_face_edge = {}
+            recon_edge_vertex = {}
     else:
         try:
             # Face chamfer distance
@@ -476,6 +489,8 @@ def eval_one(eval_root, gt_root, folder_name, is_point2cad=False, is_complexgen=
         "num_recon_vertex": len(recon_vertex_points),
         "num_gt_vertex": len(gt_vertex_points),
     }
+    if not os.path.exists(eval_root / folder_name):
+        os.makedirs(eval_root / folder_name)
     np.savez_compressed(eval_root / folder_name / 'eval.npz', results=results, allow_pickle=True)
 
 
@@ -520,7 +535,8 @@ if __name__ == '__main__':
     ori_length = len(all_folders)
     if listfile != '':
         valid_names = [item.strip() for item in open(listfile, 'r').readlines()]
-        all_folders = list(set(all_folders) & set(valid_names))
+        all_folders = valid_names
+        # all_folders = list(set(all_folders) & set(valid_names))
         all_folders.sort()
     print(f"Total {len(all_folders)}/{ori_length} folders to evaluate")
 

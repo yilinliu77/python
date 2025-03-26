@@ -620,7 +620,6 @@ class Diffusion_dataset_mm(Diffusion_dataset):
 
         sampled_prob = np.random.rand()
         idx = self.cond_prob_acc.shape[0] - (sampled_prob < self.cond_prob_acc).sum(axis=-1)
-        idx = 4
         used_condition = []
         if self.condition[idx] == "mm":
             available_condition = [item for item in self.condition if item != "uncond" and item != "mm"]

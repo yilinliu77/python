@@ -344,6 +344,7 @@ def main(v_cfg: DictConfig):
             weights = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
             # weights = {k.replace("model.", ""): v for k, v in weights.items()}
             model.load_state_dict(weights)
+            del weights
         trainer.fit(model)
 
 

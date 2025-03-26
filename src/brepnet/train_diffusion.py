@@ -341,7 +341,7 @@ def main(v_cfg: DictConfig):
             print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
             # model = TrainDiffusion.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint)
             # model.hydra_conf = v_cfg
-            weights = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
+            weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, map_location="cpu")["state_dict"]
             # weights = {k.replace("model.", ""): v for k, v in weights.items()}
             model.load_state_dict(weights)
             del weights

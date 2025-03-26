@@ -1797,8 +1797,7 @@ class AutoEncoder_1119_light(AutoEncoder_1119):
             res_block_xd(2, ds // 2, ds // 1, 3, 1, 1, v_norm=norm, v_norm_shape = (ds // 1, 4, 4)),
             nn.MaxPool2d(kernel_size=2, stride=2), # 2
             res_block_xd(2, ds // 1, ds, 3, 1, 1, v_norm=norm, v_norm_shape = (ds // 1, 2, 2)),
-            nn.MaxPool2d(kernel_size=2, stride=2), # 1
-            nn.Conv2d(ds, df, kernel_size=1, stride=1, padding=0),
+            nn.Conv2d(ds, dl, kernel_size=1, stride=1, padding=0),
             Rearrange("b n h w -> b (n h w)")
         )
         self.edge_coords = nn.Sequential(
@@ -1812,8 +1811,7 @@ class AutoEncoder_1119_light(AutoEncoder_1119):
             res_block_xd(1, ds // 2, ds, 3, 1, 1, v_norm=norm, v_norm_shape = (ds // 1, 4,)),
             nn.MaxPool1d(kernel_size=2, stride=2), # 2
             res_block_xd(1, ds, ds, 3, 1, 1, v_norm=norm, v_norm_shape = (ds // 1, 2,)),
-            nn.MaxPool1d(kernel_size=2, stride=2), # 1
-            nn.Conv1d(ds, df*2, kernel_size=1, stride=1, padding=0),
+            nn.Conv1d(ds, df, kernel_size=1, stride=1, padding=0),
             Rearrange("b n w -> b (n w)"),
         ) # b c 1
 

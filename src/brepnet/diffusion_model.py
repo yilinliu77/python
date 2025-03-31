@@ -1040,7 +1040,7 @@ class Diffusion_condition_mm(nn.Module):
         all_condition_names = v_data["conditions"]["names"]
         condition_batch_id = v_data["conditions"]["id_batch"]
         # TXT feature
-        if "txt" in all_condition_names and False:
+        if "txt" in all_condition_names:
             if v_data["conditions"]["txt_features"] != []:
                 txt_feat = v_data["conditions"]["txt_features"]
             else:

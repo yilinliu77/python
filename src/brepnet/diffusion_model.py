@@ -86,7 +86,7 @@ class Diffusion_condition(nn.Module):
             nn.Linear(self.dim_latent, self.dim_latent),
         )
         
-        self.proj_in = nn.Linear(self.dim_input+self.dim_condition, self.dit_inner_dim, bias=True)
+        self.proj_in = nn.Linear(self.dim_total, self.dit_inner_dim, bias=True)
         self.time_embed = Timesteps(self.dit_inner_dim, flip_sin_to_cos=False, downscale_freq_shift=0)
         self.time_proj = TimestepEmbedding(
             in_channels=self.dit_inner_dim,
@@ -248,6 +248,16 @@ class Diffusion_condition(nn.Module):
             nn.Linear(self.dim_input, 1),
         )
 
+        self.noise_scheduler = DDPMScheduler(
+            num_train_timesteps=1000,
+            beta_schedule=v_conf["beta_schedule"],
+            prediction_type=v_conf["diffusion_type"],
+            beta_start=v_conf["beta_start"],
+            beta_end=v_conf["beta_end"],
+            variance_type=v_conf["variance_type"],
+            clip_sample=False,
+        )
+        
         self.num_max_faces = v_conf["num_max_faces"]
         self.loss = nn.functional.l1_loss if v_conf["loss"] == "l1" else nn.functional.mse_loss
         self.diffusion_type = v_conf["diffusion_type"]

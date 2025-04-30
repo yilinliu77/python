@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import random
 
 from tqdm import tqdm
@@ -11,8 +12,13 @@ import glob
 from src.brepnet.eval.check_valid import check_step_valid_soild
 from src.brepnet.post.utils import *
 from OCC.Core.BRepLProp import BRepLProp_SLProps
+from OCC.Core.BRepGProp import brepgprop
 from OCC.Core.TopAbs import TopAbs_SOLID
 import trimesh
+
+import numpy as np
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -41,12 +47,18 @@ def normalize_mesh(mesh):
     return mesh
 
 
-def arrange_meshes(files, out_path, intervals=0.5, color_mode="index"):
+def arrange_meshes(files, out_path, intervals=0.5, color_mode="index", is_normalized=False):
     assert color_mode in ["random", "index"]
     if type(files[0]) == str:
-        meshes = [trimesh.load(file) for file in files]
+        if is_normalized:
+            meshes = [normalize_mesh(trimesh.load(file)) for file in files]
+        else:
+            meshes = [trimesh.load(file) for file in files]
     elif type(files[0]) == trimesh.Trimesh:
-        meshes = [mesh for mesh in files]
+        if is_normalized:
+            meshes = [normalize_mesh(mesh) for mesh in files]
+        else:
+            meshes = [mesh for mesh in files]
     else:
         raise ValueError("Invalid input type")
     num_meshes = len(meshes)
@@ -138,8 +150,16 @@ def compute_solid_complexity(file_path, num_samples=4):
     if mean_curvature < 1e-4:
         mean_curvature = 0.0
 
+    volume_props = GProp_GProps()
+    surface_props = GProp_GProps()
+    brepgprop.VolumeProperties(shape, volume_props)
+    brepgprop.SurfaceProperties(shape, surface_props)
+
+    complexity = len(face_list) + surface_props.Mass() / volume_props.Mass() + mean_curvature
+
     return {"is_valid_solid": is_valid, "mean_curvature": mean_curvature,
-            "num_faces"     : len(face_list), "num_edges": len(edge_list), "num_vertices": len(vetex_list)}
+            "num_faces"     : len(face_list), "num_edges": len(edge_list), "num_vertices": len(vetex_list),
+            "complexity"    : complexity}
 
 
 compute_solid_complexity_remote = ray.remote(compute_solid_complexity)
@@ -147,7 +167,8 @@ compute_solid_complexity_remote = ray.remote(compute_solid_complexity)
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_root", type=str, required=True)
-    parser.add_argument("--out_root", type=str, required=True)
+    parser.add_argument("--out_root", type=str, required=False)
+    parser.add_argument("--src_root", type=str, required=False)
     parser.add_argument("--random", action='store_true')
     parser.add_argument("--sort", action='store_true')
     parser.add_argument("--sample_num", type=int, default=100)
@@ -157,11 +178,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
     data_root = args.data_root
     out_root = args.out_root
+    src_root = None if not args.src_root else Path(args.src_root)
     random = args.random
     sort = args.sort
     sample_num = args.sample_num
     use_ray = args.use_ray
     onlyvalid = args.valid
+
+    if not out_root:
+        out_root = data_root + "_choose"
 
     # can only choose one of random, sort, seg
     if sum([random, sort]) != 1:
@@ -186,6 +211,7 @@ if __name__ == "__main__":
         for folder in pbar:
             pbar.set_description(f"Processing {folder}")
             file_path = glob.glob(os.path.join(data_root, folder, "*.step"))
+            file_path.sort()
             if len(file_path) == 0:
                 continue
             file_path = file_path[0]
@@ -193,7 +219,7 @@ if __name__ == "__main__":
             folder_scores[folder] = score
     else:
         ray.init(
-                # local_mode=True,
+                local_mode=False,
         )
         futures = []
         futures_folder_names = []
@@ -220,18 +246,24 @@ if __name__ == "__main__":
     if sort:
         # sort the folders based on the mean_curvature, num_faces, num_edges, num_vertices
         sorted_folders = sorted(folder_scores.items(),
-                                key=lambda x: (x[1]["num_faces"], x[1]["mean_curvature"], x[1]["num_edges"], x[1]["num_vertices"]),
+                                key=lambda x: (x[1]["num_faces"], x[1]["mean_curvature"],),
                                 reverse=True)
 
         for idx, folder in enumerate(tqdm(sorted_folders)):
             shutil.copytree(str(os.path.join(data_root, folder[0])), str(os.path.join(out_root, f"{idx:05d}_{folder[0]}")))
+            if src_root is not None:
+                for file in (src_root/folder[0]).glob("*"):
+                    if "_pc.ply" in file.name or "_txt.txt" in file.name or ".png" in file.name:
+                        shutil.copy(str(file), str(os.path.join(out_root, f"{idx:05d}_{folder[0]}")))
         ray.shutdown()
         mesh_path_list = glob.glob(os.path.join(out_root, "**", "*.stl"), recursive=True)
         mesh_path_list.sort()
+        prefix = Path(data_root).name
+        name = os.path.join(out_root, "{}.ply".format(prefix))
         if args.index:
-            arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"), color_mode="index")
+            arrange_meshes(mesh_path_list, name, color_mode="index")
         else:
-            arrange_meshes(mesh_path_list, os.path.join(out_root, "arranged.ply"), color_mode="random")
-        print(f"arranged mesh is saved to {os.path.join(out_root, 'arranged.ply')}")
+            arrange_meshes(mesh_path_list, name, color_mode="random")
+        print(f"arranged mesh is saved to {name}")
 
     print("Done")

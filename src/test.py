@@ -1,23 +1,12 @@
-import os
-import shutil
-
-root = r"G:/Dataset/GSP/Results/viz_output/0120_random_mesh_imgs"
-output_root = r"G:/Dataset/GSP/Results/viz_output/"
+import torch
 
 if __name__ == '__main__':
-    files = list(sorted(set([file[:8] for file in os.listdir(root)])))
+    dict1 = torch.load(r"C:/Users/yilin/Desktop/epoch=210-step=650000.ckpt")["state_dict"]
+    dict2 = torch.load(r"C:/Users/yilin/Desktop/epoch=126-step=750000.ckpt")["state_dict"]
 
-    for i in range(len(files)):
-        if i % 5 == 0:
-            os.makedirs(os.path.join(output_root, str(i//5)), exist_ok=True)
-
-        output_dir = os.path.join(output_root, str(i//5))
-        for suffix in ["_complex", "_sed", "_hp", "_gt", "_ours"]:
-            shutil.copy(
-                os.path.join(root, files[i] + suffix + ".png"),
-                os.path.join(output_dir, str(i%5) + suffix + ".png"))
-            shutil.copy(
-                os.path.join(root, files[i] + suffix + "_curve.png"),
-                os.path.join(output_dir, str(i%5) + suffix + "_curve.png"))
+    for key in dict1.keys():
+        if "ae_model" not in key:
+            continue
+        assert torch.allclose(dict1[key], dict2[key], atol=1e-4), key
 
     pass

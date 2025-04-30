@@ -56,8 +56,8 @@ debug_id = None
 write_debug_data = False
 check_post_processing = False
 data_root = Path(r"/mnt/e/yilin/data_step")
-output_root = Path(r"/mnt/d/img2brep/abc_v1/")
-data_split = r"src/brepnet/data/list/deduplicated_abc_brepnet.txt"
+output_root = Path(r"/mnt/d/img2brep/abc_v2/")
+data_split = r"src/brepnet/data/list/abc_total.txt"
 
 exception_files = [
     r"src/brepnet/bak/list_bak/abc_cube_ids.txt",

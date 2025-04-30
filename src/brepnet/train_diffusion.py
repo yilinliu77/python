@@ -1,7 +1,10 @@
+import sys
+sys.path.append('../../../')
+from functools import partial
 import importlib
 from datetime import datetime
 from pathlib import Path
-import sys
+import random
 
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeFace
 from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface
@@ -15,7 +18,6 @@ import open3d as o3d
 from src.brepnet.dataset import Diffusion_dataset
 from src.brepnet.post.utils import triangulate_shape, triangulate_face, export_edges
 
-sys.path.append('../../../')
 import os.path
 
 import hydra
@@ -28,6 +30,7 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import StochasticWeightAveraging, ModelSummary
 from lightning_fabric import seed_everything
 
 from torch.utils.data.dataloader import DataLoader
@@ -36,6 +39,10 @@ from torchmetrics.classification import BinaryPrecision, BinaryRecall, BinaryAve
 from torchmetrics import MetricCollection
 
 import trimesh
+from pytorch_lightning.loggers import WandbLogger
+
+os.environ["HTTP_PROXY"] = "http://172.31.178.46:12996"
+os.environ["HTTPS_PROXY"] = "http://172.31.178.46:12996"
 
 
 def to_mesh(face_points):
@@ -58,10 +65,19 @@ def to_mesh(face_points):
         mesh_total += mesh_item
     return mesh_total
 
+def seed_worker(worker_id, rank_id=0):
+    random.seed(worker_id+rank_id*10000)
+    np.random.seed(worker_id+rank_id*10000)
+    torch.manual_seed(worker_id+rank_id*10000)
 
 class TrainDiffusion(pl.LightningModule):
     def __init__(self, hparams):
         super(TrainDiffusion, self).__init__()
+        
+        if "GLOBAL_RANK" in os.environ:
+            seed_everything(os.environ["GLOBAL_RANK"], True)
+            global_rank = os.environ['GLOBAL_RANK']
+            print(f"{global_rank}: {torch.initial_seed()}")
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
@@ -94,6 +110,7 @@ class TrainDiffusion(pl.LightningModule):
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
+                          worker_init_fn=partial(seed_worker, rank_id=self.trainer.global_rank),
                           )
 
     def val_dataloader(self):
@@ -105,6 +122,7 @@ class TrainDiffusion(pl.LightningModule):
                           pin_memory=True,
                           persistent_workers=True if self.hydra_conf["trainer"]["num_worker"] > 0 else False,
                           prefetch_factor=2 if self.hydra_conf["trainer"]["num_worker"] > 0 else None,
+                          worker_init_fn=partial(seed_worker, rank_id=self.trainer.global_rank),
                           )
 
     def configure_optimizers(self):
@@ -133,30 +151,46 @@ class TrainDiffusion(pl.LightningModule):
         loss = self.model(data, v_test=True)
         total_loss = loss["total_loss"]
         for key in loss:
-            if key == "total_loss" or key == "t":
+            if key in ["t", "total_loss", "cond_item", "cond_onehot"]:
                 continue
             self.log(f"Validation_{key}", loss[key], prog_bar=True, logger=True, on_step=False, on_epoch=True,
                      sync_dist=True, batch_size=self.batch_size)
         self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
-
-        if batch_idx == 0 and self.global_rank == 0:
-            result = self.model.inference(1, self.device, data)[0]
+        
+        if batch_idx == 0:
             self.viz = {
                 "time_loss": []
             }
-            self.viz["recon_faces"] = result["pred_face"]
-        
-        if self.global_rank == 0 and "t" in loss:
             self.viz["time_loss"].append(loss["t"])
+        
+        if batch_idx == 0 and self.global_rank == 0:
+            recon_faces = self.model.inference(1, self.device, data)[0]["pred_face"]
+            trimesh.PointCloud(recon_faces.reshape(-1, 3)).export(str(self.log_root / "{}_faces.ply".format(self.current_epoch)))
+        
+            if "conditions" in data and False:
+                bs = len(data["v_prefix"])
+                for idx in range(bs):
+                    if "ori_imgs" in data["conditions"]:
+                        img_id = data["conditions"]["img_id"]
+                        imgs = data["conditions"]["ori_imgs"][idx].cpu().numpy().astype(np.uint8)
+                        imgs = imgs[None,...] if len(imgs.shape) ==3 else imgs
+                        for i in range(imgs.shape[0]):
+                            o3d.io.write_image(str(self.log_root / f"epoch{self.current_epoch}_item{idx}_img{img_id[i]}.png"), o3d.geometry.Image(imgs[i]))
+                    elif "points" in data["conditions"]:
+                        points = data["conditions"]["points"][idx].cpu().numpy().astype(np.float32)[0]
+                        pc = o3d.geometry.PointCloud()
+                        pc.points = o3d.utility.Vector3dVector(points[:,:3])
+                        pc.normals = o3d.utility.Vector3dVector(points[:,3:])
+                        o3d.io.write_point_cloud(str(self.log_root / f"epoch{self.current_epoch}_item{idx}_pc.ply"), pc)
+                    elif "txt" in data["conditions"]:
+                        open(self.log_root / "epoch{}_item{}_txt.txt".format(self.current_epoch, idx), "w").write(data["conditions"]["txt"][idx])
 
         return total_loss
 
     def on_validation_epoch_end(self):
         # if self.trainer.sanity_checking:
         #     return
-        if self.global_rank != 0:
-            return
 
         if "time_loss" in self.viz:
             time_loss = torch.cat(self.viz["time_loss"]).cpu().numpy()
@@ -164,9 +198,9 @@ class TrainDiffusion(pl.LightningModule):
             for i in range(10):
                 results.append(time_loss[np.logical_and(time_loss[:,0]>=i*100, time_loss[:,0]<(i+1)*100), 1].mean())
                 self.log(f'tloss/{i}', results[-1], prog_bar=False, logger=True, on_step=False, on_epoch=True, sync_dist=True)
-        if "recon_faces" in self.viz:
-            recon_faces = self.viz["recon_faces"]
-            trimesh.PointCloud(recon_faces.reshape(-1, 3)).export(str(self.log_root / "{}_faces.ply".format(self.current_epoch)))
+        
+        if self.global_rank != 0:
+            return
         self.viz = {"time_loss": []}
         return
 
@@ -182,9 +216,6 @@ class TrainDiffusion(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         if batch_idx == 0:
             seed_everything(self.global_rank)
-            
-        # if batch_idx != 147:
-        #     return
         data = batch
         batch_size = min(len(batch['v_prefix']), self.batch_size)
         # Test loss
@@ -195,16 +226,17 @@ class TrainDiffusion(pl.LightningModule):
                     sync_dist=True, batch_size=self.batch_size)
         
         # Generation
-        results = self.model.inference(batch_size, self.device, v_data=data)
+        results = self.model.inference(batch_size, self.device, v_data=data, v_log=self.global_rank == 0)
         log_root = Path(self.hydra_conf["trainer"]["test_output_dir"])
+        os.makedirs(log_root, exist_ok=True)
         for idx in range(batch_size):
             prefix = data["v_prefix"][idx]
             item_root = (log_root / prefix)
             item_root.mkdir(parents=True, exist_ok=True)
             recon_data = results[idx]
 
-            mesh = to_mesh(recon_data["pred_face"])
-            mesh.export(str(item_root / f"{prefix}_face.ply"))
+            # mesh = to_mesh(recon_data["pred_face"])
+            # mesh.export(str(item_root / f"{prefix}_face.ply"))
             export_edges(recon_data["pred_edge"], str(item_root / f"{prefix}_edge.obj"))
 
             np.savez_compressed(str(item_root / f"data.npz"),
@@ -215,16 +247,20 @@ class TrainDiffusion(pl.LightningModule):
                                 pred_edge_face_connectivity=recon_data["pred_edge_face_connectivity"],
                                 )
 
-            if "conditions" in data and "ori_imgs" in data["conditions"]:
-                imgs = data["conditions"]["ori_imgs"][idx].cpu().numpy().astype(np.uint8)
-                for i in range(imgs.shape[0]):
-                    o3d.io.write_image(str(item_root / f"{prefix}_img{i}.png"), o3d.geometry.Image(imgs[i]))
-            if "conditions" in data and "points" in data["conditions"]:
-                points = data["conditions"]["points"][idx].cpu().numpy().astype(np.float32)[0]
-                pc = o3d.geometry.PointCloud()
-                pc.points = o3d.utility.Vector3dVector(points[:,:3])
-                pc.normals = o3d.utility.Vector3dVector(points[:,3:])
-                o3d.io.write_point_cloud(str(item_root / f"{prefix}_pc.ply"), pc)
+            if "conditions" in data:
+                if "ori_imgs" in data["conditions"]:
+                    img_id = data["conditions"]["img_id"][idx]
+                    imgs = data["conditions"]["ori_imgs"][idx].cpu().numpy().astype(np.uint8)
+                    for i in range(imgs.shape[0]):
+                        o3d.io.write_image(str(item_root / f"{prefix}_img{img_id[i].cpu().item()}.png"), o3d.geometry.Image(imgs[i]))
+                elif "points" in data["conditions"]:
+                    points = data["conditions"]["points"][idx].cpu().numpy().astype(np.float32)[0]
+                    pc = o3d.geometry.PointCloud()
+                    pc.points = o3d.utility.Vector3dVector(points[:,:3])
+                    pc.normals = o3d.utility.Vector3dVector(points[:,3:])
+                    o3d.io.write_point_cloud(str(item_root / f"{prefix}_pc.ply"), pc)
+                elif "txt" in data["conditions"]:
+                    open(item_root / f"{prefix}_txt.txt", "w").write(data["conditions"]["txt"][idx])
 
     def on_test_epoch_end(self):
         for loss in self.trainer.callback_metrics:
@@ -234,48 +270,70 @@ class TrainDiffusion(pl.LightningModule):
 
 @hydra.main(config_name="train_diffusion.yaml", config_path="../../configs/brepnet/", version_base="1.1")
 def main(v_cfg: DictConfig):
-    seed_everything(0)
+    torch.backends.cudnn.benchmark = False
     torch.set_float32_matmul_precision("medium")
-    print(OmegaConf.to_yaml(v_cfg))
+    if "LOCAL_RANK" not in os.environ:
+        print(OmegaConf.to_yaml(v_cfg))
 
-    exp_name = v_cfg["trainer"]["exp_name"]
+    use_wandb = v_cfg["trainer"]["wandb"] if "wandb" in v_cfg["trainer"] else False
+    exp_name = "Diffusion_" + v_cfg["trainer"]["exp_name"]
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
-    log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name + "/" + str(datetime.now().strftime("%y-%m-%d-%H-%M-%S"))
+    # log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name + "/" + str(datetime.now().strftime("%y-%m-%d-%H-%M-%S"))
+    log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name
     v_cfg["trainer"]["output"] = log_dir
     print("Log in {}".format(log_dir))
     if v_cfg["trainer"]["spawn"] is True:
         torch.multiprocessing.set_start_method("spawn")
 
-    mc = ModelCheckpoint(monitor="Validation_Loss", save_last=True, every_n_train_steps=300000, save_top_k=-1)
-    lr_monitor = LearningRateMonitor(logging_interval='epoch')
+    assert v_cfg["dataset"]["num_max_faces"] == v_cfg["model"]["num_max_faces"]
+    assert v_cfg["dataset"]["pad_method"] == v_cfg["model"]["pad_method"]
+    assert v_cfg["dataset"]["condition"] == v_cfg["model"]["condition"]
+    # assert v_cfg["dataset"]["num_points"] == v_cfg["model"]["num_points"]
 
+    callbacks = []
+    callbacks.append(ModelCheckpoint(monitor="Validation_Loss", save_last=True, every_n_train_steps=50000, save_top_k=-1))
+    callbacks.append(LearningRateMonitor(logging_interval='epoch'))
+    if v_cfg["trainer"]["swa"]:
+        callbacks.append(StochasticWeightAveraging(swa_lrs=v_cfg["trainer"]["learning_rate"], swa_epoch_start=10))
+    
     model = TrainDiffusion(v_cfg)
-    logger = TensorBoardLogger(log_dir)
+    if not v_cfg["trainer"]["evaluate"] and exp_name!="Diffusion_test" and use_wandb:
+        logger = WandbLogger(
+            project='BRepNet++',
+            save_dir=log_dir,
+            name=exp_name,
+        )
+        logger.watch(model)
+    else:
+        logger = TensorBoardLogger(log_dir)
 
     trainer = Trainer(
-            default_root_dir=log_dir,
-            logger=logger,
-            accelerator='gpu',
-            strategy="ddp_find_unused_parameters_true" if v_cfg["trainer"].gpu > 1 else "auto",
-            devices=v_cfg["trainer"].gpu,
-            enable_model_summary=True,
-            callbacks=[mc, lr_monitor],
-            max_epochs=int(v_cfg["trainer"]["max_epochs"]),
-            max_steps=int(v_cfg["trainer"]["max_steps"]),
-            # max_epochs=2,
-            num_sanity_val_steps=2,
-            check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
-            precision=v_cfg["trainer"]["accelerator"],
+        default_root_dir=log_dir,
+        logger=logger,
+        accelerator='gpu',
+        strategy="ddp_find_unused_parameters_true" if v_cfg["trainer"].gpu > 1 else "auto",
+        devices=v_cfg["trainer"].gpu,
+        enable_model_summary=True,
+        callbacks=callbacks,
+        max_epochs=int(v_cfg["trainer"]["max_epochs"]),
+        max_steps=int(v_cfg["trainer"]["max_steps"]),
+        # max_epochs=2,
+        num_sanity_val_steps=2,
+        check_val_every_n_epoch=v_cfg["trainer"]["check_val_every_n_epoch"],
+        precision=v_cfg["trainer"]["accelerator"],
 
-            gradient_clip_algorithm="norm",
-            gradient_clip_val=0.5,
+        gradient_clip_algorithm="norm",
+        gradient_clip_val=0.5,
     )
+    seed_everything(trainer.global_rank)
 
     if v_cfg["trainer"].evaluate:
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
         weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, weights_only=False, map_location="cpu")["state_dict"]
+        # weights = {k: v for k, v in weights.items() if "ae_model" not in k}
+        # weights = {k: v for k, v in weights.items() if "camera_embedding" not in k}
         # weights = {k.replace("model.", ""): v for k, v in weights.items()}
-        model.load_state_dict(weights)
+        model.load_state_dict(weights, strict=True)
         trainer.test(model)
 
     else:
@@ -283,9 +341,10 @@ def main(v_cfg: DictConfig):
             print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
             # model = TrainDiffusion.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint)
             # model.hydra_conf = v_cfg
-            weights = torch.load(v_cfg["trainer"].resume_from_checkpoint)["state_dict"]
+            weights = torch.load(v_cfg["trainer"].resume_from_checkpoint, map_location="cpu")["state_dict"]
             # weights = {k.replace("model.", ""): v for k, v in weights.items()}
             model.load_state_dict(weights)
+            del weights
         trainer.fit(model)
 
 

@@ -7,11 +7,11 @@ from OCC.Core.STEPControl import STEPControl_Reader
 from OCC.Core.TopAbs import TopAbs_SOLID
 from tqdm import tqdm
 
-from shared.occ_utils import diable_occ_log
+from shared.occ_utils import disable_occ_log
 
 root = Path("/mnt/e/yilin/data_step/")
 output_root = Path("/mnt/e/yilin/data_flag/")
-diable_occ_log()
+disable_occ_log()
 
 @ray.remote(max_retries=0)
 def process_file(v_id):

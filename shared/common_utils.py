@@ -8,6 +8,8 @@ import numpy as np
 import torch
 import open3d as o3d
 
+normal_repr = torch.Tensor.__repr__
+torch.Tensor.__repr__ = lambda self: f"{self.shape}_{normal_repr(self)}"
 
 def debug_imgs(v_imgs: List[np.ndarray]) -> None:
     if not isinstance(v_imgs, List):

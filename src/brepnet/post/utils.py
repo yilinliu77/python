@@ -1,26 +1,16 @@
-import argparse
-import copy
-import math
-import os
-import queue
 import random
-import string
-import time
-from typing import List, Optional, Tuple, Union
 
 import numpy as np
-import ray
 import torch
 import torch.nn as nn
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeEdge, \
     BRepBuilderAPI_MakeVertex
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Sewing, BRepBuilderAPI_MakeSolid
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
-from OCC.Core.BRepTools import breptools
 
 from OCC.Core.GeomAPI import GeomAPI_PointsToBSplineSurface, GeomAPI_PointsToBSpline
 from OCC.Core.GeomAbs import GeomAbs_C0, GeomAbs_C1, GeomAbs_C2, GeomAbs_C3, GeomAbs_G1
-from OCC.Core.ShapeAnalysis import ShapeAnalysis_Wire, ShapeAnalysis_Shell
+from OCC.Core.ShapeAnalysis import ShapeAnalysis_Wire, ShapeAnalysis_Shell, ShapeAnalysis_ShapeTolerance
 from OCC.Core.ShapeExtend import ShapeExtend_WireData
 from OCC.Core.ShapeFix import ShapeFix_Face, ShapeFix_Wire, ShapeFix_Edge, ShapeFix_Shell, ShapeFix_Solid, \
     ShapeFix_ComposeShell, ShapeFix_ShapeTolerance
@@ -31,18 +21,12 @@ from OCC.Core.TopAbs import TopAbs_COMPOUND, TopAbs_FORWARD, TopAbs_REVERSED, To
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.gp import gp_Pnt, gp_XYZ, gp_Vec
 from OCC.Display.SimpleGui import init_display
-from OCC.Extend.TopologyUtils import TopologyExplorer, WireExplorer
-# from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-from OCC.Extend.DataExchange import write_stl_file, write_step_file, read_step_file
 
-# xdt
 from OCC.Core.TopoDS import topods, TopoDS_Shell, TopoDS_Builder, TopoDS_Vertex
 from OCC.Core.TopExp import TopExp_Explorer, topexp
 from OCC.Core.TopAbs import TopAbs_EDGE, TopAbs_VERTEX
 from OCC.Core.BRep import BRep_Tool
-from OCC.Core.ShapeAnalysis import ShapeAnalysis_Surface
-from OCC.Core.BRepClass import BRepClass_FaceClassifier
-from OCC.Core.TopAbs import TopAbs_IN, TopAbs_OUT, TopAbs_ON
+
 from OCC.Core.BRepExtrema import BRepExtrema_DistShapeShape
 
 from OCC.Core.ShapeAnalysis import ShapeAnalysis_FreeBounds
@@ -50,38 +34,15 @@ from OCC.Core.TopTools import TopTools_HSequenceOfShape
 from OCC.Core.Bnd import Bnd_Box
 from OCC.Core.BRepBndLib import brepbndlib
 
-from OCC.Core.ShapeAnalysis import ShapeAnalysis_WireOrder
-from OCC.Core.BRepAlgo import BRepAlgo_Loop
-
 from OCC.Core.Quantity import Quantity_Color, Quantity_TOC_RGB
 from random import randint
-from OCC.Core.TopoDS import TopoDS_Compound, TopoDS_Shell
-from OCC.Core.BRep import BRep_Builder
-from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Section
+
 from OCC.Core.BRepCheck import BRepCheck_Analyzer
-
-from OCC.Core.GeomPlate import (GeomPlate_BuildPlateSurface, GeomPlate_PointConstraint, GeomPlate_CurveConstraint,
-                                GeomPlate_MakeApprox, GeomPlate_PlateG0Criterion, GeomPlate_PlateG1Criterion, )
-from OCC.Core.TColgp import TColgp_SequenceOfXY, TColgp_SequenceOfXYZ
-from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
-
-from OCC.Core.GProp import GProp_GProps
-from OCC.Core.BRepGProp import brepgprop
-
-from OCC.Core.Geom import Geom_Line
-from OCC.Core.ShapeAnalysis import ShapeAnalysis_Curve
-from OCC.Core.Geom import Geom_BSplineCurve
-
-from OCC.Core import Message
-from OCC.Core.Message import Message_PrinterOStream, Message_Alarm
-
-from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
 
 from OCC.Core.STEPControl import STEPControl_Writer, STEPControl_AsIs
 from OCC.Core.Interface import Interface_Static
 from OCC.Core.IFSelect import IFSelect_RetDone
 
-from chamferdist import ChamferDistance
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 import trimesh
@@ -89,6 +50,18 @@ import trimesh
 from itertools import combinations
 
 from shared.occ_utils import get_primitives
+
+import importlib.util
+
+CONFIRM_CHAMFERDIST_NO_AVAILABLE = False
+if importlib.util.find_spec("chamferdist") is None or CONFIRM_CHAMFERDIST_NO_AVAILABLE:
+    CHAMFERDIST_AVAILABLE = False
+    # print("chamferdist package not found. ChamferDistance will be computed using only PyTorch.")
+    from src.brepnet.post.chamferdist_torch import ChamferDistanceTorch as ChamferDistance
+else:
+    CHAMFERDIST_AVAILABLE = True
+    # print("chamferdist package found. ChamferDistance will be computed using chamferdist package.")
+    from chamferdist import ChamferDistance
 
 # EDGE_FITTING_TOLERANCE = [1e-5, 1e-4, 1e-3, 5e-3, 8e-3, 5e-2, ]
 # FACE_FITTING_TOLERANCE = [1e-4, 1e-3, 1e-2, 3e-2, 5e-2, 8e-2, ]
@@ -134,6 +107,7 @@ INTERPOLATION_PRECISION = 0.05
 # IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, True
 # CONTINUITY = GeomAbs_C2
 
+
 def interpolation_face_points(face, is_use_cuda=False, precision=INTERPOLATION_PRECISION):
     if type(face) is np.ndarray:
         if is_use_cuda:
@@ -154,17 +128,6 @@ def interpolation_face_points(face, is_use_cuda=False, precision=INTERPOLATION_P
     # trimesh.PointCloud(face.cpu().numpy()).export(r'E:\data\img2brep\debug.ply')
     assert interpolation_face.shape[0] >= res * res
     return interpolation_face
-
-
-def interpolation_edge_points_batch(edges, num_points=100):
-    B, N, _ = edges.shape
-    num_segments = N - 1
-    t_values = torch.linspace(0, 1, num_points, device=edges.device).view(1, -1, 1)
-    start_points = edges[:, :-1].unsqueeze(2)  # Shape: (B, num_segments, 1, 3)
-    end_points = edges[:, 1:].unsqueeze(2)  # Shape: (B, num_segments, 1, 3)
-    interpolated_segments = (1 - t_values) * start_points + t_values * end_points
-    interpolated_points = interpolated_segments.view(B, -1, 3)
-    return interpolated_points
 
 
 class Shape:
@@ -211,21 +174,21 @@ class Shape:
             face_id2 = key[1]
 
             # first check the validity of the intersection
-            if is_check_intersection:
-                face1 = torch.from_numpy(self.recon_face_points[face_id1]).to(self.device)
-                face2 = torch.from_numpy(self.recon_face_points[face_id2]).to(self.device)
-                dist_face1_to_face2 = torch.sqrt(self.chamferdist(
-                        face1.reshape(1, -1, 3),
-                        self.interpolation_face[face_id2][None], bidirectional=False, batch_reduction=None, point_reduction=None))
-                dist_face2_to_face1 = torch.sqrt(self.chamferdist(
-                        face2.reshape(1, -1, 3),
-                        self.interpolation_face[face_id1][None], bidirectional=False, batch_reduction=None, point_reduction=None))
-                dis_face_to_face = torch.min(dist_face1_to_face2.min(), dist_face2_to_face1.min())
-
-                if dis_face_to_face > face2face_threshold:
-                    for item in value:
-                        self.remove_edge_idx_src.append(item)
-                    continue
+            # if is_check_intersection:
+            #     face1 = torch.from_numpy(self.recon_face_points[face_id1]).to(self.device)
+            #     face2 = torch.from_numpy(self.recon_face_points[face_id2]).to(self.device)
+            #     dist_face1_to_face2 = torch.sqrt(self.chamferdist(
+            #             face1.reshape(1, -1, 3),
+            #             self.interpolation_face[face_id2][None], bidirectional=False, batch_reduction=None, point_reduction=None))
+            #     dist_face2_to_face1 = torch.sqrt(self.chamferdist(
+            #             face2.reshape(1, -1, 3),
+            #             self.interpolation_face[face_id1][None], bidirectional=False, batch_reduction=None, point_reduction=None))
+            #     dis_face_to_face = torch.min(dist_face1_to_face2.min(), dist_face2_to_face1.min())
+            #
+            #     if dis_face_to_face > face2face_threshold:
+            #         for item in value:
+            #             self.remove_edge_idx_src.append(item)
+            #         continue
 
             edge1 = torch.from_numpy(self.recon_edge_points[value[0]]).to(self.device)
             distance11 = torch.sqrt(self.chamferdist(
@@ -474,10 +437,10 @@ class Shape:
         self.remove_edge_idx_new.extend(np.unique(remove_edges_idx_real))
 
     def build_geom(self, is_replace_edge=False, connected_tolerance=0.1):
-        self.recon_geom_faces = [create_surface(points) for points in self.recon_face_points]
-        self.recon_topo_faces = [BRepBuilderAPI_MakeFace(geom_face, TRANSFER_PRECISION).Face() for geom_face in self.recon_geom_faces]
-        self.recon_curves = [create_edge(points) for points in self.recon_edge_points]
-        self.recon_edge = [BRepBuilderAPI_MakeEdge(curve).Edge() for curve in self.recon_curves]
+        # self.recon_geom_faces = [create_surface(points) for points in self.recon_face_points]
+        # self.recon_curves = [create_edge(points) for points in self.recon_edge_points]
+        # self.recon_topo_faces = [BRepBuilderAPI_MakeFace(geom_face, TRANSFER_PRECISION).Face() for geom_face in self.recon_geom_faces]
+        # self.recon_edge = [BRepBuilderAPI_MakeEdge(curve).Edge() for curve in self.recon_curves]
 
         self.clinder_face_idx = []
         self.replace_edge_idx = []
@@ -494,7 +457,7 @@ class Shape:
                 self.clinder_face_idx.append(face_idx)
                 face_edge_from_geom_face = get_primitives(topo_face, TopAbs_EDGE)
                 for edge_idx in face_edges_idx_list:
-                    recon_topo_edge = self.recon_edge[edge_idx]
+                    recon_topo_edge = self.recon_topo_curves[edge_idx]
                     near_edge_from_geom_face = []
                     for edge_from_geom_face in face_edge_from_geom_face:
                         is_similar, dis = check_edges_similarity(recon_topo_edge, edge_from_geom_face)
@@ -505,30 +468,8 @@ class Shape:
                         continue
                     if len(near_edge_from_geom_face) > 1:
                         near_edge_from_geom_face = sorted(near_edge_from_geom_face, key=lambda x: x[1])
-                    self.recon_edge[edge_idx] = near_edge_from_geom_face[0][0]
+                    self.recon_topo_curves[edge_idx] = near_edge_from_geom_face[0][0]
                     self.replace_edge_idx.append(edge_idx)
-        pass
-
-    def fix_missing_edges(self):
-        inv_edge_face_connectivity = {}
-        for edge_idx, face_idx1, face_idx2 in self.edge_face_connectivity:
-            inv_edge_face_connectivity[(face_idx1, face_idx2)] = edge_idx
-            inv_edge_face_connectivity[(face_idx2, face_idx1)] = edge_idx
-
-        face_num = len(self.recon_face_points)
-        for i in range(face_num):
-            for j in range(i + 1, face_num):
-                face1 = self.interpolation_face[i].to(self.device)
-                face2 = self.interpolation_face[j].to(self.device)
-                dist_face1_to_face2 = torch.sqrt(self.chamferdist(
-                        face1.reshape(1, -1, 3),
-                        self.interpolation_face[j][None], bidirectional=False, batch_reduction=None, point_reduction=None))
-                dist_face2_to_face1 = torch.sqrt(self.chamferdist(
-                        face2.reshape(1, -1, 3),
-                        self.interpolation_face[i][None], bidirectional=False, batch_reduction=None, point_reduction=None))
-                dis_face_to_face = torch.min(dist_face1_to_face2.min(), dist_face2_to_face1.min())
-                if dis_face_to_face < 0.015 and (i, j) not in inv_edge_face_connectivity:
-                    continue
         pass
 
 
@@ -595,6 +536,7 @@ def optimize(
     is_optimization_diverged = False
     if v_islog:
         pbar = tqdm(total=v_max_iter, desc='Geom Optimization', unit='iter')
+
     chamferdist = ChamferDistance()
     iter = 0
     while iter < v_max_iter:
@@ -686,10 +628,7 @@ def optimize(
 
     transformed_edges = apply_transform_batch(edge_points, edge_st).detach().cpu().numpy()
     transformed_faces = apply_offset_batch(face_points, face_t).detach().cpu().numpy()
-    for idx in range(len(interpolation_face)):
-        interpolation_face[idx] = apply_offset_batch(interpolation_face[idx].unsqueeze(0),
-                                                     face_t[idx].unsqueeze(0)).squeeze(0).detach().cpu()
-    return transformed_faces, transformed_edges, interpolation_face
+    return transformed_faces, transformed_edges
 
 
 # @ray.remote(num_gpus=0.05)
@@ -979,8 +918,12 @@ def set_tolerance(v_item, v_precision):
     return v_item
 
 
+def get_tolerance(v_item, v_type):
+    tolorancer = ShapeAnalysis_ShapeTolerance()
+    return tolorancer.Tolerance(v_item, v_type)
+
+
 def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_tolerance):
-    face_fixer = ShapeFix_Face()
     topo_face = BRepBuilderAPI_MakeFace(geom_face, 1e-6).Face()
     is_debug = False
     if len(wire_list) == 6:
@@ -995,6 +938,7 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
             wire_list = [final_wire]
             # is_debug=True
             pass
+    face_fixer = ShapeFix_Face()
     face_fixer.Init(geom_face, connected_tolerance, True)
     fixed_wire_list = []
     for wire in wire_list:
@@ -1044,7 +988,7 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
         face_fixer.SetPrecision(connected_tolerance)
         face_fixer.SetMaxTolerance(connected_tolerance)
         face_fixer.SetFixOrientationMode(True)
-        face_fixer.SetFixMissingSeamMode(True)
+        face_fixer.SetFixMissingSeamMode(False)
         face_fixer.SetFixWireMode(True)
         face_fixer.SetFixLoopWiresMode(False)
         face_fixer.SetFixIntersectingWiresMode(False)
@@ -1052,7 +996,7 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
         face_fixer.SetFixSmallAreaWireMode(False)
         face_fixer.Perform()
 
-        face_fixer.FixAddNaturalBound()
+        # face_fixer.FixAddNaturalBound()
         face_fixer.FixOrientation()
         face_fixer.FixMissingSeam()
         # face_fixer.FixWiresTwoCoincEdges()
@@ -1061,14 +1005,22 @@ def create_trimmed_face_from_wire(geom_face, face_edges, wire_list, connected_to
         face_fixer.FixOrientation()
 
     except Exception as e:
-        print(f"Error fixing face {e}")
+        # print(f"Error fixing face {e}")
         return None
 
     face_occ = face_fixer.Face()
+    if face_occ.IsNull():
+        return None
     face_occ = set_tolerance(face_occ, connected_tolerance)
+
     if is_debug:
         viz_shapes([face_occ])
-    return face_occ
+
+    face_analyzer = BRepCheck_Analyzer(face_occ)
+    if face_analyzer.IsValid():
+        return face_occ
+    else:
+        return None
 
 
 def drop_edges(face_edges_np, is_edge_closed, drop_edge_num=0, accepted_connected_loss=0.2):
@@ -1163,13 +1115,13 @@ def try_create_trimmed_face(geom_face, topo_face, face_edges, connected_toleranc
 
     if trimmed_face1 is None:
         return wire_list1, trimmed_face1, False
-
-    wire_list2, trimmed_face2, is_face_valid2 = create_trimmed_face2(geom_face, topo_face, face_edges,
-                                                                     connected_tolerance)
-    if is_face_valid2:
-        return wire_list2, trimmed_face2, True
-
-    return wire_list2, trimmed_face2, False
+    #
+    # wire_list2, trimmed_face2, is_face_valid2 = create_trimmed_face2(geom_face, topo_face, face_edges,
+    #                                                                  connected_tolerance)
+    # if is_face_valid2:
+    #     return wire_list2, trimmed_face2, True
+    #
+    # return wire_list2, trimmed_face2, False
 
 
 def get_separated_surface(trimmed_faces, v_precision1=1e-3, v_precision2=1e-1):
@@ -1217,7 +1169,16 @@ def get_solid(trimmed_faces, connected_tolerance):
         # sewing.Dump()
         sewn_shell = sewing.SewedShape()
         if sewn_shell.ShapeType() == TopAbs_COMPOUND:
-            sewn_shell = get_primitives(sewn_shell, TopAbs_SHELL)[0]
+            return None
+            best_shell = None
+            best_num = 0
+            for shell in get_primitives(sewn_shell, TopAbs_SHELL):
+                if best_shell is None or len(get_primitives(shell, TopAbs_FACE)) > best_num:
+                    best_shell = shell
+                    best_num = len(get_primitives(shell, TopAbs_FACE))
+            if best_shell is None:
+                return None
+            sewn_shell = best_shell
         shape_tol_setter = ShapeFix_ShapeTolerance()
         shape_tol_setter.SetTolerance(sewn_shell, connected_tolerance)
 
@@ -1250,25 +1211,47 @@ def get_solid(trimmed_faces, connected_tolerance):
             fix_solid.SetCreateOpenSolidMode(False)
             fix_solid.Perform()
             solid = fix_solid.Solid()
-        return solid
 
-    except:
+        set_tolerance(solid, connected_tolerance)
+        if solid.ShapeType() == TopAbs_SOLID and BRepCheck_Analyzer(solid).IsValid():
+            return solid
+        else:
+            return None
+    except Exception as e:
+        print(e)
+        return None
+
+
+def get_compound(trimmed_faces, connected_tolerance):
+    try:
+        # Sew shells
+        random.shuffle(trimmed_faces)
+        sewing = BRepBuilderAPI_Sewing()
+        sewing.SetTolerance(connected_tolerance)
+        for face in trimmed_faces:
+            sewing.Add(face)
+        sewing.Perform()
+        # sewing.Dump()
+        sewn_shell = sewing.SewedShape()
+        if sewn_shell is not None:
+            return sewn_shell
+        else:
+            return None
+    except Exception as e:
+        print(e)
         return None
 
 
 def construct_brep(v_shape, connected_tolerance, isdebug=False):
-    debug_idx = [8]
+    debug_idx = []
     if isdebug:
         print(f"{Colors.GREEN}################################ 1. Fit primitives ################################{Colors.RESET}")
-    # v_shape.build_geom(is_replace_edge=True)
-    # if isdebug:
-    #     print(f"{Colors.GREEN}{len(v_shape.replace_edge_idx)} edges are replace{Colors.RESET}")
 
     recon_edge_points = v_shape.recon_edge_points
     recon_geom_faces = v_shape.recon_geom_faces
     recon_topo_faces = v_shape.recon_topo_faces
-    recon_curves = v_shape.recon_curves
-    recon_edge = v_shape.recon_edge
+    recon_curves = v_shape.recon_geom_curves
+    recon_edge = v_shape.recon_topo_curves
     FaceEdgeAdj = v_shape.face_edge_adj
     is_edge_closed = v_shape.openness
 
@@ -1358,7 +1341,7 @@ def triangulate_shape(v_shape):
 
         if triangulation is None:
             # Mesh
-            mesh = BRepMesh_IncrementalMesh(face, 0.01)
+            mesh = BRepMesh_IncrementalMesh(face, 0.1)
             triangulation = BRep_Tool.Triangulation(face, loc)
             if triangulation is None:
                 exp.Next()
@@ -1457,6 +1440,16 @@ def solid_valid_check(solid, tolerance=0.01):
             return False
         shell_exp.Next()
 
+    return True
+
+
+def can_be_triangularized(shape):
+    faces = get_primitives(shape, TopAbs_FACE)
+    for face in faces:
+        loc = TopLoc_Location()
+        triangulation = BRep_Tool.Triangulation(face, loc)
+        if triangulation is None:
+            return False
     return True
 
 

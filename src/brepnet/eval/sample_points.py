@@ -30,7 +30,7 @@ def sample(prefix, root, output_root, checkvalid):
             return
 
     # prefer stl
-    option_file = glob.glob(os.path.join(root / prefix, '*.stl')) + glob.glob(os.path.join(root / prefix, '*.ply'))
+    option_file = glob.glob(os.path.join(root / prefix, '*.stl')) # + glob.glob(os.path.join(root / prefix, '*.ply'))
     if len(option_file) == 0:
         return
     file = option_file[0]

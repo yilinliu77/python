@@ -4,8 +4,6 @@ import sys
 import numpy as np
 import open3d as o3d
 
-from src.brepnet.dataset import AutoEncoder_dataset, AutoEncoder_dataset2
-
 sys.path.append('../../../')
 import os.path
 
@@ -22,7 +20,7 @@ from pytorch_lightning.callbacks import LearningRateMonitor
 from lightning_fabric import seed_everything
 
 from torch.utils.data.dataloader import DataLoader
-from torch.optim import Adam
+from torch.optim import Adam, AdamW
 from torchmetrics.classification import BinaryPrecision, BinaryRecall, BinaryAveragePrecision, BinaryF1Score
 from torchmetrics import MetricCollection
 
@@ -89,7 +87,7 @@ class TrainAutoEncoder(pl.LightningModule):
                           )
 
     def configure_optimizers(self):
-        optimizer = Adam(self.model.parameters(), lr=self.learning_rate)
+        optimizer = AdamW(self.model.parameters(), lr=self.learning_rate)
         return {
             'optimizer': optimizer,
         }
@@ -120,6 +118,13 @@ class TrainAutoEncoder(pl.LightningModule):
         self.log("Validation/Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
 
+        if "gt_face_adj" in recon_data:
+            self.pr_computer.update(recon_data["pred_face_adj"], recon_data["gt_face_adj"])
+
+        # Rank zero only
+        if self.global_rank != 0:
+            return total_loss
+        
         if batch_idx == 0:
             if "pred_face" in recon_data:
                 self.viz["gt_face"] = recon_data["gt_face"]
@@ -127,17 +132,16 @@ class TrainAutoEncoder(pl.LightningModule):
             if "pred_edge" in recon_data:
                 self.viz["gt_edge"] = recon_data["gt_edge"]
                 self.viz["pred_edge"] = recon_data["pred_edge"]
-        if "gt_face_adj" in recon_data:
-            self.pr_computer.update(recon_data["pred_face_adj"], recon_data["gt_face_adj"])
+        
+        if "features" not in self.viz:
+            self.viz["meanstd"] = []
+        self.viz["meanstd"].append(recon_data["face_features"].reshape(recon_data["face_features"].shape[0],2,-1))
         return total_loss
 
     def on_validation_epoch_end(self):
-        # if self.trainer.sanity_checking:
-        #     return
-        if "pred_edge" in self.viz:
-            self.log_dict(self.pr_computer.compute(), prog_bar=False, logger=True, on_step=False, on_epoch=True,
-                        sync_dist=True)
-            self.pr_computer.reset()
+        self.log_dict(self.pr_computer.compute(), prog_bar=False, logger=True, on_step=False, on_epoch=True,
+                    sync_dist=True)
+        self.pr_computer.reset()
 
         if self.global_rank != 0:
             return
@@ -177,6 +181,21 @@ class TrainAutoEncoder(pl.LightningModule):
             pc.colors = o3d.utility.Vector3dVector(edge_colors / 255.0)
             o3d.io.write_point_cloud(
                 str(self.log_root / f"{self.trainer.current_epoch:05}_viz_edges.ply"), pc)
+        
+        if "meanstd" in self.viz:
+            meanstd = np.concatenate(self.viz["meanstd"], axis=0)
+            mean = meanstd[:,0]
+            std = meanstd[:,1]
+                
+            self.log_dict(
+                {
+                    "mean_mean": mean.mean(),
+                    "mean_std": mean.std(),
+                    "std_mean": std.mean(),
+                    "std_std": std.std(),
+                }, 
+                prog_bar=False, logger=True, on_step=False, on_epoch=True)
+            
         return
 
     def test_dataloader(self):
@@ -208,7 +227,7 @@ class TrainAutoEncoder(pl.LightningModule):
             local_root = log_root / f"{data['v_prefix'][0]}"
             local_root.mkdir(parents=True, exist_ok=True)
             np.savez_compressed(str(local_root / f"data.npz"),
-                                pred_face_adj_prob=recon_data["pred_face_adj_prob"],
+                                # pred_face_adj_prob=recon_data["pred_face_adj_prob"],
                                 pred_face_adj=recon_data["pred_face_adj"].cpu().numpy(),
                                 pred_face=recon_data["pred_face"],
                                 pred_edge=recon_data["pred_edge"],
@@ -264,6 +283,7 @@ def main(v_cfg: DictConfig):
     torch.set_float32_matmul_precision("medium")
     print(OmegaConf.to_yaml(v_cfg))
 
+    use_wandb = v_cfg["trainer"]["wandb"] if "wandb" in v_cfg["trainer"] else False
     exp_name = v_cfg["trainer"]["exp_name"]
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     log_dir = hydra_cfg['runtime']['output_dir'] + "/" + exp_name
@@ -277,15 +297,15 @@ def main(v_cfg: DictConfig):
 
     model = TrainAutoEncoder(v_cfg)
 
-    if v_cfg["trainer"]["evaluate"] is True or exp_name=="test":
-        logger = TensorBoardLogger(log_dir)
-    else:
+    if v_cfg["trainer"]["evaluate"] is not True and exp_name!="test" and use_wandb:
         logger = WandbLogger(
             project='BRepNet++',
             save_dir=log_dir,
             name=exp_name,
         )
         logger.watch(model)
+    else:
+        logger = TensorBoardLogger(log_dir)
 
     trainer = Trainer(
         default_root_dir=log_dir,
@@ -309,7 +329,7 @@ def main(v_cfg: DictConfig):
 
     if v_cfg["trainer"].resume_from_checkpoint is not None and v_cfg["trainer"].resume_from_checkpoint != "none":
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
-        model = TrainAutoEncoder.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint)
+        model = TrainAutoEncoder.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint, map_location="cpu")
         model.hydra_conf = v_cfg
     # model = torch.compile(model)
     if v_cfg["trainer"].evaluate:

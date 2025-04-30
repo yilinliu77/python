@@ -19,6 +19,7 @@ from thirdparty.Pointnet2_PyTorch.pointnet2_ops_lib.pointnet2_ops.pointnet2_modu
     PointnetFPModule, PointnetSAModule
 from scipy.spatial.transform import Rotation
 
+from src.brepnet.model_utils.dit_block import *
 
 # from thirdparty.PointTransformerV3.model import *
 # from thirdparty.point_transformer_v3.model import PointTransformerV3
@@ -65,24 +66,65 @@ class Diffusion_condition(nn.Module):
         self.dim_condition = 256
         self.dim_total = self.dim_latent + self.dim_condition
         self.time_statics = [0 for _ in range(10)]
-
+        use_cross_attention_1, cross_attention_1_dim = False, None
+        use_cross_attention_2, cross_attention_2_dim = False, None
+        self.num_layers = 21
+        self.dit_inner_dim = 2048
+        self.num_attention_heads = 16
+        self.mlp_ratio = 4
+        
         self.addition_tag = False
         if "addition_tag" in v_conf:
             self.addition_tag = v_conf["addition_tag"]
         if self.addition_tag:
             self.dim_input += 1 
-
+        
         self.p_embed = nn.Sequential(
             nn.Linear(self.dim_input, self.dim_latent),
             nn.LayerNorm(self.dim_latent),
             nn.SiLU(),
             nn.Linear(self.dim_latent, self.dim_latent),
         )
+        
+        self.proj_in = nn.Linear(self.dim_input+self.dim_condition, self.dit_inner_dim, bias=True)
+        self.time_embed = Timesteps(self.dit_inner_dim, flip_sin_to_cos=False, downscale_freq_shift=0)
+        self.time_proj = TimestepEmbedding(
+            in_channels=self.dit_inner_dim,
+            time_embed_dim=self.dit_inner_dim*2,
+            act_fn="gelu",
+            out_dim=self.dit_inner_dim
+        )
+        
+        self.blocks = nn.ModuleList(
+            [
+                DiTBlock(
+                    dim=self.dit_inner_dim,
+                    num_attention_heads=self.num_attention_heads,
+                    use_self_attention=True,
+                    self_attention_norm_type="fp32_layer_norm",
+                    use_cross_attention=use_cross_attention_1,
+                    cross_attention_dim=cross_attention_1_dim,
+                    cross_attention_norm_type=None,
+                    use_cross_attention_2=use_cross_attention_2,
+                    cross_attention_2_dim=cross_attention_2_dim,
+                    cross_attention_2_norm_type=None,
+                    activation_fn="gelu",
+                    norm_type="fp32_layer_norm",
+                    norm_eps=1e-5,
+                    ff_inner_dim=int(self.dit_inner_dim * self.mlp_ratio),
+                    skip=layer > self.num_layers // 2,
+                    skip_concat_front=True,
+                    skip_norm_last=False, # norm first
+                    qk_norm=True,  # See http://arxiv.org/abs/2302.05442 for details.
+                    qkv_bias=False,
+                )
+                for layer in range(self.num_layers)
+            ]
+        )
 
-        layer1 = nn.TransformerEncoderLayer(
-                d_model=self.dim_total,
-                nhead=self.dim_total // 64, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
-        self.net1 = nn.TransformerEncoder(layer1, 24, nn.LayerNorm(self.dim_total))
+        self.norm_out = LayerNorm(self.dit_inner_dim)
+        self.proj_out = nn.Linear(self.dit_inner_dim, self.dim_input, bias=True)
+        
         self.fc_out = nn.Sequential(
                 nn.Linear(self.dim_total, self.dim_total),
                 nn.LayerNorm(self.dim_total),
@@ -200,25 +242,10 @@ class Diffusion_condition(nn.Module):
             )
 
         self.classifier = nn.Sequential(
-                nn.Linear(self.dim_input, self.dim_input),
-                nn.LayerNorm(self.dim_input),
-                nn.SiLU(),
-                nn.Linear(self.dim_input, 1),
-        )    
-        self.noise_scheduler = DDPMScheduler(
-            num_train_timesteps=1000,
-            beta_schedule=v_conf["beta_schedule"],
-            prediction_type=v_conf["diffusion_type"],
-            beta_start=v_conf["beta_start"],
-            beta_end=v_conf["beta_end"],
-            variance_type=v_conf["variance_type"],
-            clip_sample=False,
-        )
-        self.time_embed = nn.Sequential(
-            nn.Linear(self.dim_total, self.dim_total),
-            nn.LayerNorm(self.dim_total),
+            nn.Linear(self.dim_input, self.dim_input),
+            nn.LayerNorm(self.dim_input),
             nn.SiLU(),
-            nn.Linear(self.dim_total, self.dim_total),
+            nn.Linear(self.dim_input, 1),
         )
 
         self.num_max_faces = v_conf["num_max_faces"]
@@ -244,6 +271,7 @@ class Diffusion_condition(nn.Module):
                 param.requires_grad = False
             self.ae_model.eval()
 
+    # TODO
     def inference(self, bs, device, v_data=None, v_log=True, **kwargs):
         face_features = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
         condition = None
@@ -331,21 +359,6 @@ class Diffusion_condition(nn.Module):
                 indices = indices.gather(1, r_indices)
                 data["padded_face_z"] = face_features[indices]
         return data
-
-    def diffuse(self, v_feature, v_timesteps, v_condition=None):
-        bs = v_feature.size(0)
-        de = v_feature.device
-        dt = v_feature.dtype
-        time_embeds = self.time_embed(sincos_embedding(v_timesteps, self.dim_total)).unsqueeze(1)
-        noise_features = self.p_embed(v_feature)
-        v_condition = torch.zeros((bs, 1, self.dim_condition), device=de, dtype=dt) if v_condition is None else v_condition
-        v_condition = v_condition.repeat(1, v_feature.shape[1], 1)
-        noise_features = torch.cat([noise_features, v_condition], dim=-1)
-        noise_features = noise_features + time_embeds
-
-        pred_x0 = self.net1(noise_features)
-        pred_x0 = self.fc_out(pred_x0)
-        return pred_x0
 
     def extract_condition(self, v_data):
         condition = None
@@ -477,6 +490,42 @@ class Diffusion_condition(nn.Module):
             condition = self.txt_fc(txt_feat)[:, None]
         return condition
 
+    def diffuse(self, v_feature, v_timesteps, v_condition=None):
+        bs = v_feature.size(0)
+        de = v_feature.device
+        dt = v_feature.dtype
+        
+        time_embeds = self.time_proj(self.time_embed(v_timesteps, self.dim_total)).unsqueeze(1)
+        noise_features = self.p_embed(v_feature)
+        v_condition = torch.zeros((bs, 1, self.dim_condition), device=de, dtype=dt) if v_condition is None else v_condition
+        v_condition = v_condition.repeat(1, v_feature.shape[1], 1)
+        noise_features = torch.cat([noise_features, v_condition], dim=-1)
+        
+        hidden_states = self.proj_in(noise_features)
+        _, N, _ = hidden_states.shape
+        skips = []
+        for layer, block in enumerate(self.blocks):
+            skip = None if layer <= self.num_layers // 2 else skips.pop()
+            hidden_states = block(
+                hidden_states,
+                encoder_hidden_states=None,
+                encoder_hidden_states_2=None,
+                temb=time_embeds,
+                image_rotary_emb=None,
+                skip=skip,
+                attention_kwargs=None,
+            )  # (N, L, D)
+
+            if layer < self.config.num_layers // 2:
+                skips.append(hidden_states)
+        
+        # final layer
+        hidden_states = self.norm_out(hidden_states)
+        hidden_states = hidden_states[:, -N:]
+        pred_x = self.proj_out(hidden_states)
+        
+        return pred_x
+    
     def forward(self, v_data, v_test=False, **kwargs):
         encoding_result = self.get_z(v_data, v_test)
         face_z = encoding_result["padded_face_z"]

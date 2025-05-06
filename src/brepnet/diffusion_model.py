@@ -239,18 +239,18 @@ class Diffusion_condition(nn.Module):
                 nn.Linear(1024, self.dim_condition),
             )
 
-        self.noise_scheduler = DDPMScheduler(
-                num_train_timesteps=1000,
-                beta_schedule=v_conf["beta_schedule"],
-                prediction_type=v_conf["diffusion_type"],
-                beta_start=v_conf["beta_start"],
-                beta_end=v_conf["beta_end"],
-                variance_type=v_conf["variance_type"],
-                clip_sample=False,
-        )
-        # self.noise_scheduler = RectifiedFlowScheduler(
-        #     num_train_timesteps=1000
+        # self.noise_scheduler = DDPMScheduler(
+        #         num_train_timesteps=1000,
+        #         beta_schedule=v_conf["beta_schedule"],
+        #         prediction_type=v_conf["diffusion_type"],
+        #         beta_start=v_conf["beta_start"],
+        #         beta_end=v_conf["beta_end"],
+        #         variance_type=v_conf["variance_type"],
+        #         clip_sample=False,
         # )
+        self.noise_scheduler = RectifiedFlowScheduler(
+            num_train_timesteps=1000
+        )
 
         self.num_max_faces = v_conf["num_max_faces"]
         self.loss = nn.functional.l1_loss if v_conf["loss"] == "l1" else nn.functional.mse_loss
@@ -539,8 +539,8 @@ class Diffusion_condition(nn.Module):
         # error = []
         for t in tqdm(self.noise_scheduler.timesteps):
             timesteps = t.reshape(-1).to(device)
-            pred_x0 = self.diffuse(face_features, timesteps, v_condition=condition)
-            face_features = self.noise_scheduler.step(pred_x0, t, face_features).prev_sample
+            pred_x = self.diffuse(face_features, timesteps, v_condition=condition)
+            face_features = self.noise_scheduler.step(pred_x, t, face_features).prev_sample
             # error.append((v_data["face_features"] - face_features).abs().mean(dim=[1,2]))
 
         face_z = face_features

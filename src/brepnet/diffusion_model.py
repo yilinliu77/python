@@ -575,7 +575,7 @@ class Diffusion_condition(nn.Module):
             loss["diffusion_loss"] += loss["l2"]
         return loss
     
-    def inference(self, bs, device, v_data=None, steps=50, rescale_t=1.0, v_log=True, verbose=True, **kwargs):
+    def inference(self, bs, device, v_data=None, steps=50, rescale_t=1.0, v_log=True, verbose=False, **kwargs):
         def v_to_xstart_eps(x_t, t, v):
             assert x_t.shape == v.shape
             eps = (1 - t) * v + x_t

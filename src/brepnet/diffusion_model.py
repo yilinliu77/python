@@ -80,13 +80,10 @@ class Diffusion_condition(nn.Module):
             self.dim_input += 1 
         
         self.p_embed = nn.Sequential(
-            nn.Linear(self.dim_input, self.dim_latent),
-            nn.LayerNorm(self.dim_latent),
-            nn.SiLU(),
-            nn.Linear(self.dim_latent, self.dim_latent),
+            nn.Linear(self.dim_input, self.dim_latent, bias=True),
+            nn.Linear(self.dim_latent, self.dit_inner_dim, bias=True),
         )
-        
-        self.proj_in = nn.Linear(self.dim_total, self.dit_inner_dim, bias=True)
+
         self.time_embed = Timesteps(self.dit_inner_dim, flip_sin_to_cos=False, downscale_freq_shift=0)
         self.time_proj = TimestepEmbedding(
             in_channels=self.dit_inner_dim,
@@ -505,10 +502,11 @@ class Diffusion_condition(nn.Module):
         de = v_feature.device
         dt = v_feature.dtype
         
-        time_embeds = self.time_proj(self.time_embed(v_timesteps, self.dim_total)).unsqueeze(1)
+        time_embeds = self.time_proj(self.time_embed(v_timesteps)).unsqueeze(1)
         noise_features = self.p_embed(v_feature)
         v_condition = torch.zeros((bs, 1, self.dim_condition), device=de, dtype=dt) if v_condition is None else v_condition
         v_condition = v_condition.repeat(1, v_feature.shape[1], 1)
+        # TODO: use cross attention
         noise_features = torch.cat([noise_features, v_condition], dim=-1)
         
         hidden_states = self.proj_in(noise_features)

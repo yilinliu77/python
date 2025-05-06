@@ -248,7 +248,7 @@ class Diffusion_condition(nn.Module):
         #         variance_type=v_conf["variance_type"],
         #         clip_sample=False,
         # )
-        self.noise_scheduler = RectifiedFlowScheduler(
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
             num_train_timesteps=1000
         )
 

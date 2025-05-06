@@ -1,5 +1,4 @@
 # Copyright (c) 2025 VAST-AI-Research and contributors
-
 # This code is based on Tencent HunyuanDiT (https://huggingface.co/Tencent-Hunyuan/HunyuanDiT),
 # which is licensed under the Tencent Hunyuan Community License Agreement.
 # Portions of this code are copied or adapted from HunyuanDiT.
@@ -34,9 +33,9 @@ from diffusers.utils import (
 )
 from diffusers.utils.torch_utils import maybe_allow_in_graph
 from torch import nn
-
-from src.brepnet.model_utils.attention_processor import FusedTripoSGAttnProcessor2_0, TripoSGAttnProcessor2_0
 from dataclasses import dataclass
+
+from .attention_processor import FusedTripoSGAttnProcessor2_0, TripoSGAttnProcessor2_0
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -82,7 +81,7 @@ class DiTBlock(nn.Module):
         dim: int,
         num_attention_heads: int,
         use_self_attention: bool = True,
-        self_attention_norm_type: Optional[str] = None,
+        self_attention_norm_type: Optional[str] = None, 
         use_cross_attention: bool = True, # ada layer norm
         cross_attention_dim: Optional[int] = None,
         cross_attention_norm_type: Optional[str] = "fp32_layer_norm",

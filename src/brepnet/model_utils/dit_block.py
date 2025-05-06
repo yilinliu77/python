@@ -181,8 +181,12 @@ class DiTBlock(nn.Module):
 
         # 4. Skip Connection
         if skip:
-            self.skip_norm = FP32LayerNorm(dim, norm_eps, elementwise_affine=True)
-            self.skip_linear = nn.Linear(2 * dim, dim)
+            if skip_norm_last:
+                self.skip_linear = nn.Linear(2 * dim, dim)
+                self.skip_norm = FP32LayerNorm(dim, norm_eps, elementwise_affine=True)
+            else:
+                self.skip_norm = FP32LayerNorm(2 * dim, norm_eps, elementwise_affine=True)
+                self.skip_linear = nn.Linear(2 * dim, dim)
         else:
             self.skip_linear = None
 

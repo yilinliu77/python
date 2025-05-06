@@ -71,10 +71,10 @@ class Diffusion_condition(nn.Module):
         self.time_statics = [0 for _ in range(10)]
         use_cross_attention_1, cross_attention_1_dim = False, None
         use_cross_attention_2, cross_attention_2_dim = False, None
-        self.num_layers = 11
+        self.num_layers = 21
         self.dit_inner_dim = 2048
         self.num_attention_heads = 16
-        self.mlp_ratio = 4
+        self.mlp_ratio = 2
         
         self.addition_tag = False
         if "addition_tag" in v_conf:
@@ -82,10 +82,7 @@ class Diffusion_condition(nn.Module):
         if self.addition_tag:
             self.dim_input += 1
         
-        self.p_embed = nn.Sequential(
-            nn.Linear(self.dim_input, self.dim_latent, bias=True),
-            nn.Linear(self.dim_latent, self.dit_inner_dim, bias=True),
-        )
+        self.embed_proj = nn.Linear(self.dim_input, self.dit_inner_dim, bias=True)
 
         self.time_embed = Timesteps(self.dit_inner_dim, flip_sin_to_cos=False, downscale_freq_shift=0)
         self.time_proj = TimestepEmbedding(
@@ -298,6 +295,7 @@ class Diffusion_condition(nn.Module):
             bs = num_faces.shape[0]
             # Fill the face_z to the padded_face_z without forloop
             if self.pad_method == "zero":
+                raise
                 padded_face_z = torch.zeros(
                     (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
                 mask = num_faces[:, None] > torch.arange(self.num_max_faces, device=num_faces.device)
@@ -465,7 +463,8 @@ class Diffusion_condition(nn.Module):
             noise = torch.randn_like(x_0)
         assert noise.shape == x_0.shape, "noise must have same shape as x_0"
 
-        t = t.view(-1, *[1 for _ in range(len(x_0.shape) - 1)])
+        #t = t.view(-1, *[1 for _ in range(len(x_0.shape) - 1)])
+        t = t.view(-1, 1, 1)
         x_t = (1 - t) * x_0 + (self.sigma_min + (1 - self.sigma_min) * t) * noise
 
         return x_t
@@ -494,7 +493,7 @@ class Diffusion_condition(nn.Module):
         v_condition = torch.zeros((bs, 1, self.dim_condition), device=de, dtype=dt) if v_condition is None else v_condition
         v_condition = v_condition.repeat(1, v_feature.shape[1], 1)
 
-        hidden_states = self.p_embed(v_feature)
+        hidden_states = self.embed_proj(v_feature)
         _, N, _ = hidden_states.shape
         skips = []
         for layer, block in enumerate(self.blocks):

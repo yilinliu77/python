@@ -238,12 +238,15 @@ class Diffusion_condition(nn.Module):
                 nn.Linear(1024, self.dim_condition),
             )
 
-        self.classifier = nn.Sequential(
-            nn.Linear(self.dim_input, self.dim_input),
-            nn.LayerNorm(self.dim_input),
-            nn.SiLU(),
-            nn.Linear(self.dim_input, 1),
-        )
+        if self.pad_method == "zero":
+            self.classifier = nn.Sequential(
+                nn.Linear(self.dim_input, self.dim_input),
+                nn.LayerNorm(self.dim_input),
+                nn.SiLU(),
+                nn.Linear(self.dim_input, 1),
+            )
+        else:
+            self.classifier = None
         
         self.t_schedule = RectifiedFlowScheduler(
             num_train_timesteps=1000

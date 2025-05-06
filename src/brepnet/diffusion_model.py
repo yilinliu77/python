@@ -12,6 +12,7 @@ from einops.layers.torch import Rearrange
 from einops import rearrange, reduce
 
 from diffusers import DDPMScheduler
+from diffusers import FlowMatchEulerDiscreteScheduler
 from torch_scatter import scatter_mean
 from tqdm import tqdm
 
@@ -237,12 +238,20 @@ class Diffusion_condition(nn.Module):
                 nn.SiLU(),
                 nn.Linear(1024, self.dim_condition),
             )
-        
-        self.t_schedule = RectifiedFlowScheduler(
-            num_train_timesteps=1000
+
+        self.noise_scheduler = DDPMScheduler(
+                num_train_timesteps=1000,
+                beta_schedule=v_conf["beta_schedule"],
+                prediction_type=v_conf["diffusion_type"],
+                beta_start=v_conf["beta_start"],
+                beta_end=v_conf["beta_end"],
+                variance_type=v_conf["variance_type"],
+                clip_sample=False,
         )
-        self.sigma_min = 1e-5
-        
+        # self.noise_scheduler = RectifiedFlowScheduler(
+        #     num_train_timesteps=1000
+        # )
+
         self.num_max_faces = v_conf["num_max_faces"]
         self.loss = nn.functional.l1_loss if v_conf["loss"] == "l1" else nn.functional.mse_loss
         self.diffusion_type = v_conf["diffusion_type"]
@@ -448,46 +457,8 @@ class Diffusion_condition(nn.Module):
                 txt_feat = torch.stack(txt_feat, dim=0)
             condition = self.txt_fc(txt_feat)[:, None]
         return condition
-
-    def diffuse(self, x_0: torch.Tensor, t: torch.Tensor, noise: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """
-        Diffuse the data for a given number of diffusion steps.
-        In other words, sample from q(x_t | x_0).
-
-        Args:
-            x_0: The [N x C x ...] tensor of noiseless inputs.
-            t: The [N] tensor of diffusion steps [0-1].
-            noise: If specified, use this noise instead of generating new noise.
-
-        Returns:
-            x_t, the noisy version of x_0 under timestep t.
-        """
-        if noise is None:
-            noise = torch.randn_like(x_0)
-        assert noise.shape == x_0.shape, "noise must have same shape as x_0"
-
-        #t = t.view(-1, *[1 for _ in range(len(x_0.shape) - 1)])
-        t = t.view(-1, 1, 1)
-        x_t = (1 - t) * x_0 + (self.sigma_min + (1 - self.sigma_min) * t) * noise
-
-        return x_t
     
-    def reverse_diffuse(self, x_t: torch.Tensor, t: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
-        """
-        Get original image from noisy version under timestep t.
-        """
-        assert noise.shape == x_t.shape, "noise must have same shape as x_t"
-        t = t.view(-1, *[1 for _ in range(len(x_t.shape) - 1)])
-        x_0 = (x_t - (self.sigma_min + (1 - self.sigma_min) * t) * noise) / (1 - t)
-        return x_0
-    
-    def get_v(self, x_0: torch.Tensor, noise: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        """
-        Compute the velocity of the diffusion process at time t.
-        """
-        return (1 - self.sigma_min) * noise - x_0
-    
-    def get_model_predition(self, v_feature, v_timesteps, v_condition=None):
+    def diffuse(self, v_feature, v_timesteps, v_condition=None):
         bs = v_feature.size(0)
         de = v_feature.device
         dt = v_feature.dtype
@@ -521,44 +492,26 @@ class Diffusion_condition(nn.Module):
         
         return pred_x
     
-    def sample_t(self, batch_size, type='logitNormal'):
-        if type == 'uniform':
-            t = torch.rand(batch_size)
-        elif type == 'logitNormal':
-            mean, std = 0, 1
-            t = torch.sigmoid(torch.randn(batch_size) * std + mean)
-        else:
-            raise NotImplementedError
-        return t
-    
     def forward(self, v_data, v_test=False, **kwargs):
         encoding_result = self.get_z(v_data, v_test)
         face_z = encoding_result["padded_face_z"]
         device = face_z.device
         bs = face_z.size(0)
-        
-        # 1. Sample time steps
-        x_0 = face_z
-        noise = torch.randn_like(x_0)
-        t = self.sample_t(bs).to(device).float()
-        timesteps = t * 1000
-        
-        # 2. Compute x_t
-        x_t = self.diffuse(x_0, t, noise)
-        
-        condition = self.extract_condition(v_data)
+        timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bs,), device=device).long()
 
-        # 3. get model predition
-        pred_v = self.get_model_predition(x_t, timesteps, condition)
-        assert pred_v.shape == noise.shape == x_0.shape
-        target_v = self.get_v(x_0, noise, t)
-        
+        condition = self.extract_condition(v_data)
+        noise = torch.randn(face_z.shape, device=device)
+        noise_input = self.noise_scheduler.add_noise(face_z, noise, timesteps)
+
+        # Model
+        pred = self.diffuse(noise_input, timesteps, condition)
+
         loss = {}
-        loss_item = self.loss(pred_v, target_v, reduction="none")
+        loss_item = self.loss(pred, face_z if self.diffusion_type == "sample" else noise, reduction="none")
         loss["diffusion_loss"] = loss_item.mean()
         if self.pad_method == "zero":
             mask = torch.logical_not((face_z.abs() < 1e-4).all(dim=-1))
-            label = self.classifier(pred_v)
+            label = self.classifier(pred)
             classification_loss = nn.functional.binary_cross_entropy_with_logits(label[..., 0], mask.float())
             if self.loss == nn.functional.l1_loss:
                 classification_loss = classification_loss * 1e-1
@@ -576,64 +529,44 @@ class Diffusion_condition(nn.Module):
             loss["l2"] = self.loss(pred, face_z)
             loss["diffusion_loss"] += loss["l2"]
         return loss
-    
-    def inference(self, bs, device, v_data=None, steps=50, rescale_t=1.0, v_log=True, verbose=False, **kwargs):
-        def v_to_xstart_eps(x_t, t, v):
-            assert x_t.shape == v.shape
-            eps = (1 - t) * v + x_t
-            x_0 = (1 - self.sigma_min) * x_t - (self.sigma_min + (1 - self.sigma_min) * t) * v
-            return x_0, eps
-        
-        noise = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
+
+    def inference(self, bs, device, v_data=None, v_log=True, **kwargs):
+        face_features = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
         condition = None
         if self.with_img or self.with_pc or self.with_txt:
             condition = self.extract_condition(v_data)[:bs]
-        
-        t_seq = np.linspace(1, 0, steps + 1)
-        t_seq = rescale_t * t_seq / (1 + (rescale_t - 1) * t_seq)
-        t_pairs = list((t_seq[i], t_seq[i + 1]) for i in range(steps))
-        ret = edict({"samples": None, "pred_x_t": [], "pred_x_0": []})
-        
-        x_t = noise
-        for t, t_prev in tqdm(t_pairs, desc="Sampling", disable=not verbose):
-            t = torch.tensor([1000 * t] * x_t.shape[0], device=x_t.device, dtype=torch.float32)
-            if condition is not None and condition.shape[0] == 1 and x_t.shape[0] > 1:
-                condition = condition.repeat(x_t.shape[0], *([1] * (len(condition.shape) - 1)))
-                
-            # predict v and calculate x_0, eps
-            pred_v = self.get_model_predition(x_t, t, condition)
-            pred_x_0, pred_eps = v_to_xstart_eps(x_t=x_t, t=t, v=pred_v)
-            pred_x_prev = x_t - (t - t_prev) * pred_v
-            ret.pred_x_t.append(pred_x_prev)
-            ret.pred_x_0.append(pred_x_0)
-            
-            x_t = pred_x_prev
-        ret.samples = x_t
+            # face_features = face_features[:condition.shape[0]]
+        # error = []
+        for t in tqdm(self.noise_scheduler.timesteps):
+            timesteps = t.reshape(-1).to(device)
+            pred_x0 = self.diffuse(face_features, timesteps, v_condition=condition)
+            face_features = self.noise_scheduler.step(pred_x0, t, face_features).prev_sample
+            # error.append((v_data["face_features"] - face_features).abs().mean(dim=[1,2]))
 
-        face_z = ret.samples
+        face_z = face_features
         if self.pad_method == "zero":
-            label = torch.sigmoid(self.classifier(x_t))[..., 0]
+            label = torch.sigmoid(self.classifier(face_features))[..., 0]
             mask = label > 0.5
         else:
             mask = torch.ones_like(face_z[:, :, 0]).to(bool)
-        
+
         recon_data = []
         for i in range(bs):
             face_z_item = face_z[i:i + 1][mask[i:i + 1]]
-            if self.addition_tag: # Deduplicate
-                flag = face_z_item[...,-1] > 0
+            if self.addition_tag:  # Deduplicate
+                flag = face_z_item[..., -1] > 0
                 face_z_item = face_z_item[flag][:, :-1]
-            if self.pad_method == "random": # Deduplicate
+            if self.pad_method == "random":  # Deduplicate
                 threshold = 1e-2
                 max_faces = face_z_item.shape[0]
-                index = torch.stack(torch.meshgrid(torch.arange(max_faces),torch.arange(max_faces), indexing="ij"), dim=2)
+                index = torch.stack(torch.meshgrid(torch.arange(max_faces), torch.arange(max_faces), indexing="ij"), dim=2)
                 features = face_z_item[index]
-                distance = (features[:,:,0]-features[:,:,1]).abs().mean(dim=-1)
+                distance = (features[:, :, 0] - features[:, :, 1]).abs().mean(dim=-1)
                 final_face_z = []
                 for j in range(max_faces):
                     valid = True
                     for k in final_face_z:
-                        if distance[j,k] < threshold:
+                        if distance[j, k] < threshold:
                             valid = False
                             break
                     if valid:

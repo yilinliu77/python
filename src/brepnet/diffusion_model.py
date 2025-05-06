@@ -237,16 +237,6 @@ class Diffusion_condition(nn.Module):
                 nn.SiLU(),
                 nn.Linear(1024, self.dim_condition),
             )
-
-        if self.pad_method == "zero":
-            self.classifier = nn.Sequential(
-                nn.Linear(self.dim_input, self.dim_input),
-                nn.LayerNorm(self.dim_input),
-                nn.SiLU(),
-                nn.Linear(self.dim_input, 1),
-            )
-        else:
-            self.classifier = None
         
         self.t_schedule = RectifiedFlowScheduler(
             num_train_timesteps=1000
@@ -258,6 +248,16 @@ class Diffusion_condition(nn.Module):
         self.diffusion_type = v_conf["diffusion_type"]
         self.pad_method = v_conf["pad_method"]
 
+        if self.pad_method == "zero":
+            self.classifier = nn.Sequential(
+                nn.Linear(self.dim_input, self.dim_input),
+                nn.LayerNorm(self.dim_input),
+                nn.SiLU(),
+                nn.Linear(self.dim_input, 1),
+            )
+        else:
+            self.classifier = None
+        
         # self.ae_model = AutoEncoder_0925(v_conf)
         model_mod = importlib.import_module("src.brepnet.model")
         model_mod = getattr(model_mod, v_conf["autoencoder"])

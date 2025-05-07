@@ -23,8 +23,6 @@ from scipy.spatial.transform import Rotation
 from easydict import EasyDict as edict
 
 from src.brepnet.model_utils.dit_block import *
-from src.brepnet.model_utils.scheduling_rectified_flow import RectifiedFlowScheduler
-from src.brepnet.model_utils.transport import *
 
 # from thirdparty.PointTransformerV3.model import *
 # from thirdparty.point_transformer_v3.model import PointTransformerV3
@@ -242,14 +240,15 @@ class Diffusion_condition(nn.Module):
                 nn.Linear(1024, self.dim_condition),
             )
         
-        # SiT transport setting
-        self.transport = create_transport(
-            path_type='Linear',
-            prediction="velocity",
-            loss_weight=None
+        self.noise_scheduler = DDPMScheduler(
+            num_train_timesteps=1000,
+            beta_schedule=v_conf["beta_schedule"],
+            prediction_type=v_conf["diffusion_type"],
+            beta_start=v_conf["beta_start"],
+            beta_end=v_conf["beta_end"],
+            variance_type=v_conf["variance_type"],
+            clip_sample=False,
         )
-        self.transport_sampler = Sampler(self.transport)
-        self.sample_fn = self.transport_sampler.sample_ode()
 
         self.num_max_faces = v_conf["num_max_faces"]
         self.loss = nn.functional.l1_loss if v_conf["loss"] == "l1" else nn.functional.mse_loss
@@ -499,32 +498,13 @@ class Diffusion_condition(nn.Module):
 
         condition = self.extract_condition(v_data)
         
-        # Transport
-        t, x0, x1 = self.transport.sample(face_z)
-        t, xt, ut = self.transport.path_sampler.plan(t, x0, x1)
-        pred = self.get_predtion(xt, t, condition)
-        B, *_, C = xt.shape
-        assert pred.size() == (B, *xt.size()[1:-1], C)
+        timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bs,), device=device).long()
+        noise = torch.randn(face_z.shape, device=device)
+        noised_face_z = self.noise_scheduler.add_noise(face_z, noise, timesteps)
         
-        if self.transport.model_type == ModelType.VELOCITY:
-            loss_item = mean_flat(((pred - ut) ** 2))
-        else:
-            _, drift_var = self.transport.path_sampler.compute_drift(xt, t)
-            sigma_t, _ = self.transport.path_sampler.compute_sigma_t(path.expand_t_like_x(t, xt))
-            if self.transport.loss_type in [WeightType.VELOCITY]:
-                weight = (drift_var / sigma_t) ** 2
-            elif self.transport.loss_type in [WeightType.LIKELIHOOD]:
-                weight = drift_var / (sigma_t ** 2)
-            elif self.transport.loss_type in [WeightType.NONE]:
-                weight = 1
-            else:
-                raise NotImplementedError()
-            
-            if self.transport.model_type == ModelType.NOISE:
-                loss_item = mean_flat(weight * ((pred - x0) ** 2))
-            else:
-                loss_item = mean_flat(weight * ((pred * sigma_t + x0) ** 2))
-                
+        pred = self.get_predtion(noised_face_z, timesteps, condition)
+        loss_item = self.loss(pred, face_z if self.diffusion_type == "sample" else noise, reduction="none")
+        
         loss = {}
         loss["diffusion_loss"] = loss_item.mean()
         if self.pad_method == "zero":
@@ -553,12 +533,16 @@ class Diffusion_condition(nn.Module):
         if self.with_img or self.with_pc or self.with_txt:
             condition = self.extract_condition(v_data)[:bs]
             # face_features = face_features[:condition.shape[0]]
+        
+        face_features = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
         # error = []
-        
-        sample_noise = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
-        sample_path = self.sample_fn(sample_noise, self.get_predtion, v_condition=condition, **kwargs)
-        face_z = sample_path[-1]
-        
+        for t in tqdm(self.noise_scheduler.timesteps):
+            timesteps = t.reshape(-1).to(device)
+            pred_x = self.get_predtion(face_features, timesteps, v_condition=condition)
+            face_features = self.noise_scheduler.step(pred_x, t, face_features).prev_sample
+            # error.append((v_data["face_features"] - face_features).abs().mean(dim=[1,2]))
+
+        face_z = face_features
         if self.pad_method == "zero":
             label = torch.sigmoid(self.classifier(face_z))[..., 0]
             mask = label > 0.5

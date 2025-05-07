@@ -473,6 +473,8 @@ class Diffusion_condition(nn.Module):
         de = v_feature.device
         dt = v_feature.dtype
         
+        if v_timesteps[0] < 1:
+            v_timesteps = v_timesteps * 1000
         time_embeds = self.time_proj(self.time_embed(v_timesteps)).unsqueeze(1)
         v_condition = torch.zeros((bs, 1, self.dim_condition), device=de, dtype=dt) if v_condition is None else v_condition
         v_condition = v_condition.repeat(1, v_feature.shape[1], 1)

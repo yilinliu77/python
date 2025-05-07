@@ -241,19 +241,6 @@ class Diffusion_condition(nn.Module):
                 nn.SiLU(),
                 nn.Linear(1024, self.dim_condition),
             )
-
-        # self.noise_scheduler = DDPMScheduler(
-        #         num_train_timesteps=1000,
-        #         beta_schedule=v_conf["beta_schedule"],
-        #         prediction_type=v_conf["diffusion_type"],
-        #         beta_start=v_conf["beta_start"],
-        #         beta_end=v_conf["beta_end"],
-        #         variance_type=v_conf["variance_type"],
-        #         clip_sample=False,
-        # )
-        # self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
-        #     num_train_timesteps=1000
-        # )
         
         # SiT transport setting
         self.transport = create_transport(

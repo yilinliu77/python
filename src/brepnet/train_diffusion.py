@@ -96,9 +96,9 @@ class TrainDiffusion(pl.LightningModule):
         model_mod = getattr(model_mod, self.hydra_conf["model"]["name"])
         self.model = model_mod(self.hydra_conf["model"])
 
-        self.viz = {
-            "time_loss": []
-        }
+        # self.viz = {
+        #     "time_loss": []
+        # }
 
     def train_dataloader(self):
         self.train_dataset = self.dataset_mod("training", self.hydra_conf["dataset"], )
@@ -158,11 +158,11 @@ class TrainDiffusion(pl.LightningModule):
         self.log("Validation_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,
                  sync_dist=True, batch_size=self.batch_size)
         
-        if batch_idx == 0:
-            self.viz = {
-                "time_loss": []
-            }
-            self.viz["time_loss"].append(loss["t"])
+        # if batch_idx == 0:
+        #     self.viz = {
+        #         "time_loss": []
+        #     }
+        #     self.viz["time_loss"].append(loss["t"])
         
         if batch_idx == 0 and self.global_rank == 0:
             recon_faces = self.model.inference(1, self.device, data)[0]["pred_face"]
@@ -192,16 +192,16 @@ class TrainDiffusion(pl.LightningModule):
         # if self.trainer.sanity_checking:
         #     return
 
-        if "time_loss" in self.viz:
-            time_loss = torch.cat(self.viz["time_loss"]).cpu().numpy()
-            results = []
-            for i in range(10):
-                results.append(time_loss[np.logical_and(time_loss[:,0]>=i*100, time_loss[:,0]<(i+1)*100), 1].mean())
-                self.log(f'tloss/{i}', results[-1], prog_bar=False, logger=True, on_step=False, on_epoch=True, sync_dist=True)
+        # if "time_loss" in self.viz:
+        #     time_loss = torch.cat(self.viz["time_loss"]).cpu().numpy()
+        #     results = []
+        #     for i in range(10):
+        #         results.append(time_loss[np.logical_and(time_loss[:,0]>=i*100, time_loss[:,0]<(i+1)*100), 1].mean())
+        #         self.log(f'tloss/{i}', results[-1], prog_bar=False, logger=True, on_step=False, on_epoch=True, sync_dist=True)
         
         if self.global_rank != 0:
             return
-        self.viz = {"time_loss": []}
+        # self.viz = {"time_loss": []}
         return
 
     def test_dataloader(self):

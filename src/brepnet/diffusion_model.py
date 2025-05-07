@@ -256,7 +256,7 @@ class Diffusion_condition(nn.Module):
         # SiT transport setting
         self.transport = create_transport(
             path_type='Linear',
-            prediction="noise",
+            prediction="velocity",
             loss_weight=None
         )
         self.transport_sampler = Sampler(self.transport)

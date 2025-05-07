@@ -45,10 +45,10 @@ def create_transport(
 
     if (path_type in [PathType.VP]):
         train_eps = 1e-5 if train_eps is None else train_eps
-        sample_eps = 1e-3 if train_eps is None else sample_eps
+        sample_eps = 1e-3 if sample_eps is None else sample_eps
     elif (path_type in [PathType.GVP, PathType.LINEAR] and model_type != ModelType.VELOCITY):
         train_eps = 1e-3 if train_eps is None else train_eps
-        sample_eps = 1e-3 if train_eps is None else sample_eps
+        sample_eps = 1e-3 if sample_eps is None else sample_eps
     else: # velocity & [GVP, LINEAR] is stable everywhere
         train_eps = 0
         sample_eps = 0

@@ -73,7 +73,7 @@ class Diffusion_condition(nn.Module):
         self.time_statics = [0 for _ in range(10)]
         use_cross_attention_1, cross_attention_1_dim = False, None
         use_cross_attention_2, cross_attention_2_dim = False, None
-        self.num_layers = 21
+        self.num_layers = 7
         self.dit_inner_dim = 2048
         self.num_attention_heads = 16
         self.mlp_ratio = 2
@@ -84,7 +84,12 @@ class Diffusion_condition(nn.Module):
         if self.addition_tag:
             self.dim_input += 1
         
-        self.embed_proj = nn.Linear(self.dim_input, self.dit_inner_dim, bias=True)
+        self.proj_in = nn.Sequential(
+            nn.Linear(self.dim_input, self.dim_latent),
+            nn.LayerNorm(self.dim_latent),
+            nn.GELU(),
+            nn.Linear(self.dim_latent, self.dit_inner_dim),
+        )
 
         self.time_embed = Timesteps(self.dit_inner_dim, flip_sin_to_cos=False, downscale_freq_shift=0)
         self.time_proj = TimestepEmbedding(
@@ -115,20 +120,17 @@ class Diffusion_condition(nn.Module):
                     skip_concat_front=True,
                     skip_norm_last=False, # norm first
                     qk_norm=True,  # See http://arxiv.org/abs/2302.05442 for details.
-                    qkv_bias=False,
+                    qkv_bias=True,
                 )
                 for layer in range(self.num_layers)
             ]
         )
-
-        self.norm_out = LayerNorm(self.dit_inner_dim)
-        self.proj_out = nn.Linear(self.dit_inner_dim, self.dim_input, bias=True)
         
-        self.fc_out = nn.Sequential(
-                nn.Linear(self.dim_total, self.dim_total),
-                nn.LayerNorm(self.dim_total),
-                nn.SiLU(),
-                nn.Linear(self.dim_total, self.dim_input),
+        self.proj_out = nn.Sequential(
+            nn.Linear(self.dit_inner_dim, self.dim_latent),
+            nn.LayerNorm(self.dim_latent),
+            nn.GELU(),
+            nn.Linear(self.dim_latent, self.dim_input),
         )
 
         self.with_img = False
@@ -479,7 +481,8 @@ class Diffusion_condition(nn.Module):
         v_condition = torch.zeros((bs, 1, self.dim_condition), device=de, dtype=dt) if v_condition is None else v_condition
         v_condition = v_condition.repeat(1, v_feature.shape[1], 1)
 
-        hidden_states = self.embed_proj(v_feature)
+        hidden_states = self.proj_in(v_feature)
+        hidden_states = hidden_states + time_embeds
         _, N, _ = hidden_states.shape
         skips = []
         for layer, block in enumerate(self.blocks):
@@ -488,7 +491,6 @@ class Diffusion_condition(nn.Module):
                 hidden_states,
                 encoder_hidden_states=None,
                 encoder_hidden_states_2=None,
-                temb=time_embeds,
                 image_rotary_emb=None,
                 skip=skip,
                 attention_kwargs=None,
@@ -498,8 +500,6 @@ class Diffusion_condition(nn.Module):
                 skips.append(hidden_states)
         
         # final layer
-        hidden_states = self.norm_out(hidden_states)
-        hidden_states = hidden_states[:, -N:]
         pred_x = self.proj_out(hidden_states)
         
         return pred_x
@@ -521,7 +521,7 @@ class Diffusion_condition(nn.Module):
         
         if self.transport.model_type == ModelType.VELOCITY:
             loss_item = mean_flat(((pred - ut) ** 2))
-        else: 
+        else:
             _, drift_var = self.transport.path_sampler.compute_drift(xt, t)
             sigma_t, _ = self.transport.path_sampler.compute_sigma_t(path.expand_t_like_x(t, xt))
             if self.transport.loss_type in [WeightType.VELOCITY]:

@@ -71,7 +71,7 @@ class Diffusion_condition(nn.Module):
         self.time_statics = [0 for _ in range(10)]
         use_cross_attention_1, cross_attention_1_dim = False, None
         use_cross_attention_2, cross_attention_2_dim = False, None
-        self.num_layers = 7
+        self.num_layers = 21
         self.dit_inner_dim = 2048
         self.num_attention_heads = 16
         self.mlp_ratio = 2

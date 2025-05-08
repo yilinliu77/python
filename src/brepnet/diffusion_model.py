@@ -13,6 +13,8 @@ from einops import rearrange, reduce
 
 from diffusers import DDPMScheduler
 from diffusers import FlowMatchEulerDiscreteScheduler
+from diffusers.training_utils import compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3
+
 from torch_scatter import scatter_mean
 from tqdm import tqdm
 
@@ -23,6 +25,8 @@ from scipy.spatial.transform import Rotation
 from easydict import EasyDict as edict
 
 from src.brepnet.model_utils.dit_block import *
+from typing import Any, Callable, Dict, List, Optional, Union
+import inspect
 
 # from thirdparty.PointTransformerV3.model import *
 # from thirdparty.point_transformer_v3.model import PointTransformerV3
@@ -59,6 +63,83 @@ def sincos_embedding(input, dim, max_period=10000):
 
 def inv_sigmoid(x):
     return torch.log(x / (1 - x + 1e-6))
+
+
+def custom_mse_loss(noise_pred, target, weighting=None, threshold=50, reduction=None):
+    noise_pred = noise_pred.float()
+    target = target.float()
+    diff = noise_pred - target
+    mse_loss = F.mse_loss(noise_pred, target, reduction='none')
+    mask = (diff.abs() <= threshold).float()
+    masked_loss = mse_loss * mask
+    if weighting is not None:
+        masked_loss = masked_loss * weighting
+    
+    if reduction == "mean":
+        final_loss = masked_loss.mean()
+    elif reduction == "sum":
+        final_loss = masked_loss.sum()
+    else:
+        final_loss = masked_loss
+    return final_loss
+
+def retrieve_timesteps(
+    scheduler,
+    num_inference_steps: Optional[int] = None,
+    device: Optional[Union[str, torch.device]] = None,
+    timesteps: Optional[List[int]] = None,
+    sigmas: Optional[List[float]] = None,
+    **kwargs,
+):
+    r"""
+    Calls the scheduler's `set_timesteps` method and retrieves timesteps from the scheduler after the call. Handles
+    custom timesteps. Any kwargs will be supplied to `scheduler.set_timesteps`.
+
+    Args:
+        scheduler (`SchedulerMixin`):
+            The scheduler to get timesteps from.
+        num_inference_steps (`int`):
+            The number of diffusion steps used when generating samples with a pre-trained model. If used, `timesteps`
+            must be `None`.
+        device (`str` or `torch.device`, *optional*):
+            The device to which the timesteps should be moved to. If `None`, the timesteps are not moved.
+        timesteps (`List[int]`, *optional*):
+            Custom timesteps used to override the timestep spacing strategy of the scheduler. If `timesteps` is passed,
+            `num_inference_steps` and `sigmas` must be `None`.
+        sigmas (`List[float]`, *optional*):
+            Custom sigmas used to override the timestep spacing strategy of the scheduler. If `sigmas` is passed,
+            `num_inference_steps` and `timesteps` must be `None`.
+
+    Returns:
+        `Tuple[torch.Tensor, int]`: A tuple where the first element is the timestep schedule from the scheduler and the
+        second element is the number of inference steps.
+    """
+    if timesteps is not None and sigmas is not None:
+        raise ValueError("Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values")
+    if timesteps is not None:
+        accepts_timesteps = "timesteps" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
+        if not accepts_timesteps:
+            raise ValueError(
+                f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
+                f" timestep schedules. Please check whether you are using the correct scheduler."
+            )
+        scheduler.set_timesteps(timesteps=timesteps, device=device, **kwargs)
+        timesteps = scheduler.timesteps
+        num_inference_steps = len(timesteps)
+    elif sigmas is not None:
+        accept_sigmas = "sigmas" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
+        if not accept_sigmas:
+            raise ValueError(
+                f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
+                f" sigmas schedules. Please check whether you are using the correct scheduler."
+            )
+        scheduler.set_timesteps(sigmas=sigmas, device=device, **kwargs)
+        timesteps = scheduler.timesteps
+        num_inference_steps = len(timesteps)
+    else:
+        scheduler.set_timesteps(num_inference_steps, device=device, **kwargs)
+        timesteps = scheduler.timesteps
+    return timesteps, num_inference_steps
 
 
 class Diffusion_condition(nn.Module):
@@ -240,15 +321,27 @@ class Diffusion_condition(nn.Module):
                 nn.Linear(1024, self.dim_condition),
             )
         
-        self.noise_scheduler = DDPMScheduler(
-            num_train_timesteps=1000,
-            beta_schedule=v_conf["beta_schedule"],
-            prediction_type=v_conf["diffusion_type"],
-            beta_start=v_conf["beta_start"],
-            beta_end=v_conf["beta_end"],
-            variance_type=v_conf["variance_type"],
-            clip_sample=False,
-        )
+        self.scheduler_type = v_conf["scheduler_type"]
+        if self.scheduler_type == "ddpm":
+            self.noise_scheduler = DDPMScheduler(
+                num_train_timesteps=1000,
+                beta_schedule=v_conf["beta_schedule"],
+                prediction_type=v_conf["diffusion_type"],
+                beta_start=v_conf["beta_start"],
+                beta_end=v_conf["beta_end"],
+                variance_type=v_conf["variance_type"],
+                clip_sample=False,
+            )
+        elif self.scheduler_type == "flowmatch":
+            self.t_weighting_scheme = v_conf["fm_t_weighting_scheme"]
+            self.loss_weighting_scheme = v_conf["fm_loss_weighting_scheme"]
+            self.num_inference_steps = v_conf["fm_num_inference_steps"]
+            self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
+                num_train_timesteps=1000
+            )
+            self.inference_scheduler = FlowMatchEulerDiscreteScheduler()
+        else:
+            raise NotImplementedError
 
         self.num_max_faces = v_conf["num_max_faces"]
         self.loss = nn.functional.l1_loss if v_conf["loss"] == "l1" else nn.functional.mse_loss
@@ -498,12 +591,49 @@ class Diffusion_condition(nn.Module):
 
         condition = self.extract_condition(v_data)
         
-        timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bs,), device=device).long()
-        noise = torch.randn(face_z.shape, device=device)
-        noised_face_z = self.noise_scheduler.add_noise(face_z, noise, timesteps)
-        
-        pred = self.get_predtion(noised_face_z, timesteps, condition)
-        loss_item = self.loss(pred, face_z if self.diffusion_type == "sample" else noise, reduction="none")
+        if self.scheduler_type == "ddpm":
+            timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bs,), device=device).long()
+            noise = torch.randn(face_z.shape, device=device)
+            noised_face_z = self.noise_scheduler.add_noise(face_z, noise, timesteps)
+            pred = self.get_predtion(noised_face_z, timesteps, condition)
+            loss_item = self.loss(pred, face_z if self.diffusion_type == "sample" else noise, reduction="none")
+            
+        elif self.scheduler_type == "flowmatch":
+            def get_sigmas(timesteps, n_dim=4, dtype=torch.float32):
+                sigmas = self.noise_scheduler.sigmas.to(device=device, dtype=dtype)
+                schedule_timesteps = self.noise_scheduler.timesteps.to(device)
+                timesteps = timesteps.to(device)
+                step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
+
+                sigma = sigmas[step_indices].flatten()
+                while len(sigma.shape) < n_dim:
+                    sigma = sigma.unsqueeze(-1)
+                return sigma
+            
+            u = compute_density_for_timestep_sampling(
+                    weighting_scheme=self.t_weighting_scheme,
+                    batch_size=bs,
+                    logit_mean=0, # only valid when weighting_scheme == logit_normal
+                    logit_std=1, # only valid when weighting_scheme == logit_normal
+                    mode_scale=1.29 # only valid when weighting_scheme == mode
+                )
+            
+            indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
+            timesteps = self.noise_scheduler.timesteps[indices].to(device=device)
+            
+            # Add noise according to flow matching.
+            # zt = (1 - texp) * x + texp * z1
+            noise = torch.randn(face_z.shape, device=device)
+            sigmas = get_sigmas(timesteps, n_dim=face_z.ndim, dtype=face_z.dtype)
+            noised_face_z = (1.0 - sigmas) * face_z + sigmas * noise
+            target = noise - noised_face_z
+            pred = self.get_predtion(noised_face_z, timesteps, condition)
+            
+            weighting = compute_loss_weighting_for_sd3(weighting_scheme=self.loss_weighting_scheme, sigmas=sigmas)
+            mse_loss = custom_mse_loss(pred.float(), target.float(), weighting.float())
+            loss_item = mse_loss.mean(dim=[1,2])
+        else:
+            raise NotImplementedError
         
         loss = {}
         loss["diffusion_loss"] = loss_item.mean()
@@ -534,15 +664,35 @@ class Diffusion_condition(nn.Module):
             condition = self.extract_condition(v_data)[:bs]
             # face_features = face_features[:condition.shape[0]]
         
-        face_features = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
-        # error = []
-        for t in tqdm(self.noise_scheduler.timesteps):
-            timesteps = t.reshape(-1).to(device)
-            pred_x = self.get_predtion(face_features, timesteps, v_condition=condition)
-            face_features = self.noise_scheduler.step(pred_x, t, face_features).prev_sample
-            # error.append((v_data["face_features"] - face_features).abs().mean(dim=[1,2]))
+        if self.scheduler_type == "ddpm":
+            face_features = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
+            num_inference_steps = len(self.noise_scheduler.timesteps)
+            # error = []
+            with tqdm(total=num_inference_steps, leave=False) as progress_bar:
+                for t in self.noise_scheduler.timesteps:
+                    timesteps = t.reshape(-1).to(device)
+                    pred = self.get_predtion(face_features, timesteps, v_condition=condition)
+                    face_features = self.noise_scheduler.step(pred, t, face_features).prev_sample
+                    # error.append((v_data["face_features"] - face_features).abs().mean(dim=[1,2]))
+                    progress_bar.update()
+        
+        elif self.scheduler_type == "flowmatch":
+            timesteps, num_inference_steps = retrieve_timesteps(
+                self.inference_scheduler, self.num_inference_steps, device)
+            
+            face_features = torch.randn((bs, self.num_max_faces, self.dim_input)).to(device)
+            with tqdm(total=num_inference_steps, leave=False) as progress_bar:
+                for t in timesteps:
+                    timestep = t.expand((bs,)).to(device)
+                    pred = self.get_predtion(face_features, timestep, v_condition=condition)
+                    face_features = self.inference_scheduler.step(pred, t, face_features).prev_sample
+                    progress_bar.update()
+                    
+        else:
+            raise NotImplementedError
 
         face_z = face_features
+        
         if self.pad_method == "zero":
             label = torch.sigmoid(self.classifier(face_z))[..., 0]
             mask = label > 0.5

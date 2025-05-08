@@ -56,6 +56,12 @@ model:
   use_mean: true
 
   diffusion_latent: 512
+
+  scheduler_type: flowmatch # [ddpm, flowmatch]
+  fm_t_weighting_scheme: uniform # [logit_normal, mode, uniform]
+  fm_loss_weighting_scheme: uniform # [sigma_sqrt, cosmap, uniform]
+  fm_num_inference_steps: 50
+  
   diffusion_type: epsilon
   loss: l2
   pad_method: random

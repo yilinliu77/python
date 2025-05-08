@@ -83,6 +83,7 @@ def custom_mse_loss(noise_pred, target, weighting=None, threshold=50, reduction=
         final_loss = masked_loss
     return final_loss
 
+# Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.retrieve_timesteps
 def retrieve_timesteps(
     scheduler,
     num_inference_steps: Optional[int] = None,
@@ -91,7 +92,7 @@ def retrieve_timesteps(
     sigmas: Optional[List[float]] = None,
     **kwargs,
 ):
-    r"""
+    """
     Calls the scheduler's `set_timesteps` method and retrieves timesteps from the scheduler after the call. Handles
     custom timesteps. Any kwargs will be supplied to `scheduler.set_timesteps`.
 
@@ -115,9 +116,13 @@ def retrieve_timesteps(
         second element is the number of inference steps.
     """
     if timesteps is not None and sigmas is not None:
-        raise ValueError("Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values")
+        raise ValueError(
+            "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values"
+        )
     if timesteps is not None:
-        accepts_timesteps = "timesteps" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
+        accepts_timesteps = "timesteps" in set(
+            inspect.signature(scheduler.set_timesteps).parameters.keys()
+        )
         if not accepts_timesteps:
             raise ValueError(
                 f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
@@ -127,7 +132,9 @@ def retrieve_timesteps(
         timesteps = scheduler.timesteps
         num_inference_steps = len(timesteps)
     elif sigmas is not None:
-        accept_sigmas = "sigmas" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
+        accept_sigmas = "sigmas" in set(
+            inspect.signature(scheduler.set_timesteps).parameters.keys()
+        )
         if not accept_sigmas:
             raise ValueError(
                 f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
@@ -554,8 +561,6 @@ class Diffusion_condition(nn.Module):
         de = v_feature.device
         dt = v_feature.dtype
         
-        if v_timesteps[0] < 1:
-            v_timesteps = v_timesteps * 1000
         time_embeds = self.time_proj(self.time_embed(v_timesteps)).unsqueeze(1)
         v_condition = torch.zeros((bs, 1, self.dim_condition), device=de, dtype=dt) if v_condition is None else v_condition
         v_condition = v_condition.repeat(1, v_feature.shape[1], 1)
@@ -619,7 +624,7 @@ class Diffusion_condition(nn.Module):
                 )
             
             indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
-            timesteps = self.noise_scheduler.timesteps[indices].to(device=device)
+            timesteps = self.noise_scheduler.timesteps[indices].to(device=device).long()
             
             # Add noise according to flow matching.
             # zt = (1 - texp) * x + texp * z1

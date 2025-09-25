@@ -6,14 +6,24 @@ import numpy as np
 import torch
 from tqdm import tqdm
 import torchvision.transforms as T
+from transformers import Dinov2Model
 import ray
 
-root = Path(r"/mnt/d/yilin/img2brep/abc_v2_npz")
+root = Path(r"E:\data\img2brep\0925_debug\abc_v2_cond")
+# root = Path(r"/mnt/d/yilin/img2brep/abc_v2_npz")
+# root = Path(r"/mnt/d/yilin/img2brep/abc_v2_cond")
+
+ONLY_CLS_TOKEN = True
+import os
+os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 
 @ray.remote(num_gpus=0.5)
 def worker(folders, v_id):
     torch.set_float32_matmul_precision("medium")
-    img_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
+    if ONLY_CLS_TOKEN:
+        img_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
+    else:
+        img_model = Dinov2Model.from_pretrained("facebook/dinov2-large")
     img_model.eval()
     img_model.cuda()
 
@@ -27,15 +37,20 @@ def worker(folders, v_id):
     with torch.no_grad():
         # with torch.autocast(dtype=torch.float16, device_type='cuda'):
         for prefix in tqdm(folders, disable=(v_id != 0)):
-            data = np.load(root / prefix / "data.npz")
+            data = np.load(root / prefix / "imgs.npz")
             transformed_imgs = [transform(item) for item in data["svr_imgs"]] + [transform(item) for item in data["sketch_imgs"]] + [transform(item) for item in data["mvr_imgs"]]
             data = torch.stack(transformed_imgs, dim=0).cuda()
-            feature = img_model(data).cpu().numpy()
-            np.save(root / prefix / "img_feature_dinov2", feature)
+            if ONLY_CLS_TOKEN:
+                feature = img_model(data).cpu().numpy()
+            else:
+                outputs = img_model(data)
+                feature = outputs.last_hidden_state.cpu().numpy()
+            np.save(root / prefix / "img_feature_dinov3.npy", feature)
 
 if __name__ == '__main__':
     ray.init(
         num_gpus=8,
+        local_mode=True
     )
 
     folders = list(root.glob("*"))
@@ -43,7 +58,7 @@ if __name__ == '__main__':
 
     folders2 = []
     for folder in folders:
-        if not os.path.exists(folder / "img_feature_dinov2.npy"):
+        if not os.path.exists(folder / "img_feature_dinov3.npy"):
             folders2.append(folder.name)
     folders = folders2
     

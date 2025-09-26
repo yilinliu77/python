@@ -19,6 +19,9 @@ from thirdparty.Pointnet2_PyTorch.pointnet2_ops_lib.pointnet2_ops.pointnet2_modu
     PointnetFPModule, PointnetSAModule
 from scipy.spatial.transform import Rotation
 
+from transformers import Dinov2Model
+import os
+os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 
 # from thirdparty.PointTransformerV3.model import *
 # from thirdparty.point_transformer_v3.model import PointTransformerV3
@@ -62,8 +65,8 @@ class Diffusion_condition(nn.Module):
         super().__init__()
         self.dim_input = 8 * 2 * 2
         self.dim_latent = v_conf["diffusion_latent"]
-        self.dim_condition = 256
-        self.dim_total = self.dim_latent + self.dim_condition
+        self.dim_condition = 1024
+        self.dim_total = self.dim_latent
         self.time_statics = [0 for _ in range(10)]
 
         self.addition_tag = False
@@ -96,7 +99,9 @@ class Diffusion_condition(nn.Module):
         self.is_aug = v_conf["is_aug"]
         if "single_img" in v_conf["condition"] or "multi_img" in v_conf["condition"] or "sketch" in v_conf["condition"]:
             self.with_img = True
-            self.img_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
+
+            self.img_model = Dinov2Model.from_pretrained('facebook/dinov2-large')
+            # self.img_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
             for param in self.img_model.parameters():
                 param.requires_grad = False
             self.img_model.eval()
@@ -198,6 +203,14 @@ class Diffusion_condition(nn.Module):
                 nn.SiLU(),
                 nn.Linear(1024, self.dim_condition),
             )
+
+        # cross attn condition
+        self.cross_attn_pre_proj = nn.Linear(self.dim_latent, 1024)
+        cross_attn_layer = nn.TransformerDecoderLayer(
+                d_model=1024,
+                nhead=1024 // 64, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
+        self.cross_attn_add_cond = nn.TransformerDecoder(cross_attn_layer, 4, nn.LayerNorm(1024))
+        self.cross_attn_post_proj = nn.Linear(1024, self.dim_latent)
 
         self.classifier = nn.Sequential(
                 nn.Linear(self.dim_input, self.dim_input),
@@ -338,10 +351,22 @@ class Diffusion_condition(nn.Module):
         dt = v_feature.dtype
         time_embeds = self.time_embed(sincos_embedding(v_timesteps, self.dim_total)).unsqueeze(1)
         noise_features = self.p_embed(v_feature)
-        v_condition = torch.zeros((bs, 1, self.dim_condition), device=de, dtype=dt) if v_condition is None else v_condition
-        v_condition = v_condition.repeat(1, v_feature.shape[1], 1)
-        noise_features = torch.cat([noise_features, v_condition], dim=-1)
-        noise_features = noise_features + time_embeds
+
+        # concat condition
+        # v_condition = torch.zeros((bs, 1, self.dim_condition), device=de, dtype=dt) if v_condition is None else v_condition
+        # v_condition = v_condition.repeat(1, v_feature.shape[1], 1)
+        # noise_features = torch.cat([noise_features, v_condition], dim=-1)
+
+        # cross attn condition
+        assert v_condition is not None
+        noise_features = self.cross_attn_pre_proj(noise_features)
+        noise_features_add_cond = self.cross_attn_add_cond(
+                tgt=noise_features,
+                memory=v_condition.squeeze(1) if v_condition.shape[1] == 1 else v_condition
+        )
+        noise_features_add_cond = self.cross_attn_post_proj(noise_features_add_cond)
+
+        noise_features = noise_features_add_cond + time_embeds
 
         pred_x0 = self.net1(noise_features)
         pred_x0 = self.fc_out(pred_x0)
@@ -357,14 +382,15 @@ class Diffusion_condition(nn.Module):
                 imgs = v_data["conditions"]["imgs"]
                 num_imgs = imgs.shape[1]
                 imgs = imgs.reshape(-1, 3, 224, 224)
-                img_feature = self.img_model(imgs)
+                img_feature = self.img_model(imgs).last_hidden_state
             img_idx = v_data["conditions"]["img_id"]
             img_feature = self.img_fc(img_feature)
             if img_idx.shape[-1] > 1:
                 camera_embedding = self.camera_embedding(img_idx)
                 img_feature = (img_feature.reshape(-1, num_imgs, self.dim_condition) + camera_embedding).mean(dim=1)
             else:
-                img_feature = (img_feature.reshape(-1, num_imgs, self.dim_condition)).mean(dim=1)
+                # img_feature = (img_feature.reshape(-1, num_imgs, self.dim_condition)).mean(dim=1)
+                img_feature = img_feature
             condition = img_feature[:, None]
         elif self.with_pc:
             pc = v_data["conditions"]["points"]

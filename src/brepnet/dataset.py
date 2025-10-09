@@ -270,7 +270,6 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
             if v_training_mode == "training":
                 self.data_folders = self.data_folders * 100
 
-        self.disable_half = v_conf["disable_half"]
         print(len(self.data_folders))
 
     def __len__(self):

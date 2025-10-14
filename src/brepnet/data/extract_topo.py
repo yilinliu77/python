@@ -67,8 +67,8 @@ check_post_processing = False
 # ]
 
 data_root = Path(r"/mnt/e/yilin/data_step")
-output_root = Path(r"/mnt/d/img2brep/deepcad_v6/")
-data_split = r"src/brepnet/data/list/deepcad_total.txt"
+output_root = Path(r"/mnt/d/img2brep/deepcad_730/")
+data_split = r"src/brepnet/data/list/deepcad_7_30.txt"
 
 exception_files = [
     r"src/brepnet/bak/list_bak/abc_cube_ids.txt",

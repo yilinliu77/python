@@ -345,7 +345,7 @@ def get_brep(v_root, output_root, v_folder):
             "vertical_face_pair"    : vertical_face_pair,
         }
 
-        np.savez_compressed(output_root / v_folder / "data_v2.npz", **data_dict)
+        np.savez_compressed(output_root / v_folder / "data.npz", **data_dict)
 
         if check_post_processing:
             from src.brepnet.post.utils import construct_brep

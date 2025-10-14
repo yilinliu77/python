@@ -66,14 +66,14 @@ check_post_processing = False
 #     r"src/brepnet/bak/list_bak/abc_with_others_ids.txt",
 # ]
 
-# data_root = Path(r"/mnt/e/yilin/data_step")
-# output_root = Path(r"/mnt/d/img2brep/abc_v2/")
-# data_split = r"src/brepnet/data/list/abc_total.txt"
-#
-# exception_files = [
-#     r"src/brepnet/bak/list_bak/abc_cube_ids.txt",
-#     r"src/brepnet/bak/list_bak/abc_with_others_ids.txt",
-# ]
+data_root = Path(r"/mnt/e/yilin/data_step")
+output_root = Path(r"/mnt/d/img2brep/deepcad_v6/")
+data_split = r"src/brepnet/data/list/deepcad_total.txt"
+
+exception_files = [
+    r"src/brepnet/bak/list_bak/abc_cube_ids.txt",
+    r"src/brepnet/bak/list_bak/abc_with_others_ids.txt",
+]
 
 # data_root = Path(r"E:\data\img2brep\train_diffusion_test_data\data_step")
 # output_root = Path(r"E:\data\img2brep\train_diffusion_test_data\data_step_output")
@@ -345,7 +345,7 @@ def get_brep(v_root, output_root, v_folder):
             "vertical_face_pair"    : vertical_face_pair,
         }
 
-        np.savez_compressed(output_root / v_folder / "data.npz", **data_dict)
+        np.savez_compressed(output_root / v_folder / "data_v2.npz", **data_dict)
 
         if check_post_processing:
             from src.brepnet.post.utils import construct_brep

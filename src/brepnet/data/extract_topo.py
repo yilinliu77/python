@@ -404,7 +404,9 @@ if __name__ == '__main__':
     total_ids.sort()
     # total_ids = total_ids[:100]
     print("Total ids: {} -> {}".format(num_original, len(total_ids)))
+    print("Deling output_root: {}".format(output_root))
     check_dir(output_root)
+    print("Done del")
 
     # single process
     if debug_id is not None:

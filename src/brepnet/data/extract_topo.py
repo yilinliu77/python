@@ -266,8 +266,8 @@ def get_brep(v_root, output_root, v_folder):
             else:
                 pass
 
-        parallel_face_pair = []
-        vertical_face_pair = []
+        pos_parallel_face_pair, neg_parallel_face_pair = [], []
+        pos_vertical_face_pair, neg_vertical_face_pair = [], []
         face_dict_filtered_list = list(face_dict_filtered.keys())
         for i in range(len(face_dict_filtered_list)):
             for j in range(i+1, len(face_dict_filtered_list)):
@@ -278,20 +278,26 @@ def get_brep(v_root, output_root, v_folder):
                 normal2 = face_dict_filtered_normal[face2]
                 if np.isclose(normal1, normal2).all() or np.isclose(normal1, -normal2).all():
                     # parallel
-                    parallel_face_pair.append([face_dict_filtered[face1], face_dict_filtered[face2]])
+                    pos_parallel_face_pair.append([face_dict_filtered[face1], face_dict_filtered[face2]])
                     # pc = face_sample_points[[face_dict_filtered[face1], face_dict_filtered[face2]]][...,:3].reshape(-1,3)
                     # pc = trimesh.points.PointCloud(pc)
                     # pc.export(str(output_root / v_folder / f"parallel_{[face_dict_filtered[face1], face_dict_filtered[face2]]}.ply"))
+                else:
+                    neg_parallel_face_pair.append([face_dict_filtered[face1], face_dict_filtered[face2]])
 
-                elif np.abs(np.dot(normal1, normal2)) < 1e-3:
+                if np.abs(np.dot(normal1, normal2)) < 1e-3:
                     # vertical
-                    vertical_face_pair.append([face_dict_filtered[face1], face_dict_filtered[face2]])
+                    pos_vertical_face_pair.append([face_dict_filtered[face1], face_dict_filtered[face2]])
                     # pc = face_sample_points[[face_dict_filtered[face1], face_dict_filtered[face2]]][..., :3].reshape(-1, 3)
                     # pc = trimesh.points.PointCloud(pc)
                     # pc.export(str(output_root / v_folder / f"vertical_{[face_dict_filtered[face1], face_dict_filtered[face2]]}.ply"))
+                else:
+                    neg_vertical_face_pair.append([face_dict_filtered[face1], face_dict_filtered[face2]])
 
-        parallel_face_pair = np.array(parallel_face_pair, dtype=np.int32)
-        vertical_face_pair = np.array(vertical_face_pair, dtype=np.int32)
+        pos_parallel_face_pair = np.array(pos_parallel_face_pair, dtype=np.int32)
+        neg_parallel_face_pair = np.array(neg_parallel_face_pair, dtype=np.int32)
+        pos_vertical_face_pair = np.array(pos_vertical_face_pair, dtype=np.int32)
+        neg_vertical_face_pair = np.array(neg_vertical_face_pair, dtype=np.int32)
 
         # Sample points in edges
         edge_sample_points = []
@@ -341,8 +347,10 @@ def get_brep(v_root, output_root, v_folder):
             "face_adj"              : face_adj,
             "zero_positions"        : zero_positions,
 
-            "parallel_face_pair"    : parallel_face_pair,
-            "vertical_face_pair"    : vertical_face_pair,
+            "pos_parallel_face_pair"    : pos_parallel_face_pair,
+            "neg_parallel_face_pair"    : neg_parallel_face_pair,
+            "pos_vertical_face_pair"    : pos_vertical_face_pair,
+            "neg_vertical_face_pair"    : neg_vertical_face_pair,
         }
 
         np.savez_compressed(output_root / v_folder / "data.npz", **data_dict)

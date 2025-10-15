@@ -351,6 +351,13 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         condition = prepare_condition(self.condition, self.conditional_data_root, prefix, id_aug,
                                       self.cached_condition, self.transform, self.conf["num_points"])
 
+        # parallel and vertical face pair
+        pos_parallel_face_pair = data_npz['pos_parallel_face_pair']
+        neg_parallel_face_pair = data_npz['neg_parallel_face_pair']
+
+        pos_vertical_face_pair = data_npz['pos_vertical_face_pair']
+        neg_parallel_face_pair = data_npz['neg_vertical_face_pair']
+
         return (
             prefix,
             face_points, edge_points,

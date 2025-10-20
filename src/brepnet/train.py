@@ -27,8 +27,8 @@ from torchmetrics import MetricCollection
 import wandb
 from pytorch_lightning.loggers import WandbLogger
 
-os.environ["HTTP_PROXY"] = "http://172.31.178.126:7890"
-os.environ["HTTPS_PROXY"] = "http://172.31.178.126:7890"
+os.environ["HTTP_PROXY"] = "http://172.28.139.75:7890"
+os.environ["HTTPS_PROXY"] = "http://172.28.139.75:7890"
 
 class TrainAutoEncoder(pl.LightningModule):
     def __init__(self, hparams):

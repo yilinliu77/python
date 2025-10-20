@@ -354,9 +354,31 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         # parallel and vertical face pair
         pos_parallel_face_pair = data_npz['pos_parallel_face_pair']
         neg_parallel_face_pair = data_npz['neg_parallel_face_pair']
+        if neg_parallel_face_pair.shape[0] > pos_parallel_face_pair.shape[0]:
+            index = np.random.choice(neg_parallel_face_pair.shape[0], pos_parallel_face_pair.shape[0], replace=False)
+            neg_parallel_face_pair = neg_parallel_face_pair[index]
 
         pos_vertical_face_pair = data_npz['pos_vertical_face_pair']
-        neg_parallel_face_pair = data_npz['neg_vertical_face_pair']
+        neg_vertical_face_pair = data_npz['neg_vertical_face_pair']
+        if neg_vertical_face_pair.shape[0] > pos_vertical_face_pair.shape[0]:
+            index = np.random.choice(neg_vertical_face_pair.shape[0], pos_vertical_face_pair.shape[0], replace=False)
+            neg_vertical_face_pair = neg_vertical_face_pair[index]
+
+        pos_parallel_face_pair = np.array([[-1,-1]], dtype=np.int32) \
+            if pos_parallel_face_pair.shape[0] == 0 else pos_parallel_face_pair
+        pos_parallel_face_pair = torch.from_numpy(pos_parallel_face_pair)
+
+        neg_parallel_face_pair = np.array([[-1,-1]], dtype=np.int32) \
+            if neg_parallel_face_pair.shape[0] == 0 else neg_parallel_face_pair
+        neg_parallel_face_pair = torch.from_numpy(neg_parallel_face_pair)
+
+        pos_vertical_face_pair = np.array([[-1,-1]], dtype=np.int32) \
+            if pos_vertical_face_pair.shape[0] == 0 else pos_vertical_face_pair
+        pos_vertical_face_pair = torch.from_numpy(pos_vertical_face_pair)
+
+        neg_vertical_face_pair = np.array([[-1,-1]], dtype=np.int32) \
+            if neg_vertical_face_pair.shape[0] == 0 else neg_vertical_face_pair
+        neg_vertical_face_pair = torch.from_numpy(neg_vertical_face_pair)
 
         return (
             prefix,
@@ -364,6 +386,8 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
             face_norm, edge_norm,
             face_bbox, edge_bbox,
             edge_face_connectivity, zero_positions, face_adj,
+            pos_parallel_face_pair, neg_parallel_face_pair,
+            pos_vertical_face_pair, neg_vertical_face_pair,
             condition
         )
 
@@ -375,6 +399,8 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
             face_norm, edge_norm,
             face_bbox, edge_bbox,
             edge_face_connectivity, zero_positions, face_adj,
+            pos_parallel_face_pair, neg_parallel_face_pair,
+            pos_vertical_face_pair, neg_vertical_face_pair,
             conditions
         ) = zip(*batch)
         bs = len(prefix)
@@ -388,6 +414,12 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         for i in range(bs):
             edge_face_connectivity[i][:, 0] += num_edges
             edge_face_connectivity[i][:, 1:] += num_faces
+
+            pos_parallel_face_pair[i][pos_parallel_face_pair[i] != -1] += num_faces
+            neg_parallel_face_pair[i][neg_parallel_face_pair[i] != -1] += num_faces
+            pos_vertical_face_pair[i][pos_vertical_face_pair[i] != -1] += num_faces
+            neg_vertical_face_pair[i][neg_vertical_face_pair[i] != -1] += num_faces
+
             edge_conn_num.append(edge_face_connectivity[i].shape[0])
             flat_zero_positions.append(zero_positions[i] + num_faces)
             num_faces += face_norm[i].shape[0]
@@ -424,6 +456,12 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
             condition_out[key] = torch.stack(condition_out[key], dim=0) if isinstance(condition_out[key][0], torch.Tensor) else \
                 condition_out[key]
 
+        pos_parallel_face_pair = torch.cat(pos_parallel_face_pair)
+        neg_parallel_face_pair = torch.cat(neg_parallel_face_pair)
+        pos_vertical_face_pair = torch.cat(pos_vertical_face_pair)
+        neg_vertical_face_pair = torch.cat(neg_vertical_face_pair)
+
+
         return {
             "v_prefix"              : prefix,
             "face_points"           : torch.cat(face_points, dim=0).to(dtype),
@@ -435,6 +473,12 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
 
             "edge_face_connectivity": torch.cat(edge_face_connectivity, dim=0),
             "zero_positions"        : flat_zero_positions,
+
+            "pos_parallel_face_pair": pos_parallel_face_pair,
+            "neg_parallel_face_pair": neg_parallel_face_pair,
+            "pos_vertical_face_pair": pos_vertical_face_pair,
+            "neg_vertical_face_pair": neg_vertical_face_pair,
+
             "attn_mask"             : attn_mask,
             "edge_attn_mask"        : edge_attn_mask,
 

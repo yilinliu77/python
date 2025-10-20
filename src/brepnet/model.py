@@ -286,7 +286,11 @@ class AutoEncoder_1119(nn.Module):
         )
 
         self.inter = AttnIntersection3(df, 768, 12)
-        self.classifier = nn.Linear(df*2, 1)
+        self.classifier = nn.Linear(df * 2, 1)
+        self.inter_p = AttnIntersection3(df, 768, 12)
+        self.classifier_p = nn.Linear(df * 2, 1)
+        self.inter_v = AttnIntersection3(df, 768, 12)
+        self.classifier_v = nn.Linear(df * 2, 1)
 
         self.face_attn_proj_in2 = nn.Linear(df, bd)
         self.face_attn_proj_out2 = nn.Linear(bd, df)
@@ -513,6 +517,49 @@ class AutoEncoder_1119(nn.Module):
 
             decoding_results["loss_edge"] = loss_edge
 
+            # parallel
+            pos_parallel_face_pair = v_data["pos_parallel_face_pair"]
+            neg_parallel_face_pair = v_data["neg_parallel_face_pair"]
+            parallel_face_pair = torch.cat((pos_parallel_face_pair, neg_parallel_face_pair))
+            valid_mask = (parallel_face_pair != -1).sum(-1).bool()
+
+            true_parallel_embedding = face_z[pos_parallel_face_pair]
+            false_parallel_embedding = face_z[neg_parallel_face_pair]
+            id_false_start = true_parallel_embedding.shape[0]
+            feature_pair = torch.cat((true_parallel_embedding, false_parallel_embedding), dim=0)
+
+            feature_pair = self.inter_p(feature_pair)
+            pred = self.classifier_p(feature_pair)
+
+            gt_labels = torch.ones_like(pred)
+            gt_labels[id_false_start:] = 0
+            loss_parallel = F.binary_cross_entropy_with_logits(pred, gt_labels, reduction='none')
+            loss_parallel = loss_parallel[valid_mask].mean()
+
+            decoding_results["loss_parallel"] = loss_parallel
+
+            # vertical
+            pos_vertical_face_pair = v_data["pos_vertical_face_pair"]
+            neg_vertical_face_pair = v_data["neg_vertical_face_pair"]
+            vertical_face_pair = torch.cat((pos_vertical_face_pair, neg_vertical_face_pair))
+            valid_mask = (vertical_face_pair != -1).sum(-1).bool()
+
+            true_vertical_embedding = face_z[pos_vertical_face_pair]
+            false_vertical_embedding = face_z[neg_vertical_face_pair]
+            id_false_start = true_vertical_embedding.shape[0]
+            feature_pair = torch.cat((true_vertical_embedding, false_vertical_embedding), dim=0)
+
+            feature_pair = self.inter_p(feature_pair)
+            pred = self.classifier_p(feature_pair)
+
+            gt_labels = torch.ones_like(pred)
+            gt_labels[id_false_start:] = 0
+            loss_vertical = F.binary_cross_entropy_with_logits(pred, gt_labels, reduction='none')
+            loss_vertical = loss_vertical[valid_mask].mean()
+
+            decoding_results["loss_vertical"] = loss_vertical
+
+
         decoding_results["edge_points_local"] = self.edge_points_decoder(intersected_edge_feature)
         decoding_results["edge_center_scale"] = self.edge_center_scale_decoder(intersected_edge_feature)
         if "edge_features" in v_encoding_result:
@@ -544,6 +591,8 @@ class AutoEncoder_1119(nn.Module):
         )
         loss["edge_feature"] = v_decoding_result["loss_edge_feature"]
         loss["edge_classification"] = v_decoding_result["loss_edge"] * 0.1
+        loss["parallel_classification"] = v_decoding_result["loss_parallel"] * 0.1
+        loss["vertical_classification"] = v_decoding_result["loss_vertical"] * 0.1
         edge_face_connectivity = v_data["edge_face_connectivity"]
         loss["edge_norm"] = self.loss_fn(
             v_decoding_result["edge_points_local"],
@@ -684,7 +733,11 @@ class AutoEncoder_1119_light(AutoEncoder_1119):
         )
 
         self.inter = AttnIntersection3(df, 512, 8)
-        self.classifier = nn.Linear(df*2, 1)
+        self.classifier = nn.Linear(df * 2, 1)
+        self.inter_p = AttnIntersection3(df, 512, 8)
+        self.classifier_p = nn.Linear(df * 2, 1)
+        self.inter_v = AttnIntersection3(df, 512, 8)
+        self.classifier_v = nn.Linear(df * 2, 1)
 
         self.face_attn_proj_in2 = nn.Linear(df, bd)
         self.face_attn_proj_out2 = nn.Linear(bd, df)

@@ -457,10 +457,16 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
                 condition_out[key]
 
         pos_parallel_face_pair = torch.cat(pos_parallel_face_pair)
-        neg_parallel_face_pair = torch.cat(neg_parallel_face_pair)
-        pos_vertical_face_pair = torch.cat(pos_vertical_face_pair)
-        neg_vertical_face_pair = torch.cat(neg_vertical_face_pair)
+        pos_parallel_face_pair = torch.cat([pos_parallel_face_pair, pos_parallel_face_pair[:, [1,0]]])
 
+        neg_parallel_face_pair = torch.cat(neg_parallel_face_pair)
+        neg_parallel_face_pair = torch.cat([neg_parallel_face_pair, neg_parallel_face_pair[:, [1, 0]]])
+
+        pos_vertical_face_pair = torch.cat(pos_vertical_face_pair)
+        pos_vertical_face_pair = torch.cat([pos_vertical_face_pair, pos_vertical_face_pair[:, [1, 0]]])
+
+        neg_vertical_face_pair = torch.cat(neg_vertical_face_pair)
+        neg_vertical_face_pair = torch.cat([neg_vertical_face_pair, neg_vertical_face_pair[:, [1, 0]]])
 
         return {
             "v_prefix"              : prefix,

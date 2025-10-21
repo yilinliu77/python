@@ -591,8 +591,8 @@ class AutoEncoder_1119(nn.Module):
         )
         loss["edge_feature"] = v_decoding_result["loss_edge_feature"]
         loss["edge_classification"] = v_decoding_result["loss_edge"] * 0.1
-        loss["parallel_classification"] = v_decoding_result["loss_parallel"] * 0.1
-        loss["vertical_classification"] = v_decoding_result["loss_vertical"] * 0.1
+        loss["parallel_classification"] = v_decoding_result["loss_parallel"]
+        loss["vertical_classification"] = v_decoding_result["loss_vertical"]
         edge_face_connectivity = v_data["edge_face_connectivity"]
         loss["edge_norm"] = self.loss_fn(
             v_decoding_result["edge_points_local"],

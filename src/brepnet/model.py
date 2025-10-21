@@ -549,8 +549,8 @@ class AutoEncoder_1119(nn.Module):
             id_false_start = true_vertical_embedding.shape[0]
             feature_pair = torch.cat((true_vertical_embedding, false_vertical_embedding), dim=0)
 
-            feature_pair = self.inter_p(feature_pair)
-            pred = self.classifier_p(feature_pair)
+            feature_pair = self.inter_v(feature_pair)
+            pred = self.classifier_v(feature_pair)
 
             gt_labels = torch.ones_like(pred)
             gt_labels[id_false_start:] = 0

@@ -604,6 +604,9 @@ class AutoEncoder_1119(nn.Module):
         )
         if self.gaussian_weights > 0:
             loss["kl_loss"] = v_decoding_result["kl_loss"]
+
+        xyz = v_data["face_norm"][..., :3]
+
         return loss
 
     def forward(self, v_data, v_test=False):

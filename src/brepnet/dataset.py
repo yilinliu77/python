@@ -224,6 +224,7 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
             listfile = v_conf['train_dataset']
         elif v_training_mode == "validation":
             listfile = v_conf['val_dataset']
+            self.scale_factor = 1
         else:
             raise
 

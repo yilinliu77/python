@@ -46,12 +46,13 @@ import traceback, sys
 from PIL import Image
 
 from shared.occ_utils import normalize_shape, get_triangulations, get_primitives, get_ordered_edges
-from src.brepnet.post.utils import Shape
+from src.brepnet.post.utils import Shape, get_separated_surface
 
 # from src.brepnet.post.utils import construct_solid
 
 debug_id = None
-debug_id = "00000797"
+# debug_id = "00000797"
+debug_id = "00284207"
 # debug_id = "00001907"
 
 write_debug_data = False
@@ -76,8 +77,8 @@ check_post_processing = False
 #     r"src/brepnet/bak/list_bak/abc_with_others_ids.txt",
 # ]
 
-data_root = Path(r"E:\data\img2brep\train_diffusion_test_data\data_step")
-output_root = Path(r"E:\data\img2brep\train_diffusion_test_data\data_step_output")
+data_root = Path(r"E:\data\img2brep\20251022")
+output_root = Path(r"E:\data\img2brep\20251022\data_step_output")
 data_split = r"D:\WorkSpace\brepnet\src\brepnet\data\list\abc_total.txt"
 
 exception_files = [
@@ -107,6 +108,59 @@ def diable_occ_log():
     for idx in range(printers.Length()):
         printers.Value(idx + 1).SetTraceLevel(Message_Alarm)
 
+def check_normal_consistency(normals: np.ndarray, angle_threshold_deg: float = 5.0, consistency_ratio_thresh: float = 0.9) -> bool:
+    """
+    判断一组法向量是否朝向接近一致。
+
+    参数：
+        normals: 形状为 (N, 3) 的法向量 ndarray（无需提前归一化）
+        angle_threshold_deg: 夹角阈值（度），默认15°（小于此值视为一致）
+        consistency_ratio_thresh: 一致比例阈值，默认90%的法向量需满足夹角<阈值
+
+    返回：
+        bool: 法向是否朝向一致
+    """
+    # -------------------------- 1. 归一化法向量（关键！） --------------------------
+    # 计算每个法向量的L2范数（长度），保持维度以便广播
+    norms = np.linalg.norm(normals, axis=1, keepdims=True)
+    # 避免除以零（理论上法向不应为零，但安全处理）
+    norms = np.where(norms < 1e-8, 1.0, norms)  # 小于1e-8的视为1，不影响结果
+    normalized_normals = normals / norms  # 归一化后的单位法向量
+
+    # -------------------------- 2. 计算平均法向（参考方向） --------------------------
+    mean_normal = np.mean(normalized_normals, axis=0)  # 平均法向（未归一化）
+    mean_norm = np.linalg.norm(mean_normal)
+    # 若平均法向接近零向量，说明法向严重分散（直接返回不一致）
+    if mean_norm < 1e-8:
+        return False
+    mean_normal = mean_normal / mean_norm  # 归一化的平均法向
+
+    # -------------------------- 3. 计算每个法向量与平均方向的夹角（度） --------------------------
+    # 点积（单位向量点积=cosθ）
+    dot_products = np.sum(normalized_normals * mean_normal, axis=1)
+    # 数值稳定：限制点积在[-1, 1]范围内（避免arccos报错）
+    dot_products = np.clip(dot_products, -1.0, 1.0)
+    # 计算夹角（弧度→角度）
+    angles_rad = np.arccos(dot_products)
+    angles_deg = np.degrees(angles_rad)
+
+    # -------------------------- 4. 统计一致性 --------------------------
+    # 计算：夹角小于阈值的法向量比例
+    consistent_mask = angles_deg < angle_threshold_deg
+    consistent_ratio = np.mean(consistent_mask)
+
+    # 计算：夹角的均值和标准差（辅助判断）
+    mean_angle = np.mean(angles_deg)
+    std_angle = np.std(angles_deg)
+
+    # 打印统计结果（可选）
+    # print(f"平均夹角: {mean_angle:.2f}° | 夹角标准差: {std_angle:.2f}°")
+    # print(f"夹角 < {angle_threshold_deg}° 的比例: {consistent_ratio:.2%}")
+
+    # 判断条件：一致比例超过阈值（可结合均值/标准差调整）
+    is_consistent = consistent_ratio >= consistency_ratio_thresh
+
+    return is_consistent
 
 def get_brep(v_root, output_root, v_folder):
     random.seed(0)
@@ -213,6 +267,14 @@ def get_brep(v_root, output_root, v_folder):
                 key[1]
             ))
 
+        if is_viz:
+            safe_check_dir(output_root / v_folder / "viz")
+
+        # for face in face_dict:
+        #     # save the topo face to obj
+        #     v, f = get_separated_surface([face], v_precision1=0.1, v_precision2=0.2)
+        #     trimesh.Trimesh(vertices=v, faces=f).export(
+        #             output_root / v_folder / "viz" / f"face_{face_dict[face]}.obj")
 
         # Sample points in face
         face_sample_points = []
@@ -264,12 +326,17 @@ def get_brep(v_root, output_root, v_folder):
                 normal2 = face_sample_points[face_dict[face]][:, :, 3:].reshape(-1,3).mean(0)
                 assert np.isclose(normal1, normal2).all() or np.isclose(normal1, -normal2).all()
                 face_dict_filtered_normal[face] = normal2
+            elif check_normal_consistency(face_sample_points[face_dict[face]][:, :, 3:].reshape(-1,3)):
+                face_dict_filtered[face] = face_dict[face]
+                normal2 = face_sample_points[face_dict[face]][:, :, 3:].reshape(-1, 3).mean(0)
+                face_dict_filtered_normal[face] = normal2
             else:
                 pass
 
         pos_parallel_face_pair, neg_parallel_face_pair = [], []
         pos_vertical_face_pair, neg_vertical_face_pair = [], []
         face_dict_filtered_list = list(face_dict_filtered.keys())
+        face_dict_list = list(face_dict.keys())
         for i in range(len(face_dict_filtered_list)):
             for j in range(i+1, len(face_dict_filtered_list)):
                 face1 = face_dict_filtered_list[i]
@@ -277,13 +344,18 @@ def get_brep(v_root, output_root, v_folder):
                 # Check normal
                 normal1 = face_dict_filtered_normal[face1]
                 normal2 = face_dict_filtered_normal[face2]
-                if np.isclose(normal1, normal2).all() or np.isclose(normal1, -normal2).all():
+                if np.isclose(normal1, normal2, atol=1e-3).all() or np.isclose(normal1, -normal2, atol=1e-3).all():
                     # parallel
                     pos_parallel_face_pair.append([face_dict_filtered[face1], face_dict_filtered[face2]])
                     if is_viz:
-                        pc = face_sample_points[[face_dict_filtered[face1], face_dict_filtered[face2]]][...,:3].reshape(-1,3)
-                        pc = trimesh.points.PointCloud(pc)
-                        pc.export(str(output_root / v_folder / f"parallel_{[face_dict_filtered[face1], face_dict_filtered[face2]]}.ply"))
+                        # save the topo face to obj
+                        v, f = get_separated_surface([face1, face2], v_precision1=0.1, v_precision2=0.2)
+                        trimesh.Trimesh(vertices=v, faces=f).export(
+                                output_root / v_folder / "viz" / f"parallel_{len(pos_parallel_face_pair)-1}_{[face_dict_filtered[face1], face_dict_filtered[face2]]}.obj")
+                        res_face_list = face_dict_list.copy(); res_face_list.remove(face1); res_face_list.remove(face2)
+                        v, f = get_separated_surface(res_face_list, v_precision1=0.1, v_precision2=0.2)
+                        trimesh.Trimesh(vertices=v, faces=f).export(
+                                output_root / v_folder / "viz" / f"parallel_{len(pos_parallel_face_pair)-1}_{[face_dict_filtered[face1], face_dict_filtered[face2]]}_res.obj")
                 else:
                     neg_parallel_face_pair.append([face_dict_filtered[face1], face_dict_filtered[face2]])
 
@@ -291,9 +363,14 @@ def get_brep(v_root, output_root, v_folder):
                     # vertical
                     pos_vertical_face_pair.append([face_dict_filtered[face1], face_dict_filtered[face2]])
                     if is_viz:
-                        pc = face_sample_points[[face_dict_filtered[face1], face_dict_filtered[face2]]][..., :3].reshape(-1, 3)
-                        pc = trimesh.points.PointCloud(pc)
-                        pc.export(str(output_root / v_folder / f"vertical_{[face_dict_filtered[face1], face_dict_filtered[face2]]}.ply"))
+                        # save the topo face to obj
+                        v, f = get_separated_surface([face1, face2], v_precision1=0.1, v_precision2=0.2)
+                        trimesh.Trimesh(vertices=v, faces=f).export(
+                                output_root / v_folder / "viz" / f"vertical_{len(pos_vertical_face_pair)-1}_{[face_dict_filtered[face1], face_dict_filtered[face2]]}.obj")
+                        res_face_list = face_dict_list.copy(); res_face_list.remove(face1); res_face_list.remove(face2)
+                        v, f = get_separated_surface(res_face_list, v_precision1=0.1, v_precision2=0.2)
+                        trimesh.Trimesh(vertices=v, faces=f).export(
+                                output_root / v_folder / "viz" / f"vertical_{len(pos_vertical_face_pair)-1}_{[face_dict_filtered[face1], face_dict_filtered[face2]]}_res.obj")
                 else:
                     neg_vertical_face_pair.append([face_dict_filtered[face1], face_dict_filtered[face2]])
 

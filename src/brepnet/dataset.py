@@ -38,10 +38,10 @@ def normalize_coord1112(v_points):
     center = points.mean(dim=1, keepdim=True)
     scale = (torch.linalg.norm(points - center, dim=-1)).max(dim=1, keepdims=True)[0]
     assert scale.min() > 1e-3
-    points = (points - center) / (scale[:, None] + 1e-6)
-    target_points = (target_points - center) / (scale[:, None] + 1e-6)
+    points = (points - center) / (scale[:, None] + 1e-8)
+    target_points = (target_points - center) / (scale[:, None] + 1e-8)
     normals = target_points - points
-    normals = normals / (1e-6 + torch.linalg.norm(normals, dim=-1, keepdim=True))
+    normals = normals / (1e-8 + torch.linalg.norm(normals, dim=-1, keepdim=True))
 
     points = points.reshape(shape)
     normals = normals.reshape(shape)
@@ -61,10 +61,63 @@ def denormalize_coord1112(points, bbox):
     points = points * scale + center
     target_points = target_points * scale + center
     normal = target_points - points
-    normal = normal / (1e-6 + torch.linalg.norm(normal, dim=-1, keepdim=True))
+    normal = normal / (1e-8 + torch.linalg.norm(normal, dim=-1, keepdim=True))
     points = torch.cat((points, normal), dim=-1)
     return points
 
+
+def normalize_coord(v_points):
+    points = v_points[..., :3]
+    normals = v_points[..., 3:]
+    shape = points.shape
+    num_items = shape[0]
+    points = points.reshape(num_items, -1, 3)
+    target_points = points + normals.reshape(num_items, -1, 3)
+
+    bbox_min, _ = points.min(dim=1, keepdim=True)  # [batch, 1, 3]
+    bbox_max, _ = points.max(dim=1, keepdim=True)  # [batch, 1, 3]
+
+    scale = bbox_max - bbox_min
+
+    center = (bbox_min + bbox_max) / 2
+
+    points = (points - center) / (scale.max(dim=-1, keepdims=True)[0] + 1e-8)
+    target_points = (target_points - center) / (scale.max(dim=-1, keepdims=True)[0] + 1e-8)
+
+    normals = target_points - points
+    normals = normals / (1e-8 + torch.linalg.norm(normals, dim=-1, keepdim=True))
+
+    points = points.reshape(shape)
+    normals = normals.reshape(shape)
+
+    bbox = torch.cat((bbox_min[:, 0], bbox_max[:, 0]), dim=-1)
+
+    return points, normals, bbox
+
+
+def denormalize_coord(points, bbox):
+    normal = points[..., 3:]
+    points = points[..., :3]
+    target_points = points + normal
+
+    bbox_min = bbox[..., :3]
+    bbox_max = bbox[..., 3:6]
+
+    center = (bbox_min + bbox_max) / 2
+    scale = bbox_max - bbox_min
+    scale = scale.max(dim=-1, keepdim=True)[0]
+
+    while len(points.shape) > len(center.shape):
+        center = center.unsqueeze(1)
+        scale = scale.unsqueeze(1)
+
+    points = points * scale + center
+    target_points = target_points * scale + center
+    normal = target_points - points
+    normal = normal / (1e-8 + torch.linalg.norm(normal, dim=-1, keepdim=True))
+
+    points = torch.cat((points, normal), dim=-1)
+    return points
 
 class Dummy_dataset(torch.utils.data.Dataset):
     def __init__(self, v_mode, v_conf):
@@ -115,7 +168,7 @@ def rotate_pc(v_pc, v_angle):
 
     fn1 = ft1 - points1
 
-    fn1 = fn1 / (1e-6 + np.linalg.norm(fn1, axis=-1, keepdims=True))
+    fn1 = fn1 / (1e-8 + np.linalg.norm(fn1, axis=-1, keepdims=True))
     points = points1
     normals = fn1
     return np.concatenate((points, normals), axis=-1)
@@ -320,8 +373,8 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
                 fn1 = ft1 - fp1
                 ln1 = lt1 - lp1
 
-                fn1 = fn1 / (1e-6 + torch.linalg.norm(fn, dim=-1, keepdim=True))
-                ln1 = ln1 / (1e-6 + torch.linalg.norm(ln, dim=-1, keepdim=True))
+                fn1 = fn1 / (1e-8 + torch.linalg.norm(fn, dim=-1, keepdim=True))
+                ln1 = ln1 / (1e-8 + torch.linalg.norm(ln, dim=-1, keepdim=True))
                 face_points[..., 3:] = fn1.reshape(face_points[..., 3:].shape)
                 edge_points[..., 3:] = ln1.reshape(edge_points[..., 3:].shape)
 
@@ -340,14 +393,11 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
             index = np.random.choice(zero_positions.shape[0], edge_face_connectivity.shape[0], replace=False)
             zero_positions = zero_positions[index]
 
-        face_points_norm, face_normal_norm, face_center, face_scale = normalize_coord1112(face_points)
-        edge_points_norm, edge_normal_norm, edge_center, edge_scale = normalize_coord1112(edge_points)
+        face_points_norm, face_normal_norm, face_bbox = normalize_coord(face_points)
+        edge_points_norm, edge_normal_norm, edge_bbox = normalize_coord(edge_points)
 
         face_norm = torch.cat((face_points_norm, face_normal_norm), dim=-1)
         edge_norm = torch.cat((edge_points_norm, edge_normal_norm), dim=-1)
-
-        face_bbox = torch.cat((face_center, face_scale), dim=-1)
-        edge_bbox = torch.cat((edge_center, edge_scale), dim=-1)
 
         condition = prepare_condition(self.condition, self.conditional_data_root, prefix, id_aug,
                                       self.cached_condition, self.transform, self.conf["num_points"])

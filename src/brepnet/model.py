@@ -185,7 +185,7 @@ class AttnIntersection3(nn.Module):
 
         self.attn_proj_in = nn.Linear(dim_in, dim_latent)
         layer = nn.TransformerDecoderLayer(
-            dim_latent, 8, dim_feedforward=2048, dropout=0,
+            dim_latent, 8, dim_feedforward=2048, dropout=0.1,
             batch_first=True, norm_first=True)
         self.layers = ModuleList([copy.deepcopy(layer) for i in range(num_layers)])
         self.attn_proj_out = nn.Linear(dim_latent, dim_out)
@@ -253,7 +253,7 @@ class AutoEncoder_1119_light(nn.Module):
         ) # b c 1
 
         attn_layer = nn.TransformerEncoderLayer(
-            bd, 16, dim_feedforward=2048, dropout=0,
+            bd, 16, dim_feedforward=2048, dropout=0.1,
             batch_first=True, norm_first=True)
 
         self.bbox_encoder = nn.Sequential(
@@ -280,11 +280,7 @@ class AutoEncoder_1119_light(nn.Module):
 
         self.face_attn_proj_in = nn.Linear(df, bd)
         self.face_attn_proj_out = nn.Linear(bd, df)
-        self.face_attn = nn.TransformerEncoder(attn_layer, 4, nn.LayerNorm(bd))
-
-        self.face_attn_proj_in1 = nn.Linear(df, bd)
-        self.face_attn_proj_out1 = nn.Linear(bd, df)
-        self.face_attn1 = nn.TransformerEncoder(attn_layer, 4, nn.LayerNorm(bd))
+        self.face_attn = nn.TransformerEncoder(attn_layer, 8, nn.LayerNorm(bd))
 
         self.global_feature1 = nn.Sequential(
             nn.Linear(df, df),
@@ -457,10 +453,6 @@ class AutoEncoder_1119_light(nn.Module):
         face_z = torch.cat((fused_face_features, gf), dim=1)
         face_z = self.global_feature2(face_z) + fused_face_features
 
-        face_z = self.face_attn_proj_in1(face_z)
-        face_z = self.face_attn1(face_z, v_data["attn_mask"])
-        face_z = self.face_attn_proj_out1(face_z)
-
         return {
             "face_features": face_z,
             "edge_features": edge_features,
@@ -598,21 +590,21 @@ class AutoEncoder_1119_light(nn.Module):
         # Loss
         loss={}
 
-        # recon_face_points = denormalize_coord(v_decoding_result["face_points_local"], v_decoding_result["face_center_scale"])
-        # recon_edge_points1 = denormalize_coord(v_decoding_result["edge_points_local1"], v_decoding_result["edge_center_scale1"])
-        # recon_edge_points = denormalize_coord(v_decoding_result["edge_points_local"], v_decoding_result["edge_center_scale"])
-        # loss["face_coords"] = self.loss_fn(
-        #     recon_face_points,
-        #     v_data["face_points"]
-        # )
-        # loss["edge_coords1"] = self.loss_fn(
-        #     recon_edge_points1,
-        #     v_data["edge_points"]
-        # )
-        # loss["edge_coords"] = self.loss_fn(
-        #     recon_edge_points,
-        #     v_data["edge_points"][v_data["edge_face_connectivity"][:, 0]]
-        # )
+        recon_face_points = denormalize_coord(v_decoding_result["face_points_local"], v_decoding_result["face_center_scale"])
+        recon_edge_points1 = denormalize_coord(v_decoding_result["edge_points_local1"], v_decoding_result["edge_center_scale1"])
+        recon_edge_points = denormalize_coord(v_decoding_result["edge_points_local"], v_decoding_result["edge_center_scale"])
+        loss["face_coords"] = self.loss_fn(
+            recon_face_points,
+            v_data["face_points"]
+        )
+        loss["edge_coords1"] = self.loss_fn(
+            recon_edge_points1,
+            v_data["edge_points"]
+        )
+        loss["edge_coords"] = self.loss_fn(
+            recon_edge_points,
+            v_data["edge_points"][v_data["edge_face_connectivity"][:, 0]]
+        )
 
         loss["face_norm"] = self.loss_fn(
             v_decoding_result["face_points_local"],

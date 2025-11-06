@@ -19,9 +19,10 @@ from PIL import Image
 from scipy.spatial.transform import Rotation
 
 from shared.occ_utils import normalize_shape, get_triangulations, get_primitives, get_ordered_edges
+from scipy.spatial.transform import Rotation
 
 # debug_id = None
-debug_id = "00000093"
+debug_id = "00000797"
 
 data_root = Path(r"/mnt/e/yilin/data_step")
 npz_root = Path(r"/mnt/d/yilin/img2brep/abc_v2_npz")
@@ -64,6 +65,25 @@ class MyOffscreenRenderer(Viewer3d):
         self.SetModeShaded()
         self.set_bg_gradient_color([255, 255, 255], [255, 255, 255])
         self.capture_number = 0
+
+
+def fibonacci_sphere_samples(n):
+    """使用斐波那契螺旋在球面上均匀采样点"""
+    points = []
+    phi = np.pi * (3. - np.sqrt(5.))  # 黄金角度
+
+    for i in range(n):
+        y = 1 - (i / (n - 1)) * 2  # y从1到-1
+        radius = np.sqrt(1 - y * y)  # 在y处的半径
+
+        theta = phi * i  # 黄金角度旋转
+
+        x = np.cos(theta) * radius
+        z = np.sin(theta) * radius
+
+        points.append((x, y, z))
+
+    return np.array(points)
 
 # @ray.remote(num_cpus=1)
 def get_brep(v_root, output_root, v_folders):
@@ -111,8 +131,8 @@ def get_brep(v_root, output_root, v_folders):
             init_pos = np.array((2, 2, 2))
             up_pos = np.array((2, 2, 3))
 
-            x_steps = 8  # x轴8个角度
-            y_steps = 8  # y轴8个角度
+            x_steps = 4  # x轴8个角度
+            y_steps = 4  # y轴8个角度
             z_steps = 4  # z轴4个角度（通常不需要太多z轴旋转）
             total_views = x_steps * y_steps * z_steps
             for i in range(total_views):
@@ -130,7 +150,36 @@ def get_brep(v_root, output_root, v_folders):
 
                 display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
                 display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
+
                 filename = str(img_root / v_folder / f"shape_{i}.png")
+                data = display.GetImageData(224, 224)
+                img = Image.frombytes("RGB", (224, 224), data)
+                img1 = np.asarray(img)
+                img1 = img1[::-1]
+                # Image.fromarray(img1).save(filename)
+                display.View.Dump(str(img_root / v_folder / f"view_.png"))
+                svr_imgs.append(img1)
+
+            num_views = 256  # 任意数量的视角
+            sphere_points = fibonacci_sphere_samples(num_views) * 3  # 乘以半径
+            for i, point in enumerate(sphere_points):
+                # 相机位置在球面上
+                view = point
+
+                # 计算看向原点的上方向（保持Z轴向上）
+                # 需要更复杂的上方向计算来避免万向锁
+                direction = -view / np.linalg.norm(view)  # 看向原点的方向
+
+                # 构建相机坐标系
+                right = np.cross([0, 0, 1], direction)
+                right = right / np.linalg.norm(right)
+                up = np.cross(direction, right)
+
+                display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
+                display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
+                display.camera.SetFOVy(int(np.random.choice([30, 35, 40, 45, 50, 55, 60])))
+
+                filename = str(img_root / v_folder / f"shape_{total_views+i}.png")
                 data = display.GetImageData(224, 224)
                 img = Image.frombytes("RGB", (224, 224), data)
                 img1 = np.asarray(img)
@@ -141,15 +190,24 @@ def get_brep(v_root, output_root, v_folders):
 
             # Sketch
             sketch_imgs = []
+            display.camera.SetEyeAndCenter(gp_Pnt(2., 2., 2.), gp_Pnt(0., 0., 0.))
+            display.camera.SetUp(gp_Dir(0, 0, 1))
+            display.camera.SetAspect(1)
+            display.camera.SetFOVy(45)
+            display.View.Dump(str(img_root / v_folder / f"view_.png"))
+
+            init_pos = np.array((2, 2, 2))
+            up_pos = np.array((2, 2, 3))
+
             mat.SetAmbientColor(Quantity_Color(1, 1, 1, Quantity_TOC_RGB))
             display.camera.SetProjectionType(0)
             display.DisplayShape(shape, material=mat, update=True)
             display.View.Dump(str(img_root / v_folder / f"view_.png"))
-            for i in range(64):
+            for i in range(total_views):
                 angles = np.array([
-                    i % 4,
-                    i // 4 % 4,
-                    i // 16
+                    i % x_steps,
+                    i // x_steps % y_steps,
+                    i // (x_steps * y_steps)
                 ])
                 matrix = Rotation.from_euler('xyz', angles * np.pi / 2).as_matrix().T
                 view = (matrix @ init_pos.T).T
@@ -160,6 +218,8 @@ def get_brep(v_root, output_root, v_folders):
 
                 display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
                 display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
+                display.camera.SetFOVy(int(np.random.choice([30, 35, 40, 45, 50, 55, 60])))
+
                 filename = str(img_root / v_folder / f"wire_{i}.png")
                 data = display.GetImageData(224, 224)
                 img = Image.frombytes("RGB", (224, 224), data)
@@ -168,7 +228,39 @@ def get_brep(v_root, output_root, v_folders):
                 # Image.fromarray(img1).save(filename)
                 sketch_imgs.append(img1)
 
+            for i, point in enumerate(sphere_points):
+                # 相机位置在球面上
+                view = point
+
+                # 计算看向原点的上方向（保持Z轴向上）
+                # 需要更复杂的上方向计算来避免万向锁
+                direction = -view / np.linalg.norm(view)  # 看向原点的方向
+
+                # 构建相机坐标系
+                right = np.cross([0, 0, 1], direction)
+                right = right / np.linalg.norm(right)
+                up = np.cross(direction, right)
+
+                display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
+                display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
+                filename = str(img_root / v_folder / f"wire_{total_views+i}.png")
+                data = display.GetImageData(224, 224)
+                img = Image.frombytes("RGB", (224, 224), data)
+                img1 = np.asarray(img)
+                img1 = img1[::-1]
+                # Image.fromarray(img1).save(filename)
+                sketch_imgs.append(img1)
+
             # Multi view
+            display.camera.SetEyeAndCenter(gp_Pnt(2., 2., 2.), gp_Pnt(0., 0., 0.))
+            display.camera.SetUp(gp_Dir(0, 0, 1))
+            display.camera.SetAspect(1)
+            display.camera.SetFOVy(45)
+            display.View.Dump(str(img_root / v_folder / f"view_.png"))
+
+            init_pos = np.array((2, 2, 2))
+            up_pos = np.array((2, 2, 3))
+
             mat = Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_Silver)
             mat.SetReflectionModeOff(Graphic3d_TypeOfReflection.Graphic3d_TOR_SPECULAR)
             display.camera.SetProjectionType(1)

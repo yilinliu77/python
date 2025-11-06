@@ -21,18 +21,18 @@ from scipy.spatial.transform import Rotation
 from shared.occ_utils import normalize_shape, get_triangulations, get_primitives, get_ordered_edges
 from scipy.spatial.transform import Rotation
 
-# debug_id = None
-debug_id = "00000797"
+debug_id = None
+# debug_id = "00000797"
 
-data_root = Path(r"/mnt/e/yilin/data_step")
-npz_root = Path(r"/mnt/d/yilin/img2brep/abc_v2_npz")
-img_root = Path(r"/mnt/d/yilin/img2brep/abc_v2_png")
+data_root = Path(r"/mnt/d/img2brep/data_step")
+npz_root = Path(r"/mnt/d/img2brep/abc_v2_npz")
+img_root = Path(r"/mnt/d/img2brep/abc_v2_png")
 data_split = r"src/brepnet/data/list/abc_total.txt"
 
-data_root = Path(r"E:\data\img2brep\train_diffusion_test_data\data_step")
-npz_root = Path(r"E:\data\img2brep\train_diffusion_test_data\abc_v2_npz")
-img_root = Path(r"E:\data\img2brep\train_diffusion_test_data\abc_v2_png")
-data_split = r"D:\WorkSpace\brepnet\src\brepnet\data\list\abc_total.txt"
+# data_root = Path(r"E:\data\img2brep\train_diffusion_test_data\data_step")
+# npz_root = Path(r"E:\data\img2brep\train_diffusion_test_data\abc_v2_npz")
+# img_root = Path(r"E:\data\img2brep\train_diffusion_test_data\abc_v2_png")
+# data_split = r"D:\WorkSpace\brepnet\src\brepnet\data\list\abc_total.txt"
 
 exception_files = [
 ]

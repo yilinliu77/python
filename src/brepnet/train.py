@@ -331,7 +331,6 @@ def main(v_cfg: DictConfig):
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
         model = TrainAutoEncoder.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint, map_location="cpu")
         model.hydra_conf = v_cfg
-        model.model.gaussian_weights = 1e-7
     # model = torch.compile(model)
     if v_cfg["trainer"].evaluate:
         trainer.test(model)

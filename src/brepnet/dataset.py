@@ -38,10 +38,10 @@ def normalize_coord1112(v_points):
     center = points.mean(dim=1, keepdim=True)
     scale = (torch.linalg.norm(points - center, dim=-1)).max(dim=1, keepdims=True)[0]
     assert scale.min() > 1e-3
-    points = (points - center) / (scale[:, None] + 1e-6)
-    target_points = (target_points - center) / (scale[:, None] + 1e-6)
+    points = (points - center) / (scale[:, None] + 1e-8)
+    target_points = (target_points - center) / (scale[:, None] + 1e-8)
     normals = target_points - points
-    normals = normals / (1e-6 + torch.linalg.norm(normals, dim=-1, keepdim=True))
+    normals = normals / (1e-8 + torch.linalg.norm(normals, dim=-1, keepdim=True))
 
     points = points.reshape(shape)
     normals = normals.reshape(shape)
@@ -61,7 +61,7 @@ def denormalize_coord1112(points, bbox):
     points = points * scale + center
     target_points = target_points * scale + center
     normal = target_points - points
-    normal = normal / (1e-6 + torch.linalg.norm(normal, dim=-1, keepdim=True))
+    normal = normal / (1e-8 + torch.linalg.norm(normal, dim=-1, keepdim=True))
     points = torch.cat((points, normal), dim=-1)
     return points
 
@@ -115,7 +115,7 @@ def rotate_pc(v_pc, v_angle):
 
     fn1 = ft1 - points1
 
-    fn1 = fn1 / (1e-6 + np.linalg.norm(fn1, axis=-1, keepdims=True))
+    fn1 = fn1 / (1e-8 + np.linalg.norm(fn1, axis=-1, keepdims=True))
     points = points1
     normals = fn1
     return np.concatenate((points, normals), axis=-1)
@@ -320,8 +320,8 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
                 fn1 = ft1 - fp1
                 ln1 = lt1 - lp1
 
-                fn1 = fn1 / (1e-6 + torch.linalg.norm(fn, dim=-1, keepdim=True))
-                ln1 = ln1 / (1e-6 + torch.linalg.norm(ln, dim=-1, keepdim=True))
+                fn1 = fn1 / (1e-8 + torch.linalg.norm(fn, dim=-1, keepdim=True))
+                ln1 = ln1 / (1e-8 + torch.linalg.norm(ln, dim=-1, keepdim=True))
                 face_points[..., 3:] = fn1.reshape(face_points[..., 3:].shape)
                 edge_points[..., 3:] = ln1.reshape(edge_points[..., 3:].shape)
 

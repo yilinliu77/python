@@ -51,12 +51,12 @@ from src.brepnet.post.utils import Shape
 # from src.brepnet.post.utils import construct_solid
 
 debug_id = None
-debug_id = "00000797"
-# debug_id = "00001907"
+# debug_id = "00000797"
+debug_id = "00003390"
 
 write_debug_data = False
 is_viz = True
-check_post_processing = False
+check_post_processing = True
 
 # data_root = Path(r"/mnt/e/yilin/data_step")
 # output_root = Path(r"/mnt/d/img2brep/abc_v2/")
@@ -227,18 +227,58 @@ def get_brep(v_root, output_root, v_folder):
 
             face_dict_geom_type[face] = surface.GetType()
 
+            surface.UResolution(1e-3)
+            surface.VResolution(1e-3)
+
             first_u = surface.FirstUParameter()
             last_u = surface.LastUParameter()
             first_v = surface.FirstVParameter()
             last_v = surface.LastVParameter()
-            u = np.linspace(first_u, last_u, num=sample_resolution)
-            v = np.linspace(first_v, last_v, num=sample_resolution)
+
+            corner_params = [
+                (first_u, first_v),  # 角点A: 当前(0,0)
+                (first_u, last_v),   # 角点B: 当前(0,15)
+                (last_u, first_v),   # 角点C: 当前(15,0)
+                (last_u, last_v)     # 角点D: 当前(15,15)
+            ]
+
+            # 采样四个角点，用于确定正确的UV方向
+            corner_points = []
+            for u, v in corner_params:
+                pnt = surface.Value(u, v)
+                corner_points.append(np.array([pnt.X(), pnt.Y(), pnt.Z()]))
+            corner_points = np.array(corner_points)  # [4, 3]
+
+            # 使用综合评分：优先X坐标，其次Y坐标, 其次Z坐标
+            corner_scores = corner_points[:, 0] * 100 + corner_points[:, 1] * 10 + corner_points[:, 2]
+            bottom_left_idx = np.argmin(corner_scores)
+
+            # 直接映射四种情况的UV采样顺序
+            if bottom_left_idx == 0:
+                # 情况0: 当前UV参数化正确，直接采样
+                u = np.linspace(first_u, last_u, sample_resolution)
+                v = np.linspace(first_v, last_v, sample_resolution)
+            elif bottom_left_idx == 1:
+                # 情况1: 需要翻转V方向
+                u = np.linspace(first_u, last_u, sample_resolution)
+                v = np.linspace(last_v, first_v, sample_resolution)  # 反向
+            elif bottom_left_idx == 2:
+                # 情况2: 需要翻转U方向
+                u = np.linspace(last_u, first_u, sample_resolution)  # 反向
+                v = np.linspace(first_v, last_v, sample_resolution)
+            elif bottom_left_idx == 3:
+                # 情况3: 需要同时翻转U和V方向
+                u = np.linspace(last_u, first_u, sample_resolution)  # 反向
+                v = np.linspace(last_v, first_v, sample_resolution)  # 反向
+            else:
+                raise ValueError("Unexpected bottom_left_idx: {}".format(bottom_left_idx))
+
             u, v = np.meshgrid(u, v)
             points = []
             for i in range(u.shape[0]):
                 for j in range(u.shape[1]):
                     pnt = surface.Value(u[i, j], v[i, j])
-                    props = GeomLProp_SLProps(surface.Surface().Surface(), u[i, j], v[i, j], 1, 0.01)
+                    props = GeomLProp_SLProps(surface.Surface().Surface(), u[i, j], v[i, j], 1, 1e-8)
                     dir = props.Normal()
                     points.append(np.array([pnt.X(), pnt.Y(), pnt.Z(), dir.X(), dir.Y(), dir.Z()], dtype=np.float32))
 
@@ -341,6 +381,15 @@ def get_brep(v_root, output_root, v_folder):
 
         zero_positions = np.stack(np.where(face_adj == 0), axis=1)
 
+        # add noise
+        # noise_scale = 1e-3
+        # edge_sample_points_noise = np.random.randn(*edge_sample_points.shape) * noise_scale
+        # face_sample_points_noise = np.random.randn(*face_sample_points.shape) * noise_scale
+        # edge_sample_points_noise[edge_sample_points_noise > noise_scale] = noise_scale
+        # face_sample_points_noise[face_sample_points_noise > noise_scale] = noise_scale
+        # edge_sample_points += edge_sample_points_noise
+        # face_sample_points += face_sample_points_noise
+
         data_dict = {
             'sample_points_lines'   : edge_sample_points.astype(np.float32),
             'sample_points_faces'   : face_sample_points.astype(np.float32),
@@ -359,22 +408,10 @@ def get_brep(v_root, output_root, v_folder):
         np.savez_compressed(output_root / v_folder / "data.npz", **data_dict)
 
         if check_post_processing:
-            from src.brepnet.post.utils import construct_brep
-
-            shape = Shape(face_sample_points[..., :3], edge_sample_points[..., :3], edge_face_connectivity, False)
-            shape.remove_half_edges()  # will filter some invalid intersection edges
-            shape.check_openness()
-            shape.build_fe()
-            shape.build_vertices(0.2)
-            _, mesh, solid = construct_brep(
-                    shape,
-                    2e-2,
-                    False,
-                    # debug_face_idx=[4]
-            )
-            if solid is None:
-                raise ValueError("Post processing failed")
-            write_step_file(solid, str(output_root / v_folder / "post_processed_shape.step"))
+            from src.brepnet.post.construct_brep import construct_brep_from_datanpz
+            construct_brep_from_datanpz(str(output_root), str(output_root), v_folder,
+                                        v_drop_num=0, use_cuda=False, is_optimize_geom=False,
+                                        isdebug=False, is_save_data=True, from_scratch=False)
             pass
 
         if write_debug_data:

@@ -24,10 +24,15 @@ from scipy.spatial.transform import Rotation
 debug_id = None
 # debug_id = "00000797"
 
+# data_root = Path(r"/mnt/d/img2brep/data_step")
+# npz_root = Path(r"/mnt/d/img2brep/abc_v2_npz")
+# img_root = Path(r"/mnt/d/img2brep/abc_v2_png")
+# data_split = r"src/brepnet/data/list/abc_total.txt"
+
 data_root = Path(r"/mnt/d/img2brep/data_step")
-npz_root = Path(r"/mnt/d/img2brep/abc_v2_npz")
-img_root = Path(r"/mnt/d/img2brep/abc_v2_png")
-data_split = r"src/brepnet/data/list/abc_total.txt"
+npz_root = Path(r"/mnt/d/img2brep/deepcad_v6_npz")
+img_root = Path(r"/mnt/d/img2brep/deepcad_v6_png")
+data_split = r"src/brepnet/data/list/deepcad_7_30.txt"
 
 # data_root = Path(r"E:\data\img2brep\train_diffusion_test_data\data_step")
 # npz_root = Path(r"E:\data\img2brep\train_diffusion_test_data\abc_v2_npz")

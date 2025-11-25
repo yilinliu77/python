@@ -543,8 +543,16 @@ class Diffusion_dataset(torch.utils.data.Dataset):
             for item in filelist:
                 if os.path.exists(self.conditional_data_root / item):
                     data_folders.append(item)
-            print("Filter out {} folders without feat".format(len(filelist) - len(data_folders)))
+            print("Filter out {} folders without cond feat".format(len(filelist) - len(data_folders)))
             filelist = data_folders
+
+        # Check face_z data
+        data_folders = []
+        for item in filelist:
+            if os.path.exists(self.latent_root / (item + f"_{0}") / "features.npy"):
+                data_folders.append(item)
+        print("Filter out {} folders without latent".format(len(filelist) - len(data_folders)))
+        filelist = data_folders
 
         if v_conf["overfit"]:  # Overfitting mode
             self.data_folders = filelist[:100] * scale_factor

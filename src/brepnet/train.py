@@ -323,6 +323,7 @@ def main(v_cfg: DictConfig):
         precision=v_cfg["trainer"]["accelerator"],
         gradient_clip_algorithm="norm",
         gradient_clip_val=0.5,
+        accumulate_grad_batches=8,
         # profiler="advanced",
         # max_steps=100
     )

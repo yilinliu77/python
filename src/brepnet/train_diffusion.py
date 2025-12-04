@@ -214,6 +214,7 @@ class TrainDiffusion(pl.LightningModule):
                           )
 
     def test_step(self, batch, batch_idx):
+        # import ipdb; ipdb.set_trace()
         if batch_idx == 0:
             seed_everything(self.global_rank)
         data = batch

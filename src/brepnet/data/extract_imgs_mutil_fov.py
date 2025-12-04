@@ -196,62 +196,62 @@ def get_brep(v_root, output_root, v_folders):
                 display.View.Dump(str(img_root / v_folder / f"view_.png"))
                 svr_imgs.append(img1)
 
-            num_views = 256  # 任意数量的视角
-            sphere_points = fibonacci_sphere_samples(num_views) * 3  # 乘以半径
-            for i, point in enumerate(sphere_points):
-                # 相机位置在球面上
-                view = point
+            # num_views = 256  # 任意数量的视角
+            # sphere_points = fibonacci_sphere_samples(num_views) * 3  # 乘以半径
+            # for i, point in enumerate(sphere_points):
+            #     # 相机位置在球面上
+            #     view = point
 
-                # 计算看向原点的上方向（保持Z轴向上）
-                # 需要更复杂的上方向计算来避免万向锁
-                direction = -view / np.linalg.norm(view)  # 看向原点的方向
+            #     # 计算看向原点的上方向（保持Z轴向上）
+            #     # 需要更复杂的上方向计算来避免万向锁
+            #     direction = -view / np.linalg.norm(view)  # 看向原点的方向
 
-                # 构建相机坐标系
-                right = np.cross([0, 0, 1], direction)
-                right = right / np.linalg.norm(right)
-                up = np.cross(direction, right)
+            #     # 构建相机坐标系
+            #     right = np.cross([0, 0, 1], direction)
+            #     right = right / np.linalg.norm(right)
+            #     up = np.cross(direction, right)
 
-                display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
-                display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
-                display.camera.SetFOVy(int(np.random.choice([30, 35, 40, 45, 50])))
+            #     display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
+            #     display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
+            #     display.camera.SetFOVy(int(np.random.choice([30, 35, 40, 45, 50])))
 
-                display.camera.SetProjectionType(0)
-                filename = str(img_root / v_folder / f"shape_{total_views+total_views+i}.png")
-                data = display.GetImageData(224, 224)
-                img = Image.frombytes("RGB", (224, 224), data)
-                img1 = np.asarray(img)
-                img1 = img1[::-1]
-                #Image.fromarray(img1).save(filename)
-                display.View.Dump(str(img_root / v_folder / f"view_.png"))
-                svr_imgs.append(img1)
+            #     display.camera.SetProjectionType(0)
+            #     filename = str(img_root / v_folder / f"shape_{total_views+total_views+i}.png")
+            #     data = display.GetImageData(224, 224)
+            #     img = Image.frombytes("RGB", (224, 224), data)
+            #     img1 = np.asarray(img)
+            #     img1 = img1[::-1]
+            #     #Image.fromarray(img1).save(filename)
+            #     display.View.Dump(str(img_root / v_folder / f"view_.png"))
+            #     svr_imgs.append(img1)
 
-            sphere_points = fibonacci_sphere_samples(num_views) * 3  # 乘以半径
-            for i, point in enumerate(sphere_points):
-                # 相机位置在球面上
-                view = point
+            # sphere_points = fibonacci_sphere_samples(num_views) * 3  # 乘以半径
+            # for i, point in enumerate(sphere_points):
+            #     # 相机位置在球面上
+            #     view = point
 
-                # 计算看向原点的上方向（保持Z轴向上）
-                # 需要更复杂的上方向计算来避免万向锁
-                direction = -view / np.linalg.norm(view)  # 看向原点的方向
+            #     # 计算看向原点的上方向（保持Z轴向上）
+            #     # 需要更复杂的上方向计算来避免万向锁
+            #     direction = -view / np.linalg.norm(view)  # 看向原点的方向
 
-                # 构建相机坐标系
-                right = np.cross([0, 0, 1], direction)
-                right = right / np.linalg.norm(right)
-                up = np.cross(direction, right)
+            #     # 构建相机坐标系
+            #     right = np.cross([0, 0, 1], direction)
+            #     right = right / np.linalg.norm(right)
+            #     up = np.cross(direction, right)
 
-                display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
-                display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
-                display.camera.SetFOVy(int(np.random.choice([30, 35, 40, 45, 50])))
+            #     display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
+            #     display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
+            #     display.camera.SetFOVy(int(np.random.choice([30, 35, 40, 45, 50])))
 
-                display.camera.SetProjectionType(1)
-                filename = str(img_root / v_folder / f"shape_{total_views + total_views + num_views + i}.png")
-                data = display.GetImageData(224, 224)
-                img = Image.frombytes("RGB", (224, 224), data)
-                img1 = np.asarray(img)
-                img1 = img1[::-1]
-                #Image.fromarray(img1).save(filename)
-                display.View.Dump(str(img_root / v_folder / f"view_.png"))
-                svr_imgs.append(img1)
+            #     display.camera.SetProjectionType(1)
+            #     filename = str(img_root / v_folder / f"shape_{total_views + total_views + num_views + i}.png")
+            #     data = display.GetImageData(224, 224)
+            #     img = Image.frombytes("RGB", (224, 224), data)
+            #     img1 = np.asarray(img)
+            #     img1 = img1[::-1]
+            #     #Image.fromarray(img1).save(filename)
+            #     display.View.Dump(str(img_root / v_folder / f"view_.png"))
+            #     svr_imgs.append(img1)
 
             # Sketch
             sketch_imgs = []
@@ -320,121 +320,121 @@ def get_brep(v_root, output_root, v_folders):
                 #Image.fromarray(img1).save(filename)
                 sketch_imgs.append(img1)
 
-            for i, point in enumerate(sphere_points):
-                # 相机位置在球面上
-                view = point
+            # for i, point in enumerate(sphere_points):
+            #     # 相机位置在球面上
+            #     view = point
 
-                # 计算看向原点的上方向（保持Z轴向上）
-                # 需要更复杂的上方向计算来避免万向锁
-                direction = -view / np.linalg.norm(view)  # 看向原点的方向
+            #     # 计算看向原点的上方向（保持Z轴向上）
+            #     # 需要更复杂的上方向计算来避免万向锁
+            #     direction = -view / np.linalg.norm(view)  # 看向原点的方向
 
-                # 构建相机坐标系
-                right = np.cross([0, 0, 1], direction)
-                right = right / np.linalg.norm(right)
-                up = np.cross(direction, right)
+            #     # 构建相机坐标系
+            #     right = np.cross([0, 0, 1], direction)
+            #     right = right / np.linalg.norm(right)
+            #     up = np.cross(direction, right)
 
-                display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
-                display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
-                display.camera.SetFOVy(int(np.random.choice([30, 35, 40, 45, 50])))
+            #     display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
+            #     display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
+            #     display.camera.SetFOVy(int(np.random.choice([30, 35, 40, 45, 50])))
 
-                display.camera.SetProjectionType(0)
-                filename = str(img_root / v_folder / f"wire_{total_views+total_views+i}.png")
-                data = display.GetImageData(224, 224)
-                img = Image.frombytes("RGB", (224, 224), data)
-                img1 = np.asarray(img)
-                img1 = img1[::-1]
-                #Image.fromarray(img1).save(filename)
-                sketch_imgs.append(img1)
+            #     display.camera.SetProjectionType(0)
+            #     filename = str(img_root / v_folder / f"wire_{total_views+total_views+i}.png")
+            #     data = display.GetImageData(224, 224)
+            #     img = Image.frombytes("RGB", (224, 224), data)
+            #     img1 = np.asarray(img)
+            #     img1 = img1[::-1]
+            #     #Image.fromarray(img1).save(filename)
+            #     sketch_imgs.append(img1)
 
-            for i, point in enumerate(sphere_points):
-                # 相机位置在球面上
-                view = point
+            # for i, point in enumerate(sphere_points):
+            #     # 相机位置在球面上
+            #     view = point
 
-                # 计算看向原点的上方向（保持Z轴向上）
-                # 需要更复杂的上方向计算来避免万向锁
-                direction = -view / np.linalg.norm(view)  # 看向原点的方向
+            #     # 计算看向原点的上方向（保持Z轴向上）
+            #     # 需要更复杂的上方向计算来避免万向锁
+            #     direction = -view / np.linalg.norm(view)  # 看向原点的方向
 
-                # 构建相机坐标系
-                right = np.cross([0, 0, 1], direction)
-                right = right / np.linalg.norm(right)
-                up = np.cross(direction, right)
+            #     # 构建相机坐标系
+            #     right = np.cross([0, 0, 1], direction)
+            #     right = right / np.linalg.norm(right)
+            #     up = np.cross(direction, right)
 
-                display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
-                display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
-                display.camera.SetFOVy(int(np.random.choice([30, 35, 40, 45, 50])))
+            #     display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
+            #     display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
+            #     display.camera.SetFOVy(int(np.random.choice([30, 35, 40, 45, 50])))
 
-                display.camera.SetProjectionType(1)
-                filename = str(img_root / v_folder / f"wire_{total_views+total_views+num_views+i}.png")
-                data = display.GetImageData(224, 224)
-                img = Image.frombytes("RGB", (224, 224), data)
-                img1 = np.asarray(img)
-                img1 = img1[::-1]
-                #Image.fromarray(img1).save(filename)
-                sketch_imgs.append(img1)
+            #     display.camera.SetProjectionType(1)
+            #     filename = str(img_root / v_folder / f"wire_{total_views+total_views+num_views+i}.png")
+            #     data = display.GetImageData(224, 224)
+            #     img = Image.frombytes("RGB", (224, 224), data)
+            #     img1 = np.asarray(img)
+            #     img1 = img1[::-1]
+            #     #Image.fromarray(img1).save(filename)
+            #     sketch_imgs.append(img1)
 
             # Multi view
-            display.camera.SetEyeAndCenter(gp_Pnt(2., 2., 2.), gp_Pnt(0., 0., 0.))
-            display.camera.SetUp(gp_Dir(0, 0, 1))
-            display.camera.SetAspect(1)
-            display.camera.SetFOVy(45)
-            display.View.Dump(str(img_root / v_folder / f"view_.png"))
+            # display.camera.SetEyeAndCenter(gp_Pnt(2., 2., 2.), gp_Pnt(0., 0., 0.))
+            # display.camera.SetUp(gp_Dir(0, 0, 1))
+            # display.camera.SetAspect(1)
+            # display.camera.SetFOVy(45)
+            # display.View.Dump(str(img_root / v_folder / f"view_.png"))
 
-            init_pos = np.array((2, 2, 2))
-            up_pos = np.array((2, 2, 3))
+            # init_pos = np.array((2, 2, 2))
+            # up_pos = np.array((2, 2, 3))
 
-            mat = Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_Silver)
-            mat.SetReflectionModeOff(Graphic3d_TypeOfReflection.Graphic3d_TOR_SPECULAR)
-            display.camera.SetProjectionType(1)
-            display.DisplayShape(shape, material=mat, update=True)
-            display.View.Dump(str(img_root / v_folder / f"view_.png"))
-            mvr_imgs = []
+            # mat = Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_Silver)
+            # mat.SetReflectionModeOff(Graphic3d_TypeOfReflection.Graphic3d_TOR_SPECULAR)
+            # display.camera.SetProjectionType(1)
+            # display.DisplayShape(shape, material=mat, update=True)
+            # display.View.Dump(str(img_root / v_folder / f"view_.png"))
+            # mvr_imgs = []
 
-            for j in range(8):
-                if j == 0:
-                    init_pos = np.array((2, 2, 2))
-                elif j == 1:
-                    init_pos = np.array((-2, 2, 2))
-                elif j == 2:
-                    init_pos = np.array((-2, -2, 2))
-                elif j == 3:
-                    init_pos = np.array((2, -2, 2))
-                elif j == 4:
-                    init_pos = np.array((2, 2, -2))
-                elif j == 5:
-                    init_pos = np.array((-2, 2, -2))
-                elif j == 6:
-                    init_pos = np.array((-2, -2, -2))
-                elif j == 7:
-                    init_pos = np.array((2, -2, -2))
-                up_pos = init_pos + np.array((0, 0, 1))
-                for i in range(64):
-                    angles = np.array([
-                        i % 4,
-                        i // 4 % 4,
-                        i // 16
-                    ])
-                    matrix = Rotation.from_euler('xyz', angles * np.pi / 2).as_matrix().T
-                    view = (matrix @ init_pos.T).T
-                    up = (matrix @ up_pos.T).T
+            # for j in range(8):
+            #     if j == 0:
+            #         init_pos = np.array((2, 2, 2))
+            #     elif j == 1:
+            #         init_pos = np.array((-2, 2, 2))
+            #     elif j == 2:
+            #         init_pos = np.array((-2, -2, 2))
+            #     elif j == 3:
+            #         init_pos = np.array((2, -2, 2))
+            #     elif j == 4:
+            #         init_pos = np.array((2, 2, -2))
+            #     elif j == 5:
+            #         init_pos = np.array((-2, 2, -2))
+            #     elif j == 6:
+            #         init_pos = np.array((-2, -2, -2))
+            #     elif j == 7:
+            #         init_pos = np.array((2, -2, -2))
+            #     up_pos = init_pos + np.array((0, 0, 1))
+            #     for i in range(64):
+            #         angles = np.array([
+            #             i % 4,
+            #             i // 4 % 4,
+            #             i // 16
+            #         ])
+            #         matrix = Rotation.from_euler('xyz', angles * np.pi / 2).as_matrix().T
+            #         view = (matrix @ init_pos.T).T
+            #         up = (matrix @ up_pos.T).T
 
-                    # new_v = (matrix.T @ np.asarray(v).T).T
-                    # trimesh.Trimesh(vertices=new_v, faces=f).export(str(img_root / v_folder / f"mesh_{i}.ply"))
+            #         # new_v = (matrix.T @ np.asarray(v).T).T
+            #         # trimesh.Trimesh(vertices=new_v, faces=f).export(str(img_root / v_folder / f"mesh_{i}.ply"))
 
-                    display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
-                    display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
-                    filename = str(img_root / v_folder / f"mvr_{i}_{j}.png")
-                    data = display.GetImageData(224, 224)
-                    img = Image.frombytes("RGB", (224, 224), data)
-                    img1 = np.asarray(img)
-                    img1 = img1[::-1]
-                    # Image.fromarray(img1).save(filename)
-                    mvr_imgs.append(img1)
+            #         display.camera.SetEyeAndCenter(gp_Pnt(view[0], view[1], view[2]), gp_Pnt(0., 0., 0.))
+            #         display.camera.SetUp(gp_Dir(up[0], up[1], up[2]))
+            #         filename = str(img_root / v_folder / f"mvr_{i}_{j}.png")
+            #         data = display.GetImageData(224, 224)
+            #         img = Image.frombytes("RGB", (224, 224), data)
+            #         img1 = np.asarray(img)
+            #         img1 = img1[::-1]
+            #         # Image.fromarray(img1).save(filename)
+            #         mvr_imgs.append(img1)
 
             svr_imgs = np.stack(svr_imgs, axis=0)
-            mvr_imgs = np.stack(mvr_imgs, axis=0)
+            # mvr_imgs = np.stack(mvr_imgs, axis=0)
             sketch_imgs = np.stack(sketch_imgs, axis=0)
             data_dict["svr_imgs"] = svr_imgs
-            data_dict["mvr_imgs"] = mvr_imgs
+            # data_dict["mvr_imgs"] = mvr_imgs
             data_dict["sketch_imgs"] = sketch_imgs
 
             np.savez_compressed(output_root / v_folder / "data.npz", **data_dict)

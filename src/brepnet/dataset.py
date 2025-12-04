@@ -164,7 +164,7 @@ def prepare_condition(v_condition_names, v_cond_root, v_folder_path, v_id_aug,
             # ori_data = np.load(v_cond_root / v_folder_path / "imgs.npz")
             ori_data = np.load(v_cond_root / v_folder_path / "imgs_new.npz")
             if "single_img" in v_condition_names:
-                imgs = ori_data["svr_imgs"][v_id_aug][None, :]
+                imgs = ori_data["svr_imgs"][v_id_aug+64][None, :]
                 # imgs = ori_data["svr_imgs"][v_id_aug+int(np.random.choice([0, 64]))][None, :]
                 img_id = np.array([0], dtype=np.int64)
             elif "multi_img" in v_condition_names:

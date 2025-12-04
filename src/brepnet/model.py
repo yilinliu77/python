@@ -185,7 +185,7 @@ class AttnIntersection3(nn.Module):
 
         self.attn_proj_in = nn.Linear(dim_in, dim_latent)
         layer = nn.TransformerDecoderLayer(
-            dim_latent, 8, dim_feedforward=2048, dropout=0,
+            dim_latent, 16, dim_feedforward=2048, dropout=0,
             batch_first=True, norm_first=True)
         self.layers = ModuleList([copy.deepcopy(layer) for i in range(num_layers)])
         self.attn_proj_out = nn.Linear(dim_latent, dim_out)
@@ -473,11 +473,11 @@ class AutoEncoder_1119_light(nn.Module):
             nn.Linear(df, df),
         )
 
-        self.inter = AttnIntersection3(df, df * 2, 512, 8)
+        self.inter = AttnIntersection3(df, df * 2, 512, 12)
         self.classifier = nn.Linear(df * 2, 1)
-        self.inter_p = AttnIntersection3(df, df * 2, 512, 4)
+        self.inter_p = AttnIntersection3(df, df * 2, 512, 2)
         self.classifier_p = nn.Linear(df * 2, 1)
-        self.inter_v = AttnIntersection3(df, df * 2, 512, 4)
+        self.inter_v = AttnIntersection3(df, df * 2, 512, 2)
         self.classifier_v = nn.Linear(df * 2, 1)
 
         self.face_attn_proj_in2 = nn.Linear(df, bd)

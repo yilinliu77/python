@@ -171,6 +171,45 @@ class res_block_xd(nn.Module):
 def inv_sigmoid(x):
     return torch.log(x / (1 - x))
 
+def compute_cos_loss(normal1, normal2, reduction='mean'):
+    cos_sim = torch.sum(normal1 * normal2, dim=-1)  # 形状: (M,)
+    loss = 1.0 - torch.abs(cos_sim)
+
+    if reduction == 'mean':
+        loss = torch.mean(loss)
+    elif reduction == 'sum':
+        loss = torch.sum(loss)
+    return loss
+
+def compute_topology_loss(points_normals, topology_pairs, topology_type, reduction='mean'):
+    assert topology_type in ['parallel', 'vertical'], "topology_type must be 'parallel' or 'vertical'"
+    normals = points_normals[..., 3:]
+    avg_normals = torch.mean(normals, dim=(1, 2))  # 形状: (B, 3)
+    avg_normals = F.normalize(avg_normals, dim=-1, eps=1e-8)
+    normals1 = avg_normals[topology_pairs[:, 0]]  # 形状: (M, 3)
+    normals2 = avg_normals[topology_pairs[:, 1]]  # 形状: (M, 3)
+
+    cos_sim = torch.sum(normals1 * normals2, dim=-1)  # 形状: (M,)
+
+    if topology_type == 'vertical':
+        loss = torch.abs(cos_sim)
+    elif topology_type == 'parallel':
+        loss = 1.0 - torch.abs(cos_sim)
+    else:
+        raise ValueError("topology_type must be 'parallel' or 'vertical'")
+
+    if reduction == 'mean':
+        loss = torch.mean(loss)
+    elif reduction == 'sum':
+        loss = torch.sum(loss)
+
+    # 角度误差是arccos(|cos_sim|)
+    # angle_rad = torch.acos(torch.abs(cos_sim))
+    # angle_deg = torch.rad2deg(angle_rad)  # 形状: (M,)
+    # Test:
+    # compute_topology_loss(v_data["face_points"][..., :self.in_channels], v_data['pos_parallel_face_pair'], 'parallel')
+    # compute_topology_loss(v_data["face_points"][..., :self.in_channels], v_data['pos_vertical_face_pair'], 'vertical')
+    return loss
 
 class AttnIntersection3(nn.Module):
     def __init__(
@@ -459,6 +498,21 @@ class AutoEncoder_1119(nn.Module):
         decoding_results = {}
         decoding_results["face_points_local"] = self.face_points_decoder(face_z)
         decoding_results["face_center_scale"] = self.face_center_scale_decoder(face_z)
+
+        # GT loss = 0
+        # compute_topology_loss(v_data["face_points"][..., :self.in_channels], v_data['pos_parallel_face_pair'], 'parallel')
+        # compute_topology_loss(v_data["face_points"][..., :self.in_channels], v_data['pos_vertical_face_pair'], 'vertical')
+
+        loss_normal_feature_parallel = compute_topology_loss(
+                points_normals=decoding_results["face_points_local"],
+                topology_pairs=v_data['pos_parallel_face_pair'],
+                topology_type='parallel')
+        loss_normal_feature_vertical = compute_topology_loss(
+                points_normals=decoding_results["face_points_local"],
+                topology_pairs=v_data['pos_vertical_face_pair'],
+                topology_type='vertical')
+        decoding_results['loss_normal_feature_parallel_reg'] = loss_normal_feature_parallel
+        decoding_results['loss_normal_feature_vertical_reg'] = loss_normal_feature_vertical
 
         if v_deduplicated: # Deduplicate
             face_points_local = decoding_results["face_points_local"]

@@ -733,7 +733,7 @@ class AutoEncoder_1119_light(AutoEncoder_1119):
             nn.Linear(df, df),
         )
 
-        self.inter = AttnIntersection3(df, 512, 8)
+        self.inter = AttnIntersection3(df, 512, 12)
         self.classifier = nn.Linear(df * 2, 1)
         self.inter_p = AttnIntersection3(df, 512, 2)
         self.classifier_p = nn.Linear(df * 2, 1)

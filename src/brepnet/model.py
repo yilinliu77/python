@@ -394,7 +394,7 @@ class AutoEncoder_1119(nn.Module):
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         fused_face_features = eps.mul(std).add_(mean)
-        kl_loss = (-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())) * self.gaussian_weights
+        kl_loss = (-0.5 * torch.mean(1 + logvar - mean.pow(2) - logvar.exp())) * self.gaussian_weights
         if v_is_test:
             fused_face_features = mean
         # return fused_face_features, kl_loss

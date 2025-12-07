@@ -656,6 +656,12 @@ class AutoEncoder_1119(nn.Module):
             v_decoding_result["edge_center_scale"],
             v_data["edge_bbox"][edge_face_connectivity[:, 0]]
         )
+
+        # 
+        recon_face_points = denormalize_coord(v_decoding_result["face_points_local"], v_decoding_result["face_center_scale"])
+        recon_edge_points1 = denormalize_coord(v_decoding_result["edge_points_local1"], v_decoding_result["edge_center_scale1"])
+        recon_edge_points = denormalize_coord(v_decoding_result["edge_points_local"], v_decoding_result["edge_center_scale"])
+
         if self.gaussian_weights > 0:
             loss["kl_loss"] = v_decoding_result["kl_loss"]
 

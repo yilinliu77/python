@@ -172,14 +172,91 @@ def inv_sigmoid(x):
     return torch.log(x / (1 - x))
 
 def compute_cos_loss(normal1, normal2, reduction='mean'):
+    # normalize normal
+    normal1 = F.normalize(normal1, dim=-1, eps=1e-8)
+    normal2 = F.normalize(normal2, dim=-1, eps=1e-8)
     cos_sim = torch.sum(normal1 * normal2, dim=-1)  # 形状: (M,)
     loss = 1.0 - torch.abs(cos_sim)
+    loss = loss.clamp(0, 1)
 
     if reduction == 'mean':
         loss = torch.mean(loss)
     elif reduction == 'sum':
         loss = torch.sum(loss)
     return loss
+
+def bbox_loss(pred, target, loss_fun,
+              center_loss_weight, scale_loss_weight, reduction='mean'):
+    """
+    计算边界框损失
+
+    Args:
+        pred: 预测tensor，形状 (N, 4)，包含中心坐标和尺度 (cx, cy, cz, s)
+        target: 目标tensor，形状 (N, 4)，包含中心坐标和尺度 (cx, cy, cz, s)
+        loss_fun: 用于计算损失的函数（如 nn.L1Loss 或 nn.MSELoss）
+        center_loss_weight: 中心坐标损失的权重
+        scale_loss_weight: 尺度损失的权重
+        reduction: 损失的归约方式 ('mean' 或 'sum')
+
+    Returns:
+        总损失值
+    """
+    assert pred.shape[-1] == 4 and target.shape[-1] == 4, "pred and target must have last dimension of size 4"
+
+    pred_center = pred[..., :3]
+    pred_scale = pred[..., 3:]
+    target_center = target[..., :3]
+    target_scale = target[..., 3:]
+
+    center_loss = loss_fun(pred_center, target_center)
+    scale_loss = loss_fun(pred_scale, target_scale)
+
+    if reduction == 'mean':
+        center_loss = torch.mean(center_loss)
+        scale_loss = torch.mean(scale_loss)
+    elif reduction == 'sum':
+        center_loss = torch.sum(center_loss)
+        scale_loss = torch.sum(scale_loss)
+
+    total_loss = center_loss_weight * center_loss + scale_loss_weight * scale_loss
+    return total_loss
+
+def geom_combined_loss(pred, target,
+                       xyz_loss_fun=F.l1_loss,
+                       xyz_weight=1.0,
+                       normal_loss_fun=compute_cos_loss,
+                       normal_weight=1e-1):
+    """
+    组合损失函数
+
+    Args:
+        pred: 预测tensor，形状 (N, 16, 16, 6)
+        target: 目标tensor，形状 (N, 16, 16, 6)
+        xyz_weight: 坐标损失的权重
+        normal_weight: 法向量余弦损失的权重
+
+    Returns:
+        总损失值
+    """
+    assert pred.shape[-1] == 6 and target.shape[-1] == 6, "pred and target must have last dimension of size 6"
+
+    # 分割坐标和法向量部分
+    pred_xyz = pred[..., :3]
+    pred_normal = pred[..., 3:]
+    pred_normal = F.normalize(pred_normal, dim=-1, eps=1e-8)
+
+    target_xyz = target[..., :3]
+    target_normal = target[..., 3:]
+    target_normal = F.normalize(target_normal, dim=-1, eps=1e-8)
+
+    # 计算MSE损失
+    mse_per_point = xyz_loss_fun(pred_xyz, target_xyz)
+
+    # 计算余弦损失
+    cos_loss_per_point = normal_loss_fun(pred_normal, target_normal)
+
+    # 计算加权总损失
+    return xyz_weight * mse_per_point + normal_weight * cos_loss_per_point
 
 def compute_topology_loss(points_normals, topology_pairs, topology_type, reduction='mean'):
     assert topology_type in ['parallel', 'vertical'], "topology_type must be 'parallel' or 'vertical'"
@@ -419,7 +496,28 @@ class AutoEncoder_1119(nn.Module):
             "Loss": 0,
         }
 
-        self.loss_fn = nn.L1Loss() if v_conf["loss"] == "l1" else nn.MSELoss()
+        # self.loss_fn = nn.L1Loss() if v_conf["loss"] == "l1" else nn.MSELoss()
+        self.loss_fn = nn.SmoothL1Loss() if v_conf["loss"] == "l1" else nn.MSELoss()
+        self.face_geom_loss_fn = lambda pred, target: geom_combined_loss(
+                pred, target,
+                xyz_loss_fun=self.loss_fn,
+                xyz_weight=1.0,
+                normal_loss_fun=compute_cos_loss,
+                normal_weight=1e-1,
+        )
+        self.edge_geom_loss_fn = lambda pred, target: geom_combined_loss(
+                pred, target,
+                xyz_loss_fun=self.loss_fn,
+                xyz_weight=1.0,
+                normal_loss_fun=compute_cos_loss,
+                normal_weight=0,
+        )
+        self.bbox_loss_fn = lambda pred, target: bbox_loss(
+                pred, target,
+                loss_fun=self.loss_fn,
+                center_loss_weight=1.0,
+                scale_loss_weight=1.0,
+        )
 
     def sample(self, v_fused_face_features, v_is_test=False):
         if self.gaussian_weights <= 0:
@@ -498,21 +596,6 @@ class AutoEncoder_1119(nn.Module):
         decoding_results = {}
         decoding_results["face_points_local"] = self.face_points_decoder(face_z)
         decoding_results["face_center_scale"] = self.face_center_scale_decoder(face_z)
-
-        # GT loss = 0
-        # compute_topology_loss(v_data["face_points"][..., :self.in_channels], v_data['pos_parallel_face_pair'], 'parallel')
-        # compute_topology_loss(v_data["face_points"][..., :self.in_channels], v_data['pos_vertical_face_pair'], 'vertical')
-
-        loss_normal_feature_parallel = compute_topology_loss(
-                points_normals=decoding_results["face_points_local"],
-                topology_pairs=v_data['pos_parallel_face_pair'],
-                topology_type='parallel')
-        loss_normal_feature_vertical = compute_topology_loss(
-                points_normals=decoding_results["face_points_local"],
-                topology_pairs=v_data['pos_vertical_face_pair'],
-                topology_type='vertical')
-        decoding_results['loss_normal_feature_parallel_reg'] = loss_normal_feature_parallel
-        decoding_results['loss_normal_feature_vertical_reg'] = loss_normal_feature_vertical
 
         if v_deduplicated: # Deduplicate
             face_points_local = decoding_results["face_points_local"]
@@ -613,6 +696,21 @@ class AutoEncoder_1119(nn.Module):
 
             decoding_results["loss_vertical"] = loss_vertical
 
+            # GT loss = 0
+            # compute_topology_loss(v_data["face_points"][..., :self.in_channels], v_data['pos_parallel_face_pair'], 'parallel')
+            # compute_topology_loss(v_data["face_points"][..., :self.in_channels], v_data['pos_vertical_face_pair'], 'vertical')
+
+            loss_normal_feature_parallel = compute_topology_loss(
+                    points_normals=decoding_results["face_points_local"],
+                    topology_pairs=v_data['pos_parallel_face_pair'],
+                    topology_type='parallel')
+            loss_normal_feature_vertical = compute_topology_loss(
+                    points_normals=decoding_results["face_points_local"],
+                    topology_pairs=v_data['pos_vertical_face_pair'],
+                    topology_type='vertical')
+            decoding_results['loss_normal_feature_parallel_reg'] = loss_normal_feature_parallel
+            decoding_results['loss_normal_feature_vertical_reg'] = loss_normal_feature_vertical
+
 
         decoding_results["edge_points_local"] = self.edge_points_decoder(intersected_edge_feature)
         decoding_results["edge_center_scale"] = self.edge_center_scale_decoder(intersected_edge_feature)
@@ -626,20 +724,20 @@ class AutoEncoder_1119(nn.Module):
     def loss(self, v_decoding_result, v_data):
         # Loss
         loss={}
-        loss["face_norm"] = self.loss_fn(
+        loss["face_norm"] = self.face_geom_loss_fn(
             v_decoding_result["face_points_local"],
             v_data["face_norm"]
         )
-        loss["face_bbox"] = self.loss_fn(
+        loss["face_bbox"] = self.bbox_loss_fn(
             v_decoding_result["face_center_scale"],
             v_data["face_bbox"]
         )
 
-        loss["edge_norm1"] = self.loss_fn(
+        loss["edge_norm1"] = self.edge_geom_loss_fn(
             v_decoding_result["edge_points_local1"],
             v_data["edge_norm"]
         )
-        loss["edge_bbox1"] = self.loss_fn(
+        loss["edge_bbox1"] = self.bbox_loss_fn(
             v_decoding_result["edge_center_scale1"],
             v_data["edge_bbox"]
         )
@@ -647,20 +745,27 @@ class AutoEncoder_1119(nn.Module):
         loss["edge_classification"] = v_decoding_result["loss_edge"] * 0.1
         loss["parallel_classification"] = v_decoding_result["loss_parallel"] * 0.1
         loss["vertical_classification"] = v_decoding_result["loss_vertical"] * 0.1
+        loss['normal_feature_parallel_reg'] = v_decoding_result['loss_normal_feature_parallel_reg'] * 0.1
+        loss['normal_feature_vertical_reg'] = v_decoding_result['loss_normal_feature_vertical_reg'] * 0.1
+
         edge_face_connectivity = v_data["edge_face_connectivity"]
-        loss["edge_norm"] = self.loss_fn(
+        loss["edge_norm"] = self.edge_geom_loss_fn(
             v_decoding_result["edge_points_local"],
             v_data["edge_norm"][edge_face_connectivity[:, 0]]
         )
-        loss["edge_bbox"] = self.loss_fn(
+        loss["edge_bbox"] = self.bbox_loss_fn(
             v_decoding_result["edge_center_scale"],
             v_data["edge_bbox"][edge_face_connectivity[:, 0]]
         )
 
-        # 
-        recon_face_points = denormalize_coord(v_decoding_result["face_points_local"], v_decoding_result["face_center_scale"])
-        recon_edge_points1 = denormalize_coord(v_decoding_result["edge_points_local1"], v_decoding_result["edge_center_scale1"])
-        recon_edge_points = denormalize_coord(v_decoding_result["edge_points_local"], v_decoding_result["edge_center_scale"])
+        # gobal features
+        recon_face_points = denormalize_coord1112(v_decoding_result["face_points_local"], v_decoding_result["face_center_scale"])
+        recon_edge_points1 = denormalize_coord1112(v_decoding_result["edge_points_local1"], v_decoding_result["edge_center_scale1"])
+        recon_edge_points = denormalize_coord1112(v_decoding_result["edge_points_local"], v_decoding_result["edge_center_scale"])
+
+        loss["face_geom"] = self.face_geom_loss_fn(recon_face_points, v_data['face_points'])
+        loss["edge_geom1"] = self.edge_geom_loss_fn(recon_edge_points1, v_data['edge_points'])
+        loss["edge_geom"] = self.edge_geom_loss_fn(recon_edge_points, v_data['edge_points'][edge_face_connectivity[:, 0]])
 
         if self.gaussian_weights > 0:
             loss["kl_loss"] = v_decoding_result["kl_loss"]
@@ -793,11 +898,11 @@ class AutoEncoder_1119_light(AutoEncoder_1119):
             nn.Linear(df, df),
         )
 
-        self.inter = AttnIntersection3(df, 512, 8)
+        self.inter = AttnIntersection3(df, 512, 12)
         self.classifier = nn.Linear(df * 2, 1)
-        self.inter_p = AttnIntersection3(df, 512, 8)
+        self.inter_p = AttnIntersection3(df, 512, 2)
         self.classifier_p = nn.Linear(df * 2, 1)
-        self.inter_v = AttnIntersection3(df, 512, 8)
+        self.inter_v = AttnIntersection3(df, 512, 2)
         self.classifier_v = nn.Linear(df * 2, 1)
 
         self.face_attn_proj_in2 = nn.Linear(df, bd)

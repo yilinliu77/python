@@ -509,7 +509,7 @@ class AutoEncoder_1119(nn.Module):
                 xyz_loss_fun=self.loss_fn,
                 xyz_weight=1.0,
                 normal_loss_fun=compute_cos_loss,
-                normal_weight=0,
+                normal_weight=0.1,
         )
         self.bbox_loss_fn = lambda pred, target: bbox_loss(
                 pred, target,

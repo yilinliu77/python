@@ -323,7 +323,7 @@ def main(v_cfg: DictConfig):
         precision=v_cfg["trainer"]["accelerator"],
         gradient_clip_algorithm="norm",
         gradient_clip_val=0.5,
-        accumulate_grad_batches=8,
+        accumulate_grad_batches=2,
         # profiler="advanced",
         # max_steps=100
     )
@@ -332,7 +332,7 @@ def main(v_cfg: DictConfig):
         print(f"Resuming from {v_cfg['trainer'].resume_from_checkpoint}")
         model = TrainAutoEncoder.load_from_checkpoint(v_cfg["trainer"].resume_from_checkpoint, map_location="cpu")
         model.hydra_conf = v_cfg
-        model.model.gaussian_weights = 1e-7
+        # model.model.gaussian_weights = 1e-7
     # model = torch.compile(model)
     if v_cfg["trainer"].evaluate:
         trainer.test(model)

@@ -497,20 +497,22 @@ class AutoEncoder_1119(nn.Module):
         }
 
         self.loss_fn = nn.L1Loss() if v_conf["loss"] == "l1" else nn.MSELoss()
-        self.face_geom_loss_fn = lambda pred, target: geom_combined_loss(
-                pred, target,
-                xyz_loss_fun=self.loss_fn,
-                xyz_weight=1.0,
-                normal_loss_fun=compute_cos_loss,
-                normal_weight=0.1,
-        )
-        self.edge_geom_loss_fn = lambda pred, target: geom_combined_loss(
-                pred, target,
-                xyz_loss_fun=self.loss_fn,
-                xyz_weight=1.0,
-                normal_loss_fun=compute_cos_loss,
-                normal_weight=0.1,
-        )
+        # self.face_geom_loss_fn = lambda pred, target: geom_combined_loss(
+        #         pred, target,
+        #         xyz_loss_fun=self.loss_fn,
+        #         xyz_weight=1.0,
+        #         normal_loss_fun=compute_cos_loss,
+        #         normal_weight=0.1,
+        # )
+        # self.edge_geom_loss_fn = lambda pred, target: geom_combined_loss(
+        #         pred, target,
+        #         xyz_loss_fun=self.loss_fn,
+        #         xyz_weight=1.0,
+        #         normal_loss_fun=compute_cos_loss,
+        #         normal_weight=0.1,
+        # )
+        self.face_geom_loss_fn = self.loss_fn
+        self.edge_geom_loss_fn = self.loss_fn
         self.bbox_loss_fn = lambda pred, target: bbox_loss(
                 pred, target,
                 loss_fun=self.loss_fn,

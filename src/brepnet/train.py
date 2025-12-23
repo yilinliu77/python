@@ -87,7 +87,7 @@ class TrainAutoEncoder(pl.LightningModule):
                           )
 
     def configure_optimizers(self):
-        optimizer = AdamW(self.model.parameters(), lr=self.learning_rate, weight_decay=1e-3)
+        optimizer = AdamW(self.model.parameters(), lr=self.learning_rate)
         return {
             'optimizer': optimizer,
         }

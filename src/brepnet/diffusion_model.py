@@ -356,6 +356,7 @@ class Diffusion_condition(nn.Module):
         # v_condition = torch.zeros((bs, 1, self.dim_condition), device=de, dtype=dt) if v_condition is None else v_condition
         # v_condition = v_condition.repeat(1, v_feature.shape[1], 1)
         # noise_features = torch.cat([noise_features, v_condition], dim=-1)
+        # noise_features = noise_features + time_embeds
 
         # cross attn condition
         assert v_condition is not None
@@ -365,7 +366,6 @@ class Diffusion_condition(nn.Module):
                 memory=v_condition.squeeze(1) if v_condition.shape[1] == 1 else v_condition
         )
         noise_features_add_cond = self.cross_attn_post_proj(noise_features_add_cond)
-
         noise_features = noise_features_add_cond + time_embeds
 
         pred_x0 = self.net1(noise_features)

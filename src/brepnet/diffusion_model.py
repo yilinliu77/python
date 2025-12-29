@@ -59,6 +59,37 @@ def sincos_embedding(input, dim, max_period=10000):
 def inv_sigmoid(x):
     return torch.log(x / (1 - x + 1e-6))
 
+class BBoxEmbed(nn.Module):
+    def __init__(self, hidden_dim=48, dim=768):
+        super().__init__()
+
+        assert hidden_dim % 6 == 0
+
+        self.embedding_dim = hidden_dim
+        e = torch.pow(2, torch.arange(self.embedding_dim // 6)).float() * np.pi
+        e = torch.stack([
+            torch.cat([e, torch.zeros(self.embedding_dim // 6),
+                       torch.zeros(self.embedding_dim // 6)]),
+            torch.cat([torch.zeros(self.embedding_dim // 6), e,
+                       torch.zeros(self.embedding_dim // 6)]),
+            torch.cat([torch.zeros(self.embedding_dim // 6),
+                       torch.zeros(self.embedding_dim // 6), e]),
+        ])
+        self.register_buffer('basis', e)  # 3 x 16
+
+        self.mlp = nn.Linear(self.embedding_dim + 3, dim)
+
+    @staticmethod
+    def embed(input, basis):
+        projections = torch.einsum(
+                'bnd,de->bne', input, basis)
+        embeddings = torch.cat([projections.sin(), projections.cos()], dim=2)
+        return embeddings
+
+    def forward(self, input):
+        # input: B x N x 3
+        embed = self.mlp(torch.cat([self.embed(input, self.basis), input], dim=2))  # B x N x C
+        return embed
 
 class Diffusion_condition(nn.Module):
     def __init__(self, v_conf, ):
@@ -345,7 +376,7 @@ class Diffusion_condition(nn.Module):
                 data["padded_face_z"] = face_features[indices]
         return data
 
-    def diffuse(self, v_feature, v_timesteps, v_condition=None):
+    def diffuse(self, v_feature, v_timesteps, bbox_cond=None, v_condition=None):
         bs = v_feature.size(0)
         de = v_feature.device
         dt = v_feature.dtype

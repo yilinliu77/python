@@ -625,8 +625,8 @@ class AutoEncoder_1119_light(nn.Module):
             feature_pair = self.inter(feature_pair)
             pred = self.classifier(feature_pair)
 
-            gt_labels = torch.ones_like(pred)
-            gt_labels[id_false_start:] = 0
+            gt_labels = torch.ones_like(pred) * 0.95
+            gt_labels[id_false_start:] = 0.05
             loss_edge = F.binary_cross_entropy_with_logits(pred, gt_labels)
 
             intersected_edge_feature = feature_pair[:id_false_start]
@@ -652,8 +652,8 @@ class AutoEncoder_1119_light(nn.Module):
             feature_pair = self.inter_p(feature_pair)
             pred = self.classifier_p(feature_pair)
 
-            gt_labels = torch.ones_like(pred)
-            gt_labels[id_false_start:] = 0
+            gt_labels = torch.ones_like(pred) * 0.95
+            gt_labels[id_false_start:] = 0.05
             loss_parallel = F.binary_cross_entropy_with_logits(pred, gt_labels, reduction='none')
             loss_parallel = loss_parallel[valid_mask].mean() if valid_mask.sum() != 0 else loss_parallel.mean() * 0
 
@@ -673,8 +673,8 @@ class AutoEncoder_1119_light(nn.Module):
             feature_pair = self.inter_v(feature_pair)
             pred = self.classifier_v(feature_pair)
 
-            gt_labels = torch.ones_like(pred)
-            gt_labels[id_false_start:] = 0
+            gt_labels = torch.ones_like(pred) * 0.95
+            gt_labels[id_false_start:] = 0.05
             loss_vertical = F.binary_cross_entropy_with_logits(pred, gt_labels, reduction='none')
             loss_vertical = loss_vertical[valid_mask].mean() if valid_mask.sum() != 0 else loss_vertical.mean() * 0
 
@@ -726,11 +726,11 @@ class AutoEncoder_1119_light(nn.Module):
             v_data["edge_bbox"]
         )
         loss["edge_feature"] = v_decoding_result["loss_edge_feature"]
-        loss["edge_classification"] = v_decoding_result["loss_edge"] * 0.1
-        loss["parallel_classification"] = v_decoding_result["loss_parallel"] * 0.1
-        loss["vertical_classification"] = v_decoding_result["loss_vertical"] * 0.1
-        loss['normal_feature_parallel_reg'] = v_decoding_result['loss_normal_feature_parallel_reg'] * 0.1
-        loss['normal_feature_vertical_reg'] = v_decoding_result['loss_normal_feature_vertical_reg'] * 0.1
+        loss["edge_classification"] = v_decoding_result["loss_edge"] * 0.01
+        loss["parallel_classification"] = v_decoding_result["loss_parallel"] * 0.01
+        loss["vertical_classification"] = v_decoding_result["loss_vertical"] * 0.01
+        loss['normal_feature_parallel_reg'] = v_decoding_result['loss_normal_feature_parallel_reg'] * 0.01
+        loss['normal_feature_vertical_reg'] = v_decoding_result['loss_normal_feature_vertical_reg'] * 0.01
 
         edge_face_connectivity = v_data["edge_face_connectivity"]
         loss["edge_norm"] = self.edge_geom_loss_fn(

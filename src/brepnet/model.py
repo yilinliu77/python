@@ -480,6 +480,7 @@ class AutoEncoder_1119_light(nn.Module):
         }
 
         self.loss_fn = nn.L1Loss() if v_conf["loss"] == "l1" else nn.MSELoss()
+        self.mse_loss_fn = nn.MSELoss()
         # self.face_geom_loss_fn = lambda pred, target: geom_combined_loss(
         #         pred, target,
         #         xyz_loss_fun=self.loss_fn,
@@ -631,7 +632,7 @@ class AutoEncoder_1119_light(nn.Module):
 
             intersected_edge_feature = feature_pair[:id_false_start]
 
-            decoding_results["loss_edge_feature"] = self.loss_fn(
+            decoding_results["loss_edge_feature"] = self.mse_loss_fn(
                 intersected_edge_feature,
                 v_encoding_result["edge_features"][edge_face_connectivity[:, 0]].detach(),
             )

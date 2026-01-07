@@ -36,6 +36,7 @@ class TrainAutoEncoder(pl.LightningModule):
         self.hydra_conf = hparams
         self.learning_rate = self.hydra_conf["trainer"]["learning_rate"]
         self.batch_size = self.hydra_conf["trainer"]["batch_size"]
+        self.batch_size = 1
         self.num_worker = self.hydra_conf["trainer"]["num_worker"]
 
         self.save_hyperparameters(hparams)
@@ -323,7 +324,7 @@ def main(v_cfg: DictConfig):
         precision=v_cfg["trainer"]["accelerator"],
         gradient_clip_algorithm="norm",
         gradient_clip_val=0.5,
-        accumulate_grad_batches=8,
+        # accumulate_grad_batches=8,
         # profiler="advanced",
         # max_steps=100
     )

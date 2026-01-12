@@ -51,13 +51,17 @@ from src.brepnet.post.utils import Shape
 # from src.brepnet.post.utils import construct_solid
 
 debug_id = None
-# debug_id = "00000003"
+# debug_id = "00000162"
 
 write_debug_data = False
 check_post_processing = False
 data_root = Path(r"/mnt/e/yilin/data_step")
 output_root = Path(r"/mnt/d/img2brep/abc_v2/")
 data_split = r"src/brepnet/data/list/abc_total.txt"
+
+# data_root = Path(r"E:\data\img2brep\train_brepquery\data_step")
+# output_root = Path(r"E:\data\img2brep\train_brepquery\abc_v3")
+# data_split = r"E:\data\img2brep\train_brepquery\abc_total.txt"
 
 exception_files = [
     r"src/brepnet/bak/list_bak/abc_cube_ids.txt",
@@ -70,6 +74,7 @@ sample_resolution = 16
 face_scale_threshold = 1e-3
 edge_scale_threshold = 1e-3
 
+
 def check_dir(v_path):
     if os.path.exists(v_path):
         shutil.rmtree(v_path)
@@ -79,6 +84,7 @@ def check_dir(v_path):
 def safe_check_dir(v_path):
     if not os.path.exists(v_path):
         os.makedirs(v_path)
+
 
 def diable_occ_log():
     from OCC.Core.Message import Message_Alarm, message
@@ -198,7 +204,7 @@ def get_brep(v_root, output_root, v_folder):
             surface = BRepAdaptor_Surface(face)
 
             if surface.GetType() not in [GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone,
-                                            GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BSplineSurface]:
+                                         GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BSplineSurface]:
                 raise ValueError("Unsupported surface type: {}".format(surface.GetType()))
 
             first_u = surface.FirstUParameter()
@@ -215,7 +221,7 @@ def get_brep(v_root, output_root, v_folder):
                     props = GeomLProp_SLProps(surface.Surface().Surface(), u[i, j], v[i, j], 1, 0.01)
                     dir = props.Normal()
                     points.append(np.array([pnt.X(), pnt.Y(), pnt.Z(), dir.X(), dir.Y(), dir.Z()], dtype=np.float32))
-            
+
             # Check face range
             points = np.stack(points, axis=0)
             face_center = np.mean(points[:, :3], axis=0)
@@ -247,7 +253,7 @@ def get_brep(v_root, output_root, v_folder):
                 curve.D1(u, pnt, v1)
                 v1 = v1.Normalized()
                 points.append(np.array([pnt.X(), pnt.Y(), pnt.Z(), v1.X(), v1.Y(), v1.Z()], dtype=np.float32))
-            
+
             # Check edge range
             points = np.stack(points, axis=0)
             edge_center = np.mean(points[:, :3], axis=0)
@@ -278,34 +284,45 @@ def get_brep(v_root, output_root, v_folder):
         np.savez_compressed(output_root / v_folder / "data.npz", **data_dict)
 
         if check_post_processing:
-            from src.brepnet.post.utils import construct_brep
+            from src.brepnet.post.construct_brep import construct_brep_from_datanpz
 
-            shape = Shape(face_sample_points[...,:3], edge_sample_points[...,:3], edge_face_connectivity, False)
-            shape.remove_half_edges()  # will filter some invalid intersection edges
-            shape.check_openness()
-            shape.build_fe()
-            shape.build_vertices(0.2)
-            _, mesh, solid = construct_brep(
-                    shape,
-                    2e-2,
-                    False,
-                    # debug_face_idx=[4]
-            )
-            if solid is None:
-                raise ValueError("Post processing failed")
-            write_step_file(solid, str(output_root / v_folder / "post_processed_shape.step"))
+            construct_brep_from_datanpz(str(output_root),
+                                        str(output_root),
+                                        v_folder,
+                                        v_drop_num=0,
+                                        use_cuda=True, from_scratch=False,
+                                        is_save_data=False, is_log=False,
+                                        is_optimize_geom=False, v_max_optimize_iter=200,
+                                        is_ray=False, )
+
+            # from src.brepnet.post.utils import construct_brep
+            #
+            # shape = Shape(face_sample_points[...,:3], edge_sample_points[...,:3], edge_face_connectivity, False)
+            # shape.remove_half_edges()  # will filter some invalid intersection edges
+            # shape.check_openness()
+            # shape.build_fe()
+            # shape.build_vertices(0.2)
+            # _, mesh, solid = construct_brep(
+            #         shape,
+            #         2e-2,
+            #         False,
+            #         # debug_face_idx=[4]
+            # )
+            # if solid is None:
+            #     raise ValueError("Post processing failed")
+            # write_step_file(solid, str(output_root / v_folder / "post_processed_shape.step"))
             pass
 
         if write_debug_data:
-            # import open3d as o3d
-            # pc_model = o3d.geometry.PointCloud()
-            # pc_model.points = o3d.utility.Vector3dVector(face_sample_points.reshape(-1, 3))
-            # o3d.io.write_point_cloud(str(output_root / v_folder / "face_sample_points.ply"), pc_model)
-            #
-            # pc_model.points = o3d.utility.Vector3dVector(edge_sample_points.reshape(-1, 3))
-            # o3d.io.write_point_cloud(str(output_root / v_folder / "edge_sample_points.ply"), pc_model)
+            import open3d as o3d
+            pc_model = o3d.geometry.PointCloud()
+            pc_model.points = o3d.utility.Vector3dVector(face_sample_points[..., :3].reshape(-1, 3))
+            o3d.io.write_point_cloud(str(output_root / v_folder / "face_sample_points.ply"), pc_model)
+
+            pc_model.points = o3d.utility.Vector3dVector(edge_sample_points[..., :3].reshape(-1, 3))
+            o3d.io.write_point_cloud(str(output_root / v_folder / "edge_sample_points.ply"), pc_model)
             pass
-        
+
     except Exception as e:
         with open(output_root / "error.txt", "a") as f:
             tb_list = traceback.extract_tb(sys.exc_info()[2])
@@ -317,6 +334,7 @@ def get_brep(v_root, output_root, v_folder):
             shutil.rmtree(output_root / v_folder)
         return False
     return True
+
 
 get_brep_ray = ray.remote(get_brep)
 
@@ -337,14 +355,14 @@ if __name__ == '__main__':
 
     # single process
     if debug_id is not None:
-        total_ids = [debug_id]
+        total_ids = debug_id
         get_brep(data_root, output_root, total_ids)
     else:
         ray.init(
                 dashboard_host="0.0.0.0",
                 dashboard_port=15000,
-                #num_cpus=1,
-                #local_mode=True
+                # num_cpus=1,
+                # local_mode=True
         )
         tasks = []
         for i in range(len(total_ids)):

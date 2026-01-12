@@ -53,15 +53,15 @@ from src.brepnet.post.utils import Shape
 debug_id = None
 # debug_id = "00000162"
 
-write_debug_data = False
-check_post_processing = False
-data_root = Path(r"/mnt/e/yilin/data_step")
-output_root = Path(r"/mnt/d/img2brep/abc_v2/")
-data_split = r"src/brepnet/data/list/abc_total.txt"
+write_debug_data = True
+check_post_processing = True
+# data_root = Path(r"/mnt/e/yilin/data_step")
+# output_root = Path(r"/mnt/d/img2brep/abc_v2/")
+# data_split = r"src/brepnet/data/list/abc_total.txt"
 
-# data_root = Path(r"E:\data\img2brep\train_brepquery\data_step")
-# output_root = Path(r"E:\data\img2brep\train_brepquery\abc_v3")
-# data_split = r"E:\data\img2brep\train_brepquery\abc_total.txt"
+data_root = Path(r"E:\data\img2brep\train_brepquery\data_step")
+output_root = Path(r"E:\data\img2brep\train_brepquery\abc_v3")
+data_split = r"E:\data\img2brep\train_brepquery\abc_total.txt"
 
 exception_files = [
     r"src/brepnet/bak/list_bak/abc_cube_ids.txt",

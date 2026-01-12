@@ -18,6 +18,8 @@ from torch_cluster import fps
 
 from src.brepnet.dataset import denormalize_coord1112
 
+from src.brepnet.utils import Attention, PreNorm, FeedForward
+
 def add_timer(time_statics, v_attr, timer):
     if v_attr not in time_statics:
         time_statics[v_attr] = 0.
@@ -462,19 +464,35 @@ class AutoEncoder_1119_light(nn.Module):
         bd = 768
         self.point_embed = PointEmbed(dim=bd)
 
-        # encoder
-        cross_layer = nn.TransformerDecoderLayer(
-                bd, 16, dim_feedforward=2048, dropout=0,
-                batch_first=True, norm_first=True)
-        attn_layer = nn.TransformerEncoderLayer(
-                bd, 16, dim_feedforward=2048, dropout=0,
-                batch_first=True, norm_first=True)
+        # face query encoder
+        self.face_coords_cross_query = nn.ModuleList([])
+        for i in range(2):
+            self.face_coords_cross_query.append(nn.ModuleList([
+                PreNorm(bd, Attention(bd, bd, heads=16, dim_head=bd // 16)),
+                PreNorm(bd, FeedForward(bd)),
+            ]))
+        self.face_coords_attn = nn.ModuleList([])
+        for i in range(8):
+            self.face_coords_attn.append(nn.ModuleList([
+                PreNorm(bd, Attention(bd, heads=16, dim_head=bd // 16)),
+                PreNorm(bd, FeedForward(bd))
+            ]))
 
-        self.face_coords_cross_query = ModuleList([copy.deepcopy(cross_layer) for i in range(2)])
-        self.face_coords_attn = nn.TransformerEncoder(attn_layer, 8, nn.LayerNorm(bd))
-        self.edge_coords_cross_query = ModuleList([copy.deepcopy(cross_layer) for i in range(2)])
-        self.edge_coords_attn = nn.TransformerEncoder(attn_layer, 6, nn.LayerNorm(bd))
+        # edge query encoder
+        self.edge_coords_cross_query = nn.ModuleList([])
+        for i in range(2):
+            self.edge_coords_cross_query.append(nn.ModuleList([
+                PreNorm(bd, Attention(bd, bd, heads=16, dim_head=bd // 16)),
+                PreNorm(bd, FeedForward(bd)),
+            ]))
+        self.edge_coords_attn = nn.ModuleList([])
+        for i in range(8):
+            self.edge_coords_attn.append(nn.ModuleList([
+                PreNorm(bd, Attention(bd, heads=16, dim_head=bd // 16)),
+                PreNorm(bd, FeedForward(bd))
+            ]))
 
+        # gnn fusion
         self.graph_face_edge = nn.ModuleList()
         for i in range(2):
             self.graph_face_edge.append(GATv2Conv(
@@ -483,12 +501,8 @@ class AutoEncoder_1119_light(nn.Module):
             ))
             self.graph_face_edge.append(nn.LeakyReLU())
 
-        # post gnn attn
-        layer = nn.TransformerEncoderLayer(
-                bd, 16, dim_feedforward=2048, dropout=0,
-                batch_first=True, norm_first=True)
-        self.post_gnn_attn = nn.TransformerEncoder(layer, 4, nn.LayerNorm(bd))
-        self.post_gnn_attn_proj_out = nn.Linear(bd, df)
+        self.face_feature_proj_out = nn.Linear(bd, df)
+        self.edge_feature_proj_out = nn.Linear(bd, df*2)
 
         bd = 768  # bottlenek_dim
         self.face_attn_proj_in = nn.Linear(df, bd)
@@ -496,7 +510,7 @@ class AutoEncoder_1119_light(nn.Module):
         layer = nn.TransformerEncoderLayer(
                 bd, 16, dim_feedforward=2048, dropout=0,
                 batch_first=True, norm_first=True)
-        self.face_attn = nn.TransformerEncoder(layer, 8, nn.LayerNorm(bd))
+        self.face_attn = nn.TransformerEncoder(layer, 4, nn.LayerNorm(bd))
 
         self.global_feature1 = nn.Sequential(
             nn.Linear(df, df),
@@ -639,27 +653,35 @@ class AutoEncoder_1119_light(nn.Module):
         edge_points = rearrange(v_data["edge_points"][..., :3], 'b h n -> b h n').contiguous()
 
         face_query_points = fps_subsample(face_points, face_points.shape[1], face_points.shape[1] / 64)
-        edge_query_points = fps_subsample(edge_points, edge_points.shape[1], edge_points.shape[1] / 64)
+        edge_query_points = fps_subsample(edge_points, edge_points.shape[1], edge_points.shape[1] / 8)
 
         face_points_embed, face_query_points_embed = self.point_embed(face_points), self.point_embed(face_query_points)
         edge_points_embed, edge_query_points_embed = self.point_embed(edge_points), self.point_embed(edge_query_points)
 
         # face
-        for cross_layer in self.face_coords_cross_query:
-            face_latent = cross_layer(tgt=face_query_points_embed, memory=face_points_embed)
-        face_latent = self.face_coords_attn(face_latent)
+        for cross_attn, cross_ff in self.face_coords_cross_query:
+            face_query_points_embed = cross_attn(face_query_points_embed, context=face_points_embed) + face_query_points_embed
+            face_query_points_embed = cross_ff(face_query_points_embed) + face_query_points_embed
+        for attn, ff in self.face_coords_attn:
+            face_query_points_embed = attn(face_query_points_embed) + face_query_points_embed
+            face_query_points_embed = ff(face_query_points_embed) + face_query_points_embed
 
         # edge
-        for cross_layer in self.edge_coords_cross_query:
-            edge_latent = cross_layer(tgt=edge_query_points_embed, memory=edge_points_embed)
-        edge_latent = self.edge_coords_attn(edge_latent)
+        for cross_attn, cross_ff in self.edge_coords_cross_query:
+            edge_query_points_embed = cross_attn(edge_query_points_embed, context=edge_points_embed) + edge_query_points_embed
+            edge_query_points_embed = cross_ff(edge_query_points_embed) + edge_query_points_embed
+        for attn, ff in self.edge_coords_attn:
+            edge_query_points_embed = attn(edge_query_points_embed) + edge_query_points_embed
+            edge_query_points_embed = ff(edge_query_points_embed) + edge_query_points_embed
 
+        face_features = self.face_feature_proj_out(face_query_points_embed)
+        edge_features = self.face_feature_proj_out(edge_query_points_embed)
 
         # Face attn
-        # attn_x = self.face_attn_proj_in(face_features)
-        # attn_x = self.face_attn(attn_x, v_data["attn_mask"])
-        # attn_x = self.face_attn_proj_out(attn_x)
-        # fused_face_features = face_features + attn_x
+        attn_x = self.face_attn_proj_in(face_features)
+        attn_x = self.face_attn(attn_x, v_data["attn_mask"])
+        attn_x = self.face_attn_proj_out(attn_x)
+        fused_face_features = face_features + attn_x
 
         # # Face graph
         edge_face_connectivity = v_data["edge_face_connectivity"]

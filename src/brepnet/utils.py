@@ -12,7 +12,7 @@ from torch_cluster import fps
 
 import math
 
-from flash_attn import flash_attn_kvpacked_func
+# from flash_attn import flash_attn_kvpacked_func
 
 
 def exists(val):
@@ -72,13 +72,13 @@ class Attention(nn.Module):
         context = default(context, x)
         kv = self.to_kv(context)
 
-        q = rearrange(q, 'b n (h d) -> b n h d', h=h)
-        kv = rearrange(kv, 'b n (p h d) -> b n p h d', h=h, p=2)
+        q = rearrange(q, 'b n (h d) -> b h n d', h=h)
+        kv = rearrange(kv, 'b m (p h d) -> p b h m d', h=h, p=2)
+        k, v = kv[0], kv[1]
 
-        out = flash_attn_kvpacked_func(q.bfloat16(), kv.bfloat16(), window_size=(window_size, window_size))
-        out = out.to(x.dtype)
-
-        return self.to_out(rearrange(out, 'b n h d -> b n (h d)'))
+        out = F.scaled_dot_product_attention(query=q, key=k, value=v)
+        out = self.to_out(rearrange(out, 'b h n d -> b n (h d)'))
+        return out
 
 
 class PointEmbed(nn.Module):

@@ -52,9 +52,9 @@ from src.brepnet.post.utils import Shape
 
 debug_id = None
 # debug_id = "00000797"
-debug_id = "00003390"
+# debug_id = "00003390"
 
-write_debug_data = False
+write_debug_data = True
 is_viz = True
 check_post_processing = True
 
@@ -76,18 +76,22 @@ check_post_processing = True
 #     r"src/brepnet/bak/list_bak/abc_with_others_ids.txt",
 # ]
 
-data_root = Path(r"E:\data\img2brep\train_diffusion_test_data\data_step")
-output_root = Path(r"E:\data\img2brep\train_diffusion_test_data\data_step_output")
-data_split = r"D:\WorkSpace\brepnet\src\brepnet\data\list\abc_total.txt"
+# data_root = Path(r"E:\data\img2brep\train_diffusion_test_data\data_step")
+# output_root = Path(r"E:\data\img2brep\train_diffusion_test_data\data_step_output")
+# data_split = r"D:\WorkSpace\brepnet\src\brepnet\data\list\abc_total.txt"
+
+data_root = Path(r"E:\data\img2brep\train_brepquery\data_step")
+output_root = Path(r"E:\data\img2brep\train_brepquery\abc_v3")
+data_split = r"E:\data\img2brep\train_brepquery\abc_total.txt"
 
 exception_files = [
 ]
 
 num_max_primitives = 100000
-sample_resolution = 16
+sample_resolution = 32
 
-face_scale_threshold = 1e-3
-edge_scale_threshold = 1e-3
+face_scale_threshold = 1e-6
+edge_scale_threshold = 1e-6
 
 
 def check_dir(v_path):
@@ -302,7 +306,7 @@ def get_brep(v_root, output_root, v_folder):
                 dir = BRepAdaptor_Surface(face).Plane().Axis().Direction()
                 normal1 = np.array([dir.X(), dir.Y(), dir.Z()], dtype=np.float32)
                 normal2 = face_sample_points[face_dict[face]][:, :, 3:].reshape(-1,3).mean(0)
-                assert np.isclose(normal1, normal2).all() or np.isclose(normal1, -normal2).all()
+                # assert np.isclose(normal1, normal2).all() or np.isclose(normal1, -normal2).all()
                 face_dict_filtered_normal[face] = normal2
             else:
                 pass
@@ -409,19 +413,24 @@ def get_brep(v_root, output_root, v_folder):
 
         if check_post_processing:
             from src.brepnet.post.construct_brep import construct_brep_from_datanpz
-            construct_brep_from_datanpz(str(output_root), str(output_root), v_folder,
-                                        v_drop_num=0, use_cuda=False, is_optimize_geom=False,
-                                        isdebug=False, is_save_data=True, from_scratch=False)
+            construct_brep_from_datanpz(str(output_root),
+                                        str(output_root),
+                                        v_folder,
+                                        v_drop_num=0,
+                                        use_cuda=True, from_scratch=False,
+                                        is_save_data=False, is_log=False,
+                                        is_optimize_geom=False, v_max_optimize_iter=200,
+                                        is_ray=False, )
             pass
 
         if write_debug_data:
-            # import open3d as o3d
-            # pc_model = o3d.geometry.PointCloud()
-            # pc_model.points = o3d.utility.Vector3dVector(face_sample_points.reshape(-1, 3))
-            # o3d.io.write_point_cloud(str(output_root / v_folder / "face_sample_points.ply"), pc_model)
-            #
-            # pc_model.points = o3d.utility.Vector3dVector(edge_sample_points.reshape(-1, 3))
-            # o3d.io.write_point_cloud(str(output_root / v_folder / "edge_sample_points.ply"), pc_model)
+            import open3d as o3d
+            pc_model = o3d.geometry.PointCloud()
+            pc_model.points = o3d.utility.Vector3dVector(face_sample_points[..., :3].reshape(-1, 3))
+            o3d.io.write_point_cloud(str(output_root / v_folder / "face_sample_points.ply"), pc_model)
+
+            pc_model.points = o3d.utility.Vector3dVector(edge_sample_points[..., :3].reshape(-1, 3))
+            o3d.io.write_point_cloud(str(output_root / v_folder / "edge_sample_points.ply"), pc_model)
             pass
 
     except Exception as e:

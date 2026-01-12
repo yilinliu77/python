@@ -13,6 +13,9 @@ from torch_geometric.nn import GATv2Conv
 from torch_scatter import scatter_mean
 import torchvision
 
+import numpy as np
+from torch_cluster import fps
+
 from src.brepnet.dataset import denormalize_coord1112
 
 def add_timer(time_statics, v_attr, timer):
@@ -321,6 +324,126 @@ class AttnIntersection3(nn.Module):
         output = self.attn_proj_out(tgt)[:,0]
         return output
 
+class PointEmbed(nn.Module):
+    def __init__(self, hidden_dim=48, dim=128):
+        super().__init__()
+
+        assert hidden_dim % 6 == 0
+
+        self.embedding_dim = hidden_dim
+        e = torch.pow(2, torch.arange(self.embedding_dim // 6)).float() * np.pi
+        e = torch.stack([
+            torch.cat([e, torch.zeros(self.embedding_dim // 6),
+                       torch.zeros(self.embedding_dim // 6)]),
+            torch.cat([torch.zeros(self.embedding_dim // 6), e,
+                       torch.zeros(self.embedding_dim // 6)]),
+            torch.cat([torch.zeros(self.embedding_dim // 6),
+                       torch.zeros(self.embedding_dim // 6), e]),
+        ])
+        self.register_buffer('basis', e)  # 3 x 16
+
+        self.mlp = nn.Linear(self.embedding_dim + 3, dim)
+
+    @staticmethod
+    def embed(input, basis):
+        projections = torch.einsum(
+                'bnd,de->bne', input, basis)
+        embeddings = torch.cat([projections.sin(), projections.cos()], dim=2)
+        return embeddings
+
+    def forward(self, input):
+        # input: B x N x 3
+        embed = self.mlp(torch.cat([self.embed(input, self.basis), input], dim=2))  # B x N x C
+        return embed
+
+
+def fps_subsample(pc, N, M):
+    # pc: B x N x 3
+    B, N0, D = pc.shape
+    assert N == N0
+
+    ###### fps
+    flattened = pc.view(B * N, D)
+
+    batch = torch.arange(B).to(pc.device)
+    batch = torch.repeat_interleave(batch, N)
+
+    pos = flattened
+
+    ratio = 1.0 * M / N
+
+    idx = fps(pos, batch, ratio=ratio)
+
+    sampled_pc = pos[idx]
+    sampled_pc = sampled_pc.view(B, -1, 3)
+    ######
+
+    return sampled_pc
+
+class DiagonalGaussianDistribution(object):
+    def __init__(self, mean, logvar, deterministic=False):
+        self.mean = mean
+        self.logvar = logvar
+        self.logvar = torch.clamp(self.logvar, -30.0, 20.0)
+        self.deterministic = deterministic
+        self.std = torch.exp(0.5 * self.logvar)
+        self.var = torch.exp(self.logvar)
+        if self.deterministic:
+            self.var = self.std = torch.zeros_like(self.mean).to(device=self.mean.device)
+
+    def sample(self):
+        x = self.mean + self.std * torch.randn(self.mean.shape).to(device=self.mean.device)
+        return x
+
+    def kl(self, other=None):
+        if self.deterministic:
+            return torch.Tensor([0.])
+        else:
+            if other is None:
+                return 0.5 * torch.mean(torch.pow(self.mean, 2)
+                                        + self.var - 1.0 - self.logvar,
+                                        dim=[1, 2])
+            else:
+                return 0.5 * torch.mean(
+                        torch.pow(self.mean - other.mean, 2) / other.var
+                        + self.var / other.var - 1.0 - self.logvar + other.logvar,
+                        dim=[1, 2, 3])
+
+    def nll(self, sample, dims=[1, 2, 3]):
+        if self.deterministic:
+            return torch.Tensor([0.])
+        logtwopi = np.log(2.0 * np.pi)
+        return 0.5 * torch.sum(
+                logtwopi + self.logvar + torch.pow(sample - self.mean, 2) / self.var,
+                dim=dims)
+
+    def mode(self):
+        return self.mean
+
+class KLBottleneck(nn.Module):
+    def __init__(self, dim, latent_dim, kl_weight):
+        super().__init__()
+
+        self.kl_weight = kl_weight
+
+        self.proj = nn.Linear(latent_dim, dim)
+
+        self.mean_fc = nn.Linear(dim, latent_dim)
+        self.logvar_fc = nn.Linear(dim, latent_dim)
+
+    def pre(self, x):
+        mean = self.mean_fc(x)
+        logvar = self.logvar_fc(x)
+
+        posterior = DiagonalGaussianDistribution(mean, logvar)
+        x = posterior.sample()
+        kl = posterior.kl()
+
+        return {'x': x, 'kl': self.kl_weight * kl}
+
+    def post(self, x):
+        x = self.proj(x)
+        return x
 
 class AutoEncoder_1119_light(nn.Module):
     def __init__(self, v_conf):
@@ -336,50 +459,36 @@ class AutoEncoder_1119_light(nn.Module):
         self.in_channels = v_conf["in_channels"]
         self.with_intersection = v_conf["with_intersection"]
 
-        self.face_coords = nn.Sequential(
-            nn.Conv2d(self.in_channels, ds // 8, kernel_size=3, stride=1, padding=1),
-            nn.LayerNorm((ds // 8, 16, 16)),
-            nn.LeakyReLU(),
-            res_block_xd(2, ds // 8, ds // 4, 3, 1, 1, v_norm=norm, v_norm_shape=(ds // 4, 16, 16)),
-            nn.MaxPool2d(kernel_size=2, stride=2),  # 8
-            res_block_xd(2, ds // 4, ds // 2, 3, 1, 1, v_norm=norm, v_norm_shape=(ds // 2, 8, 8)),
-            nn.MaxPool2d(kernel_size=2, stride=2),  # 4
-            res_block_xd(2, ds // 2, ds // 1, 3, 1, 1, v_norm=norm, v_norm_shape=(ds // 1, 4, 4)),
-            nn.MaxPool2d(kernel_size=2, stride=2),  # 2
-            res_block_xd(2, ds // 1, ds, 3, 1, 1, v_norm=norm, v_norm_shape=(ds // 1, 2, 2)),
-            nn.Conv2d(ds, dl, kernel_size=1, stride=1, padding=0),
-            Rearrange("b n h w -> b (n h w)")
-        )
-        self.edge_coords = nn.Sequential(
-            nn.Conv1d(self.in_channels, ds // 8, kernel_size=3, stride=1, padding=1),
-            nn.LayerNorm((ds // 8, 16,)),
-            nn.LeakyReLU(),
-            res_block_xd(1, ds // 8, ds // 4, 3, 1, 1, v_norm=norm, v_norm_shape=(ds // 4, 16,)),
-            nn.MaxPool1d(kernel_size=2, stride=2),  # 8
-            res_block_xd(1, ds // 4, ds // 2, 3, 1, 1, v_norm=norm, v_norm_shape=(ds // 2, 8,)),
-            nn.MaxPool1d(kernel_size=2, stride=2),  # 4
-            res_block_xd(1, ds // 2, ds, 3, 1, 1, v_norm=norm, v_norm_shape=(ds // 1, 4,)),
-            nn.MaxPool1d(kernel_size=2, stride=2),  # 2
-            res_block_xd(1, ds, ds, 3, 1, 1, v_norm=norm, v_norm_shape=(ds // 1, 2,)),
-            nn.Conv1d(ds, df, kernel_size=1, stride=1, padding=0),
-            Rearrange("b n w -> b (n w)"),
-        )  # b c 1
+        bd = 768
+        self.point_embed = PointEmbed(dim=bd)
+
+        # encoder
+        cross_layer = nn.TransformerDecoderLayer(
+                bd, 16, dim_feedforward=2048, dropout=0,
+                batch_first=True, norm_first=True)
+        attn_layer = nn.TransformerEncoderLayer(
+                bd, 16, dim_feedforward=2048, dropout=0,
+                batch_first=True, norm_first=True)
+
+        self.face_coords_cross_query = ModuleList([copy.deepcopy(cross_layer) for i in range(2)])
+        self.face_coords_attn = nn.TransformerEncoder(attn_layer, 8, nn.LayerNorm(bd))
+        self.edge_coords_cross_query = ModuleList([copy.deepcopy(cross_layer) for i in range(2)])
+        self.edge_coords_attn = nn.TransformerEncoder(attn_layer, 6, nn.LayerNorm(bd))
 
         self.graph_face_edge = nn.ModuleList()
-        for i in range(5):
+        for i in range(2):
             self.graph_face_edge.append(GATv2Conv(
-                    df, df,
-                    heads=1, edge_dim=df * 2,
+                    bd, bd,
+                    heads=1, edge_dim=bd,
             ))
             self.graph_face_edge.append(nn.LeakyReLU())
 
-        bd = 768  # bottlenek_dim
-        self.face_attn_proj_in = nn.Linear(df, bd)
-        self.face_attn_proj_out = nn.Linear(bd, df)
+        # post gnn attn
         layer = nn.TransformerEncoderLayer(
-            bd, 16, dim_feedforward=2048, dropout=0,
-            batch_first=True, norm_first=True)
-        self.face_attn = nn.TransformerEncoder(layer, 8, nn.LayerNorm(bd))
+                bd, 16, dim_feedforward=2048, dropout=0,
+                batch_first=True, norm_first=True)
+        self.post_gnn_attn = nn.TransformerEncoder(layer, 4, nn.LayerNorm(bd))
+        self.post_gnn_attn_proj_out = nn.Linear(bd, df)
 
         self.global_feature1 = nn.Sequential(
             nn.Linear(df, df),
@@ -394,17 +503,6 @@ class AutoEncoder_1119_light(nn.Module):
 
         self.inter = AttnIntersection3(df, 512, 12)
         self.classifier = nn.Linear(df * 2, 1)
-        self.inter_p = AttnIntersection3(df, 512, 2)
-        self.classifier_p = nn.Linear(df * 2, 1)
-        self.inter_v = AttnIntersection3(df, 512, 2)
-        self.classifier_v = nn.Linear(df * 2, 1)
-
-        self.face_attn_proj_in2 = nn.Linear(df, bd)
-        self.face_attn_proj_out2 = nn.Linear(bd, df)
-        layer2 = nn.TransformerEncoderLayer(
-            bd, 16, dim_feedforward=2048, dropout=0,
-            batch_first=True, norm_first=True)
-        self.face_attn2 = nn.TransformerEncoder(layer2, 8)
 
         # Decoder
         self.face_points_decoder = nn.Sequential(
@@ -529,16 +627,31 @@ class AutoEncoder_1119_light(nn.Module):
         return timer
 
     def encode(self, v_data, v_test):
-        face_points = rearrange(v_data["face_points"][..., :self.in_channels], 'b h w n -> b n h w').contiguous()
-        edge_points = rearrange(v_data["edge_points"][..., :self.in_channels], 'b h n -> b n h').contiguous()
-        face_features = self.face_coords(face_points)
-        edge_features = self.edge_coords(edge_points)
+        face_points = rearrange(v_data["face_points"][..., :3], 'b h w n -> b (h w) n').contiguous()
+        edge_points = rearrange(v_data["edge_points"][..., :3], 'b h n -> b h n').contiguous()
+
+        face_query_points = fps_subsample(face_points, face_points.shape[1], face_points.shape[1] / 64)
+        edge_query_points = fps_subsample(edge_points, edge_points.shape[1], edge_points.shape[1] / 64)
+
+        face_points_embed, face_query_points_embed = self.point_embed(face_points), self.point_embed(face_query_points)
+        edge_points_embed, edge_query_points_embed = self.point_embed(edge_points), self.point_embed(edge_query_points)
+
+        # face
+        for cross_layer in self.face_coords_cross_query:
+            face_latent = cross_layer(tgt=face_query_points_embed, memory=face_points_embed)
+        face_latent = self.face_coords_attn(face_latent)
+
+        # edge
+        for cross_layer in self.edge_coords_cross_query:
+            edge_latent = cross_layer(tgt=edge_query_points_embed, memory=edge_points_embed)
+        edge_latent = self.edge_coords_attn(edge_latent)
+
 
         # Face attn
-        attn_x = self.face_attn_proj_in(face_features)
-        attn_x = self.face_attn(attn_x, v_data["attn_mask"])
-        attn_x = self.face_attn_proj_out(attn_x)
-        fused_face_features = face_features + attn_x
+        # attn_x = self.face_attn_proj_in(face_features)
+        # attn_x = self.face_attn(attn_x, v_data["attn_mask"])
+        # attn_x = self.face_attn_proj_out(attn_x)
+        # fused_face_features = face_features + attn_x
 
         # # Face graph
         edge_face_connectivity = v_data["edge_face_connectivity"]

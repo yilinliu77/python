@@ -490,6 +490,14 @@ class AutoEncoder_1119_light(nn.Module):
         self.post_gnn_attn = nn.TransformerEncoder(layer, 4, nn.LayerNorm(bd))
         self.post_gnn_attn_proj_out = nn.Linear(bd, df)
 
+        bd = 768  # bottlenek_dim
+        self.face_attn_proj_in = nn.Linear(df, bd)
+        self.face_attn_proj_out = nn.Linear(bd, df)
+        layer = nn.TransformerEncoderLayer(
+                bd, 16, dim_feedforward=2048, dropout=0,
+                batch_first=True, norm_first=True)
+        self.face_attn = nn.TransformerEncoder(layer, 8, nn.LayerNorm(bd))
+
         self.global_feature1 = nn.Sequential(
             nn.Linear(df, df),
             nn.LeakyReLU(),

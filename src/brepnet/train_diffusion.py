@@ -219,7 +219,7 @@ class TrainDiffusion(pl.LightningModule):
         data = batch
         batch_size = min(len(batch['v_prefix']), self.batch_size)
         # Test loss
-        if len(data.keys()) != 1:
+        if len(data.keys()) > 2:
             loss = self.model(data, v_test=True)
             total_loss = loss["total_loss"]
             self.log("Test_Loss", total_loss, prog_bar=True, logger=True, on_step=False, on_epoch=True,

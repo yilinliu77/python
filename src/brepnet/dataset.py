@@ -736,3 +736,49 @@ class Diffusion_dataset_mm(Diffusion_dataset):
             "conditions"   : condition_out,
             "id_aug"       : id_aug,
         }
+
+
+class Diffusion_pc_test_dataset(torch.utils.data.Dataset):
+    def __init__(self, v_training_mode, v_conf):
+        super(Diffusion_dataset, self).__init__()
+        self.conf = v_conf
+        self.data_root = Path(v_conf['test_dataset'])
+        
+        self.data_folders = sorted(self.data_root.glob("*.ply"))
+        print("Total data num:", len(self.data_folders))
+
+    def __len__(self):
+        return 2
+        return len(self.data_folders)
+
+    def __getitem__(self, idx):
+        # idx = 0
+        folder_path = self.data_folders[idx]
+        mesh = trimesh.load(str(folder_path))
+        condition={}
+        condition["points"] = torch.from_numpy(np.concatenate((vertices.vertices, mesh.normals), axis=1)).float()[None]
+        return (
+            idx,
+            condition,
+        )
+
+    @staticmethod
+    def collate_fn(batch):
+        (
+            v_prefix, conditions
+        ) = zip(*batch)
+
+        keys = conditions[0].keys()
+        condition_out = {key: [] for key in keys}
+        for idx in range(len(conditions)):
+            for key in keys:
+                condition_out[key].append(conditions[idx][key])
+
+        for key in keys:
+            condition_out[key] = torch.stack(condition_out[key], dim=0) if isinstance(condition_out[key][0], torch.Tensor) else \
+                condition_out[key]
+
+        return {
+            "v_prefix": v_prefix,
+            "conditions": condition_out,
+        }

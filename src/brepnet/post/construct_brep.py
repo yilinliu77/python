@@ -437,15 +437,17 @@ if __name__ == '__main__':
             ))
         results = []
         for i in tqdm(range(len(all_folders))):
-            try:
-                results.append(ray.get(tasks[i], timeout=timeout))
-            except ray.exceptions.GetTimeoutError:
-                results.append(None)
-                timeout_cancel_list.append(all_folders[i])
-                ray.cancel(tasks[i])
-                print(f"Cancel {all_folders[i]} for timeout")
-            except:
-                results.append(None)
+            results.append(ray.get(tasks[i]))
+        # for i in tqdm(range(len(all_folders))):
+        #     try:
+        #         results.append(ray.get(tasks[i], timeout=timeout))
+        #     except ray.exceptions.GetTimeoutError:
+        #         results.append(None)
+        #         timeout_cancel_list.append(all_folders[i])
+        #         ray.cancel(tasks[i])
+        #         print(f"Cancel {all_folders[i]} for timeout")
+        #     except:
+        #         results.append(None)
         results = [item for item in results if item is not None]
         print(f"Cancel for timeout: {timeout_cancel_list}")
         print(len(results))

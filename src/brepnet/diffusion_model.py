@@ -117,7 +117,7 @@ class Diffusion_condition(nn.Module):
         if "pc" in v_conf["condition"]:
             self.with_pc = True
             
-            if True:
+            if False:
                 self.point_model = PointEncoder(v_conf, self.dim_condition)
             elif False:
                 self.point_model = PointTransformerV3(in_channels=6, cls_mode=True)
@@ -369,7 +369,7 @@ class Diffusion_condition(nn.Module):
         elif self.with_pc:
             pc = v_data["conditions"]["points"]
 
-            if True:
+            if False:
                 feat = self.point_model(pc[:, 0, :, :], v_data["id_aug"])
                 condition = feat[:, None]
             else:
@@ -444,7 +444,7 @@ class Diffusion_condition(nn.Module):
                         pcd.points = o3d.utility.Vector3dVector(v_pc[idx,:,:3])
                         o3d.io.write_point_cloud(str(root/prefix/f"{idx}_aug.ply"), pcd)
 
-                if True:
+                if False:
                     bs = pc.shape[0]
                     num_points = pc.shape[1]
                     feat = pc.reshape(-1, 6)

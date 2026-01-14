@@ -740,7 +740,7 @@ class Diffusion_dataset_mm(Diffusion_dataset):
 
 class Diffusion_pc_test_dataset(torch.utils.data.Dataset):
     def __init__(self, v_training_mode, v_conf):
-        super(Diffusion_dataset, self).__init__()
+        super(Diffusion_pc_test_dataset, self).__init__()
         self.conf = v_conf
         self.data_root = Path(v_conf['test_dataset'])
         
@@ -748,17 +748,25 @@ class Diffusion_pc_test_dataset(torch.utils.data.Dataset):
         print("Total data num:", len(self.data_folders))
 
     def __len__(self):
-        return 2
+        # return 32
         return len(self.data_folders)
 
     def __getitem__(self, idx):
         # idx = 0
         folder_path = self.data_folders[idx]
-        mesh = trimesh.load(str(folder_path))
+        mesh = o3d.io.read_point_cloud(str(folder_path))
+        points = np.concatenate((mesh.points, mesh.normals), axis=1)
+        center = (points[:, :3].max(axis=0) + points[:, :3].min(axis=0)) / 2
+        size = points[:, :3].max(axis=0) - points[:, :3].min(axis=0)
+        scale = 1.8 / size.max()
+        points[:, :3] = (points[:, :3]-center)*scale
+        # print("Point shape:", points.shape[0])
+        # idx = np.random.choice(points.shape[0], 2048, replace=False)
+        # points = points[idx]
         condition={}
-        condition["points"] = torch.from_numpy(np.concatenate((vertices.vertices, mesh.normals), axis=1)).float()[None]
+        condition["points"] = torch.from_numpy(points).float()[None]
         return (
-            idx,
+            folder_path.stem,
             condition,
         )
 

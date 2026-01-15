@@ -196,6 +196,7 @@ class CrossAttnIntersection(nn.Module):
         dim_in,
         dim_out,
         dim_latent,
+        edge_query_num,
         depth=8,
         num_heads=16,
     ) -> None:
@@ -204,7 +205,7 @@ class CrossAttnIntersection(nn.Module):
         self.proj_in = nn.Linear(dim_in, dim_latent)
         self.pos_encoding = nn.Parameter(torch.randn(2, dim_latent))
 
-        self.edge_latent_query = nn.Parameter(torch.randn(4, dim_latent))
+        self.edge_latent_query = nn.Parameter(torch.randn(edge_query_num, dim_latent))
         self.cross_attn_intersection = CrossAttentionBlocks(dim=dim_latent, context_dim=dim_latent, num_heads=num_heads, depth=depth)
         self.to_edge_latent = nn.Linear(dim_latent, dim_out)
 
@@ -303,7 +304,7 @@ class AutoEncoder_1119_light(nn.Module):
         self.edge_latent_to_bd = nn.Linear(2*self.df, bd)
         # self.face_post_kl_attn = SelfAttentionBlocks(dim=bd, num_heads=num_heads, depth=2)
 
-        self.inter = CrossAttnIntersection(df, 2*df, bd, 4)
+        self.inter = CrossAttnIntersection(df, 2*df, bd, edge_query_num=self.edge_latent_num, num_heads=num_heads, depth=4)
         self.classifier = nn.Linear(self.edge_latent_num * df * 2, 1)
 
         # face decoder

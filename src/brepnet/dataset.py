@@ -48,8 +48,22 @@ def normalize_coord1112(v_points):
 
     return points, normals, center[:, 0], scale
 
+def normalize_coord1112_bk(v_points):
+    points = v_points
+    shape = points.shape
+    num_items = shape[0]
+    points = points.reshape(num_items, -1, 3)
 
-def denormalize_coord1112(points, bbox):
+    center = points.mean(dim=1, keepdim=True)
+    scale = (torch.linalg.norm(points - center, dim=-1)).max(dim=1, keepdims=True)[0]
+    assert scale.min() > 1e-3
+    points = (points - center) / (scale[:, None] + 1e-8)
+
+    points = points.reshape(shape)
+    return points, center[:, 0], scale
+
+
+def denormalize_coord1112_bk(points, bbox):
     normal = points[..., 3:]
     points = points[..., :3]
     target_points = points + normal
@@ -64,6 +78,20 @@ def denormalize_coord1112(points, bbox):
     normal = normal / (1e-8 + torch.linalg.norm(normal, dim=-1, keepdim=True))
     points = torch.cat((points, normal), dim=-1)
     return points
+
+def denormalize_coord1112(points, bbox):
+    coord_points = points
+
+    center = bbox[..., :3]
+    scale = bbox[..., 3:4]
+
+    while len(coord_points.shape) > len(center.shape):
+        center = center.unsqueeze(1)
+        scale = scale.unsqueeze(1)
+
+    points_denorm = coord_points * scale + center
+
+    return points_denorm
 
 
 class Dummy_dataset(torch.utils.data.Dataset):

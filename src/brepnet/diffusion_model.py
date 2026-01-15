@@ -21,7 +21,9 @@ from scipy.spatial.transform import Rotation
 
 from transformers import Dinov2Model
 import os
+
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+
 
 # from thirdparty.PointTransformerV3.model import *
 # from thirdparty.point_transformer_v3.model import PointTransformerV3
@@ -59,42 +61,11 @@ def sincos_embedding(input, dim, max_period=10000):
 def inv_sigmoid(x):
     return torch.log(x / (1 - x + 1e-6))
 
-class BBoxEmbed(nn.Module):
-    def __init__(self, hidden_dim=48, dim=768):
-        super().__init__()
-
-        assert hidden_dim % 6 == 0
-
-        self.embedding_dim = hidden_dim
-        e = torch.pow(2, torch.arange(self.embedding_dim // 6)).float() * np.pi
-        e = torch.stack([
-            torch.cat([e, torch.zeros(self.embedding_dim // 6),
-                       torch.zeros(self.embedding_dim // 6)]),
-            torch.cat([torch.zeros(self.embedding_dim // 6), e,
-                       torch.zeros(self.embedding_dim // 6)]),
-            torch.cat([torch.zeros(self.embedding_dim // 6),
-                       torch.zeros(self.embedding_dim // 6), e]),
-        ])
-        self.register_buffer('basis', e)  # 3 x 16
-
-        self.mlp = nn.Linear(self.embedding_dim + 3, dim)
-
-    @staticmethod
-    def embed(input, basis):
-        projections = torch.einsum(
-                'bnd,de->bne', input, basis)
-        embeddings = torch.cat([projections.sin(), projections.cos()], dim=2)
-        return embeddings
-
-    def forward(self, input):
-        # input: B x N x 3
-        embed = self.mlp(torch.cat([self.embed(input, self.basis), input], dim=2))  # B x N x C
-        return embed
 
 class Diffusion_condition(nn.Module):
     def __init__(self, v_conf, ):
         super().__init__()
-        self.dim_input = 8 * 2 * 2
+        self.dim_input = 16 * 2 * 2
         self.dim_latent = v_conf["diffusion_latent"]
         self.dim_condition = 1024
         self.dim_total = self.dim_latent
@@ -104,13 +75,13 @@ class Diffusion_condition(nn.Module):
         if "addition_tag" in v_conf:
             self.addition_tag = v_conf["addition_tag"]
         if self.addition_tag:
-            self.dim_input += 1 
+            self.dim_input += 1
 
         self.p_embed = nn.Sequential(
-            nn.Linear(self.dim_input, self.dim_latent),
-            nn.LayerNorm(self.dim_latent),
-            nn.SiLU(),
-            nn.Linear(self.dim_latent, self.dim_latent),
+                nn.Linear(self.dim_input, self.dim_latent),
+                nn.LayerNorm(self.dim_latent),
+                nn.SiLU(),
+                nn.Linear(self.dim_latent, self.dim_latent),
         )
 
         layer1 = nn.TransformerEncoderLayer(
@@ -138,27 +109,27 @@ class Diffusion_condition(nn.Module):
             self.img_model.eval()
 
             self.img_fc = nn.Sequential(
-                nn.Linear(1024, 1024),
-                nn.LayerNorm(1024),
-                nn.SiLU(),
-                nn.Linear(1024, self.dim_condition),
+                    nn.Linear(1024, 1024),
+                    nn.LayerNorm(1024),
+                    nn.SiLU(),
+                    nn.Linear(1024, self.dim_condition),
             )
             self.camera_embedding = nn.Sequential(
-                nn.Embedding(8, 256),
-                nn.Linear(256, 256),
-                nn.LayerNorm(256),
-                nn.SiLU(),
-                nn.Linear(256, self.dim_condition),
+                    nn.Embedding(8, 256),
+                    nn.Linear(256, 256),
+                    nn.LayerNorm(256),
+                    nn.SiLU(),
+                    nn.Linear(256, self.dim_condition),
             )
         if "pc" in v_conf["condition"]:
             self.with_pc = True
-            
+
             if True:
                 self.point_model = PointEncoder(v_conf, self.dim_condition)
             elif False:
                 self.point_model = PointTransformerV3(in_channels=6, cls_mode=True)
                 self.fc_lyaer = nn.Sequential(
-                    nn.Linear(512, self.dim_condition),
+                        nn.Linear(512, self.dim_condition),
                 )
             else:
                 self.SA_modules = nn.ModuleList()
@@ -227,12 +198,12 @@ class Diffusion_condition(nn.Module):
             for param in self.txt_model.parameters():
                 param.requires_grad = False
             self.txt_model.eval()
-            
+
             self.txt_fc = nn.Sequential(
-                nn.Linear(1024, 1024),
-                nn.LayerNorm(1024),
-                nn.SiLU(),
-                nn.Linear(1024, self.dim_condition),
+                    nn.Linear(1024, 1024),
+                    nn.LayerNorm(1024),
+                    nn.SiLU(),
+                    nn.Linear(1024, self.dim_condition),
             )
 
         # cross attn condition
@@ -248,21 +219,21 @@ class Diffusion_condition(nn.Module):
                 nn.LayerNorm(self.dim_input),
                 nn.SiLU(),
                 nn.Linear(self.dim_input, 1),
-        )    
+        )
         self.noise_scheduler = DDPMScheduler(
-            num_train_timesteps=1000,
-            beta_schedule=v_conf["beta_schedule"],
-            prediction_type=v_conf["diffusion_type"],
-            beta_start=v_conf["beta_start"],
-            beta_end=v_conf["beta_end"],
-            variance_type=v_conf["variance_type"],
-            clip_sample=False,
+                num_train_timesteps=1000,
+                beta_schedule=v_conf["beta_schedule"],
+                prediction_type=v_conf["diffusion_type"],
+                beta_start=v_conf["beta_start"],
+                beta_end=v_conf["beta_end"],
+                variance_type=v_conf["variance_type"],
+                clip_sample=False,
         )
         self.time_embed = nn.Sequential(
-            nn.Linear(self.dim_total, self.dim_total),
-            nn.LayerNorm(self.dim_total),
-            nn.SiLU(),
-            nn.Linear(self.dim_total, self.dim_total),
+                nn.Linear(self.dim_total, self.dim_total),
+                nn.LayerNorm(self.dim_total),
+                nn.SiLU(),
+                nn.Linear(self.dim_total, self.dim_total),
         )
 
         self.num_max_faces = v_conf["num_max_faces"]
@@ -307,24 +278,24 @@ class Diffusion_condition(nn.Module):
             mask = label > 0.5
         else:
             mask = torch.ones_like(face_z[:, :, 0]).to(bool)
-        
+
         recon_data = []
         for i in range(bs):
             face_z_item = face_z[i:i + 1][mask[i:i + 1]]
-            if self.addition_tag: # Deduplicate
-                flag = face_z_item[...,-1] > 0
+            if self.addition_tag:  # Deduplicate
+                flag = face_z_item[..., -1] > 0
                 face_z_item = face_z_item[flag][:, :-1]
-            if self.pad_method == "random": # Deduplicate
+            if self.pad_method == "random":  # Deduplicate
                 threshold = 1e-2
                 max_faces = face_z_item.shape[0]
-                index = torch.stack(torch.meshgrid(torch.arange(max_faces),torch.arange(max_faces), indexing="ij"), dim=2)
+                index = torch.stack(torch.meshgrid(torch.arange(max_faces), torch.arange(max_faces), indexing="ij"), dim=2)
                 features = face_z_item[index]
-                distance = (features[:,:,0]-features[:,:,1]).abs().mean(dim=-1)
+                distance = (features[:, :, 0] - features[:, :, 1]).abs().mean(dim=-1)
                 final_face_z = []
                 for j in range(max_faces):
                     valid = True
                     for k in final_face_z:
-                        if distance[j,k] < threshold:
+                        if distance[j, k] < threshold:
                             valid = False
                             break
                     if valid:
@@ -340,8 +311,8 @@ class Diffusion_condition(nn.Module):
             face_features = v_data["face_features"]
             bs = face_features.shape[0]
             num_face = face_features.shape[1]
-            mean = face_features[..., :32]
-            std = face_features[..., 32:]
+            mean = face_features[..., :64]
+            std = face_features[..., 64:]
             if self.use_mean:
                 face_features = mean
             else:
@@ -357,26 +328,26 @@ class Diffusion_condition(nn.Module):
             # Fill the face_z to the padded_face_z without forloop
             if self.pad_method == "zero":
                 padded_face_z = torch.zeros(
-                    (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
+                        (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
                 mask = num_faces[:, None] > torch.arange(self.num_max_faces, device=num_faces.device)
                 padded_face_z[mask] = face_features
                 data["padded_face_z"] = padded_face_z
                 data["mask"] = mask
             else:
                 positions = torch.arange(self.num_max_faces, device=face_features.device).unsqueeze(0).repeat(bs, 1)
-                mandatory_mask = positions < num_faces[:,None]
-                random_indices = (torch.rand((bs, self.num_max_faces), device=face_features.device) * num_faces[:,None]).long()
+                mandatory_mask = positions < num_faces[:, None]
+                random_indices = (torch.rand((bs, self.num_max_faces), device=face_features.device) * num_faces[:, None]).long()
                 indices = torch.where(mandatory_mask, positions, random_indices)
                 num_faces_cum = num_faces.cumsum(dim=0).roll(1)
                 num_faces_cum[0] = 0
-                indices += num_faces_cum[:,None]
+                indices += num_faces_cum[:, None]
                 # Permute the indices
                 r_indices = torch.argsort(torch.rand((bs, self.num_max_faces), device=face_features.device), dim=1)
                 indices = indices.gather(1, r_indices)
                 data["padded_face_z"] = face_features[indices]
         return data
 
-    def diffuse(self, v_feature, v_timesteps, bbox_cond=None, v_condition=None):
+    def diffuse(self, v_feature, v_timesteps, v_condition=None):
         bs = v_feature.size(0)
         de = v_feature.device
         dt = v_feature.dtype
@@ -387,7 +358,6 @@ class Diffusion_condition(nn.Module):
         # v_condition = torch.zeros((bs, 1, self.dim_condition), device=de, dtype=dt) if v_condition is None else v_condition
         # v_condition = v_condition.repeat(1, v_feature.shape[1], 1)
         # noise_features = torch.cat([noise_features, v_condition], dim=-1)
-        # noise_features = noise_features + time_embeds
 
         # cross attn condition
         assert v_condition is not None
@@ -397,6 +367,7 @@ class Diffusion_condition(nn.Module):
                 memory=v_condition.squeeze(1) if v_condition.shape[1] == 1 else v_condition
         )
         noise_features_add_cond = self.cross_attn_post_proj(noise_features_add_cond)
+
         noise_features = noise_features_add_cond + time_embeds
 
         pred_x0 = self.net1(noise_features)
@@ -435,39 +406,40 @@ class Diffusion_condition(nn.Module):
                 pc = torch.cat([points, normals], dim=-1)
 
                 if self.is_aug and self.training:
-                # if self.is_aug:
+                    # if self.is_aug:
                     # Rotate
                     if True:
                         id_aug = v_data["id_aug"]
-                        angles = torch.stack([id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
+                        angles = torch.stack([id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2],
+                                             dim=1)
                         matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
                         rotation_3d_matrix = torch.tensor(matrix, device=pc.device, dtype=pc.dtype)
 
                         pc2 = (rotation_3d_matrix @ points.permute(0, 2, 1)).permute(0, 2, 1)
-                        tpc2 = (rotation_3d_matrix @ (points+normals).permute(0, 2, 1)).permute(0, 2, 1)
+                        tpc2 = (rotation_3d_matrix @ (points + normals).permute(0, 2, 1)).permute(0, 2, 1)
                         normals2 = tpc2 - pc2
                         pc = torch.cat([pc2, normals2], dim=-1)
-                    
+
                     # Crop
                     if True:
                         bs = pc.shape[0]
                         num_points = pc.shape[1]
                         pc_index = torch.randint(0, pc.shape[1], (bs,), device=pc.device)
-                        center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[...,:3]
-                        length_xyz = torch.rand((bs,3), device=pc.device) * 1.0
+                        center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[..., :3]
+                        length_xyz = torch.rand((bs, 3), device=pc.device) * 1.0
                         bbox_min = center_pos - length_xyz[:, None, :]
                         bbox_max = center_pos + length_xyz[:, None, :]
                         mask = torch.logical_not(((pc[:, :, :3] > bbox_min) & (pc[:, :, :3] < bbox_max)).all(dim=-1))
 
-                        sort_results = torch.sort(mask.long(),descending=True)
-                        mask=sort_results.values
-                        pc_sorted = torch.gather(pc,1,sort_results.indices[:,:,None].repeat(1,1,6))
+                        sort_results = torch.sort(mask.long(), descending=True)
+                        mask = sort_results.values
+                        pc_sorted = torch.gather(pc, 1, sort_results.indices[:, :, None].repeat(1, 1, 6))
                         num_valid = mask.sum(dim=-1)
-                        index1 = torch.rand((bs,num_points), device=pc.device) * num_valid[:,None]
-                        index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs,1)
+                        index1 = torch.rand((bs, num_points), device=pc.device) * num_valid[:, None]
+                        index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs, 1)
                         index = torch.where(mask.bool(), index2, index1)
                         pc = pc_sorted[torch.arange(bs)[:, None].repeat(1, num_points), index.long()]
-                    
+
                     # Downsample
                     if True:
                         num_points = pc.shape[1]
@@ -475,17 +447,17 @@ class Diffusion_condition(nn.Module):
                         np.random.shuffle(index)
                         num_points = np.random.randint(1000, num_points)
                         # pc = pc[:,index[:2048]]
-                        pc = pc[:,index[:num_points]]
+                        pc = pc[:, index[:num_points]]
 
                     # Noise
                     if True:
                         noise = torch.randn_like(pc) * 0.02
                         pc = pc + noise
-                    
+
                     # Mask normal
                     if True:
                         # pc[...,3:] = 0.
-                        pc[...,3:] = 0. if torch.rand(1) > 0.5 else pc[...,3:]
+                        pc[..., 3:] = 0. if torch.rand(1) > 0.5 else pc[..., 3:]
                 else:
                     pc = pc
 
@@ -496,10 +468,10 @@ class Diffusion_condition(nn.Module):
                     root = Path(r"D:/brepnet/noisy_input/111")
                     for idx in range(v_pc.shape[0]):
                         prefix = v_data["v_prefix"][idx]
-                        (root/prefix).mkdir(parents=True, exist_ok=True)
+                        (root / prefix).mkdir(parents=True, exist_ok=True)
                         pcd = o3d.geometry.PointCloud()
-                        pcd.points = o3d.utility.Vector3dVector(v_pc[idx,:,:3])
-                        o3d.io.write_point_cloud(str(root/prefix/f"{idx}_aug.ply"), pcd)
+                        pcd.points = o3d.utility.Vector3dVector(v_pc[idx, :, :3])
+                        o3d.io.write_point_cloud(str(root / prefix / f"{idx}_aug.ply"), pcd)
 
                 if True:
                     bs = pc.shape[0]
@@ -507,10 +479,10 @@ class Diffusion_condition(nn.Module):
                     feat = pc.reshape(-1, 6)
                     coords = feat[:, :3]
                     results = self.point_model({
-                        "feat": feat,
-                        "coord": coords,
+                        "feat"     : feat,
+                        "coord"    : coords,
                         "grid_size": 0.02,
-                        "batch": torch.arange(bs, device=pc.device).repeat_interleave(num_points),
+                        "batch"    : torch.arange(bs, device=pc.device).repeat_interleave(num_points),
                     })
                     features = scatter_mean(results["feat"], results["batch"], dim=0)
                     features = self.fc_lyaer(features)
@@ -547,7 +519,7 @@ class Diffusion_condition(nn.Module):
 
         # Model
         pred = self.diffuse(noise_input, timesteps, condition)
-        
+
         loss = {}
         loss_item = self.loss(pred, face_z if self.diffusion_type == "sample" else noise, reduction="none")
         loss["diffusion_loss"] = loss_item.mean()
@@ -572,6 +544,7 @@ class Diffusion_condition(nn.Module):
             loss["diffusion_loss"] += loss["l2"]
         return loss
 
+
 class PointEncoder(nn.Module):
     def __init__(self, v_conf, v_fc_dim):
         super().__init__()
@@ -584,55 +557,55 @@ class PointEncoder(nn.Module):
             c_in = 6
             with_bn = False
             self.point_model.append(
-                PointnetSAModuleMSG(
-                    npoint=1024,
-                    radii=[0.05, 0.1],
-                    nsamples=[16, 32],
-                    mlps=[[c_in, 32], [c_in, 64]],
-                    use_xyz=True,
-                    bn=with_bn
-                )
+                    PointnetSAModuleMSG(
+                            npoint=1024,
+                            radii=[0.05, 0.1],
+                            nsamples=[16, 32],
+                            mlps=[[c_in, 32], [c_in, 64]],
+                            use_xyz=True,
+                            bn=with_bn
+                    )
             )
             c_out_0 = 32 + 64
 
             c_in = c_out_0
             self.point_model.append(
-                PointnetSAModuleMSG(
-                    npoint=256,
-                    radii=[0.1, 0.2],
-                    nsamples=[16, 32],
-                    mlps=[[c_in, 64], [c_in, 128]],
-                    use_xyz=True,
-                    bn=with_bn
-                )
+                    PointnetSAModuleMSG(
+                            npoint=256,
+                            radii=[0.1, 0.2],
+                            nsamples=[16, 32],
+                            mlps=[[c_in, 64], [c_in, 128]],
+                            use_xyz=True,
+                            bn=with_bn
+                    )
             )
             c_out_1 = 64 + 128
             c_in = c_out_1
             self.point_model.append(
-                PointnetSAModuleMSG(
-                    npoint=64,
-                    radii=[0.2, 0.4],
-                    nsamples=[16, 32],
-                    mlps=[[c_in, 128], [c_in, 256]],
-                    use_xyz=True,
-                    bn=with_bn
-                )
+                    PointnetSAModuleMSG(
+                            npoint=64,
+                            radii=[0.2, 0.4],
+                            nsamples=[16, 32],
+                            mlps=[[c_in, 128], [c_in, 256]],
+                            use_xyz=True,
+                            bn=with_bn
+                    )
             )
             c_out_2 = 128 + 256
 
             c_in = c_out_2
             self.point_model.append(
-                PointnetSAModule(
-                    mlp=[c_in, 256, 512, 1024],
-                    use_xyz=True,
-                    bn=with_bn
-                )
+                    PointnetSAModule(
+                            mlp=[c_in, 256, 512, 1024],
+                            use_xyz=True,
+                            bn=with_bn
+                    )
             )
             self.fc_layer = nn.Sequential(
-                nn.Linear(1024, 1024),
-                nn.LayerNorm(1024),
-                nn.SiLU(),
-                nn.Linear(1024, v_fc_dim),
+                    nn.Linear(1024, 1024),
+                    nn.LayerNorm(1024),
+                    nn.SiLU(),
+                    nn.Linear(1024, v_fc_dim),
             )
         elif v_conf["point_encoder"] == "pointnet2":
             self.point_model = nn.ModuleList()
@@ -640,78 +613,79 @@ class PointEncoder(nn.Module):
             c_in = 6
             with_bn = False
             self.point_model.append(
-                PointnetSAModuleMSG(
-                    npoint=1024,
-                    radii=[0.05, 0.1, 0.2],
-                    nsamples=[16, 32, 128],
-                    mlps=[[c_in, 16, 16], [c_in, 32, 32], [c_in, 64, 64]],
-                    use_xyz=True,
-                    bn=with_bn
-                )
+                    PointnetSAModuleMSG(
+                            npoint=1024,
+                            radii=[0.05, 0.1, 0.2],
+                            nsamples=[16, 32, 128],
+                            mlps=[[c_in, 16, 16], [c_in, 32, 32], [c_in, 64, 64]],
+                            use_xyz=True,
+                            bn=with_bn
+                    )
             )
             c_out_0 = 16 + 32 + 64
 
             c_in = c_out_0
             self.point_model.append(
-                PointnetSAModuleMSG(
-                    npoint=256,
-                    radii=[0.1, 0.2, 0.4],
-                    nsamples=[16, 32, 128],
-                    mlps=[[c_in, 32, 32], [c_in, 64, 64], [c_in, 128, 128]],
-                    use_xyz=True,
-                    bn=with_bn
-                )
+                    PointnetSAModuleMSG(
+                            npoint=256,
+                            radii=[0.1, 0.2, 0.4],
+                            nsamples=[16, 32, 128],
+                            mlps=[[c_in, 32, 32], [c_in, 64, 64], [c_in, 128, 128]],
+                            use_xyz=True,
+                            bn=with_bn
+                    )
             )
             c_out_1 = 32 + 64 + 128
             c_in = c_out_1
             self.point_model.append(
-                PointnetSAModuleMSG(
-                    npoint=64,
-                    radii=[0.2, 0.4, 0.8],
-                    nsamples=[16, 32, 128],
-                    mlps=[[c_in, 64, 64], [c_in, 128, 128], [c_in, 128, 128]],
-                    use_xyz=True,
-                    bn=with_bn
-                )
+                    PointnetSAModuleMSG(
+                            npoint=64,
+                            radii=[0.2, 0.4, 0.8],
+                            nsamples=[16, 32, 128],
+                            mlps=[[c_in, 64, 64], [c_in, 128, 128], [c_in, 128, 128]],
+                            use_xyz=True,
+                            bn=with_bn
+                    )
             )
             c_out_2 = 64 + 128 + 128
 
             c_in = c_out_2
             self.point_model.append(
-                PointnetSAModuleMSG(
-                    npoint=16,
-                    radii=[0.4, 0.8, 1.6],
-                    nsamples=[16, 32, 128],
-                    mlps=[[c_in, 128, 128], [c_in, 128, 128], [c_in, 128, 128]],
-                    use_xyz=True,
-                    bn=with_bn
-                )
+                    PointnetSAModuleMSG(
+                            npoint=16,
+                            radii=[0.4, 0.8, 1.6],
+                            nsamples=[16, 32, 128],
+                            mlps=[[c_in, 128, 128], [c_in, 128, 128], [c_in, 128, 128]],
+                            use_xyz=True,
+                            bn=with_bn
+                    )
             )
 
             c_out_3 = 128 + 128 + 128
             c_in = c_out_3
             self.point_model.append(
-                PointnetSAModule(
-                    mlp=[c_in, 1024, 1024, 1024],
-                    use_xyz=True,
-                    bn=with_bn
-                )
+                    PointnetSAModule(
+                            mlp=[c_in, 1024, 1024, 1024],
+                            use_xyz=True,
+                            bn=with_bn
+                    )
             )
             self.fc_layer = nn.Sequential(
-                nn.Linear(1024, 1024),
-                nn.LayerNorm(1024),
-                nn.SiLU(),
-                nn.Linear(1024, v_fc_dim),
+                    nn.Linear(1024, 1024),
+                    nn.LayerNorm(1024),
+                    nn.SiLU(),
+                    nn.Linear(1024, v_fc_dim),
             )
         elif v_conf["point_encoder"] == "pointnet_noncuda":
-            from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet2_utils import PointNetSetAbstractionMsg,PointNetFeaturePropagation,PointNetSetAbstraction
-            
+            from thirdparty.Pointnet_Pointnet2_pytorch.models.pointnet2_utils import PointNetSetAbstractionMsg, PointNetFeaturePropagation, \
+                PointNetSetAbstraction
+
             self.sa1 = PointNetSetAbstractionMsg(1024, [0.05, 0.1], [16, 32], 6, [[16, 16, 32], [32, 32, 64]])
-            self.sa2 = PointNetSetAbstractionMsg(256, [0.1, 0.2], [16, 32], 32+64, [[64, 64, 128], [64, 96, 128]])
-            self.sa3 = PointNetSetAbstractionMsg(64, [0.2, 0.4], [16, 32], 128+128, [[128, 196, 256], [128, 196, 256]])
-            self.sa4 = PointNetSetAbstractionMsg(16, [0.4, 0.8], [16, 32], 256+256, [[256, 256, 512], [256, 384, 512]])
+            self.sa2 = PointNetSetAbstractionMsg(256, [0.1, 0.2], [16, 32], 32 + 64, [[64, 64, 128], [64, 96, 128]])
+            self.sa3 = PointNetSetAbstractionMsg(64, [0.2, 0.4], [16, 32], 128 + 128, [[128, 196, 256], [128, 196, 256]])
+            self.sa4 = PointNetSetAbstractionMsg(16, [0.4, 0.8], [16, 32], 256 + 256, [[256, 256, 512], [256, 384, 512]])
             self.sa5 = PointNetSetAbstraction(None, None, None, 512 + 512 + 3, [512, 512, 1024], True)
-            
+
             self.fc1 = nn.Linear(1024, 512)
             # self.bn1 = nn.BatchNorm1d(512)
             self.drop1 = nn.Dropout(0.4)
@@ -721,13 +695,13 @@ class PointEncoder(nn.Module):
             self.fc3 = nn.Linear(256, v_fc_dim)
         else:
             self.point_model = PointTransformerV3(
-                in_channels=6, cls_mode=True,
-                enc_depths=(1, 1, 1, 1, 1),
-                # enc_channels=(32, 64, 128, 256, 512),
-                enc_channels=(16, 32, 64, 128, 256),
+                    in_channels=6, cls_mode=True,
+                    enc_depths=(1, 1, 1, 1, 1),
+                    # enc_channels=(32, 64, 128, 256, 512),
+                    enc_channels=(16, 32, 64, 128, 256),
             )
             self.fc_layer = nn.Sequential(
-                nn.Linear(256, v_fc_dim),
+                    nn.Linear(256, v_fc_dim),
             )
 
     def augment(self, v_points):
@@ -739,18 +713,18 @@ class PointEncoder(nn.Module):
             bs = pc.shape[0]
             num_points = pc.shape[1]
             pc_index = torch.randint(0, pc.shape[1], (bs,), device=pc.device)
-            center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[...,:3]
-            length_xyz = torch.rand((bs,3), device=pc.device) * 1.0
+            center_pos = torch.gather(pc, 1, pc_index[:, None, None].repeat(1, 1, 6))[..., :3]
+            length_xyz = torch.rand((bs, 3), device=pc.device) * 1.0
             bbox_min = center_pos - length_xyz[:, None, :]
             bbox_max = center_pos + length_xyz[:, None, :]
             mask = torch.logical_not(((pc[:, :, :3] > bbox_min) & (pc[:, :, :3] < bbox_max)).all(dim=-1))
 
-            sort_results = torch.sort(mask.long(),descending=True)
-            mask=sort_results.values
-            pc_sorted = torch.gather(pc,1,sort_results.indices[:,:,None].repeat(1,1,6))
+            sort_results = torch.sort(mask.long(), descending=True)
+            mask = sort_results.values
+            pc_sorted = torch.gather(pc, 1, sort_results.indices[:, :, None].repeat(1, 1, 6))
             num_valid = mask.sum(dim=-1)
-            index1 = torch.rand((bs,num_points), device=pc.device) * num_valid[:,None]
-            index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs,1)
+            index1 = torch.rand((bs, num_points), device=pc.device) * num_valid[:, None]
+            index2 = torch.arange(num_points, device=pc.device)[None].repeat(bs, 1)
             index = torch.where(mask.bool(), index2, index1)
             pc = pc_sorted[torch.arange(bs)[:, None].repeat(1, num_points), index.long()]
 
@@ -758,7 +732,7 @@ class PointEncoder(nn.Module):
             index = np.arange(num_points)
             np.random.shuffle(index)
             num_points = np.random.randint(1000, num_points)
-            pc = pc[:,index[:num_points]]
+            pc = pc[:, index[:num_points]]
 
             # Noise
             noise = torch.randn_like(pc) * 0.02
@@ -775,7 +749,7 @@ class PointEncoder(nn.Module):
         if v_id_aug is not None:
             angles = torch.stack([
                 v_id_aug % 4 * torch.pi / 2, v_id_aug // 4 % 4 * torch.pi / 2, v_id_aug // 16 * torch.pi / 2],
-                dim=1)
+                    dim=1)
             matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
             rotation_3d_matrix = torch.tensor(matrix, device=v_points.device, dtype=v_points.dtype)
             points = v_points[..., :3]
@@ -794,18 +768,18 @@ class PointEncoder(nn.Module):
                     li_xyz, li_features = self.point_model[i](l_xyz[i], l_features[i])
                     l_xyz.append(li_xyz)
                     l_features.append(li_features)
-            features = self.fc_layer(l_features[-1][...,0])
+            features = self.fc_layer(l_features[-1][..., 0])
         elif self.conf["point_encoder"] == "pointnet_noncuda":
             aug_pc = aug_pc.permute(0, 2, 1)
             l0_points = aug_pc
-            l0_xyz = aug_pc[:,:3,:]
+            l0_xyz = aug_pc[:, :3, :]
 
             l1_xyz, l1_points = self.sa1(l0_xyz, l0_points)
             l2_xyz, l2_points = self.sa2(l1_xyz, l1_points)
             l3_xyz, l3_points = self.sa3(l2_xyz, l2_points)
             l4_xyz, l4_points = self.sa4(l3_xyz, l3_points)
             l5_xyz, l5_points = self.sa5(l4_xyz, l4_points)
-            
+
             x = l5_points.view(aug_pc.shape[0], 1024)
             x = self.drop1(F.relu((self.fc1(x))))
             x = self.drop2(F.relu((self.fc2(x))))
@@ -816,14 +790,15 @@ class PointEncoder(nn.Module):
             feat = aug_pc.reshape(-1, 6)
             coords = feat[:, :3]
             results = self.point_model({
-                "feat": feat,
-                "coord": coords,
+                "feat"     : feat,
+                "coord"    : coords,
                 "grid_size": 0.02,
-                "batch": torch.arange(bs, device=aug_pc.device).repeat_interleave(num_points),
+                "batch"    : torch.arange(bs, device=aug_pc.device).repeat_interleave(num_points),
             })
             features = scatter_mean(results["feat"], results["batch"], dim=0)
             features = self.fc_layer(features)
         return features
+
 
 class ImageEncoder(nn.Module):
     def __init__(self, v_fc_dim):
@@ -833,22 +808,22 @@ class ImageEncoder(nn.Module):
             param.requires_grad = False
         self.img_model.eval()
 
-        decoder_layer=nn.TransformerDecoderLayer(1024, 8, batch_first=True, norm_first=True)
+        decoder_layer = nn.TransformerDecoderLayer(1024, 8, batch_first=True, norm_first=True)
         self.pose_attn = nn.TransformerDecoder(decoder_layer, 4, nn.LayerNorm(1024))
 
         self.camera_embedding = nn.Sequential(
-            nn.Embedding(8, 1024),
-            nn.Linear(1024, 1024),
-            nn.LayerNorm(1024),
-            nn.SiLU(),
-            nn.Linear(1024, 1024),
+                nn.Embedding(8, 1024),
+                nn.Linear(1024, 1024),
+                nn.LayerNorm(1024),
+                nn.SiLU(),
+                nn.Linear(1024, 1024),
         )
 
         self.img_fc = nn.Sequential(
-            nn.Linear(1024, 1024),
-            nn.LayerNorm(1024),
-            nn.SiLU(),
-            nn.Linear(1024, v_fc_dim),
+                nn.Linear(1024, 1024),
+                nn.LayerNorm(1024),
+                nn.SiLU(),
+                nn.Linear(1024, v_fc_dim),
         )
 
     def forward(self, v_data):
@@ -860,7 +835,7 @@ class ImageEncoder(nn.Module):
 
         v_id_aug = v_data["conditions"]["img_id"]
         camera_embedding = self.camera_embedding(v_id_aug)
-        queried_feature = self.pose_attn(tgt=camera_embedding,memory=dino_feature)
+        queried_feature = self.pose_attn(tgt=camera_embedding, memory=dino_feature)
 
         condition_batch_id = v_data["conditions"]["id_batch"]
         svr_feature = queried_feature[condition_batch_id["single_img_rec"]]
@@ -869,9 +844,9 @@ class ImageEncoder(nn.Module):
         mvr_feature_total = queried_feature[condition_batch_id["multi_img_rec"]]
         if mvr_feature_total.shape[0] > 0:
             mvr_feature = scatter_mean(
-                mvr_feature_total,
-                condition_batch_id["multi_img_rec2"],
-                dim=0
+                    mvr_feature_total,
+                    condition_batch_id["multi_img_rec2"],
+                    dim=0
             )
         else:
             mvr_feature = mvr_feature_total
@@ -880,6 +855,7 @@ class ImageEncoder(nn.Module):
         sketch_feature = self.img_fc(sketch_feature)
         mvr_feature = self.img_fc(mvr_feature)
         return svr_feature, sketch_feature, mvr_feature
+
 
 class Diffusion_condition_mm(nn.Module):
     def __init__(self, v_conf, ):
@@ -891,21 +867,21 @@ class Diffusion_condition_mm(nn.Module):
         self.time_statics = [0 for _ in range(10)]
 
         self.p_embed = nn.Sequential(
-            nn.Linear(self.dim_input, self.dim_latent),
-            nn.LayerNorm(self.dim_latent),
-            nn.SiLU(),
-            nn.Linear(self.dim_latent, self.dim_latent),
+                nn.Linear(self.dim_input, self.dim_latent),
+                nn.LayerNorm(self.dim_latent),
+                nn.SiLU(),
+                nn.Linear(self.dim_latent, self.dim_latent),
         )
 
         layer1 = nn.TransformerEncoderLayer(
-            d_model=self.dim_total,
-            nhead=self.dim_total // 64, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
+                d_model=self.dim_total,
+                nhead=self.dim_total // 64, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
         self.net1 = nn.TransformerEncoder(layer1, 24, nn.LayerNorm(self.dim_total))
         self.fc_out = nn.Sequential(
-            nn.Linear(self.dim_total, self.dim_total),
-            nn.LayerNorm(self.dim_total),
-            nn.SiLU(),
-            nn.Linear(self.dim_total, self.dim_input),
+                nn.Linear(self.dim_total, self.dim_total),
+                nn.LayerNorm(self.dim_total),
+                nn.SiLU(),
+                nn.Linear(self.dim_total, self.dim_input),
         )
 
         self.with_img = False
@@ -928,26 +904,26 @@ class Diffusion_condition_mm(nn.Module):
             self.txt_model.eval()
 
             self.txt_fc = nn.Sequential(
-                nn.Linear(1024, 1024),
-                nn.LayerNorm(1024),
-                nn.SiLU(),
-                nn.Linear(1024, self.dim_condition),
+                    nn.Linear(1024, 1024),
+                    nn.LayerNorm(1024),
+                    nn.SiLU(),
+                    nn.Linear(1024, self.dim_condition),
             )
 
         self.noise_scheduler = DDPMScheduler(
-            num_train_timesteps=1000,
-            beta_schedule=v_conf["beta_schedule"],
-            prediction_type=v_conf["diffusion_type"],
-            beta_start=v_conf["beta_start"],
-            beta_end=v_conf["beta_end"],
-            variance_type=v_conf["variance_type"],
-            clip_sample=False,
+                num_train_timesteps=1000,
+                beta_schedule=v_conf["beta_schedule"],
+                prediction_type=v_conf["diffusion_type"],
+                beta_start=v_conf["beta_start"],
+                beta_end=v_conf["beta_end"],
+                variance_type=v_conf["variance_type"],
+                clip_sample=False,
         )
         self.time_embed = nn.Sequential(
-            nn.Linear(self.dim_total, self.dim_total),
-            nn.LayerNorm(self.dim_total),
-            nn.SiLU(),
-            nn.Linear(self.dim_total, self.dim_total),
+                nn.Linear(self.dim_total, self.dim_total),
+                nn.LayerNorm(self.dim_total),
+                nn.SiLU(),
+                nn.Linear(self.dim_total, self.dim_total),
         )
 
         self.num_max_faces = v_conf["num_max_faces"]
@@ -1004,20 +980,20 @@ class Diffusion_condition_mm(nn.Module):
 
         face_z = face_features
         mask = torch.ones_like(face_z[:, :, 0]).to(bool)
-        
+
         recon_data = []
         for i in range(bs):
             face_z_item = face_z[i:i + 1][mask[i:i + 1]]
             threshold = 1e-2
             max_faces = face_z_item.shape[0]
-            index = torch.stack(torch.meshgrid(torch.arange(max_faces),torch.arange(max_faces), indexing="ij"), dim=2)
+            index = torch.stack(torch.meshgrid(torch.arange(max_faces), torch.arange(max_faces), indexing="ij"), dim=2)
             features = face_z_item[index]
-            distance = (features[:,:,0]-features[:,:,1]).abs().mean(dim=-1)
+            distance = (features[:, :, 0] - features[:, :, 1]).abs().mean(dim=-1)
             final_face_z = []
             for j in range(max_faces):
                 valid = True
                 for k in final_face_z:
-                    if distance[j,k] < threshold:
+                    if distance[j, k] < threshold:
                         valid = False
                         break
                 if valid:
@@ -1051,7 +1027,7 @@ class Diffusion_condition_mm(nn.Module):
             # Fill the face_z to the padded_face_z without forloop
             if self.pad_method == "zero":
                 padded_face_z = torch.zeros(
-                    (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
+                        (bs, self.num_max_faces, dim_latent), device=face_features.device, dtype=face_features.dtype)
                 mask = num_faces[:, None] > torch.arange(self.num_max_faces, device=num_faces.device)
                 padded_face_z[mask] = face_features
                 data["padded_face_z"] = padded_face_z
@@ -1103,7 +1079,7 @@ class Diffusion_condition_mm(nn.Module):
             else:
                 txt = v_data["conditions"]["txt"]
                 txt_feat = self.txt_model.encode(txt, show_progress_bar=False, convert_to_numpy=False, device=self.txt_model.device)
-                txt_feat = torch.stack(txt_feat, dim=0) # bs, 1024
+                txt_feat = torch.stack(txt_feat, dim=0)  # bs, 1024
             txt_features = self.txt_fc(txt_feat)
             condition[condition_batch_id["txt"], 4] = txt_features.to(dtype)
 
@@ -1138,39 +1114,39 @@ class Diffusion_condition_mm(nn.Module):
 
         # Model
         pred = self.diffuse(noise_input, timesteps, condition)
-        
+
         loss = {}
         loss_item = self.loss(pred, face_z if self.diffusion_type == "sample" else noise, reduction="none")
         loss["diffusion_loss"] = loss_item.mean()
         loss["total_loss"] = sum(loss.values())
-        
+
         loss["t"] = torch.stack((timesteps, loss_item.mean(dim=1).mean(dim=1)), dim=1)
         loss_item = loss_item.mean(dim=1).mean(dim=1)
-        uncond_mask = [item=="uncond" for item in v_data["conditions"]["names"]]
+        uncond_mask = [item == "uncond" for item in v_data["conditions"]["names"]]
         loss["uncond_count"] = sum(uncond_mask)
         if loss["uncond_count"] > 0:
             loss["uncond_diffusion_loss"] = loss_item[uncond_mask].mean()
-        mm_mask = [item=="mm" for item in v_data["conditions"]["names"]]
+        mm_mask = [item == "mm" for item in v_data["conditions"]["names"]]
         loss["mm_count"] = sum(mm_mask)
         if loss["mm_count"] > 0:
             loss["mm_diffusion_loss"] = loss_item[mm_mask].mean()
-        svr_mask = [item=="single_img" for item in v_data["conditions"]["names"]]
+        svr_mask = [item == "single_img" for item in v_data["conditions"]["names"]]
         loss["svr_count"] = sum(svr_mask)
         if loss["svr_count"] > 0:
             loss["svr_diffusion_loss"] = loss_item[svr_mask].mean()
-        mvr_mask = [item=="multi_img" for item in v_data["conditions"]["names"]]
+        mvr_mask = [item == "multi_img" for item in v_data["conditions"]["names"]]
         loss["mvr_count"] = sum(mvr_mask)
         if loss["mvr_count"] > 0:
             loss["mvr_diffusion_loss"] = loss_item[mvr_mask].mean()
-        sketch_mask = [item=="sketch" for item in v_data["conditions"]["names"]]
+        sketch_mask = [item == "sketch" for item in v_data["conditions"]["names"]]
         loss["sketch_count"] = sum(sketch_mask)
         if loss["sketch_count"] > 0:
             loss["sketch_diffusion_loss"] = loss_item[sketch_mask].mean()
-        pc_mask = [item=="pc" for item in v_data["conditions"]["names"]]
+        pc_mask = [item == "pc" for item in v_data["conditions"]["names"]]
         loss["pc_count"] = sum(pc_mask)
         if loss["pc_count"] > 0:
             loss["pc_diffusion_loss"] = loss_item[pc_mask].mean()
-        txt_mask = [item=="txt" for item in v_data["conditions"]["names"]]
+        txt_mask = [item == "txt" for item in v_data["conditions"]["names"]]
         loss["txt_count"] = sum(txt_mask)
         if loss["txt_count"] > 0:
             loss["txt_diffusion_loss"] = loss_item[txt_mask].mean()
@@ -1196,16 +1172,16 @@ class Diffusion_condition_mvr(Diffusion_condition):
             self.img_model.eval()
 
             self.img_fc1 = nn.Sequential(
-                nn.Linear(1024, self.dim_condition),
-                nn.LayerNorm(self.dim_condition),
-                nn.SiLU(),
-                nn.Linear(self.dim_condition, self.dim_condition),
+                    nn.Linear(1024, self.dim_condition),
+                    nn.LayerNorm(self.dim_condition),
+                    nn.SiLU(),
+                    nn.Linear(self.dim_condition, self.dim_condition),
             )
             self.img_fc2 = nn.Sequential(
-                nn.Linear(1024, self.dim_condition),
-                nn.LayerNorm(self.dim_condition),
-                nn.SiLU(),
-                nn.Linear(self.dim_condition, self.dim_condition),
+                    nn.Linear(1024, self.dim_condition),
+                    nn.LayerNorm(self.dim_condition),
+                    nn.SiLU(),
+                    nn.Linear(self.dim_condition, self.dim_condition),
             )
 
     def extract_condition(self, v_data):
@@ -1238,7 +1214,7 @@ class Diffusion_condition_mvr(Diffusion_condition):
                 if True:
                     id_aug = v_data["id_aug"]
                     angles = torch.stack(
-                        [id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
+                            [id_aug % 4 * torch.pi / 2, id_aug // 4 % 4 * torch.pi / 2, id_aug // 16 * torch.pi / 2], dim=1)
                     matrix = (Rotation.from_euler('xyz', angles.cpu().numpy()).as_matrix())
                     rotation_3d_matrix = torch.tensor(matrix, device=pc.device, dtype=pc.dtype)
 

@@ -529,7 +529,7 @@ class AutoEncoder_1119_light(nn.Module):
 
             intersected_edge_feature = feature_pair[:id_false_start]
 
-            decoding_results["loss_edge_feature"] = self.mse_loss_fn(
+            decoding_results["loss_edge_feature"] = self.loss_fn(
                 intersected_edge_feature,
                 v_encoding_result["edge_features"][edge_face_connectivity[:, 0]].detach(),
             )

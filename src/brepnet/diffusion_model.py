@@ -86,7 +86,7 @@ class Diffusion_condition(nn.Module):
 
         layer1 = nn.TransformerEncoderLayer(
                 d_model=self.dim_total,
-                nhead=self.dim_total // 64, norm_first=True, dim_feedforward=2048, dropout=0.1, batch_first=True)
+                nhead=self.dim_total // 64, norm_first=True, dim_feedforward=2048, dropout=0, batch_first=True)
         self.net1 = nn.TransformerEncoder(layer1, 24, nn.LayerNorm(self.dim_total))
         self.fc_out = nn.Sequential(
                 nn.Linear(self.dim_total, self.dim_total),

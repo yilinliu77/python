@@ -243,7 +243,7 @@ class AutoEncoder_1119_light(nn.Module):
         self.in_channels = v_conf["in_channels"]
         self.with_intersection = v_conf["with_intersection"]
 
-        bd = 768
+        bd = 512
         num_heads = 16
 
         self.point_embed = PointEmbedXD(hidden_dim=48, dim=bd, coord_dim=3)
@@ -251,16 +251,16 @@ class AutoEncoder_1119_light(nn.Module):
         self.edge_u_embed = PointEmbedXD(hidden_dim=16, dim=bd, coord_dim=1)
 
         # face query encoder
-        self.face_coords_cross_query = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=2)
-        self.face_coords_attn = SelfAttentionBlocks(dim=bd, num_heads=num_heads, depth=8)
+        self.face_coords_cross_query = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=1)
+        self.face_coords_attn = SelfAttentionBlocks(dim=bd, num_heads=num_heads, depth=6)
 
         # edge query encoder
-        self.edge_coords_cross_query = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=2)
-        self.edge_coords_attn = SelfAttentionBlocks(dim=bd, num_heads=num_heads, depth=8)
+        self.edge_coords_cross_query = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=1)
+        self.edge_coords_attn = SelfAttentionBlocks(dim=bd, num_heads=num_heads, depth=6)
 
         # gnn fusion
         self.graph_face_edge = nn.ModuleList()
-        for i in range(2):
+        for i in range(1):
             self.graph_face_edge.append(GATv2Conv(
                     bd, bd,
                     heads=1, edge_dim=bd,
@@ -270,12 +270,12 @@ class AutoEncoder_1119_light(nn.Module):
         # face global attn pooling
         self.face_attn_pooling_query = nn.Parameter(torch.randn(1, bd))
         # self.face_attn_pooling_query = nn.Parameter(torch.randn(self.face_latent_num, bd))
-        self.face_attn_pooling = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=2)
+        self.face_attn_pooling = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=1)
         # self.face_pooling_feature_proj_out = nn.Linear(bd, df)
 
         self.edge_attn_pooling_query = nn.Parameter(torch.randn(1, bd))
         # self.edge_attn_pooling_query = nn.Parameter(torch.randn(self.edge_latent_num, bd))
-        self.edge_attn_pooling = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=2)
+        self.edge_attn_pooling = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=1)
         # self.edge_pooling_feature_proj_out = nn.Linear(bd, df * 2)
 
         self.edge_feature_proj_out = nn.Linear(bd, df*2)
@@ -301,9 +301,9 @@ class AutoEncoder_1119_light(nn.Module):
         # post kl
         self.face_latent_to_bd = nn.Linear(self.df, bd)
         self.edge_latent_to_bd = nn.Linear(2*self.df, bd)
-        self.face_post_kl_attn = SelfAttentionBlocks(dim=bd, num_heads=num_heads, depth=2)
+        # self.face_post_kl_attn = SelfAttentionBlocks(dim=bd, num_heads=num_heads, depth=2)
 
-        self.inter = CrossAttnIntersection(df, 2*df, 768, 8)
+        self.inter = CrossAttnIntersection(df, 2*df, bd, 4)
         self.classifier = nn.Linear(self.edge_latent_num * df * 2, 1)
 
         # face decoder

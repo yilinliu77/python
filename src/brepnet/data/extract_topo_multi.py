@@ -51,7 +51,7 @@ from src.brepnet.post.utils import Shape
 # from src.brepnet.post.utils import construct_solid
 
 debug_id = None
-debug_id = "00000249"
+# debug_id = "00000249"
 
 write_debug_data = True
 is_viz = True
@@ -88,7 +88,7 @@ exception_files = [
 
 num_max_primitives = 100000
 sample_resolution = 16
-multi_sample_resolution = [8, 16, 24, 32]
+multi_sample_resolution = [8, 16, 32]
 
 face_scale_threshold = 1e-6
 edge_scale_threshold = 1e-6
@@ -117,6 +117,100 @@ def diable_occ_log():
     printers = message.DefaultMessenger().Printers()
     for idx in range(printers.Length()):
         printers.Value(idx + 1).SetTraceLevel(Message_Alarm)
+
+
+def sample_face_points(face: TopoDS_Face, sample_resolution: int, face_scale_threshold: float = 1e-6):
+    """
+    采样单个面的点（支持自定义分辨率）
+    :param face: TopoDS_Face对象
+    :param sample_resolution: 采样分辨率（如16/32/64）
+    :param face_scale_threshold: 面尺度阈值，避免过小的面
+    :return:
+        - face_points: 采样点数组 [res, res, 6]（XYZ + 法向量）
+    """
+    surface = BRepAdaptor_Surface(face)
+
+    # 检查曲面类型（保留原逻辑）
+    if surface.GetType() not in [GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone,
+                                 GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BSplineSurface]:
+        raise ValueError(f"Unsupported surface type: {surface.GetType()}")
+
+    # 设置分辨率（保留原逻辑）
+    surface.UResolution(1e-3)
+    surface.VResolution(1e-3)
+
+    # 获取UV参数范围
+    first_u = surface.FirstUParameter()
+    last_u = surface.LastUParameter()
+    first_v = surface.FirstVParameter()
+    last_v = surface.LastVParameter()
+
+    # 生成UV网格（核心：分辨率由参数传入）
+    u = np.linspace(first_u, last_u, sample_resolution)
+    v = np.linspace(first_v, last_v, sample_resolution)
+    u, v = np.meshgrid(u, v)
+
+    # 采样每个点的坐标+法向量
+    points = []
+    for i in range(u.shape[0]):
+        for j in range(u.shape[1]):
+            pnt = surface.Value(u[i, j], v[i, j])
+            props = GeomLProp_SLProps(surface.Surface().Surface(), u[i, j], v[i, j], 1, 1e-8)
+            dir = props.Normal()
+            points.append(np.array([pnt.X(), pnt.Y(), pnt.Z(), dir.X(), dir.Y(), dir.Z()], dtype=np.float32))
+
+    # 格式整理 + 尺度检查（保留原逻辑）
+    points = np.stack(points, axis=0)
+    face_center = np.mean(points[:, :3], axis=0)
+    face_scale = np.min(np.linalg.norm(points[:, :3] - face_center, axis=1))
+    if face_scale < face_scale_threshold:
+        raise ValueError("Face scale too small: {}".format(face_scale))
+    points = points.reshape(sample_resolution, sample_resolution, -1)
+
+    return points
+
+
+def sample_edge_points(edge: TopoDS_Edge, sample_resolution: int, edge_scale_threshold: float = 1e-6):
+    """
+    采样单个边的点（支持自定义分辨率）
+    :param edge: TopoDS_Edge对象
+    :param sample_resolution: 采样分辨率（如16/32/64）
+    :param edge_scale_threshold: 边尺度阈值，避免过小的边
+    :return:
+        - edge_points: 采样点数组 [res, 6]（XYZ + 切向量）
+        - curve_type: 曲线类型（GeomAbs_*）
+    """
+    curve = BRepAdaptor_Curve(edge)
+
+    # 检查曲线类型（保留原逻辑）
+    if curve.GetType() not in [GeomAbs_Circle, GeomAbs_Line, GeomAbs_Ellipse, GeomAbs_BSplineCurve]:
+        raise ValueError(f"Unsupported curve type: {curve.GetType()}")
+    curve.Resolution(1e-3)
+
+    # 确定参数范围（考虑方向，保留原逻辑）
+    range_start = curve.FirstParameter() if edge.Orientation() == 0 else curve.LastParameter()
+    range_end = curve.LastParameter() if edge.Orientation() == 0 else curve.FirstParameter()
+
+    # 生成采样参数（核心：分辨率由参数传入）
+    sample_u = np.linspace(range_start, range_end, num=sample_resolution)
+
+    # 采样每个点的坐标+切向量
+    points = []
+    for u in sample_u:
+        pnt = curve.Value(u)
+        v1 = gp_Vec()
+        curve.D1(u, pnt, v1)
+        v1 = v1.Normalized()
+        points.append(np.array([pnt.X(), pnt.Y(), pnt.Z(), v1.X(), v1.Y(), v1.Z()], dtype=np.float32))
+
+    # 格式整理 + 尺度检查（保留原逻辑）
+    points = np.stack(points, axis=0)
+    edge_center = np.mean(points[:, :3], axis=0)
+    edge_scale = np.min(np.linalg.norm(points[:, :3] - edge_center, axis=1))
+    if edge_scale < edge_scale_threshold:
+        raise ValueError(f"Edge scale too small: {edge_scale}")
+
+    return points
 
 
 def get_brep(v_root, output_root, v_folder):
@@ -227,45 +321,21 @@ def get_brep(v_root, output_root, v_folder):
 
         # Sample points in face
         face_sample_points = []
+        face_sample_points_low = []
+        face_sample_points_high = []
         # record plane type
         face_dict_geom_type = {}
         for face in face_dict:
-            surface = BRepAdaptor_Surface(face)
+            points = sample_face_points(face, multi_sample_resolution[1], scale_threshold_dict[str(multi_sample_resolution[1])])
+            face_sample_points.append(points)
+            points_low = sample_face_points(face, multi_sample_resolution[0], scale_threshold_dict[str(multi_sample_resolution[0])])
+            face_sample_points_low.append(points_low)
+            points_high = sample_face_points(face, multi_sample_resolution[2], scale_threshold_dict[str(multi_sample_resolution[2])])
+            face_sample_points_high.append(points_high)
 
-            if surface.GetType() not in [GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone,
-                                         GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_BSplineSurface]:
-                raise ValueError("Unsupported surface type: {}".format(surface.GetType()))
-
-            face_dict_geom_type[face] = surface.GetType()
-
-            surface.UResolution(1e-3)
-            surface.VResolution(1e-3)
-
-            first_u = surface.FirstUParameter()
-            last_u = surface.LastUParameter()
-            first_v = surface.FirstVParameter()
-            last_v = surface.LastVParameter()
-
-            u = np.linspace(first_u, last_u, sample_resolution)
-            v = np.linspace(first_v, last_v, sample_resolution)
-
-            u, v = np.meshgrid(u, v)
-            points = []
-            for i in range(u.shape[0]):
-                for j in range(u.shape[1]):
-                    pnt = surface.Value(u[i, j], v[i, j])
-                    props = GeomLProp_SLProps(surface.Surface().Surface(), u[i, j], v[i, j], 1, 1e-8)
-                    dir = props.Normal()
-                    points.append(np.array([pnt.X(), pnt.Y(), pnt.Z(), dir.X(), dir.Y(), dir.Z()], dtype=np.float32))
-
-            # Check face range
-            points = np.stack(points, axis=0)
-            face_center = np.mean(points[:, :3], axis=0)
-            face_scale = np.min(np.linalg.norm(points[:, :3] - face_center, axis=1))
-            if face_scale < face_scale_threshold:
-                raise ValueError("Face scale too small: {}".format(face_scale))
-            face_sample_points.append(points.reshape(sample_resolution, sample_resolution, -1))
         face_sample_points = np.stack(face_sample_points, axis=0)
+        face_sample_points_low = np.stack(face_sample_points_low, axis=0)
+        face_sample_points_high = np.stack(face_sample_points_high, axis=0)
         assert len(face_dict) == num_faces == face_sample_points.shape[0]
 
         # process the unadj face relationship
@@ -320,35 +390,22 @@ def get_brep(v_root, output_root, v_folder):
 
         # Sample points in edges
         edge_sample_points = []
+        edge_sample_points_low = []
+        edge_sample_points_high = []
         num_edges = len(edge_face_connectivity)
         for i_intersection in range(num_edges):
             edge, id_face1, id_face2 = edge_face_connectivity[i_intersection]
             edge_face_connectivity[i_intersection] = (i_intersection, id_face1, id_face2)
-            curve = BRepAdaptor_Curve(edge)
-            curve.Resolution(1e-3)
-            if curve.GetType() not in [GeomAbs_Circle, GeomAbs_Line, GeomAbs_Ellipse, GeomAbs_BSplineCurve]:
-                raise ValueError("Unsupported curve type: {}".format(curve.GetType()))
-            # Sample 20 points along it
-            # Determine the orientation
-            range_start = curve.FirstParameter() if edge.Orientation() == 0 else curve.LastParameter()
-            range_end = curve.LastParameter() if edge.Orientation() == 0 else curve.FirstParameter()
-            sample_u = np.linspace(range_start, range_end, num=sample_resolution)
-            points = []
-            for u in sample_u:
-                pnt = curve.Value(u)
-                v1 = gp_Vec()
-                curve.D1(u, pnt, v1)
-                v1 = v1.Normalized()
-                points.append(np.array([pnt.X(), pnt.Y(), pnt.Z(), v1.X(), v1.Y(), v1.Z()], dtype=np.float32))
+            points = sample_edge_points(edge, multi_sample_resolution[1], scale_threshold_dict[str(multi_sample_resolution[1])])
+            edge_sample_points.append(points)
+            points_low = sample_edge_points(edge, multi_sample_resolution[0], scale_threshold_dict[str(multi_sample_resolution[0])])
+            edge_sample_points_low.append(points_low)
+            points_high = sample_edge_points(edge, multi_sample_resolution[2], scale_threshold_dict[str(multi_sample_resolution[2])])
+            edge_sample_points_high.append(points_high)
 
-            # Check edge range
-            points = np.stack(points, axis=0)
-            edge_center = np.mean(points[:, :3], axis=0)
-            edge_scale = np.min(np.linalg.norm(points[:, :3] - edge_center, axis=1))
-            if edge_scale < edge_scale_threshold:
-                raise ValueError("Edge scale too small: {}".format(edge_scale))
-            edge_sample_points.append(np.stack(points, axis=0))
         edge_sample_points = np.stack(edge_sample_points, axis=0)
+        edge_sample_points_low = np.stack(edge_sample_points_low, axis=0)
+        edge_sample_points_high = np.stack(edge_sample_points_high, axis=0)
         edge_face_connectivity = np.asarray(edge_face_connectivity, dtype=np.int32)
 
         # Accelerate the training
@@ -368,8 +425,13 @@ def get_brep(v_root, output_root, v_folder):
         # face_sample_points += face_sample_points_noise
 
         data_dict = {
-            'sample_points_lines'   : edge_sample_points.astype(np.float32),
-            'sample_points_faces'   : face_sample_points.astype(np.float32),
+            'sample_points_lines'       : edge_sample_points.astype(np.float32),
+            'sample_points_lines_low'   : edge_sample_points_low.astype(np.float32),
+            'sample_points_lines_high'  : edge_sample_points_high.astype(np.float32),
+
+            'sample_points_faces'       : face_sample_points.astype(np.float32),
+            'sample_points_faces_low'   : face_sample_points_low.astype(np.float32),
+            'sample_points_faces_high'  : face_sample_points_high.astype(np.float32),
 
             'edge_face_connectivity': edge_face_connectivity.astype(np.int64),
 

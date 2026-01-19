@@ -314,7 +314,9 @@ class AutoEncoder_dataset3(torch.utils.data.Dataset):
         if self.mode == "testing" and self.is_aug == 1:
             prefix += "_{}".format(idx // self.ori_length)
         face_points = torch.from_numpy(data_npz['sample_points_faces'])
+        face_points_high = torch.from_numpy(data_npz['sample_points_faces_high'])
         edge_points = torch.from_numpy(data_npz['sample_points_lines'])
+        edge_points_high = torch.from_numpy(data_npz['sample_points_lines_high'])
 
         id_aug = 0
         if self.is_aug == 0:

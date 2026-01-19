@@ -90,7 +90,6 @@ IS_VIZ_WIRE, IS_VIZ_FACE, IS_VIZ_SHELL = False, False, False
 CONTINUITY = GeomAbs_C2
 
 INTERPOLATION_PRECISION = 0.05
-SAMPLE_RESOLUTION = 32
 
 # EDGE_FITTING_TOLERANCE = [5e-3, 8e-3, 5e-2]
 # FACE_FITTING_TOLERANCE = [2e-2, 5e-2, 8e-2]
@@ -148,6 +147,8 @@ class Shape:
         self.remove_edge_idx_new = []
 
         self.have_data = True
+
+        self.SAMPLE_RESOLUTION = v_face_point.shape[1]
 
         pass
 
@@ -345,7 +346,7 @@ class Shape:
         self.pair1 = np.asarray(pair1).astype(np.int64)
         self.is_end_point = np.asarray(is_end_point).astype(bool)
         idx = np.zeros_like(self.is_end_point).astype(np.int64)
-        idx[self.is_end_point] = SAMPLE_RESOLUTION-1
+        idx[self.is_end_point] = self.SAMPLE_RESOLUTION-1
         vertex_clusters = edges[self.pair1, idx]
 
         mean_dis = np.linalg.norm(vertex_clusters[:, 0] - vertex_clusters[:, 1], axis=1) + \
@@ -513,7 +514,7 @@ def optimize(
     if pair1 is not None:
         pair1 = torch.from_numpy(pair1.copy()).to(device)
     idx = np.zeros_like(is_end_point).astype(np.int64)
-    idx[is_end_point] = SAMPLE_RESOLUTION-1
+    idx[is_end_point] = recon_face_points.shape[1]-1
     idx = torch.from_numpy(idx).to(device)
 
     edge_st = nn.Parameter(

@@ -232,8 +232,8 @@ class AutoEncoder_1119_light(nn.Module):
         self.df = self.dim_latent * 2 * 2
         df = self.df
 
-        self.sample_num = 32
-        self.query_num = 32
+        self.sample_num = 16
+        self.query_num = 16
         self.downsample_ratio = 2*2*2
 
         self.face_downsample_ratio = self.downsample_ratio ** 2
@@ -261,7 +261,7 @@ class AutoEncoder_1119_light(nn.Module):
 
         # gnn fusion
         self.graph_face_edge = nn.ModuleList()
-        for i in range(1):
+        for i in range(3):
             self.graph_face_edge.append(GATv2Conv(
                     bd, bd,
                     heads=1, edge_dim=bd,
@@ -304,7 +304,7 @@ class AutoEncoder_1119_light(nn.Module):
         self.edge_latent_to_bd = nn.Linear(2*self.df, bd)
         # self.face_post_kl_attn = SelfAttentionBlocks(dim=bd, num_heads=num_heads, depth=2)
 
-        self.inter = CrossAttnIntersection(df, 2*df, bd, edge_query_num=self.edge_latent_num, num_heads=num_heads, depth=4)
+        self.inter = CrossAttnIntersection(df, 2*df, bd, edge_query_num=self.edge_latent_num, num_heads=num_heads, depth=6)
         self.classifier = nn.Linear(self.edge_latent_num * df * 2, 1)
 
         # face decoder
@@ -530,7 +530,7 @@ class AutoEncoder_1119_light(nn.Module):
 
             intersected_edge_feature = feature_pair[:id_false_start]
 
-            decoding_results["loss_edge_feature"] = self.mse_loss_fn(
+            decoding_results["loss_edge_feature"] = self.loss_fn(
                 intersected_edge_feature,
                 v_encoding_result["edge_features"][edge_face_connectivity[:, 0]].detach(),
             )

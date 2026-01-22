@@ -20,7 +20,7 @@ from src.brepnet.dataset import denormalize_coord1112
 
 from src.brepnet.utils import (Attention, PreNorm, FeedForward,
                                SelfAttentionBlocks, CrossAttentionBlocks,
-                               PointEmbed3D, PointEmbedXD,
+                               PointEmbed3D, PointEmbedXD, FourierEmbedder,
                                generate_2d_grid_coords, generate_1d_grid, fps_subsample)
 
 def add_timer(time_statics, v_attr, timer):
@@ -247,9 +247,12 @@ class AutoEncoder_1119_light(nn.Module):
         bd = 512
         num_heads = 16
 
-        self.point_embed = PointEmbedXD(hidden_dim=48, dim=bd, coord_dim=3)
-        self.face_uv_embed = PointEmbedXD(hidden_dim=32, dim=bd, coord_dim=2)
-        self.edge_u_embed = PointEmbedXD(hidden_dim=16, dim=bd, coord_dim=1)
+        # self.point_embed = PointEmbedXD(hidden_dim=48, dim=bd, coord_dim=3)
+        # self.face_uv_embed = PointEmbedXD(hidden_dim=32, dim=bd, coord_dim=2)
+        # self.edge_u_embed = PointEmbedXD(hidden_dim=16, dim=bd, coord_dim=1)
+        self.point_embed = FourierEmbedder(num_freqs=8, input_dim=3, hidden_dim=bd, include_pi=True)
+        self.face_uv_embed = FourierEmbedder(num_freqs=8, input_dim=2, hidden_dim=bd, include_pi=True)
+        self.edge_u_embed = FourierEmbedder(num_freqs=8, input_dim=1, hidden_dim=bd, include_pi=True)
 
         # face query encoder
         self.face_coords_cross_query = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=1)
@@ -579,7 +582,7 @@ class AutoEncoder_1119_light(nn.Module):
             v_data["edge_bbox"]
         )
         loss["edge_feature"] = v_decoding_result["loss_edge_feature"]
-        loss["edge_classification"] = v_decoding_result["loss_edge"] * 0.01
+        loss["edge_classification"] = v_decoding_result["loss_edge"] * 0.1
 
         edge_face_connectivity = v_data["edge_face_connectivity"]
         loss["edge_norm"] = self.edge_geom_loss_fn(

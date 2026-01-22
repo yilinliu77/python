@@ -27,8 +27,30 @@ from torchmetrics import MetricCollection
 import wandb
 from pytorch_lightning.loggers import WandbLogger
 
+from torch.optim.lr_scheduler import _LRScheduler
+import math
+
 os.environ["HTTP_PROXY"] = "http://172.31.178.44:7890"
 os.environ["HTTPS_PROXY"] = "http://172.31.178.44:7890"
+
+
+class WarmupCosineLR(_LRScheduler):
+    def __init__(self, optimizer, warmup_epochs, max_epochs, min_lr=1e-6, last_epoch=-1):
+        self.warmup_epochs = warmup_epochs
+        self.max_epochs = max_epochs
+        self.min_lr = min_lr
+        super().__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        epoch = self.last_epoch
+        # 预热阶段：线性上升
+        if epoch < self.warmup_epochs:
+            return [base_lr * epoch / self.warmup_epochs for base_lr in self.base_lrs]
+        # 余弦退火阶段：平滑下降到最小LR
+        else:
+            progress = (epoch - self.warmup_epochs) / (self.max_epochs - self.warmup_epochs)
+            return [self.min_lr + (base_lr - self.min_lr) * 0.5 * (1 + math.cos(math.pi * progress))
+                    for base_lr in self.base_lrs]
 
 class TrainAutoEncoder(pl.LightningModule):
     def __init__(self, hparams):
@@ -88,7 +110,22 @@ class TrainAutoEncoder(pl.LightningModule):
                           )
 
     def configure_optimizers(self):
-        optimizer = AdamW(self.model.parameters(), lr=self.learning_rate)
+        optimizer = AdamW(self.model.parameters(), lr=self.learning_rate, weight_decay=1e-4)
+        # scheduler = WarmupCosineLR(
+        #         optimizer,
+        #         warmup_epochs=1,
+        #         max_epochs=100,
+        #         min_lr=1e-6,
+        # )
+        # return {
+        #     'optimizer'   : optimizer,
+        #     'lr_scheduler': {
+        #         'scheduler': scheduler,
+        #         'interval' : 'epoch',  # 按epoch更新（适合大多数场景）
+        #         'frequency': 1,  # 每个epoch更新一次
+        #         'monitor'  : 'train_loss'  # 可选：监控训练损失（不影响调度）
+        #     }
+        # }
         return {
             'optimizer': optimizer,
         }

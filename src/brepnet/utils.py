@@ -78,7 +78,12 @@ class Attention(nn.Module):
         kv = rearrange(kv, 'b m (p h d) -> p b h m d', h=h, p=2)
         k, v = kv[0], kv[1]
 
-        out = F.scaled_dot_product_attention(query=q, key=k, value=v)
+        with torch.backends.cuda.sdp_kernel(
+                enable_flash=True,
+                enable_math=False,
+                enable_mem_efficient=True
+        ):
+            out = F.scaled_dot_product_attention(query=q, key=k, value=v)
         out = self.to_out(rearrange(out, 'b h n d -> b n (h d)'))
         return out
 
@@ -114,6 +119,173 @@ class CrossAttentionBlocks(nn.Module):
             x = ff(x) + x
         return x
 
+# class AttentionPool(nn.Module):
+#     def __init__(self, query_dim, spatial_dim, context_dim=None, heads=8, dim_head=64, output_dim=None):
+#         super().__init__()
+#         inner_dim = dim_head * heads
+#         context_dim = default(context_dim, query_dim)
+#         self.heads = heads
+#         self.dim_head = dim_head
+#         self.spatial_dim = spatial_dim  # 输入序列/空间长度
+#
+#         # 位置编码：适配 (spatial_dim + 1) 个Token（全局Token + 原始Token）
+#         self.positional_embedding = nn.Parameter(
+#             torch.randn(spatial_dim + 1, query_dim) / query_dim ** 0.5
+#         )
+#
+#         self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
+#         self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+#         self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+#         self.to_out = nn.Linear(inner_dim, output_dim or query_dim)
+#
+#     def forward(self, x, context=None, mask=None):
+#         """
+#         核心逻辑对齐原AttentionPool：
+#         1. 生成全局Token → 2. 拼接全局Token → 3. 加位置编码 → 4. 全局Token做Query聚合所有特征
+#         Args:
+#             x: 输入张量，shape=(N, L, C) （N=batch, L=spatial_dim, C=query_dim）
+#             mask: 注意力掩码，shape=(N, L)，用于加权生成全局Token
+#             context: 兼容原参数，默认=None（使用x自身）
+#         Returns:
+#             池化输出，shape=(N, output_dim) （全局聚合特征）
+#         """
+#         h = self.heads
+#         context = default(context, x)  # 兼容原context参数逻辑
+#
+#         # ========== 步骤1：维度调整 + 生成全局Token（核心池化前置逻辑） ==========
+#         x = x.permute(1, 0, 2)  # NLC → LNC (L=spatial_dim, N=batch, C=query_dim)
+#         if mask is not None:
+#             # 带mask的加权平均生成全局Token（避免无效区域干扰）
+#             mask = mask.unsqueeze(-1).permute(1, 0, 2)  # (N,L) → (L,N,1)
+#             global_emb = (x * mask).sum(dim=0) / mask.sum(dim=0)
+#         else:
+#             # 无mask时直接均值生成全局Token
+#             global_emb = x.mean(dim=0, keepdim=True)  # (1, N, C)
+#         # 拼接全局Token到最前端：(L+1, N, C)
+#         x = torch.cat([global_emb, x], dim=0)
+#
+#         # ========== 步骤2：叠加位置编码（对齐原AttentionPool） ==========
+#         x = x + self.positional_embedding[:, None, :].to(x.dtype)  # (L+1, N, C)
+#         x = x.permute(1, 0, 2)  # 恢复 NLC 格式：(N, L+1, C)
+#
+#         # ========== 步骤3：构建Q/K/V（Q仅用全局Token，K/V用全部Token） ==========
+#         # Query：仅取第0位的全局Token → (N, 1, C)
+#         q = self.to_q(x[:, :1, :])
+#         # Key/Value：用所有Token（全局+原始）→ (N, L+1, C)
+#         k = self.to_k(x)
+#         v = self.to_v(x)
+#
+#         # ========== 步骤4：维度重排（保留原Attention的rearrange逻辑） ==========
+#         q = rearrange(q, 'b n (h d) -> b h n d', h=h, d=self.dim_head)  # (N, h, 1, d)
+#         k = rearrange(k, 'b m (h d) -> b h m d', h=h, d=self.dim_head)  # (N, h, L+1, d)
+#         v = rearrange(v, 'b m (h d) -> b h m d', h=h, d=self.dim_head)  # (N, h, L+1, d)
+#
+#         # ========== 步骤5：FlashAttention加速计算（保留原逻辑） ==========
+#         with torch.backends.cuda.sdp_kernel(
+#                 enable_flash=True,
+#                 enable_math=False,
+#                 enable_mem_efficient=True
+#         ):
+#             out = F.scaled_dot_product_attention(query=q, key=k, value=v)
+#
+#         # ========== 步骤6：维度还原 + 输出投影（池化结果） ==========
+#         out = rearrange(out, 'b h n d -> b n (h d)')  # (N, 1, inner_dim)
+#         out = self.to_out(out).squeeze(1)  # 挤压维度 → (N, output_dim)
+#
+#         return out
+
+class AttentionPool(nn.Module):
+    def __init__(
+            self,
+            query_dim,
+            spatial_dim,
+            context_dim=None,
+            num_queries=1,  # 要初始化的N个mean Query数量
+            heads=8,
+            dim_head=64,
+            output_dim=None,
+    ):
+        super().__init__()
+        inner_dim = dim_head * heads
+        context_dim = default(context_dim, query_dim)
+        self.heads = heads
+        self.dim_head = dim_head
+        self.spatial_dim = spatial_dim  # 原始长度L（无需整除N）
+        self.num_queries = num_queries  # N个Query的数量
+
+        # 位置编码：适配 (N + L) 个Token（N个mean Query + 原始L个Token）
+        self.positional_embedding = nn.Parameter(
+                torch.randn(self.num_queries + spatial_dim, query_dim) / query_dim ** 0.5
+        )
+
+        # ========== 可学习偏移参数（给每个Query加差异化偏移） ==========
+        self.query_offset = nn.Parameter(
+                torch.randn(self.num_queries, query_dim) / query_dim ** 0.5
+        )
+
+        self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
+        self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+        self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+        self.to_out = nn.Linear(inner_dim, output_dim or query_dim)
+
+    def forward(self, x, context=None, mask=None):
+        """
+        核心：无分块 + 全局mean初始化 + 可学习偏移（N个Query差异化）
+        输入：x (N, L, C) → 输出：(N, num_queries, output_dim)
+        """
+        h = self.heads
+        context = default(context, x)
+        B, L, C = x.shape  # B=batch, L=原始长度, C=query_dim
+        N = self.num_queries  # 要的N个Query数量
+
+        # ========== 步骤1：无分块！生成1个全局mean + 可学习偏移得到N个Query ==========
+        x = x.permute(1, 0, 2)  # NLC → LNC (L, B, C)
+
+        if mask is not None:
+            # 带mask的全局加权mean
+            mask = mask.unsqueeze(-1).permute(1, 0, 2)  # (B,L) → (L,B,1)
+            global_sum = (x * mask).sum(dim=0)  # (B, C)
+            mask_sum = mask.sum(dim=0).clamp(min=1e-8)  # (B, 1)
+            global_emb = global_sum / mask_sum  # (B, C)
+        else:
+            # 无mask的全局mean
+            global_emb = x.mean(dim=0)  # (B, C) → 1个全局mean
+
+        # 核心：全局mean复制N份 + 可学习偏移（保留mean初始化，同时让Query差异化）
+        query_means = global_emb.unsqueeze(0).repeat(N, 1, 1)  # (N, B, C) 复制N份mean
+        query_means = query_means + self.query_offset[:, None, :].to(x.dtype)  # 加可学习偏移
+
+        # ========== 步骤2：拼接N个mean+偏移的Query + 原始Token ==========
+        x = torch.cat([query_means, x], dim=0)  # (N+L, B, C)
+
+        # ========== 步骤3：原逻辑完全复用 ==========
+        # 叠加位置编码
+        x = x + self.positional_embedding[:, None, :].to(x.dtype)  # (N+L, B, C)
+        x = x.permute(1, 0, 2)  # 恢复 NLC 格式：(B, N+L, C)
+
+        # 构建Q/K/V：Q取前N个mean+偏移的Query
+        q = self.to_q(x[:, :N, :])  # (B, N, inner_dim)
+        k = self.to_k(x)  # (B, N+L, inner_dim)
+        v = self.to_v(x)  # (B, N+L, inner_dim)
+
+        # 维度重排
+        q = rearrange(q, 'b n (h d) -> b h n d', h=h, d=self.dim_head)  # (B, h, N, d)
+        k = rearrange(k, 'b m (h d) -> b h m d', h=h, d=self.dim_head)  # (B, h, N+L, d)
+        v = rearrange(v, 'b m (h d) -> b h m d', h=h, d=self.dim_head)  # (B, h, N+L, d)
+
+        # FlashAttention加速
+        with torch.backends.cuda.sdp_kernel(
+                enable_flash=True,
+                enable_math=False,
+                enable_mem_efficient=True
+        ):
+            out = F.scaled_dot_product_attention(query=q, key=k, value=v)
+
+        # 维度还原：保留N个Query的长度
+        out = rearrange(out, 'b h n d -> b n (h d)')  # (B, N, inner_dim)
+        out = self.to_out(out)  # (B, N, output_dim)
+
+        return out
 
 class PointEmbed3D(nn.Module):
     def __init__(self, hidden_dim=48, dim=128):

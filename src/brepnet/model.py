@@ -18,7 +18,7 @@ from torch_cluster import fps
 
 from src.brepnet.dataset import denormalize_coord1112
 
-from src.brepnet.utils import (Attention, PreNorm, FeedForward,
+from src.brepnet.utils import (Attention, PreNorm, FeedForward, AttentionPool,
                                SelfAttentionBlocks, CrossAttentionBlocks,
                                PointEmbed3D, PointEmbedXD, FourierEmbedder,
                                generate_2d_grid_coords, generate_1d_grid, fps_subsample)
@@ -196,28 +196,38 @@ class CrossAttnIntersection(nn.Module):
         dim_in,
         dim_out,
         dim_latent,
+        face_latent_num,
         edge_query_num,
-        depth=8,
+        cross_attn_depth=4,
+        self_attn_depth=4,
         num_heads=16,
     ) -> None:
         super().__init__()
 
         self.proj_in = nn.Linear(dim_in, dim_latent)
-        self.pos_encoding = nn.Parameter(torch.randn(2, dim_latent))
+        self.pos_encoding = nn.Parameter(torch.randn(2, dim_latent) / dim_latent ** 0.5)
 
-        self.edge_latent_query = nn.Parameter(torch.randn(edge_query_num, dim_latent))
-        self.cross_attn_intersection = CrossAttentionBlocks(dim=dim_latent, context_dim=dim_latent, num_heads=num_heads, depth=depth)
+        self.cross_attn_intersection = CrossAttentionBlocks(dim=dim_latent, context_dim=dim_latent,
+                                                            num_heads=num_heads, depth=cross_attn_depth)
+
+        self.edge_latent_query = AttentionPool(query_dim=dim_latent, spatial_dim=face_latent_num,
+                                               num_queries=edge_query_num,
+                                               heads=num_heads, dim_head=dim_latent // num_heads)
+
+        self.edge_latent_attn = SelfAttentionBlocks(dim=dim_latent, num_heads=num_heads, depth=self_attn_depth)
+
         self.to_edge_latent = nn.Linear(dim_latent, dim_out)
 
 
     def forward(self, face_feature_pair) -> Tensor:
         face1_latent = self.proj_in(face_feature_pair[:, 0]) + self.pos_encoding[0]
         face2_latent = self.proj_in(face_feature_pair[:, 1]) + self.pos_encoding[1]
-        face_feature_pair = torch.cat((face1_latent, face2_latent), dim=1)
 
-        edge_latent_query = self.edge_latent_query[None, :, :].expand(face_feature_pair.shape[0], -1, -1)
-        edge_latent_query = self.cross_attn_intersection(edge_latent_query, context=face_feature_pair)
-        output = self.to_edge_latent(edge_latent_query)
+        face1_latent = self.cross_attn_intersection(face1_latent, context=face2_latent)
+        edge_latent = self.edge_latent_query(face1_latent)
+        edge_latent = self.edge_latent_attn(edge_latent)
+
+        output = self.to_edge_latent(edge_latent)
         return output
 
 
@@ -262,25 +272,21 @@ class AutoEncoder_1119_light(nn.Module):
         self.edge_coords_cross_query = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=1)
         self.edge_coords_attn = SelfAttentionBlocks(dim=bd, num_heads=num_heads, depth=6)
 
+        # face global attn pooling
+        self.face_attn_pooling = AttentionPool(query_dim=bd, spatial_dim=self.face_latent_num, heads=num_heads, dim_head=bd // num_heads)
+        self.edge_attn_pooling = AttentionPool(query_dim=bd, spatial_dim=self.edge_latent_num, heads=num_heads, dim_head=bd // num_heads)
+
         # gnn fusion
         self.graph_face_edge = nn.ModuleList()
-        for i in range(3):
+        num_gnn_layers = 3
+        for i in range(num_gnn_layers):
             self.graph_face_edge.append(GATv2Conv(
-                    bd, bd,
-                    heads=1, edge_dim=bd,
+                bd, bd,
+                heads=1, edge_dim=bd,
             ))
             self.graph_face_edge.append(nn.LeakyReLU())
 
-        # face global attn pooling
-        self.face_attn_pooling_query = nn.Parameter(torch.randn(1, bd))
-        # self.face_attn_pooling_query = nn.Parameter(torch.randn(self.face_latent_num, bd))
-        self.face_attn_pooling = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=1)
-        # self.face_pooling_feature_proj_out = nn.Linear(bd, df)
-
-        self.edge_attn_pooling_query = nn.Parameter(torch.randn(1, bd))
-        # self.edge_attn_pooling_query = nn.Parameter(torch.randn(self.edge_latent_num, bd))
-        self.edge_attn_pooling = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=1)
-        # self.edge_pooling_feature_proj_out = nn.Linear(bd, df * 2)
+        self.gobal_query = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=2)
 
         self.edge_feature_proj_out = nn.Linear(bd, df*2)
 
@@ -307,23 +313,28 @@ class AutoEncoder_1119_light(nn.Module):
         self.edge_latent_to_bd = nn.Linear(2*self.df, bd)
         # self.face_post_kl_attn = SelfAttentionBlocks(dim=bd, num_heads=num_heads, depth=2)
 
-        self.inter = CrossAttnIntersection(df, 2*df, bd, edge_query_num=self.edge_latent_num, num_heads=num_heads, depth=6)
+        self.inter = CrossAttnIntersection(df, 2*df, bd,
+                                           face_latent_num=self.face_latent_num, edge_query_num=self.edge_latent_num,
+                                           num_heads=num_heads, cross_attn_depth=6, self_attn_depth=4)
+
         self.classifier = nn.Linear(self.edge_latent_num * df * 2, 1)
 
         # face decoder
         self.face_points_cross_query_decoder = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=6)
         self.to_face_points_local = nn.Linear(bd, 3)
 
-        self.face_center_scale_query = nn.Parameter(torch.randn(1, bd))
-        self.face_center_scale_cross_query_decoder = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=4)
+        self.face_center_scale_decoder = SelfAttentionBlocks(dim=bd, num_heads=num_heads, depth=4)
+        self.face_attn_pooling_decoder = AttentionPool(query_dim=bd, spatial_dim=self.face_latent_num,
+                                                       heads=num_heads, dim_head=bd // num_heads)
         self.to_face_center_scale = nn.Linear(bd, 4)
 
         # edge decoder
         self.edge_points_cross_query_decoder = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=6)
         self.to_edge_points_local = nn.Linear(bd, 3)
 
-        self.edge_center_scale_query = nn.Parameter(torch.randn(1, bd))
-        self.edge_center_scale_decoder = CrossAttentionBlocks(dim=bd, context_dim=bd, num_heads=num_heads, depth=4)
+        self.edge_center_scale_decoder = SelfAttentionBlocks(dim=bd, num_heads=num_heads, depth=4)
+        self.edge_attn_pooling_decoder = AttentionPool(query_dim=bd, spatial_dim=self.edge_latent_num,
+                                                       heads=num_heads, dim_head=bd // num_heads)
         self.to_edge_center_scale = nn.Linear(bd, 4)
 
         self.times = {
@@ -401,16 +412,9 @@ class AutoEncoder_1119_light(nn.Module):
         edge_query_points_embed = self.edge_coords_cross_query(edge_query_points_embed, context=edge_points_embed)
         edge_query_points_embed = self.edge_coords_attn(edge_query_points_embed)
 
-        # face global pooling
-        # face_query_pooling_embed = self.face_attn_pooling_query[None, :, :].expand(face_query_points_embed.shape[0], 1, -1)
-        face_query_pooling_embed = self.face_attn_pooling_query[None, :, :].expand(face_query_points_embed.shape[0], -1, -1)
-        face_query_pooling_embed = self.face_attn_pooling(face_query_pooling_embed, context=face_query_points_embed)
-        face_query_pooling_embed = face_query_pooling_embed[:, 0]
-
-        # edge_query_pooling_embed = self.edge_attn_pooling_query[None, :, :].expand(edge_query_points_embed.shape[0], 1, -1)
-        edge_query_pooling_embed = self.edge_attn_pooling_query[None, :, :].expand(edge_query_points_embed.shape[0], -1, -1)
-        edge_query_pooling_embed = self.edge_attn_pooling(edge_query_pooling_embed, context=edge_query_points_embed)
-        edge_query_pooling_embed = edge_query_pooling_embed[:, 0]
+        # global pooling
+        face_query_pooling_embed = self.face_attn_pooling(face_query_points_embed)[:, 0]
+        edge_query_pooling_embed = self.edge_attn_pooling(edge_query_points_embed)[:, 0]
 
         # # Face graph
         edge_face_connectivity = v_data["edge_face_connectivity"]
@@ -423,7 +427,8 @@ class AutoEncoder_1119_light(nn.Module):
             else:
                 x = layer(x)
         gnn_features = x
-        face_features = face_query_points_embed + gnn_features[:, None, :].expand(-1, self.face_latent_num, -1)
+        face_features = self.gobal_query(face_query_points_embed, context=gnn_features.unsqueeze(1))
+        # face_features = face_query_points_embed + gnn_features[:, None, :].expand(-1, self.face_latent_num, -1)
 
         edge_features = self.edge_feature_proj_out(edge_query_points_embed)
 
@@ -461,8 +466,8 @@ class AutoEncoder_1119_light(nn.Module):
         face_uv_query_point_embed = self.face_points_cross_query_decoder(face_uv_query_point_embed, context=face_features)
         face_points_local = self.to_face_points_local(face_uv_query_point_embed)
 
-        face_center_scale = self.face_center_scale_query.expand(face_features.shape[0], -1, -1)
-        face_center_scale = self.face_center_scale_cross_query_decoder(face_center_scale, context=face_features)
+        face_center_scale = self.face_center_scale_decoder(face_features)
+        face_center_scale = self.face_attn_pooling_decoder(face_center_scale)
         face_center_scale = self.to_face_center_scale(face_center_scale)[:, 0, :]
 
         decoding_results["face_points_local"] = face_points_local.reshape(-1, self.query_num, self.query_num, 3)
@@ -476,8 +481,8 @@ class AutoEncoder_1119_light(nn.Module):
             edge_points_local1 = self.edge_points_cross_query_decoder(edge_u_query_point_embed, context=encoding_edge_feature)
             edge_points_local1 = self.to_edge_points_local(edge_points_local1)
 
-            edge_center_scale1 = self.edge_center_scale_query.expand(encoding_edge_feature.shape[0], -1, -1)
-            edge_center_scale1 = self.edge_center_scale_decoder(edge_center_scale1, context=encoding_edge_feature)
+            edge_center_scale1 = self.edge_center_scale_decoder(encoding_edge_feature)
+            edge_center_scale1 = self.edge_attn_pooling_decoder(edge_center_scale1)
             edge_center_scale1 = self.to_edge_center_scale(edge_center_scale1)[:, 0, :]
 
             decoding_results["edge_points_local1"] = edge_points_local1
@@ -527,8 +532,8 @@ class AutoEncoder_1119_light(nn.Module):
             feature_pair = self.inter(feature_pair)
             pred = self.classifier(feature_pair.flatten(1, 2))
 
-            gt_labels = torch.ones_like(pred) * 0.95
-            gt_labels[id_false_start:] = 0.05
+            gt_labels = torch.ones_like(pred)
+            gt_labels[id_false_start:] = 0
             loss_edge = F.binary_cross_entropy_with_logits(pred, gt_labels)
 
             intersected_edge_feature = feature_pair[:id_false_start]
@@ -548,8 +553,8 @@ class AutoEncoder_1119_light(nn.Module):
         edge_points_local = self.edge_points_cross_query_decoder(edge_u_query_point_embed, context=intersected_edge_feature)
         edge_points_local = self.to_edge_points_local(edge_points_local)
 
-        edge_center_scale = self.edge_center_scale_query.expand(intersected_edge_feature.shape[0], -1, -1)
-        edge_center_scale = self.edge_center_scale_decoder(edge_center_scale, context=intersected_edge_feature)
+        edge_center_scale = self.edge_center_scale_decoder(intersected_edge_feature)
+        edge_center_scale = self.edge_attn_pooling_decoder(edge_center_scale)
         edge_center_scale = self.to_edge_center_scale(edge_center_scale)[:, 0, :]
 
         decoding_results["edge_points_local"] = edge_points_local

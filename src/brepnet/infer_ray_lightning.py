@@ -33,7 +33,6 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-import open3d as o3d
 import torch
 from torch.utils.data import DataLoader, Dataset
 import lightning.pytorch as pl
@@ -124,6 +123,7 @@ class PCInferDataset(Dataset):
         return len(self.files)
 
     def __getitem__(self, idx):
+        import open3d as o3d
         f = self.files[idx]
         name = Path(str(f)).stem
         if self.is_s3:
@@ -190,6 +190,8 @@ class PCInferModule(pl.LightningModule):
             self.model.ae_model.train()
 
     def _save(self, root, recon):
+        import open3d as o3d
+
         root.mkdir(parents=True, exist_ok=True)
         pf = recon["pred_face"].astype(np.float32)
         export_edges(recon["pred_edge"], str(root / "edge.obj"))
@@ -240,7 +242,7 @@ def main():
     ap.add_argument("--num_cpus", type=int, default=4, help="cpus per worker")
     ap.add_argument("--worker_node_type", default="p5.48xlarge")
     ap.add_argument("--worker_node_priority", default="background")
-    ap.add_argument("--exp_name", default="pc_infer")
+    ap.add_argument("--exp_name", default="test")
     ap.add_argument("--s3_results_uri", default="s3://autodesk-adpcdl-965535024567-p-ue1-internal-brepfaceted/private/yl-voronoi/training_logs")
     ap.add_argument("--max_failures", type=int, default=50)
     ap.add_argument("--no_ray", action="store_true", help="run a local Trainer instead of ray")

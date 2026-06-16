@@ -254,7 +254,7 @@ class Diffusion_condition(nn.Module):
             condition = self.extract_condition(v_data)[:bs]
             # face_features = face_features[:condition.shape[0]]
         # error = []
-        for t in tqdm(self.noise_scheduler.timesteps):
+        for t in self.noise_scheduler.timesteps:
             timesteps = t.reshape(-1).to(device)
             pred_x0 = self.diffuse(face_features, timesteps, v_condition=condition)
             face_features = self.noise_scheduler.step(pred_x0, t, face_features).prev_sample

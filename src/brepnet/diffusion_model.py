@@ -21,7 +21,11 @@ from scipy.spatial.transform import Rotation
 
 
 # from thirdparty.PointTransformerV3.model import *
-from thirdparty.point_transformer_v3.model import PointTransformerV3
+try:
+    from thirdparty.point_transformer_v3.model import PointTransformerV3
+except ImportError as _e:  # spconv may be absent; only needed for pc_encoder="ptv3"
+    PointTransformerV3 = None
+    _ptv3_import_error = _e
 
 def add_timer(time_statics, v_attr, timer):
     if v_attr not in time_statics:
@@ -116,8 +120,9 @@ class Diffusion_condition(nn.Module):
             )
         if "pc" in v_conf["condition"]:
             self.with_pc = True
-            
-            if True:
+            self.use_ptv3 = v_conf.get("pc_encoder", "ptv3") == "ptv3"
+
+            if self.use_ptv3:
                 self.point_model = PointTransformerV3(in_channels=6, cls_mode=True)
                 self.fc_lyaer = nn.Sequential(
                     nn.Linear(512, self.dim_condition),
@@ -284,7 +289,10 @@ class Diffusion_condition(nn.Module):
                     if valid:
                         final_face_z.append(j)
                 face_z_item = face_z_item[final_face_z]
-            data_item = self.ae_model.inference(face_z_item)
+            # Decode in full fp32 precision (diffusion may run under fp16 autocast,
+            # but geometry decoding needs full precision for edges to close).
+            with torch.autocast(device_type=face_z.device.type, enabled=False):
+                data_item = self.ae_model.inference(face_z_item.float())
             recon_data.append(data_item)
         return recon_data
 
@@ -438,7 +446,7 @@ class Diffusion_condition(nn.Module):
                     pcd.points = o3d.utility.Vector3dVector(v_pc[idx,:,:3])
                     o3d.io.write_point_cloud(str(root/prefix/f"{idx}_aug.ply"), pcd)
 
-            if True:
+            if self.use_ptv3:
                 bs = pc.shape[0]
                 num_points = pc.shape[1]
                 feat = pc.reshape(-1, 6)
@@ -572,7 +580,10 @@ class Diffusion_condition_mm(Diffusion_condition):
                     if valid:
                         final_face_z.append(j)
                 face_z_item = face_z_item[final_face_z]
-            data_item = self.ae_model.inference(face_z_item)
+            # Decode in full fp32 precision (diffusion may run under fp16 autocast,
+            # but geometry decoding needs full precision for edges to close).
+            with torch.autocast(device_type=face_z.device.type, enabled=False):
+                data_item = self.ae_model.inference(face_z_item.float())
             recon_data.append(data_item)
         return recon_data
         

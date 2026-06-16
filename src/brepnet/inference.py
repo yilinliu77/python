@@ -4,7 +4,6 @@ import os.path
 from pathlib import Path
 import numpy as np
 import open3d as o3d
-import ray
 from PIL import Image
 from tqdm import tqdm
 
@@ -46,7 +45,8 @@ if __name__ == '__main__':
         "autoencoder_weights": "",
         "is_aug": False,
         "condition": [],
-        "cond_prob": []
+        "cond_prob": [],
+        "pc_encoder": "pointnet2",
     }
 
     parser = argparse.ArgumentParser(prog='Inference')
@@ -55,8 +55,12 @@ if __name__ == '__main__':
     parser.add_argument('--condition', nargs='+', required=True)
     parser.add_argument('--input', nargs='+', type=str)
     parser.add_argument('--output_dir', type=str, default="./inference_output")
+    parser.add_argument('--num_proposals', type=int, default=32)
+    parser.add_argument('--num_max_faces', type=int, default=30)
+    parser.add_argument('--skip_post', action='store_true', help="Skip BRep post-processing")
 
     args = parser.parse_args()
+    conf["num_max_faces"] = args.num_max_faces
     conf["autoencoder_weights"] = args.autoencoder_weights
     conf["diffusion_weights"] = args.diffusion_weights
     conf["condition"] = args.condition
@@ -88,7 +92,7 @@ if __name__ == '__main__':
             "conditions": {
             }
         }
-        num_proposals = 32
+        num_proposals = args.num_proposals
         if "pc" in conf["condition"]:
             input_file = Path(fileitem)
             name = input_file.stem
@@ -161,7 +165,12 @@ if __name__ == '__main__':
                                 pred_edge_face_connectivity=recon_data["pred_edge_face_connectivity"],
                                 )
 
+    if args.skip_post:
+        print("Skipping post processing (--skip_post). Network predictions (incl. pred_face UV grids) saved under network_pred/.")
+        sys.exit(0)
+
     print("Start post processing")
+    import ray
     num_cpus = 8
     ray.init(
         dashboard_host="0.0.0.0",

@@ -51,6 +51,14 @@ def check_step_valid_soild(step_file, precision=1e-1, return_shape=False):
             return False, None
         else:
             return False
+    # Some pythonocc versions return a list of shapes when as_compound=False.
+    if isinstance(shape, (list, tuple)):
+        if len(shape) != 1:
+            if return_shape:
+                return False, shape
+            else:
+                return False
+        shape = shape[0]
     if shape.ShapeType() != TopAbs_SOLID:
         if return_shape:
             return False, shape

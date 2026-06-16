@@ -1,10 +1,6 @@
-
-# ---- PyTorch Geometric extensions ---------------------------------------
-# pip install -f https://data.pyg.org/whl/torch-2.8.0+cu128.html \
-#     torch-scatter==2.1.2 torch-cluster==1.6.3
-torch-scatter==2.1.2
-torch-cluster==1.6.3
-torch-geometric==2.7.0
+torch_geometric
+https://data.pyg.org/whl/torch-2.8.0%2Bcu128/torch_scatter-2.1.2%2Bpt28cu128-cp312-cp312-linux_x86_64.whl
+https://data.pyg.org/whl/torch-2.8.0%2Bcu128/torch_cluster-1.6.3%2Bpt28cu128-cp312-cp312-linux_x86_64.whl
 
 numpy==2.4.3
 scipy==1.17.1
@@ -24,21 +20,9 @@ pytorch-lightning==2.6.1          # provides lightning_fabric
 torchmetrics==1.9.0
 tqdm==4.67.3
 
-# ---- distributed orchestration ------------------------------------------
-ray==2.55.1
-# S3 I/O uses the `aws` CLI (system tool), not boto3.
-
+ray
 # ---- geometry / B-rep post-processing -----------------------------------
 chamferdist==1.0.3
-# pythonocc-core==7.9.0  -> CONDA ONLY:  conda install -c conda-forge pythonocc-core
 
 # ---- local / source builds (not on PyPI) --------------------------------
-# pointnet2_ops (==3.0.0) -- point-cloud condition encoder, built from source:
-#   pip install -e thirdparty/Pointnet2_PyTorch/pointnet2_ops_lib   # needs nvcc/CUDA
-#
-# Optional, only for the unused PointTransformerV3 encoder (pc_encoder="ptv3"):
-#   spconv-cu128
-#
-# Optional, only for text-conditioned generation (condition="txt"):
-#   sentence-transformers
-#   transformers==5.7.0
+git+https://github.com/yilinliu77/PointNetAD.git

@@ -66,7 +66,6 @@ import ray
 from tqdm import tqdm
 from lightning_fabric import seed_everything
 
-from src.brepnet.diffusion_model import Diffusion_condition
 
 # per-node checkpoint cache (shared by all actors on a node; atomic download)
 NODE_CKPT_CACHE = Path("/tmp/pc2brep_ckpt_cache")
@@ -222,6 +221,7 @@ def build_conf(num_max_faces):
 def load_model(conf, diffusion_ckpt, autoencoder_ckpt, device):
     conf = dict(conf)
     conf["autoencoder_weights"] = autoencoder_ckpt
+    from src.brepnet.diffusion_model import Diffusion_condition
     model = Diffusion_condition(conf)
     w = torch.load(diffusion_ckpt, map_location=device, weights_only=False)["state_dict"]
     w = {k: v for k, v in w.items() if "ae_model" not in k}

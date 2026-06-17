@@ -19,7 +19,9 @@ einops==0.8.2
 pytorch-lightning==2.6.1          # provides lightning_fabric
 torchmetrics==1.9.0
 tqdm==4.67.3
-
+lightning==2.5.1
+omegaconf
+cloudpathlib
 ray
 # ---- geometry / B-rep post-processing -----------------------------------
 chamferdist==1.0.3

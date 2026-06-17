@@ -5,21 +5,25 @@ argparse. A LightningDataModule streams point clouds; a LightningModule wraps
 the brepnet Diffusion_condition model, loads its own checkpoint in __init__,
 and writes predictions to S3 in test_step.
 
-Only GPU inference runs here. B-rep post-processing stays separate:
-    python -m src.brepnet.pc_to_brep --only_post --output_dir <parent-of-network_pred>
+Output layout matches pc_to_brep exactly:
+    <output_dir>/network_pred/<name>/<idx>/{data.npz, edge.obj, pred_face_points.ply}
+
+Only GPU inference runs here. B-rep post-processing stays separate and takes the
+SAME --output_dir (it reads <output_dir>/network_pred):
+    python -m src.brepnet.pc_to_brep --only_post --output_dir <output_dir>
 
 Example (ray cluster):
     python -m src.brepnet.infer_ray_lightning \
         --ckpt s3://bucket/ckpts/0218_abc_pc_li_1450k.ckpt \
         --pc_dir s3://bucket/pc_test \
-        --output_dir s3://bucket/out1/network_pred \
+        --output_dir s3://bucket/out1 \
         --s3_results_uri s3://bucket/ray_results/pc_infer \
         --gpu 8 --worker_node_type p5.48xlarge --worker_node_priority background
 
 Local (no ray cluster / no adsk_raylab):
     python -m src.brepnet.infer_ray_lightning --no_ray \
         --ckpt 0218_abc_pc_li_1450k.ckpt --pc_dir inference_data/pc_test \
-        --output_dir ./out1/network_pred --limit 5
+        --output_dir ./out1 --limit 5
 
 The diffusion checkpoint embeds the matching ae_model, so loading the whole
 state_dict gives the correct autoencoder -- no separate AE file is needed.
@@ -173,12 +177,15 @@ class PCInferModule(pl.LightningModule):
                 path = _download(ckpt, tempfile.mkdtemp())
             sd = torch.load(path, map_location="cpu", weights_only=False)["state_dict"]
             print(self.load_state_dict(sd, strict=False))  # keys are model.* -> aligns
+        # Mirror pc_to_brep: write under <output_dir>/network_pred/<name>/<idx>/
+        # so the same --output_dir can be handed straight to
+        #   pc_to_brep --only_post --output_dir <output_dir>
         if output_dir is None:
             self.test_root = None
         elif is_s3(output_dir):
-            self.test_root = S3Path(output_dir)
+            self.test_root = S3Path(output_dir) / "network_pred"
         else:
-            self.test_root = Path(output_dir)
+            self.test_root = Path(output_dir) / "network_pred"
             self.test_root.mkdir(parents=True, exist_ok=True)
 
     def configure_optimizers(self):
@@ -228,7 +235,8 @@ def main():
     ap = argparse.ArgumentParser("pc -> diffusion inference (Ray+Lightning)")
     ap.add_argument("--ckpt", required=True, help="diffusion checkpoint (local or s3://)")
     ap.add_argument("--pc_dir", required=True, help="dir of .ply clouds (local or s3://)")
-    ap.add_argument("--output_dir", required=True, help="network_pred output dir (local or s3://)")
+    ap.add_argument("--output_dir", required=True,
+                    help="output root (local or s3://); writes <output_dir>/network_pred/...")
     ap.add_argument("--num_samples", type=int, default=16)
     ap.add_argument("--num_points", type=int, default=8192)
     ap.add_argument("--num_max_faces", type=int, default=100)

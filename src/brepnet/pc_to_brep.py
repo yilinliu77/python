@@ -41,6 +41,7 @@ Config defaults match the 0218_abc_pc_li checkpoint family:
 import argparse
 import glob
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -362,11 +363,33 @@ class StartRegistry:
         return dict(self.t)
 
 
-def _post_task(proposal, net_pred_base, after_post_base, drop_num, registry):
+POST_SCRATCH = Path(os.environ.get("PC2BREP_SCRATCH", tempfile.gettempdir())) / "pc2brep_post"
+
+
+def _sweep_stale(root, max_age):
+    """Remove leftover job dirs older than max_age. Timed-out tasks are killed
+    with SIGKILL (ray.cancel force=True), so their `finally` cleanup never runs
+    and their scratch dirs leak; anything older than the timeout window belongs
+    to such a dead task and is safe to reclaim here."""
+    now = time.time()
+    try:
+        for d in root.glob("job_*"):
+            try:
+                if now - d.stat().st_mtime > max_age:
+                    shutil.rmtree(d, ignore_errors=True)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+def _post_task(proposal, net_pred_base, after_post_base, drop_num, registry, cleanup_age):
     # First action: report real start time to the (cross-node) registry.
     registry.mark.remote(proposal, time.time())
+    POST_SCRATCH.mkdir(parents=True, exist_ok=True)
+    _sweep_stale(POST_SCRATCH, cleanup_age)  # reclaim disk from SIGKILL'd timeouts
     name, idx = proposal.split("/")
-    work = Path(tempfile.mkdtemp(prefix="pc2brep_post_"))
+    work = Path(tempfile.mkdtemp(prefix="job_", dir=POST_SCRATCH))
     try:
         in_dir = work / "in" / name / idx
         in_dir.mkdir(parents=True, exist_ok=True)
@@ -396,6 +419,14 @@ def run_post(args, output_dir):
     success_base = uri_join(output_dir, "success_brep")
 
     folders = list_proposals(net_pred_base)
+    if args.skip_existing_success:
+        done = list_successes(after_post_base)
+        done_set = {f"{name}/{idx}" for name, idxs in done.items() for idx in idxs}
+        n_before = len(folders)
+        folders = [f for f in folders if f not in done_set]
+        print(f"[post] skip_existing_success: {n_before - len(folders)} proposals "
+              f"already have success.txt under {after_post_base}; "
+              f"rebuilding the remaining {len(folders)}")
     n_cpus = int(ray.cluster_resources().get("CPU", os.cpu_count() or 1))
     if args.num_cpus and args.num_cpus > 0:
         n_cpus = args.num_cpus
@@ -404,6 +435,8 @@ def run_post(args, output_dir):
 
     registry = StartRegistry.remote()
     remote_fn = ray.remote(num_gpus=0, max_retries=0)(_post_task)
+    # a leaked scratch dir older than ~2x the timeout can only be a dead task
+    cleanup_age = max(args.timeout * 2, 600)
 
     queue = list(folders)
     inflight = {}   # ref -> {"proposal", "deadline"(None until running)}
@@ -413,7 +446,8 @@ def run_post(args, output_dir):
     while queue or inflight:
         while queue and len(inflight) < n_cpus:
             p = queue.pop(0)
-            t = remote_fn.remote(p, net_pred_base, after_post_base, args.drop_num, registry)
+            t = remote_fn.remote(p, net_pred_base, after_post_base, args.drop_num,
+                                 registry, cleanup_age)
             inflight[t] = {"proposal": p, "deadline": None}
         ready, _ = ray.wait(list(inflight.keys()), num_returns=1, timeout=2.0)
         now = time.time()
@@ -440,21 +474,98 @@ def run_post(args, output_dir):
                 pbar.update(1)
     pbar.close()
 
-    # Transfer valid solids -> success_brep/<name>_NN.step (sequential per shape)
+    # pack: select one solid per input and report validity rates
+    run_pack(args, output_dir, succ=succ, folders=folders, timed_out=timed_out)
+
+
+def list_successes(after_post_base):
+    """Return {name: [idx, ...]} for proposals that rebuilt a valid solid
+    (have success.txt) under <output_dir>/after_post."""
+    from collections import defaultdict
+    succ = defaultdict(list)
+    if is_s3(after_post_base):
+        base = str(after_post_base).rstrip("/") + "/"
+        out = subprocess.run(["aws", "s3", "ls", base, "--recursive"],
+                             capture_output=True, text=True, check=True).stdout
+        for line in out.splitlines():
+            key = line.split()[-1] if line.split() else ""
+            if key.endswith("/success.txt"):
+                parts = key.split("/")
+                succ[parts[-3]].append(parts[-2])
+    else:
+        base = Path(after_post_base)
+        if base.exists():
+            for name in sorted(os.listdir(base)):
+                nd = base / name
+                if nd.is_dir():
+                    for idx in sorted(os.listdir(nd)):
+                        if (nd / idx / "success.txt").exists():
+                            succ[name].append(idx)
+    return succ
+
+
+def run_pack(args, output_dir, succ=None, folders=None, timed_out=None):
+    """Pack rebuilt solids into success_brep/<name>.step (one random valid solid
+    per input) and report validity rates. Runs standalone via --only_pack once
+    the rebuild (post) results exist under <output_dir>/after_post."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    net_pred_base = uri_join(output_dir, "network_pred")
+    after_post_base = uri_join(output_dir, "after_post")
+    success_base = uri_join(output_dir, "success_brep")
+
+    if folders is None:
+        print(f"[pack] listing all proposals under {net_pred_base} ...", flush=True)
+        folders = list_proposals(net_pred_base)
+        print(f"[pack] found {len(folders)} proposals", flush=True)
+    if succ is None:
+        print(f"[pack] listing successful (rebuilt) folders under {after_post_base} ...", flush=True)
+        succ = list_successes(after_post_base)
+        print(f"[pack] found {sum(len(v) for v in succ.values())} valid solids "
+              f"across {len(succ)} inputs", flush=True)
+
+    # One valid solid per input -> success_brep/<name>.step (no suffix): pick a
+    # random success among that input's proposals. These are independent
+    # server-side S3 copies, so run them concurrently instead of one aws-cp
+    # subprocess at a time (the per-file process spawn is what made this slow).
+    jobs = [(uri_join(after_post_base, name, random.choice(succ[name]), "recon_brep.step"),
+             uri_join(success_base, f"{name}.step"))
+            for name in sorted(succ)]
+
+    def _try_copy(sd):
+        try:
+            copy_uri(*sd)
+            return True
+        except Exception:
+            return False
+
     transferred = 0
-    for name in sorted(succ):
-        for seq, idx in enumerate(sorted(succ[name])):
-            copy_uri(uri_join(after_post_base, name, idx, "recon_brep.step"),
-                     uri_join(success_base, f"{name}_{seq:02d}.step"))
-            transferred += 1
+    if jobs:
+        base_cpus = args.num_cpus if args.num_cpus and args.num_cpus > 0 else (os.cpu_count() or 8)
+        workers = min(64, max(8, base_cpus * 4))
+        print(f"[pack] copying {len(jobs)} selected solids -> {success_base} "
+              f"({workers} parallel) ...", flush=True)
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for ok in tqdm(ex.map(_try_copy, jobs), total=len(jobs), desc="pack"):
+                transferred += int(ok)
 
     inputs = sorted(set(f.split("/")[0] for f in folders))
-    print("\n=== post-processing summary ===")
-    print(f"proposals processed         : {len(folders)}")
-    print(f"valid solids (success.txt)  : {sum(len(v) for v in succ.values())}")
-    print(f"timed out (>{args.timeout}s)        : {timed_out}")
-    print(f"inputs with >=1 valid solid : {len(succ)}/{len(inputs)}")
-    print(f"[post] {transferred} STEP files -> {success_base}")
+    n_proposals = len(folders)
+    n_valid = sum(len(v) for v in succ.values())
+    n_inputs = len(inputs)
+    n_inputs_ok = len(succ)
+    # general validity rate: valid proposals / all proposals processed
+    gen_rate = n_valid / n_proposals if n_proposals else 0.0
+    # 1-of-num_samples rate: fraction of inputs with >=1 valid solid among samples
+    atleast1_rate = n_inputs_ok / n_inputs if n_inputs else 0.0
+    print("\n=== pack summary ===")
+    print(f"proposals processed         : {n_proposals}")
+    print(f"valid solids (success.txt)  : {n_valid}")
+    if timed_out is not None:
+        print(f"timed out (>{args.timeout}s)        : {timed_out}")
+    print(f"general validity rate       : {n_valid}/{n_proposals} = {gen_rate:.2%}")
+    print(f"1-of-{args.num_samples} validity rate    : {n_inputs_ok}/{n_inputs} = {atleast1_rate:.2%}")
+    print(f"[pack] {transferred} STEP files -> {success_base}")
 
 
 # --------------------------------------------------------------------------- #
@@ -475,12 +586,22 @@ def main():
     # post
     ap.add_argument('--skip_post', action='store_true', help="inference only")
     ap.add_argument('--only_post', action='store_true', help="post only (predictions must exist under output_dir)")
+    ap.add_argument('--only_pack', action='store_true',
+                    help="pack only: select 1 solid per input -> success_brep/ and report "
+                         "validity rates (rebuild results must exist under output_dir/after_post)")
+    ap.add_argument('--skip_existing_success', action='store_true',
+                    help="during rebuild, skip proposals that already have a success.txt "
+                         "under output_dir/after_post; only rebuild the rest")
     ap.add_argument('--num_cpus', type=int, default=-1, help="post concurrency (-1 = all cluster cpus)")
     ap.add_argument('--drop_num', type=int, default=1)
     ap.add_argument('--timeout', type=int, default=600, help="per-shape post timeout (s), running-time only")
     args = ap.parse_args()
 
     seed_everything(args.seed)
+
+    if args.only_pack:  # pure I/O, no ray cluster needed
+        run_pack(args, args.output_dir)
+        return
 
     if args.ray_address:
         ray.init(address=args.ray_address, ignore_reinit_error=True, log_to_driver=False)

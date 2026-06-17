@@ -104,9 +104,36 @@ def export_edges(l_v, v_file):
         f.write(line_str)
 
 
+def count_done(output_dir, num_samples):
+    """Names already complete under <output_dir>/network_pred/<name>/<idx>/data.npz.
+
+    A name counts as done only if it has >= num_samples data.npz files, so that
+    partially-generated names are re-run (overwritten) rather than skipped.
+    """
+    base = output_dir.rstrip("/") + "/network_pred/"
+    counts = {}
+    if is_s3(output_dir):
+        import subprocess
+        out = subprocess.run(["aws", "s3", "ls", base, "--recursive"],
+                             capture_output=True, text=True).stdout
+        for line in out.splitlines():
+            toks = line.split()
+            key = toks[-1] if toks else ""
+            if key.endswith("/data.npz") and "network_pred/" in key:
+                name = key.split("network_pred/", 1)[1].split("/", 1)[0]
+                counts[name] = counts.get(name, 0) + 1
+    else:
+        npdir = Path(output_dir) / "network_pred"
+        if npdir.exists():
+            for p in npdir.glob("*/*/data.npz"):
+                name = p.parent.parent.name
+                counts[name] = counts.get(name, 0) + 1
+    return {n for n, c in counts.items() if c >= num_samples}
+
+
 # --------------------------------------------------------------------------- #
 class PCInferDataset(Dataset):
-    def __init__(self, pc_dir, num_points, test_list=None, limit=0):
+    def __init__(self, pc_dir, num_points, test_list=None, limit=0, skip_names=None):
         self.num_points = num_points
         self.is_s3 = is_s3(pc_dir)
         PPath = S3Path if self.is_s3 else Path
@@ -121,6 +148,12 @@ class PCInferDataset(Dataset):
             self.files = sorted(p for p in root.iterdir() if str(p).endswith(".ply"))
         if limit > 0:
             self.files = self.files[:limit]
+        if skip_names:  # precomputed on the driver (see count_done); cheap set filter here
+            skip = set(skip_names)
+            before = len(self.files)
+            self.files = [f for f in self.files if Path(str(f)).stem not in skip]
+            print(f"resume: skipped {before - len(self.files)} already-complete; "
+                  f"{len(self.files)} to (re)generate")
         print(f"PCInferDataset: {len(self.files)} point clouds")
 
     def __len__(self):
@@ -151,13 +184,14 @@ class PCInferDataset(Dataset):
 
 class PCInferDataModule(pl.LightningDataModule):
     def __init__(self, pc_dir, num_points=8192, test_list=None, limit=0,
-                 batch_size=1, num_worker=4):
+                 batch_size=1, num_worker=4, skip_names=None):
         super().__init__()
         self.pc_dir, self.num_points, self.test_list, self.limit = pc_dir, num_points, test_list, limit
-        self.batch_size, self.num_worker = batch_size, num_worker
+        self.batch_size, self.num_worker, self.skip_names = batch_size, num_worker, skip_names
 
     def test_dataloader(self):
-        ds = PCInferDataset(self.pc_dir, self.num_points, self.test_list, self.limit)
+        ds = PCInferDataset(self.pc_dir, self.num_points, self.test_list, self.limit,
+                            skip_names=self.skip_names)
         return DataLoader(ds, batch_size=self.batch_size, num_workers=self.num_worker,
                           shuffle=False, pin_memory=False, worker_init_fn=seed_worker)
 
@@ -242,6 +276,9 @@ def main():
     ap.add_argument("--num_max_faces", type=int, default=100)
     ap.add_argument("--ae_dropout", action="store_true")
     ap.add_argument("--test_list", default=None)
+    ap.add_argument("--resume", action="store_true",
+                    help="skip names that already have >= num_samples data.npz in output_dir; "
+                         "(re)generate incomplete or missing ones")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--batch_size", type=int, default=1)
     ap.add_argument("--precision", default="16-mixed")
@@ -257,11 +294,23 @@ def main():
     args = ap.parse_args()
 
     torch.set_float32_matmul_precision("high")
+
+    # Resume scan runs ONCE here on the driver (one recursive listing), then the
+    # complete-name set is shipped to every worker as a plain kwarg -- workers do
+    # not re-scan the output dir.
+    skip_names = None
+    if args.resume:
+        done = count_done(args.output_dir, args.num_samples)
+        skip_names = sorted(done)
+        print(f"resume: {len(skip_names)} names already complete "
+              f"(>= {args.num_samples} data.npz); they will be skipped")
+
     model_kwargs = dict(ckpt=args.ckpt, num_samples=args.num_samples,
                         num_max_faces=args.num_max_faces, ae_dropout=args.ae_dropout,
                         output_dir=args.output_dir)
     data_kwargs = dict(pc_dir=args.pc_dir, num_points=args.num_points, test_list=args.test_list,
-                       limit=args.limit, batch_size=args.batch_size, num_worker=args.num_cpus)
+                       limit=args.limit, batch_size=args.batch_size, num_worker=args.num_cpus,
+                       skip_names=skip_names)
     trainer_kwargs = {"accelerator": "auto", "precision": args.precision, "limit_test_batches": 1.0}
 
     if args.no_ray or RayLightningExperiment is None:
